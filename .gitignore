@@ -1,0 +1,65 @@
+# Virtual environments
+.venv/
+venv/
+
+# Python caches and build artifacts
+__pycache__/
+*.py[cod]
+*.pyd
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+htmlcov/
+build/
+dist/
+*.egg-info/
+
+# Notebook artifacts
+.ipynb_checkpoints/
+*.nbconvert.ipynb
+
+# Local private/output directories
+data/**
+Data/**
+models/**
+reports/**
+spm_glm_extraction_out/**
+
+# Keep scaffold placeholders only
+!models/
+!models/README.md
+!models/.gitkeep
+!reports/
+!reports/README.md
+!reports/.gitkeep
+
+# Local-only notebooks currently in repo root
+hello.ipynb
+BAS1_data_investigation.ipynb
+
+# Secrets and local environment files
+.env
+.env.*
+*.secret
+*.secrets
+
+# Large/binary artifacts commonly produced by ML workflows
+*.csv
+*.parquet
+*.feather
+*.pkl
+*.joblib
+*.h5
+*.hdf5
+*.npy
+*.npz
+*.nii
+*.nii.gz
+*.zip
+
+# OS/editor
+.DS_Store
+Thumbs.db
+*.code-workspace
