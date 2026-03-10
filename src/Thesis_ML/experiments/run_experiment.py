@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import itertools
 import json
 import logging
 import platform
@@ -34,7 +35,7 @@ from Thesis_ML.features.nifti_features import build_feature_cache
 LOGGER = logging.getLogger(__name__)
 
 _MODEL_NAMES = ("logreg", "linearsvc", "ridge")
-_CV_MODES = ("loso_session", "within_subject_loso_session")
+_CV_MODES = ("loso_session", "within_subject_loso_session", "frozen_cross_person_transfer")
 _TARGET_ALIASES = {
     "emotion": "emotion",
     "coarse_affect": "coarse_affect",
@@ -64,7 +65,6 @@ def _make_model(name: str, n_samples: int, n_features: int, seed: int) -> Any:
             solver=solver,
             max_iter=5000,
             random_state=seed,
-            multi_class="auto",
         )
     if name == "linearsvc":
         dual = bool(n_samples <= n_features)
@@ -222,6 +222,113 @@ def _evaluate_permutations(
     }
 
 
+def _extract_linear_coefficients(estimator: Pipeline) -> tuple[np.ndarray, np.ndarray, list[str]]:
+    model = estimator.named_steps.get("model")
+    if model is None or not hasattr(model, "coef_"):
+        raise ValueError(
+            "Interpretability export requires a fitted linear model with a 'coef_' attribute."
+        )
+
+    coef_array = np.asarray(model.coef_, dtype=np.float64)
+    if coef_array.ndim == 1:
+        coef_array = coef_array.reshape(1, -1)
+    if coef_array.ndim != 2:
+        raise ValueError(f"Unsupported coefficient shape for interpretability: {coef_array.shape}")
+
+    intercept_raw = getattr(model, "intercept_", np.zeros(coef_array.shape[0], dtype=np.float64))
+    intercept_array = np.asarray(intercept_raw, dtype=np.float64).reshape(-1)
+    if intercept_array.size == 1 and coef_array.shape[0] > 1:
+        intercept_array = np.repeat(intercept_array, coef_array.shape[0])
+
+    classes = getattr(model, "classes_", None)
+    if classes is None:
+        class_labels = [f"class_{idx}" for idx in range(coef_array.shape[0])]
+    else:
+        class_labels = [str(value) for value in np.asarray(classes).tolist()]
+
+    return coef_array, intercept_array, class_labels
+
+
+def _safe_corr(a: np.ndarray, b: np.ndarray) -> float:
+    if a.size == 0 or b.size == 0:
+        return 0.0
+    std_a = float(np.std(a))
+    std_b = float(np.std(b))
+    if std_a == 0.0 or std_b == 0.0:
+        return 0.0
+    return float(np.corrcoef(a, b)[0, 1])
+
+
+def _compute_interpretability_stability(coef_vectors: list[np.ndarray]) -> dict[str, Any]:
+    if not coef_vectors:
+        return {
+            "status": "no_coefficients",
+            "n_folds": 0,
+            "n_pairs": 0,
+            "mean_pairwise_correlation": None,
+            "mean_sign_consistency": None,
+            "top_k": 0,
+            "mean_top_k_overlap": None,
+        }
+
+    lengths = {int(vector.size) for vector in coef_vectors}
+    if len(lengths) != 1:
+        return {
+            "status": "incompatible_coefficient_shapes",
+            "n_folds": int(len(coef_vectors)),
+            "n_pairs": 0,
+            "mean_pairwise_correlation": None,
+            "mean_sign_consistency": None,
+            "top_k": 0,
+            "mean_top_k_overlap": None,
+        }
+
+    stacked = np.vstack(coef_vectors).astype(np.float64, copy=False)
+    n_folds, n_coeffs = stacked.shape
+    pair_indices = list(itertools.combinations(range(n_folds), 2))
+
+    pairwise_corrs = [
+        _safe_corr(stacked[left_idx], stacked[right_idx]) for left_idx, right_idx in pair_indices
+    ]
+    mean_pairwise_corr = float(np.mean(pairwise_corrs)) if pairwise_corrs else None
+
+    sign_matrix = np.sign(stacked)
+    sign_consistency = np.maximum.reduce(
+        [
+            np.mean(sign_matrix == -1.0, axis=0),
+            np.mean(sign_matrix == 0.0, axis=0),
+            np.mean(sign_matrix == 1.0, axis=0),
+        ]
+    )
+    mean_sign_consistency = float(np.mean(sign_consistency))
+
+    top_k = int(min(100, n_coeffs))
+    if top_k > 0:
+        top_k_sets = [
+            set(np.argpartition(np.abs(row), -top_k)[-top_k:].tolist()) for row in stacked
+        ]
+        top_k_overlaps = []
+        for left_idx, right_idx in pair_indices:
+            left = top_k_sets[left_idx]
+            right = top_k_sets[right_idx]
+            denom = len(left | right)
+            overlap = float(len(left & right) / denom) if denom > 0 else 0.0
+            top_k_overlaps.append(overlap)
+        mean_top_k_overlap = float(np.mean(top_k_overlaps)) if top_k_overlaps else None
+    else:
+        mean_top_k_overlap = None
+
+    return {
+        "status": "ok",
+        "n_folds": int(n_folds),
+        "n_pairs": int(len(pair_indices)),
+        "mean_pairwise_correlation": mean_pairwise_corr,
+        "mean_sign_consistency": mean_sign_consistency,
+        "top_k": top_k,
+        "mean_top_k_overlap": mean_top_k_overlap,
+    }
+
+
 def run_experiment(
     index_csv: Path,
     data_root: Path,
@@ -230,6 +337,8 @@ def run_experiment(
     model: str,
     cv: str = "loso_session",
     subject: str | None = None,
+    train_subject: str | None = None,
+    test_subject: str | None = None,
     seed: int = 42,
     filter_task: str | None = None,
     filter_modality: str | None = None,
@@ -248,6 +357,19 @@ def run_experiment(
         if subject is None or not str(subject).strip():
             raise ValueError("cv='within_subject_loso_session' requires a non-empty subject.")
         subject = str(subject).strip()
+    if cv_mode == "frozen_cross_person_transfer":
+        if train_subject is None or not str(train_subject).strip():
+            raise ValueError(
+                "cv='frozen_cross_person_transfer' requires a non-empty train_subject."
+            )
+        if test_subject is None or not str(test_subject).strip():
+            raise ValueError(
+                "cv='frozen_cross_person_transfer' requires a non-empty test_subject."
+            )
+        train_subject = str(train_subject).strip()
+        test_subject = str(test_subject).strip()
+        if train_subject == test_subject:
+            raise ValueError("train_subject and test_subject must be different.")
 
     target_column = _resolve_target_column(target)
 
@@ -271,11 +393,24 @@ def run_experiment(
         index_df = index_df[index_df["subject"].astype(str) == str(subject)].copy()
         if index_df.empty:
             raise ValueError(f"No samples found for subject '{subject}' after filtering.")
+    if cv_mode == "frozen_cross_person_transfer":
+        selected = {str(train_subject), str(test_subject)}
+        index_df = index_df[index_df["subject"].astype(str).isin(selected)].copy()
+        if index_df.empty:
+            raise ValueError(
+                "No samples found for frozen_cross_person_transfer after subject filtering."
+            )
 
     index_df = index_df.dropna(subset=[target_column]).copy()
     index_df[target_column] = index_df[target_column].astype(str)
     if index_df.empty:
         raise ValueError("No samples left after filtering and target cleanup.")
+    if cv_mode == "frozen_cross_person_transfer":
+        subjects_after_target = set(index_df["subject"].astype(str).unique().tolist())
+        if str(train_subject) not in subjects_after_target:
+            raise ValueError(f"No samples found for train_subject '{train_subject}'.")
+        if str(test_subject) not in subjects_after_target:
+            raise ValueError(f"No samples found for test_subject '{test_subject}'.")
 
     manifest_path = build_feature_cache(
         index_csv=index_csv,
@@ -292,30 +427,60 @@ def run_experiment(
     )
 
     y = metadata_df[target_column].astype(str).to_numpy()
-    if cv_mode == "within_subject_loso_session":
+
+    if cv_mode == "frozen_cross_person_transfer":
+        subjects = metadata_df["subject"].astype(str)
+        train_mask = subjects == str(train_subject)
+        test_mask = subjects == str(test_subject)
+        train_idx = np.flatnonzero(train_mask.to_numpy())
+        test_idx = np.flatnonzero(test_mask.to_numpy())
+
+        if len(train_idx) == 0:
+            raise ValueError(f"No cache-aligned samples found for train_subject '{train_subject}'.")
+        if len(test_idx) == 0:
+            raise ValueError(f"No cache-aligned samples found for test_subject '{test_subject}'.")
+
+        unique_labels_train = np.unique(y[train_idx])
+        if len(unique_labels_train) < 2:
+            raise ValueError("Training data requires at least 2 target classes.")
+
+        groups = metadata_df["session"].astype(str).to_numpy()
+        splits: list[tuple[np.ndarray, np.ndarray]] = [(train_idx, test_idx)]
+    elif cv_mode == "within_subject_loso_session":
         subjects = metadata_df["subject"].astype(str)
         unique_subjects = sorted(subjects.unique().tolist())
         if len(unique_subjects) != 1 or unique_subjects[0] != subject:
             raise ValueError(
                 "within_subject_loso_session requires exactly one subject in the evaluated data."
             )
+
         groups = metadata_df["session"].astype(str).to_numpy()
+        unique_groups = np.unique(groups)
+        unique_labels = np.unique(y)
+        if len(unique_groups) < 2:
+            raise ValueError("Grouped CV requires at least 2 unique subject-session groups.")
+        if len(unique_labels) < 2:
+            raise ValueError("Classification requires at least 2 target classes.")
+
+        splitter = LeaveOneGroupOut()
+        splits = list(splitter.split(x_matrix, y, groups))
+        if len(splits) < 2:
+            raise ValueError("Grouped CV produced fewer than 2 folds.")
     else:
         groups = (
             metadata_df["subject"].astype(str) + "_" + metadata_df["session"].astype(str)
         ).to_numpy()
-    unique_groups = np.unique(groups)
-    unique_labels = np.unique(y)
+        unique_groups = np.unique(groups)
+        unique_labels = np.unique(y)
+        if len(unique_groups) < 2:
+            raise ValueError("Grouped CV requires at least 2 unique subject-session groups.")
+        if len(unique_labels) < 2:
+            raise ValueError("Classification requires at least 2 target classes.")
 
-    if len(unique_groups) < 2:
-        raise ValueError("Grouped CV requires at least 2 unique subject-session groups.")
-    if len(unique_labels) < 2:
-        raise ValueError("Classification requires at least 2 target classes.")
-
-    splitter = LeaveOneGroupOut()
-    splits = list(splitter.split(x_matrix, y, groups))
-    if len(splits) < 2:
-        raise ValueError("Grouped CV produced fewer than 2 folds.")
+        splitter = LeaveOneGroupOut()
+        splits = list(splitter.split(x_matrix, y, groups))
+        if len(splits) < 2:
+            raise ValueError("Grouped CV produced fewer than 2 folds.")
 
     pipeline_template = _build_pipeline(
         model_name=model,
@@ -323,6 +488,27 @@ def run_experiment(
         n_features=x_matrix.shape[1],
         seed=seed,
     )
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    resolved_run_id = run_id or f"{timestamp}_{model}_{target_column}"
+    report_dir = reports_root / resolved_run_id
+    report_dir.mkdir(parents=True, exist_ok=True)
+
+    fold_metrics_path = report_dir / "fold_metrics.csv"
+    fold_splits_path = report_dir / "fold_splits.csv"
+    predictions_path = report_dir / "predictions.csv"
+    metrics_path = report_dir / "metrics.json"
+    config_path = report_dir / "config.json"
+    interpretability_summary_path = report_dir / "interpretability_summary.json"
+    interpretability_fold_artifacts_path = report_dir / "interpretability_fold_explanations.csv"
+
+    interpretability_enabled = cv_mode == "within_subject_loso_session"
+    interpretability_fold_rows: list[dict[str, Any]] = []
+    interpretability_vectors: list[np.ndarray] = []
+    interpretability_dir: Path | None = None
+    if interpretability_enabled:
+        interpretability_dir = report_dir / "interpretability"
+        interpretability_dir.mkdir(parents=True, exist_ok=True)
 
     fold_rows: list[dict[str, Any]] = []
     split_rows: list[dict[str, Any]] = []
@@ -349,9 +535,52 @@ def run_experiment(
                 raise ValueError(
                     "within_subject_loso_session produced overlapping train/test sessions."
                 )
+        if cv_mode == "frozen_cross_person_transfer":
+            expected_train = [str(train_subject)]
+            expected_test = [str(test_subject)]
+            if train_subjects != expected_train or test_subjects != expected_test:
+                raise ValueError(
+                    "frozen_cross_person_transfer produced unexpected train/test subject "
+                    "membership."
+                )
 
         estimator = clone(pipeline_template)
         estimator.fit(x_matrix[train_idx], y[train_idx])
+
+        if interpretability_enabled:
+            if interpretability_dir is None:
+                raise ValueError("Interpretability directory was not initialized.")
+            coef_array, intercept_array, class_labels = _extract_linear_coefficients(estimator)
+            coef_path = interpretability_dir / f"fold_{fold_index:03d}_coefficients.npz"
+            np.savez_compressed(
+                coef_path,
+                coefficients=coef_array.astype(np.float32, copy=False),
+                intercept=intercept_array.astype(np.float32, copy=False),
+                class_labels=np.asarray(class_labels, dtype=np.str_),
+                feature_index=np.arange(coef_array.shape[1], dtype=np.int32),
+            )
+            interpretability_fold_rows.append(
+                {
+                    "fold": fold_index,
+                    "experiment_mode": cv_mode,
+                    "subject": str(subject),
+                    "held_out_test_sessions": "|".join(test_sessions),
+                    "model": model,
+                    "target": target_column,
+                    "n_train": int(len(train_idx)),
+                    "n_test": int(len(test_idx)),
+                    "coef_rows": int(coef_array.shape[0]),
+                    "n_features": int(coef_array.shape[1]),
+                    "coef_shape": json.dumps(list(coef_array.shape)),
+                    "intercept_shape": json.dumps(list(intercept_array.shape)),
+                    "class_labels": json.dumps(class_labels),
+                    "coefficient_file": str(coef_path.resolve()),
+                    "seed": int(seed),
+                    "run_id": resolved_run_id,
+                    "config_file": config_path.name,
+                }
+            )
+            interpretability_vectors.append(coef_array.reshape(-1).astype(np.float64))
 
         y_pred = estimator.predict(x_matrix[test_idx])
         y_true = y[test_idx]
@@ -364,6 +593,12 @@ def run_experiment(
             "test_groups": "|".join(sorted(np.unique(groups[test_idx]).tolist())),
             "experiment_mode": cv_mode,
             "subject": str(subject) if cv_mode == "within_subject_loso_session" else pd.NA,
+            "train_subject": (
+                str(train_subject) if cv_mode == "frozen_cross_person_transfer" else pd.NA
+            ),
+            "test_subject": (
+                str(test_subject) if cv_mode == "frozen_cross_person_transfer" else pd.NA
+            ),
             "train_sessions": "|".join(train_sessions),
             "test_sessions": "|".join(test_sessions),
             "target": target_column,
@@ -380,6 +615,12 @@ def run_experiment(
                 "fold": fold_index,
                 "experiment_mode": cv_mode,
                 "subject": str(subject) if cv_mode == "within_subject_loso_session" else pd.NA,
+                "train_subject": (
+                    str(train_subject) if cv_mode == "frozen_cross_person_transfer" else pd.NA
+                ),
+                "test_subject": (
+                    str(test_subject) if cv_mode == "frozen_cross_person_transfer" else pd.NA
+                ),
                 "train_subjects": "|".join(train_subjects),
                 "test_subjects": "|".join(test_subjects),
                 "train_sessions": "|".join(train_sessions),
@@ -411,6 +652,17 @@ def run_experiment(
                     "modality": fold_row["modality"],
                     "emotion": fold_row.get("emotion", pd.NA),
                     "coarse_affect": fold_row.get("coarse_affect", pd.NA),
+                    "experiment_mode": cv_mode,
+                    "train_subject": (
+                        str(train_subject)
+                        if cv_mode == "frozen_cross_person_transfer"
+                        else pd.NA
+                    ),
+                    "test_subject": (
+                        str(test_subject)
+                        if cv_mode == "frozen_cross_person_transfer"
+                        else pd.NA
+                    ),
                 }
             )
 
@@ -431,7 +683,11 @@ def run_experiment(
         "cv": cv_mode,
         "experiment_mode": cv_mode,
         "subject": str(subject) if cv_mode == "within_subject_loso_session" else None,
-        "n_samples": int(len(y)),
+        "train_subject": (
+            str(train_subject) if cv_mode == "frozen_cross_person_transfer" else None
+        ),
+        "test_subject": str(test_subject) if cv_mode == "frozen_cross_person_transfer" else None,
+        "n_samples": int(len(y_true_all)),
         "n_features": int(x_matrix.shape[1]),
         "n_folds": int(len(fold_rows)),
         "accuracy": overall_accuracy,
@@ -452,16 +708,55 @@ def run_experiment(
             observed_accuracy=overall_accuracy,
         )
 
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    resolved_run_id = run_id or f"{timestamp}_{model}_{target_column}"
-    report_dir = reports_root / resolved_run_id
-    report_dir.mkdir(parents=True, exist_ok=True)
-
-    fold_metrics_path = report_dir / "fold_metrics.csv"
-    fold_splits_path = report_dir / "fold_splits.csv"
-    predictions_path = report_dir / "predictions.csv"
-    metrics_path = report_dir / "metrics.json"
-    config_path = report_dir / "config.json"
+    caution_text = (
+        "Linear coefficients are reported as model-behavior evidence only and must not be "
+        "interpreted as direct neural localization."
+    )
+    if interpretability_enabled:
+        pd.DataFrame(interpretability_fold_rows).to_csv(
+            interpretability_fold_artifacts_path, index=False
+        )
+        interpretability_summary: dict[str, Any] = {
+            "enabled": True,
+            "performed": True,
+            "status": "performed",
+            "reason": None,
+            "caution": caution_text,
+            "experiment_mode": cv_mode,
+            "subject": str(subject),
+            "model": model,
+            "target": target_column,
+            "n_fold_artifacts": int(len(interpretability_fold_rows)),
+            "fold_artifacts_path": str(interpretability_fold_artifacts_path.resolve()),
+            "stability": _compute_interpretability_stability(interpretability_vectors),
+        }
+    else:
+        interpretability_summary = {
+            "enabled": False,
+            "performed": False,
+            "status": "not_applicable",
+            "reason": "Interpretability export is enabled only for within_subject_loso_session.",
+            "caution": caution_text,
+            "experiment_mode": cv_mode,
+            "subject": None,
+            "model": model,
+            "target": target_column,
+            "n_fold_artifacts": 0,
+            "fold_artifacts_path": None,
+            "stability": None,
+        }
+    interpretability_summary_path.write_text(
+        f"{json.dumps(interpretability_summary, indent=2)}\n",
+        encoding="utf-8",
+    )
+    metrics["interpretability"] = {
+        "enabled": bool(interpretability_summary["enabled"]),
+        "performed": bool(interpretability_summary["performed"]),
+        "status": str(interpretability_summary["status"]),
+        "summary_path": str(interpretability_summary_path.resolve()),
+        "fold_artifacts_path": interpretability_summary["fold_artifacts_path"],
+        "stability": interpretability_summary["stability"],
+    }
 
     for row in fold_rows:
         row["run_id"] = resolved_run_id
@@ -486,11 +781,20 @@ def run_experiment(
         "cv": cv_mode,
         "experiment_mode": cv_mode,
         "subject": str(subject) if cv_mode == "within_subject_loso_session" else None,
+        "train_subject": (
+            str(train_subject) if cv_mode == "frozen_cross_person_transfer" else None
+        ),
+        "test_subject": str(test_subject) if cv_mode == "frozen_cross_person_transfer" else None,
         "seed": int(seed),
         "filter_task": filter_task,
         "filter_modality": filter_modality,
         "n_permutations": int(n_permutations),
         "fold_splits_path": str(fold_splits_path.resolve()),
+        "interpretability_enabled": bool(interpretability_summary["enabled"]),
+        "interpretability_performed": bool(interpretability_summary["performed"]),
+        "interpretability_status": str(interpretability_summary["status"]),
+        "interpretability_fold_artifacts_path": interpretability_summary["fold_artifacts_path"],
+        "interpretability_summary_path": str(interpretability_summary_path.resolve()),
         "python_version": platform.python_version(),
         "numpy_version": np.__version__,
         "pandas_version": pd.__version__,
@@ -508,6 +812,8 @@ def run_experiment(
         "fold_metrics_path": str(fold_metrics_path.resolve()),
         "fold_splits_path": str(fold_splits_path.resolve()),
         "predictions_path": str(predictions_path.resolve()),
+        "interpretability_summary_path": str(interpretability_summary_path.resolve()),
+        "interpretability_fold_artifacts_path": interpretability_summary["fold_artifacts_path"],
         "metrics": metrics,
     }
 
@@ -538,6 +844,21 @@ def _build_parser() -> argparse.ArgumentParser:
         help=(
             "Subject identifier (required for cv=within_subject_loso_session; "
             "for example sub-001)."
+        ),
+    )
+    parser.add_argument(
+        "--train-subject",
+        default=None,
+        help=(
+            "Training subject identifier (required for "
+            "cv=frozen_cross_person_transfer)."
+        ),
+    )
+    parser.add_argument(
+        "--test-subject",
+        default=None,
+        help=(
+            "Test subject identifier (required for cv=frozen_cross_person_transfer)."
         ),
     )
     parser.add_argument("--seed", type=int, default=42, help="Random seed.")
@@ -584,6 +905,8 @@ def main(argv: list[str] | None = None) -> int:
             model=model_name,
             cv=args.cv,
             subject=args.subject,
+            train_subject=args.train_subject,
+            test_subject=args.test_subject,
             seed=args.seed,
             filter_task=args.filter_task,
             filter_modality=args.filter_modality,

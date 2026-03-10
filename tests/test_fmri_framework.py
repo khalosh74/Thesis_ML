@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import importlib
 import json
 from pathlib import Path
 
 import nibabel as nib
 import numpy as np
 import pandas as pd
+import pytest
+from sklearn.dummy import DummyClassifier
 
 from Thesis_ML.data.affect_labels import COARSE_AFFECT_BY_EMOTION, derive_coarse_affect
 from Thesis_ML.data.index_dataset import build_dataset_index
@@ -514,3 +517,333 @@ def test_within_subject_mode_rejects_unknown_subject(tmp_path: Path) -> None:
         raise AssertionError("Expected ValueError for unknown subject in within-subject mode.")
     except ValueError as exc:
         assert "No samples found for subject 'sub-999'" in str(exc)
+
+
+def test_experiment_cli_accepts_frozen_cross_person_transfer() -> None:
+    parser = _build_parser()
+    args = parser.parse_args(
+        [
+            "--index-csv",
+            "dataset_index.csv",
+            "--data-root",
+            "Data",
+            "--cache-dir",
+            "cache",
+            "--target",
+            "coarse_affect",
+            "--model",
+            "ridge",
+            "--cv",
+            "frozen_cross_person_transfer",
+            "--train-subject",
+            "sub-001",
+            "--test-subject",
+            "sub-002",
+        ]
+    )
+    assert args.cv == "frozen_cross_person_transfer"
+    assert args.train_subject == "sub-001"
+    assert args.test_subject == "sub-002"
+
+
+def test_cross_person_transfer_requires_train_and_test_subject(tmp_path: Path) -> None:
+    data_root = tmp_path / "Data"
+    labels = [
+        "run-1_passive_anger_audio",
+        "run-1_passive_happiness_audio",
+    ]
+    for subject in ("sub-001", "sub-002"):
+        for session in ("ses-01", "ses-02"):
+            _create_glm_session(
+                glm_dir=data_root / subject / session / "BAS2",
+                labels=labels,
+                class_signal=True,
+            )
+
+    index_csv = tmp_path / "dataset_index.csv"
+    build_dataset_index(data_root=data_root, out_csv=index_csv)
+
+    try:
+        run_experiment(
+            index_csv=index_csv,
+            data_root=data_root,
+            cache_dir=tmp_path / "cache",
+            target="coarse_affect",
+            model="ridge",
+            cv="frozen_cross_person_transfer",
+            test_subject="sub-002",
+            run_id="missing_train_subject",
+            reports_root=tmp_path / "reports" / "experiments",
+        )
+        raise AssertionError("Expected ValueError when train_subject is missing.")
+    except ValueError as exc:
+        assert "requires a non-empty train_subject" in str(exc)
+
+    try:
+        run_experiment(
+            index_csv=index_csv,
+            data_root=data_root,
+            cache_dir=tmp_path / "cache",
+            target="coarse_affect",
+            model="ridge",
+            cv="frozen_cross_person_transfer",
+            train_subject="sub-001",
+            run_id="missing_test_subject",
+            reports_root=tmp_path / "reports" / "experiments",
+        )
+        raise AssertionError("Expected ValueError when test_subject is missing.")
+    except ValueError as exc:
+        assert "requires a non-empty test_subject" in str(exc)
+
+
+def test_cross_person_transfer_rejects_identical_subjects(tmp_path: Path) -> None:
+    data_root = tmp_path / "Data"
+    labels = [
+        "run-1_passive_anger_audio",
+        "run-1_passive_happiness_audio",
+    ]
+    for session in ("ses-01", "ses-02"):
+        _create_glm_session(
+            glm_dir=data_root / "sub-001" / session / "BAS2",
+            labels=labels,
+            class_signal=True,
+        )
+
+    index_csv = tmp_path / "dataset_index.csv"
+    build_dataset_index(data_root=data_root, out_csv=index_csv)
+
+    try:
+        run_experiment(
+            index_csv=index_csv,
+            data_root=data_root,
+            cache_dir=tmp_path / "cache",
+            target="coarse_affect",
+            model="ridge",
+            cv="frozen_cross_person_transfer",
+            train_subject="sub-001",
+            test_subject="sub-001",
+            run_id="same_subject_transfer",
+            reports_root=tmp_path / "reports" / "experiments",
+        )
+        raise AssertionError("Expected ValueError when train_subject == test_subject.")
+    except ValueError as exc:
+        assert "must be different" in str(exc)
+
+
+def test_experiment_runner_frozen_cross_person_transfer_auditable(tmp_path: Path) -> None:
+    data_root = tmp_path / "Data"
+    labels = [
+        "run-1_passive_anger_audio",
+        "run-1_passive_happiness_audio",
+        "run-1_passive_anger_video",
+        "run-1_passive_happiness_video",
+    ]
+    subject_sessions = (
+        ("sub-001", ("ses-01", "ses-02", "ses-03")),
+        ("sub-002", ("ses-01", "ses-02")),
+    )
+    for subject, sessions in subject_sessions:
+        for session in sessions:
+            _create_glm_session(
+                glm_dir=data_root / subject / session / "BAS2",
+                labels=labels,
+                class_signal=True,
+            )
+
+    index_csv = tmp_path / "dataset_index.csv"
+    build_dataset_index(data_root=data_root, out_csv=index_csv)
+    index_df = pd.read_csv(index_csv)
+    expected_train = int((index_df["subject"] == "sub-001").sum())
+    expected_test = int((index_df["subject"] == "sub-002").sum())
+
+    result = run_experiment(
+        index_csv=index_csv,
+        data_root=data_root,
+        cache_dir=tmp_path / "cache",
+        target="coarse_affect",
+        model="ridge",
+        cv="frozen_cross_person_transfer",
+        train_subject="sub-001",
+        test_subject="sub-002",
+        seed=77,
+        run_id="transfer_sub001_to_sub002",
+        reports_root=tmp_path / "reports" / "experiments",
+    )
+
+    report_dir = Path(result["report_dir"])
+    config = json.loads((report_dir / "config.json").read_text(encoding="utf-8"))
+    metrics = json.loads((report_dir / "metrics.json").read_text(encoding="utf-8"))
+    predictions = pd.read_csv(report_dir / "predictions.csv")
+    fold_splits = pd.read_csv(report_dir / "fold_splits.csv")
+    fold_metrics = pd.read_csv(report_dir / "fold_metrics.csv")
+
+    assert config["experiment_mode"] == "frozen_cross_person_transfer"
+    assert config["train_subject"] == "sub-001"
+    assert config["test_subject"] == "sub-002"
+    assert metrics["experiment_mode"] == "frozen_cross_person_transfer"
+    assert metrics["train_subject"] == "sub-001"
+    assert metrics["test_subject"] == "sub-002"
+    assert metrics["target"] == "coarse_affect"
+    assert metrics["n_folds"] == 1
+
+    assert set(predictions["subject"].astype(str).unique()) == {"sub-002"}
+    assert set(predictions["train_subject"].astype(str).unique()) == {"sub-001"}
+    assert set(predictions["test_subject"].astype(str).unique()) == {"sub-002"}
+    assert {"emotion", "coarse_affect"} <= set(predictions.columns)
+
+    assert len(fold_splits) == 1
+    split_row = fold_splits.iloc[0]
+    assert split_row["experiment_mode"] == "frozen_cross_person_transfer"
+    assert split_row["train_subject"] == "sub-001"
+    assert split_row["test_subject"] == "sub-002"
+    assert split_row["train_subjects"] == "sub-001"
+    assert split_row["test_subjects"] == "sub-002"
+    assert int(split_row["train_sample_count"]) == expected_train
+    assert int(split_row["test_sample_count"]) == expected_test
+    assert set(str(split_row["train_sessions"]).split("|")) == {"ses-01", "ses-02", "ses-03"}
+    assert set(str(split_row["test_sessions"]).split("|")) == {"ses-01", "ses-02"}
+    assert split_row["target"] == "coarse_affect"
+    assert split_row["model"] == "ridge"
+    assert int(split_row["seed"]) == 77
+    assert split_row["config_file"] == "config.json"
+
+    assert len(fold_metrics) == 1
+    fold_row = fold_metrics.iloc[0]
+    assert fold_row["train_subject"] == "sub-001"
+    assert fold_row["test_subject"] == "sub-002"
+    assert int(fold_row["n_train"]) == expected_train
+    assert int(fold_row["n_test"]) == expected_test
+
+
+@pytest.mark.parametrize("model_name", ["ridge", "linearsvc", "logreg"])
+def test_within_subject_interpretability_exports_for_linear_models(
+    tmp_path: Path, model_name: str
+) -> None:
+    data_root = tmp_path / "Data"
+    labels = [
+        "run-1_passive_anger_audio",
+        "run-1_passive_happiness_audio",
+        "run-1_passive_anger_video",
+        "run-1_passive_happiness_video",
+    ]
+    for subject in ("sub-001", "sub-002"):
+        for session in ("ses-01", "ses-02", "ses-03"):
+            _create_glm_session(
+                glm_dir=data_root / subject / session / "BAS2",
+                labels=labels,
+                class_signal=True,
+            )
+
+    index_csv = tmp_path / "dataset_index.csv"
+    build_dataset_index(data_root=data_root, out_csv=index_csv)
+
+    result = run_experiment(
+        index_csv=index_csv,
+        data_root=data_root,
+        cache_dir=tmp_path / "cache",
+        target="coarse_affect",
+        model=model_name,
+        cv="within_subject_loso_session",
+        subject="sub-001",
+        seed=11,
+        run_id=f"within_{model_name}_interpretability",
+        reports_root=tmp_path / "reports" / "experiments",
+    )
+
+    report_dir = Path(result["report_dir"])
+    summary_path = report_dir / "interpretability_summary.json"
+    assert summary_path.exists()
+
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    assert summary["enabled"] is True
+    assert summary["performed"] is True
+    assert summary["experiment_mode"] == "within_subject_loso_session"
+    assert summary["subject"] == "sub-001"
+    assert summary["model"] == model_name
+    assert summary["target"] == "coarse_affect"
+    assert summary["stability"] is not None
+    assert summary["stability"]["n_folds"] == 3
+    assert summary["stability"]["n_pairs"] == 3
+
+    artifacts_path = Path(str(summary["fold_artifacts_path"]))
+    assert artifacts_path.exists()
+    artifacts = pd.read_csv(artifacts_path)
+    assert len(artifacts) == result["metrics"]["n_folds"] == 3
+    assert {
+        "fold",
+        "experiment_mode",
+        "subject",
+        "held_out_test_sessions",
+        "model",
+        "target",
+        "n_features",
+        "coef_shape",
+        "coefficient_file",
+        "seed",
+        "run_id",
+        "config_file",
+    } <= set(artifacts.columns)
+    assert set(artifacts["subject"].astype(str).unique()) == {"sub-001"}
+    assert set(artifacts["held_out_test_sessions"].astype(str).tolist()) == {
+        "ses-01",
+        "ses-02",
+        "ses-03",
+    }
+
+    for _, row in artifacts.iterrows():
+        coef_path = Path(str(row["coefficient_file"]))
+        assert coef_path.exists()
+        with np.load(coef_path, allow_pickle=False) as npz:
+            coefficients = np.asarray(npz["coefficients"])
+            intercept = np.asarray(npz["intercept"])
+            class_labels = np.asarray(npz["class_labels"])
+            feature_index = np.asarray(npz["feature_index"])
+        assert coefficients.ndim == 2
+        assert intercept.ndim == 1
+        assert feature_index.ndim == 1
+        assert coefficients.shape[1] == int(row["n_features"])
+        assert feature_index.shape[0] == int(row["n_features"])
+        assert class_labels.size >= 1
+
+
+def test_within_subject_interpretability_rejects_unsupported_model(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    data_root = tmp_path / "Data"
+    labels = [
+        "run-1_passive_anger_audio",
+        "run-1_passive_happiness_audio",
+        "run-1_passive_anger_video",
+        "run-1_passive_happiness_video",
+    ]
+    for session in ("ses-01", "ses-02", "ses-03"):
+        _create_glm_session(
+            glm_dir=data_root / "sub-001" / session / "BAS2",
+            labels=labels,
+            class_signal=True,
+        )
+
+    index_csv = tmp_path / "dataset_index.csv"
+    build_dataset_index(data_root=data_root, out_csv=index_csv)
+
+    def _dummy_model(*_args: object, **_kwargs: object) -> DummyClassifier:
+        return DummyClassifier(strategy="most_frequent")
+
+    module = importlib.import_module("Thesis_ML.experiments.run_experiment")
+    monkeypatch.setattr(module, "_make_model", _dummy_model)
+
+    with pytest.raises(
+        ValueError,
+        match="Interpretability export requires a fitted linear model with a 'coef_' attribute.",
+    ):
+        run_experiment(
+            index_csv=index_csv,
+            data_root=data_root,
+            cache_dir=tmp_path / "cache",
+            target="coarse_affect",
+            model="ridge",
+            cv="within_subject_loso_session",
+            subject="sub-001",
+            run_id="unsupported_model_interpretability",
+            reports_root=tmp_path / "reports" / "experiments",
+        )
