@@ -28,13 +28,16 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.svm import LinearSVC
 
+from Thesis_ML.data.affect_labels import with_coarse_affect
 from Thesis_ML.features.nifti_features import build_feature_cache
 
 LOGGER = logging.getLogger(__name__)
 
 _MODEL_NAMES = ("logreg", "linearsvc", "ridge")
+_CV_MODES = ("loso_session", "within_subject_loso_session")
 _TARGET_ALIASES = {
     "emotion": "emotion",
+    "coarse_affect": "coarse_affect",
     "modality": "modality",
     "task": "task",
     "regressor_label": "regressor_label",
@@ -87,6 +90,13 @@ def _resolve_target_column(target: str) -> str:
         allowed = ", ".join(sorted(_TARGET_ALIASES))
         raise ValueError(f"Unsupported target '{target}'. Allowed values: {allowed}")
     return _TARGET_ALIASES[target]
+
+
+def _resolve_cv_mode(cv: str) -> str:
+    if cv not in _CV_MODES:
+        allowed = ", ".join(_CV_MODES)
+        raise ValueError(f"Unsupported cv '{cv}'. Allowed values: {allowed}")
+    return cv
 
 
 def _load_features_from_cache(
@@ -219,6 +229,7 @@ def run_experiment(
     target: str,
     model: str,
     cv: str = "loso_session",
+    subject: str | None = None,
     seed: int = 42,
     filter_task: str | None = None,
     filter_modality: str | None = None,
@@ -232,14 +243,20 @@ def run_experiment(
     cache_dir = Path(cache_dir)
     reports_root = Path(reports_root)
 
-    if cv != "loso_session":
-        raise ValueError("Only cv='loso_session' is currently supported.")
+    cv_mode = _resolve_cv_mode(cv)
+    if cv_mode == "within_subject_loso_session":
+        if subject is None or not str(subject).strip():
+            raise ValueError("cv='within_subject_loso_session' requires a non-empty subject.")
+        subject = str(subject).strip()
 
     target_column = _resolve_target_column(target)
 
     index_df = pd.read_csv(index_csv)
     if index_df.empty:
         raise ValueError(f"Dataset index is empty: {index_csv}")
+    index_df = with_coarse_affect(
+        index_df, emotion_column="emotion", coarse_column="coarse_affect"
+    )
 
     for required in ("sample_id", "subject", "session", "task", "modality", target_column):
         if required not in index_df.columns:
@@ -249,6 +266,11 @@ def run_experiment(
         index_df = index_df[index_df["task"] == filter_task].copy()
     if filter_modality is not None:
         index_df = index_df[index_df["modality"] == filter_modality].copy()
+
+    if cv_mode == "within_subject_loso_session":
+        index_df = index_df[index_df["subject"].astype(str) == str(subject)].copy()
+        if index_df.empty:
+            raise ValueError(f"No samples found for subject '{subject}' after filtering.")
 
     index_df = index_df.dropna(subset=[target_column]).copy()
     index_df[target_column] = index_df[target_column].astype(str)
@@ -265,11 +287,23 @@ def run_experiment(
     x_matrix, metadata_df = _load_features_from_cache(
         index_df=index_df, cache_manifest_path=manifest_path
     )
+    metadata_df = with_coarse_affect(
+        metadata_df, emotion_column="emotion", coarse_column="coarse_affect"
+    )
 
     y = metadata_df[target_column].astype(str).to_numpy()
-    groups = (
-        metadata_df["subject"].astype(str) + "_" + metadata_df["session"].astype(str)
-    ).to_numpy()
+    if cv_mode == "within_subject_loso_session":
+        subjects = metadata_df["subject"].astype(str)
+        unique_subjects = sorted(subjects.unique().tolist())
+        if len(unique_subjects) != 1 or unique_subjects[0] != subject:
+            raise ValueError(
+                "within_subject_loso_session requires exactly one subject in the evaluated data."
+            )
+        groups = metadata_df["session"].astype(str).to_numpy()
+    else:
+        groups = (
+            metadata_df["subject"].astype(str) + "_" + metadata_df["session"].astype(str)
+        ).to_numpy()
     unique_groups = np.unique(groups)
     unique_labels = np.unique(y)
 
@@ -291,11 +325,31 @@ def run_experiment(
     )
 
     fold_rows: list[dict[str, Any]] = []
+    split_rows: list[dict[str, Any]] = []
     prediction_rows: list[dict[str, Any]] = []
     y_true_all: list[str] = []
     y_pred_all: list[str] = []
 
     for fold_index, (train_idx, test_idx) in enumerate(splits):
+        train_meta = metadata_df.iloc[train_idx].reset_index(drop=True)
+        test_meta = metadata_df.iloc[test_idx].reset_index(drop=True)
+        train_subjects = sorted(train_meta["subject"].astype(str).unique().tolist())
+        test_subjects = sorted(test_meta["subject"].astype(str).unique().tolist())
+        train_sessions = sorted(train_meta["session"].astype(str).unique().tolist())
+        test_sessions = sorted(test_meta["session"].astype(str).unique().tolist())
+
+        if cv_mode == "within_subject_loso_session":
+            expected_subjects = [str(subject)]
+            if train_subjects != expected_subjects or test_subjects != expected_subjects:
+                raise ValueError(
+                    "within_subject_loso_session produced fold(s) with unexpected "
+                    "subject membership."
+                )
+            if set(train_sessions) & set(test_sessions):
+                raise ValueError(
+                    "within_subject_loso_session produced overlapping train/test sessions."
+                )
+
         estimator = clone(pipeline_template)
         estimator.fit(x_matrix[train_idx], y[train_idx])
 
@@ -308,30 +362,55 @@ def run_experiment(
             "n_train": int(len(train_idx)),
             "n_test": int(len(test_idx)),
             "test_groups": "|".join(sorted(np.unique(groups[test_idx]).tolist())),
+            "experiment_mode": cv_mode,
+            "subject": str(subject) if cv_mode == "within_subject_loso_session" else pd.NA,
+            "train_sessions": "|".join(train_sessions),
+            "test_sessions": "|".join(test_sessions),
+            "target": target_column,
+            "model": model,
+            "seed": int(seed),
             "accuracy": float(accuracy_score(y_true, y_pred)),
             "balanced_accuracy": float(balanced_accuracy_score(y_true, y_pred)),
             "macro_f1": float(f1_score(y_true, y_pred, average="macro", zero_division=0)),
         }
         fold_rows.append(fold_metrics)
 
-        fold_meta = metadata_df.iloc[test_idx].reset_index(drop=True)
-        for row_idx in range(len(fold_meta)):
+        split_rows.append(
+            {
+                "fold": fold_index,
+                "experiment_mode": cv_mode,
+                "subject": str(subject) if cv_mode == "within_subject_loso_session" else pd.NA,
+                "train_subjects": "|".join(train_subjects),
+                "test_subjects": "|".join(test_subjects),
+                "train_sessions": "|".join(train_sessions),
+                "test_sessions": "|".join(test_sessions),
+                "train_sample_count": int(len(train_idx)),
+                "test_sample_count": int(len(test_idx)),
+                "target": target_column,
+                "model": model,
+                "seed": int(seed),
+            }
+        )
+
+        for row_idx in range(len(test_meta)):
+            fold_row = test_meta.loc[row_idx]
             prediction_rows.append(
                 {
                     "fold": fold_index,
-                    "sample_id": str(fold_meta.loc[row_idx, "sample_id"]),
+                    "sample_id": str(fold_row["sample_id"]),
                     "y_true": str(y_true[row_idx]),
                     "y_pred": str(y_pred[row_idx]),
                     "decision_value": score_payload["decision_value"][row_idx],
                     "decision_vector": score_payload["decision_vector"][row_idx],
                     "proba_value": score_payload["proba_value"][row_idx],
                     "proba_vector": score_payload["proba_vector"][row_idx],
-                    "subject": fold_meta.loc[row_idx, "subject"],
-                    "session": fold_meta.loc[row_idx, "session"],
-                    "bas": fold_meta.loc[row_idx, "bas"],
-                    "task": fold_meta.loc[row_idx, "task"],
-                    "modality": fold_meta.loc[row_idx, "modality"],
-                    "emotion": fold_meta.loc[row_idx, "emotion"],
+                    "subject": fold_row["subject"],
+                    "session": fold_row["session"],
+                    "bas": fold_row["bas"],
+                    "task": fold_row["task"],
+                    "modality": fold_row["modality"],
+                    "emotion": fold_row.get("emotion", pd.NA),
+                    "coarse_affect": fold_row.get("coarse_affect", pd.NA),
                 }
             )
 
@@ -349,7 +428,9 @@ def run_experiment(
     metrics: dict[str, Any] = {
         "model": model,
         "target": target_column,
-        "cv": cv,
+        "cv": cv_mode,
+        "experiment_mode": cv_mode,
+        "subject": str(subject) if cv_mode == "within_subject_loso_session" else None,
         "n_samples": int(len(y)),
         "n_features": int(x_matrix.shape[1]),
         "n_folds": int(len(fold_rows)),
@@ -377,11 +458,20 @@ def run_experiment(
     report_dir.mkdir(parents=True, exist_ok=True)
 
     fold_metrics_path = report_dir / "fold_metrics.csv"
+    fold_splits_path = report_dir / "fold_splits.csv"
     predictions_path = report_dir / "predictions.csv"
     metrics_path = report_dir / "metrics.json"
     config_path = report_dir / "config.json"
 
+    for row in fold_rows:
+        row["run_id"] = resolved_run_id
+        row["config_file"] = config_path.name
+    for row in split_rows:
+        row["run_id"] = resolved_run_id
+        row["config_file"] = config_path.name
+
     pd.DataFrame(fold_rows).to_csv(fold_metrics_path, index=False)
+    pd.DataFrame(split_rows).to_csv(fold_splits_path, index=False)
     pd.DataFrame(prediction_rows).to_csv(predictions_path, index=False)
     metrics_path.write_text(f"{json.dumps(metrics, indent=2)}\n", encoding="utf-8")
 
@@ -393,11 +483,14 @@ def run_experiment(
         "cache_dir": str(cache_dir.resolve()),
         "target": target_column,
         "model": model,
-        "cv": cv,
+        "cv": cv_mode,
+        "experiment_mode": cv_mode,
+        "subject": str(subject) if cv_mode == "within_subject_loso_session" else None,
         "seed": int(seed),
         "filter_task": filter_task,
         "filter_modality": filter_modality,
         "n_permutations": int(n_permutations),
+        "fold_splits_path": str(fold_splits_path.resolve()),
         "python_version": platform.python_version(),
         "numpy_version": np.__version__,
         "pandas_version": pd.__version__,
@@ -413,6 +506,7 @@ def run_experiment(
         "config_path": str(config_path.resolve()),
         "metrics_path": str(metrics_path.resolve()),
         "fold_metrics_path": str(fold_metrics_path.resolve()),
+        "fold_splits_path": str(fold_splits_path.resolve()),
         "predictions_path": str(predictions_path.resolve()),
         "metrics": metrics,
     }
@@ -435,8 +529,16 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--cv",
         default="loso_session",
-        choices=["loso_session"],
+        choices=list(_CV_MODES),
         help="Cross-validation scheme.",
+    )
+    parser.add_argument(
+        "--subject",
+        default=None,
+        help=(
+            "Subject identifier (required for cv=within_subject_loso_session; "
+            "for example sub-001)."
+        ),
     )
     parser.add_argument("--seed", type=int, default=42, help="Random seed.")
     parser.add_argument("--filter-task", default=None, help="Optional task filter.")
@@ -481,6 +583,7 @@ def main(argv: list[str] | None = None) -> int:
             target=args.target,
             model=model_name,
             cv=args.cv,
+            subject=args.subject,
             seed=args.seed,
             filter_task=args.filter_task,
             filter_modality=args.filter_modality,

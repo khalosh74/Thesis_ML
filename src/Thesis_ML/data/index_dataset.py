@@ -10,6 +10,7 @@ from typing import Any
 
 import pandas as pd
 
+from Thesis_ML.data.affect_labels import derive_coarse_affect
 from Thesis_ML.spm.extract_glm import extract_glm_session
 
 LOGGER = logging.getLogger(__name__)
@@ -117,6 +118,7 @@ def build_dataset_index(
                     "run": int(row["run"]) if not pd.isna(row["run"]) else pd.NA,
                     "task": row["task"],
                     "emotion": row["emotion"],
+                    "coarse_affect": derive_coarse_affect(row["emotion"]),
                     "modality": row["modality"],
                     "beta_index": int(row["beta_index"]),
                     "beta_file": beta_file,
@@ -138,6 +140,7 @@ def build_dataset_index(
         "run",
         "task",
         "emotion",
+        "coarse_affect",
         "modality",
         "beta_path",
         "mask_path",

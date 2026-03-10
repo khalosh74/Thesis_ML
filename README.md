@@ -17,7 +17,7 @@ Use a BIDS-like hierarchy under a local data root (`Data/` or `data/`):
 Data/
   sub-001/
     ses-04/
-      BAS1/
+      BAS2/
         beta_0001.nii
         beta_0002.nii
         ...
@@ -44,8 +44,8 @@ If you do not need `SPM.mat` parsing, `.[dev]` is enough.
 
 ```powershell
 thesisml-extract-glm `
-  --glm-dir Data/sub-001/ses-04/BAS1 `
-  --out-dir Data/processed/extractions/sub-001/ses-04/BAS1
+  --glm-dir Data/sub-001/ses-04/BAS2 `
+  --out-dir Data/processed/extractions/sub-001/ses-04/BAS2
 ```
 
 Outputs:
@@ -58,11 +58,11 @@ Outputs:
 thesisml-build-index `
   --data-root Data `
   --out-csv Data/processed/dataset_index.csv `
-  --pattern "sub-*/ses-*/BAS*"
+  --pattern "sub-*/ses-*/BAS2"
 ```
 
 The output index includes at least:
-- `subject`, `session`, `bas`, `run`, `task`, `emotion`, `modality`
+- `subject`, `session`, `bas`, `run`, `task`, `emotion`, `coarse_affect`, `modality`
 - `beta_path`, `mask_path`, `regressor_label`
 
 Path convention:
@@ -82,27 +82,28 @@ Cache behavior:
 - Contains `X` (`n_samples x n_voxels`), `y`, and row metadata.
 - Existing cache files are skipped unless `--force` is passed.
 
-### 4) Run leakage-safe grouped-CV experiment
+### 4) Run primary within-person session-held-out experiment
 
 ```powershell
 thesisml-run-experiment `
   --index-csv Data/processed/dataset_index.csv `
   --data-root Data `
   --cache-dir Data/processed/feature_cache `
-  --target emotion `
+  --target coarse_affect `
   --model ridge `
-  --cv loso_session `
+  --cv within_subject_loso_session `
+  --subject sub-001 `
   --seed 42
 ```
 
-Optional filters and permutation test:
+Optional grouped LOSO across all subject-session groups:
 
 ```powershell
 thesisml-run-experiment `
   --index-csv Data/processed/dataset_index.csv `
   --data-root Data `
   --cache-dir Data/processed/feature_cache `
-  --target emotion `
+  --target coarse_affect `
   --filter-task passive `
   --filter-modality audio `
   --model logreg `
@@ -120,6 +121,7 @@ reports/experiments/<run_id>/
   config.json
   metrics.json
   fold_metrics.csv
+  fold_splits.csv
   predictions.csv
 ```
 

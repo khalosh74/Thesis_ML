@@ -12,6 +12,8 @@ import nibabel as nib
 import numpy as np
 import pandas as pd
 
+from Thesis_ML.data.affect_labels import with_coarse_affect
+
 LOGGER = logging.getLogger(__name__)
 
 _REQUIRED_INDEX_COLUMNS = {
@@ -99,6 +101,7 @@ def build_feature_cache(
     missing = _REQUIRED_INDEX_COLUMNS - set(index_df.columns)
     if missing:
         raise ValueError(f"index_csv missing required columns: {sorted(missing)}")
+    index_df = with_coarse_affect(index_df, emotion_column="emotion", coarse_column="coarse_affect")
 
     if group_key not in index_df.columns:
         if group_key == "subject_session_bas":
