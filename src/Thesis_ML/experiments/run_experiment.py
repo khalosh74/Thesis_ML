@@ -563,7 +563,7 @@ def run_experiment(
     cache_dir: Path,
     target: str,
     model: str,
-    cv: str = "loso_session",
+    cv: str | None = None,
     subject: str | None = None,
     train_subject: str | None = None,
     test_subject: str | None = None,
@@ -580,7 +580,13 @@ def run_experiment(
     cache_dir = Path(cache_dir)
     reports_root = Path(reports_root)
 
-    cv_mode = _resolve_cv_mode(cv)
+    if cv is None or not str(cv).strip():
+        allowed = ", ".join(_CV_MODES)
+        raise ValueError(
+            "run_experiment requires explicit cv mode selection. "
+            f"Provide one of: {allowed}"
+        )
+    cv_mode = _resolve_cv_mode(str(cv).strip())
     if cv_mode == "within_subject_loso_session":
         if subject is None or not str(subject).strip():
             raise ValueError("cv='within_subject_loso_session' requires a non-empty subject.")

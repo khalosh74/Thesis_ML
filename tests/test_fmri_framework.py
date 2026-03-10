@@ -512,6 +512,40 @@ def test_baseline_models_use_fixed_explicit_settings() -> None:
     assert int(ridge.random_state) == 13
 
 
+def test_experiment_api_requires_explicit_cv(tmp_path: Path) -> None:
+    data_root = tmp_path / "Data"
+    labels = [
+        "run-1_passive_anger_audio",
+        "run-1_passive_happiness_audio",
+    ]
+    for session in ("ses-01", "ses-02"):
+        _create_glm_session(
+            glm_dir=data_root / "sub-001" / session / "BAS2",
+            labels=labels,
+            class_signal=True,
+        )
+
+    index_csv = tmp_path / "dataset_index.csv"
+    build_dataset_index(data_root=data_root, out_csv=index_csv)
+
+    with pytest.raises(ValueError) as exc:
+        run_experiment(
+            index_csv=index_csv,
+            data_root=data_root,
+            cache_dir=tmp_path / "cache",
+            target="coarse_affect",
+            model="ridge",
+            run_id="missing_cv_programmatic",
+            reports_root=tmp_path / "reports" / "experiments",
+        )
+
+    message = str(exc.value)
+    assert "requires explicit cv mode selection" in message
+    assert "within_subject_loso_session" in message
+    assert "frozen_cross_person_transfer" in message
+    assert "loso_session" in message
+
+
 def test_experiment_cli_requires_cv(capsys: pytest.CaptureFixture[str]) -> None:
     parser = _build_parser()
     with pytest.raises(SystemExit) as exc:
