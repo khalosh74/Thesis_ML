@@ -10,10 +10,12 @@ import numpy as np
 import pandas as pd
 import pytest
 from sklearn.dummy import DummyClassifier
+from sklearn.linear_model import LogisticRegression, RidgeClassifier
+from sklearn.svm import LinearSVC
 
 from Thesis_ML.data.affect_labels import COARSE_AFFECT_BY_EMOTION, derive_coarse_affect
 from Thesis_ML.data.index_dataset import build_dataset_index
-from Thesis_ML.experiments.run_experiment import _build_parser, run_experiment
+from Thesis_ML.experiments.run_experiment import _build_parser, _make_model, run_experiment
 from Thesis_ML.features.nifti_features import build_feature_cache
 from Thesis_ML.spm.extract_glm import extract_glm_session, parse_regressor_label
 
@@ -400,6 +402,25 @@ def test_experiment_cli_accepts_coarse_affect_target() -> None:
     )
     assert args.target == "coarse_affect"
     assert args.cv == "loso_session"
+
+
+def test_baseline_models_use_fixed_explicit_settings() -> None:
+    logreg = _make_model(name="logreg", seed=13)
+    linearsvc = _make_model(name="linearsvc", seed=13)
+    ridge = _make_model(name="ridge", seed=13)
+
+    assert isinstance(logreg, LogisticRegression)
+    assert logreg.solver == "saga"
+    assert int(logreg.max_iter) == 5000
+    assert int(logreg.random_state) == 13
+
+    assert isinstance(linearsvc, LinearSVC)
+    assert linearsvc.dual is True
+    assert int(linearsvc.max_iter) == 5000
+    assert int(linearsvc.random_state) == 13
+
+    assert isinstance(ridge, RidgeClassifier)
+    assert int(ridge.random_state) == 13
 
 
 def test_experiment_cli_requires_cv(capsys: pytest.CaptureFixture[str]) -> None:

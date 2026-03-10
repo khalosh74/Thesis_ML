@@ -59,24 +59,24 @@ def _current_git_commit() -> str | None:
     return process.stdout.strip() or None
 
 
-def _make_model(name: str, n_samples: int, n_features: int, seed: int) -> Any:
+def _make_model(name: str, seed: int) -> Any:
+    # Keep model hyperparameters fixed across runs to avoid hidden dependence on
+    # full selected dataset geometry before fold-level train/test splitting.
     if name == "logreg":
-        solver = "saga" if n_features > n_samples else "liblinear"
         return LogisticRegression(
-            solver=solver,
+            solver="saga",
             max_iter=5000,
             random_state=seed,
         )
     if name == "linearsvc":
-        dual = bool(n_samples <= n_features)
-        return LinearSVC(dual=dual, random_state=seed, max_iter=5000)
+        return LinearSVC(dual=True, random_state=seed, max_iter=5000)
     if name == "ridge":
         return RidgeClassifier(random_state=seed)
     raise ValueError(f"Unknown model: {name}")
 
 
-def _build_pipeline(model_name: str, n_samples: int, n_features: int, seed: int) -> Pipeline:
-    model = _make_model(name=model_name, n_samples=n_samples, n_features=n_features, seed=seed)
+def _build_pipeline(model_name: str, seed: int) -> Pipeline:
+    model = _make_model(name=model_name, seed=seed)
     # fMRI voxel vectors are dense numeric arrays; centered scaling is appropriate.
     return Pipeline(
         steps=[
@@ -729,8 +729,6 @@ def run_experiment(
 
     pipeline_template = _build_pipeline(
         model_name=model,
-        n_samples=x_matrix.shape[0],
-        n_features=x_matrix.shape[1],
         seed=seed,
     )
 
