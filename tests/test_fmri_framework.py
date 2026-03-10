@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib
 import json
 from pathlib import Path
+from typing import Literal
 
 import nibabel as nib
 import numpy as np
@@ -17,9 +18,10 @@ from Thesis_ML.features.nifti_features import build_feature_cache
 from Thesis_ML.spm.extract_glm import extract_glm_session, parse_regressor_label
 
 
-def _write_nifti(path: Path, data: np.ndarray) -> None:
+def _write_nifti(path: Path, data: np.ndarray, affine: np.ndarray | None = None) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    image = nib.Nifti1Image(data.astype(np.float32), affine=np.eye(4))
+    matrix = np.eye(4, dtype=np.float64) if affine is None else np.asarray(affine, dtype=np.float64)
+    image = nib.Nifti1Image(data.astype(np.float32), affine=matrix)
     nib.save(image, str(path))
 
 
@@ -28,13 +30,23 @@ def _create_glm_session(
     labels: list[str],
     missing_beta_indexes: set[int] | None = None,
     class_signal: bool = False,
+    shape: tuple[int, int, int] = (3, 3, 3),
+    affine: np.ndarray | None = None,
+    mask_variant: Literal["default", "shift_x", "expanded_x"] = "default",
 ) -> None:
     glm_dir.mkdir(parents=True, exist_ok=True)
     missing_beta_indexes = missing_beta_indexes or set()
 
-    mask = np.zeros((3, 3, 3), dtype=np.float32)
-    mask[1:, 1:, 1:] = 1.0
-    _write_nifti(glm_dir / "mask.nii", mask)
+    mask = np.zeros(shape, dtype=np.float32)
+    if mask_variant == "default":
+        mask[1:, 1:, 1:] = 1.0
+    elif mask_variant == "shift_x":
+        mask[:-1, 1:, 1:] = 1.0
+    elif mask_variant == "expanded_x":
+        mask[:, 1:, 1:] = 1.0
+    else:
+        raise ValueError(f"Unsupported mask_variant: {mask_variant}")
+    _write_nifti(glm_dir / "mask.nii", mask, affine=affine)
 
     pd.Series(labels).to_csv(glm_dir / "regressor_labels.csv", index=False, header=False)
 
@@ -42,13 +54,13 @@ def _create_glm_session(
         if idx in missing_beta_indexes:
             continue
 
-        beta = np.full((3, 3, 3), fill_value=float(idx), dtype=np.float32)
+        beta = np.full(shape, fill_value=float(idx), dtype=np.float32)
         if class_signal:
             if "_anger_" in label:
                 beta[1:, 1:, 1:] += 5.0
             if "_joy_" in label or "_happiness_" in label:
                 beta[1:, 1:, 1:] -= 5.0
-        _write_nifti(glm_dir / f"beta_{idx:04d}.nii", beta)
+        _write_nifti(glm_dir / f"beta_{idx:04d}.nii", beta, affine=affine)
 
 
 def test_parse_regressor_label() -> None:
@@ -218,6 +230,7 @@ def test_feature_cache(tmp_path: Path) -> None:
         x_matrix = npz["X"]
         y = npz["y"]
         metadata = json.loads(str(npz["metadata_json"].item()))
+        spatial_signature = json.loads(str(npz["spatial_signature_json"].item()))
 
     assert x_matrix.dtype == np.float32
     assert x_matrix.shape[0] == len(y) == len(metadata)
@@ -225,6 +238,20 @@ def test_feature_cache(tmp_path: Path) -> None:
     assert {"emotion", "coarse_affect"} <= set(metadata[0])
     for row in metadata:
         assert row["coarse_affect"] == derive_coarse_affect(row["emotion"])
+    assert spatial_signature["image_shape"] == [3, 3, 3]
+    assert spatial_signature["mask_voxel_count"] == 8
+    assert spatial_signature["feature_count"] == 8
+    assert len(str(spatial_signature["mask_sha256"])) == 64
+    assert spatial_signature["voxel_size"] == [1.0, 1.0, 1.0]
+    assert {
+        "spatial_signature_version",
+        "image_shape_json",
+        "affine_json",
+        "voxel_size_json",
+        "mask_voxel_count",
+        "feature_count",
+        "mask_sha256",
+    } <= set(manifest.columns)
 
 
 def test_experiment_runner_smoke(tmp_path: Path) -> None:
@@ -273,11 +300,14 @@ def test_experiment_runner_smoke(tmp_path: Path) -> None:
     assert (report_dir / "metrics.json").exists()
     assert (report_dir / "fold_metrics.csv").exists()
     assert (report_dir / "predictions.csv").exists()
+    assert (report_dir / "spatial_compatibility_report.json").exists()
 
     metrics = json.loads((report_dir / "metrics.json").read_text(encoding="utf-8"))
     assert {"accuracy", "balanced_accuracy", "macro_f1", "confusion_matrix"} <= set(metrics)
     assert metrics["n_folds"] >= 2
     assert "permutation_test" in metrics
+    assert metrics["spatial_compatibility"]["passed"] is True
+    assert metrics["spatial_compatibility"]["n_groups_checked"] >= 2
 
     predictions = pd.read_csv(report_dir / "predictions.csv")
     assert len(predictions) > 0
@@ -335,9 +365,15 @@ def test_experiment_runner_coarse_affect_target(tmp_path: Path) -> None:
     metrics = json.loads((report_dir / "metrics.json").read_text(encoding="utf-8"))
     config = json.loads((report_dir / "config.json").read_text(encoding="utf-8"))
     predictions = pd.read_csv(report_dir / "predictions.csv")
+    spatial_report = json.loads(
+        (report_dir / "spatial_compatibility_report.json").read_text(encoding="utf-8")
+    )
 
     assert metrics["target"] == "coarse_affect"
     assert config["target"] == "coarse_affect"
+    assert config["spatial_compatibility_passed"] is True
+    assert metrics["spatial_compatibility"]["passed"] is True
+    assert spatial_report["passed"] is True
     assert {"emotion", "coarse_affect"} <= set(predictions.columns)
     assert set(predictions["y_true"].unique()) <= {"negative", "neutral", "positive"}
     mapped = predictions["emotion"].map(derive_coarse_affect)
@@ -494,11 +530,17 @@ def test_experiment_runner_within_subject_mode_auditable(tmp_path: Path) -> None
     predictions = pd.read_csv(report_dir / "predictions.csv")
     fold_splits = pd.read_csv(report_dir / "fold_splits.csv")
     fold_metrics = pd.read_csv(report_dir / "fold_metrics.csv")
+    spatial_report = json.loads(
+        (report_dir / "spatial_compatibility_report.json").read_text(encoding="utf-8")
+    )
 
     assert config["experiment_mode"] == "within_subject_loso_session"
     assert config["subject"] == "sub-001"
+    assert config["spatial_compatibility_passed"] is True
     assert metrics["experiment_mode"] == "within_subject_loso_session"
     assert metrics["subject"] == "sub-001"
+    assert metrics["spatial_compatibility"]["passed"] is True
+    assert spatial_report["passed"] is True
 
     assert set(predictions["subject"].astype(str).unique()) == {"sub-001"}
     assert set(fold_splits["subject"].astype(str).unique()) == {"sub-001"}
@@ -712,13 +754,19 @@ def test_experiment_runner_frozen_cross_person_transfer_auditable(tmp_path: Path
     predictions = pd.read_csv(report_dir / "predictions.csv")
     fold_splits = pd.read_csv(report_dir / "fold_splits.csv")
     fold_metrics = pd.read_csv(report_dir / "fold_metrics.csv")
+    spatial_report = json.loads(
+        (report_dir / "spatial_compatibility_report.json").read_text(encoding="utf-8")
+    )
 
     assert config["experiment_mode"] == "frozen_cross_person_transfer"
     assert config["train_subject"] == "sub-001"
     assert config["test_subject"] == "sub-002"
+    assert config["spatial_compatibility_passed"] is True
     assert metrics["experiment_mode"] == "frozen_cross_person_transfer"
     assert metrics["train_subject"] == "sub-001"
     assert metrics["test_subject"] == "sub-002"
+    assert metrics["spatial_compatibility"]["passed"] is True
+    assert spatial_report["passed"] is True
     assert metrics["target"] == "coarse_affect"
     assert metrics["n_folds"] == 1
 
@@ -749,6 +797,130 @@ def test_experiment_runner_frozen_cross_person_transfer_auditable(tmp_path: Path
     assert fold_row["test_subject"] == "sub-002"
     assert int(fold_row["n_train"]) == expected_train
     assert int(fold_row["n_test"]) == expected_test
+
+
+@pytest.mark.parametrize(
+    ("session2_kwargs", "expected_reason"),
+    [
+        pytest.param({"shape": (4, 3, 3)}, "image_shape mismatch", id="shape_mismatch"),
+        pytest.param(
+            {"affine": np.diag([2.0, 1.0, 1.0, 1.0])},
+            "affine mismatch",
+            id="affine_mismatch",
+        ),
+        pytest.param(
+            {"mask_variant": "expanded_x"},
+            "feature_count mismatch",
+            id="feature_mismatch",
+        ),
+        pytest.param({"mask_variant": "shift_x"}, "mask_sha256 mismatch", id="mask_hash_mismatch"),
+    ],
+)
+def test_spatial_compatibility_mismatch_fails_with_clear_error(
+    tmp_path: Path,
+    session2_kwargs: dict[str, object],
+    expected_reason: str,
+) -> None:
+    data_root = tmp_path / "Data"
+    labels = [
+        "run-1_passive_anger_audio",
+        "run-1_passive_happiness_audio",
+    ]
+    _create_glm_session(
+        glm_dir=data_root / "sub-001" / "ses-01" / "BAS2",
+        labels=labels,
+        class_signal=True,
+    )
+    _create_glm_session(
+        glm_dir=data_root / "sub-001" / "ses-02" / "BAS2",
+        labels=labels,
+        class_signal=True,
+        **session2_kwargs,
+    )
+
+    index_csv = tmp_path / "dataset_index.csv"
+    build_dataset_index(data_root=data_root, out_csv=index_csv)
+
+    reports_root = tmp_path / "reports" / "experiments"
+    run_id = f"spatial_mismatch_{expected_reason.replace(' ', '_')}"
+    with pytest.raises(ValueError, match="Spatial compatibility validation failed"):
+        run_experiment(
+            index_csv=index_csv,
+            data_root=data_root,
+            cache_dir=tmp_path / "cache",
+            target="coarse_affect",
+            model="ridge",
+            cv="within_subject_loso_session",
+            subject="sub-001",
+            run_id=run_id,
+            reports_root=reports_root,
+        )
+
+    spatial_report_path = reports_root / run_id / "spatial_compatibility_report.json"
+    assert spatial_report_path.exists()
+    report = json.loads(spatial_report_path.read_text(encoding="utf-8"))
+    assert report["passed"] is False
+    reasons = json.dumps(report["mismatches"])
+    assert expected_reason in reasons
+
+
+def test_spatial_compatibility_missing_legacy_signature_fails_explicitly(tmp_path: Path) -> None:
+    data_root = tmp_path / "Data"
+    labels = [
+        "run-1_passive_anger_audio",
+        "run-1_passive_happiness_audio",
+    ]
+    for session in ("ses-01", "ses-02"):
+        _create_glm_session(
+            glm_dir=data_root / "sub-001" / session / "BAS2",
+            labels=labels,
+            class_signal=True,
+        )
+
+    index_csv = tmp_path / "dataset_index.csv"
+    build_dataset_index(data_root=data_root, out_csv=index_csv)
+
+    cache_dir = tmp_path / "cache"
+    manifest_path = build_feature_cache(
+        index_csv=index_csv,
+        data_root=data_root,
+        cache_dir=cache_dir,
+    )
+    manifest = pd.read_csv(manifest_path)
+    legacy_npz_path = Path(manifest.loc[0, "cache_path"])
+    with np.load(legacy_npz_path, allow_pickle=False) as npz:
+        legacy_payload = {
+            "X": np.asarray(npz["X"], dtype=np.float32),
+            "y": np.asarray(npz["y"]),
+            "metadata_json": np.asarray(npz["metadata_json"]),
+            "group_id": np.asarray(npz["group_id"]),
+        }
+    np.savez_compressed(legacy_npz_path, **legacy_payload)
+
+    reports_root = tmp_path / "reports" / "experiments"
+    run_id = "legacy_missing_spatial_signature"
+    with pytest.raises(
+        ValueError,
+        match="missing spatial signature metadata",
+    ):
+        run_experiment(
+            index_csv=index_csv,
+            data_root=data_root,
+            cache_dir=cache_dir,
+            target="coarse_affect",
+            model="ridge",
+            cv="within_subject_loso_session",
+            subject="sub-001",
+            run_id=run_id,
+            reports_root=reports_root,
+        )
+
+    spatial_report_path = reports_root / run_id / "spatial_compatibility_report.json"
+    assert spatial_report_path.exists()
+    report = json.loads(spatial_report_path.read_text(encoding="utf-8"))
+    assert report["passed"] is False
+    reasons = json.dumps(report["mismatches"])
+    assert "missing spatial signature metadata" in reasons
 
 
 @pytest.mark.parametrize("model_name", ["ridge", "linearsvc", "logreg"])

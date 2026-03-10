@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import logging
 import re
 from pathlib import Path
+from typing import Any
 
 import nibabel as nib
 import numpy as np
@@ -15,6 +17,7 @@ import pandas as pd
 from Thesis_ML.data.affect_labels import with_coarse_affect
 
 LOGGER = logging.getLogger(__name__)
+_SPATIAL_SIGNATURE_VERSION = 1
 
 _REQUIRED_INDEX_COLUMNS = {
     "sample_id",
@@ -39,15 +42,43 @@ def _resolve_data_path(path_value: str, data_root: Path) -> Path:
     return data_root / path
 
 
-def load_mask(mask_path: Path) -> np.ndarray:
-    """Load a NIfTI mask and return a boolean voxel mask."""
+def _mask_sha256(mask_bool: np.ndarray) -> str:
+    mask_bytes = np.ascontiguousarray(mask_bool.astype(np.uint8, copy=False)).tobytes()
+    return hashlib.sha256(mask_bytes).hexdigest()
+
+
+def _build_spatial_signature(
+    mask_img: nib.spatialimages.SpatialImage, mask_bool: np.ndarray
+) -> dict[str, Any]:
+    affine = np.asarray(mask_img.affine, dtype=np.float64)
+    voxel_size = tuple(float(value) for value in mask_img.header.get_zooms()[: mask_bool.ndim])
+    voxel_count = int(mask_bool.sum())
+    return {
+        "signature_version": _SPATIAL_SIGNATURE_VERSION,
+        "image_shape": [int(value) for value in mask_bool.shape],
+        "affine": affine.tolist(),
+        "voxel_size": list(voxel_size),
+        "mask_voxel_count": voxel_count,
+        "feature_count": voxel_count,
+        "mask_sha256": _mask_sha256(mask_bool),
+    }
+
+
+def _load_mask_and_signature(mask_path: Path) -> tuple[np.ndarray, dict[str, Any]]:
     mask_path = Path(mask_path)
     if not mask_path.exists():
         raise FileNotFoundError(f"Mask file does not exist: {mask_path}")
 
     mask_img = nib.load(str(mask_path))
     mask_data = np.asarray(mask_img.get_fdata(dtype=np.float32))
-    return np.isfinite(mask_data) & (mask_data > 0)
+    mask_bool = np.isfinite(mask_data) & (mask_data > 0)
+    return mask_bool, _build_spatial_signature(mask_img=mask_img, mask_bool=mask_bool)
+
+
+def load_mask(mask_path: Path) -> np.ndarray:
+    """Load a NIfTI mask and return a boolean voxel mask."""
+    mask_bool, _ = _load_mask_and_signature(mask_path=mask_path)
+    return mask_bool
 
 
 def extract_masked_vector(beta_path: Path, mask_bool: np.ndarray) -> np.ndarray:
@@ -74,6 +105,59 @@ def _cache_path_for_group(cache_dir: Path, group_rows: pd.DataFrame) -> Path:
     session = _sanitize_token(str(first["session"]))
     bas = _sanitize_token(str(first["bas"]))
     return cache_dir / subject / session / f"{bas}.npz"
+
+
+def _signature_manifest_fields(signature: dict[str, Any] | None) -> dict[str, object]:
+    if not signature:
+        return {
+            "spatial_signature_version": pd.NA,
+            "image_shape_json": pd.NA,
+            "affine_json": pd.NA,
+            "voxel_size_json": pd.NA,
+            "mask_voxel_count": pd.NA,
+            "feature_count": pd.NA,
+            "mask_sha256": pd.NA,
+        }
+
+    image_shape = signature.get("image_shape")
+    affine = signature.get("affine")
+    voxel_size = signature.get("voxel_size")
+    signature_version = int(
+        signature.get("signature_version", _SPATIAL_SIGNATURE_VERSION)
+    )
+    return {
+        "spatial_signature_version": signature_version,
+        "image_shape_json": json.dumps(image_shape) if image_shape is not None else pd.NA,
+        "affine_json": json.dumps(affine) if affine is not None else pd.NA,
+        "voxel_size_json": json.dumps(voxel_size) if voxel_size is not None else pd.NA,
+        "mask_voxel_count": (
+            int(signature["mask_voxel_count"]) if "mask_voxel_count" in signature else pd.NA
+        ),
+        "feature_count": int(signature["feature_count"]) if "feature_count" in signature else pd.NA,
+        "mask_sha256": str(signature["mask_sha256"]) if "mask_sha256" in signature else pd.NA,
+    }
+
+
+def _read_existing_cache_signature(cache_path: Path) -> dict[str, Any] | None:
+    try:
+        with np.load(cache_path, allow_pickle=False) as npz:
+            signature: dict[str, Any] | None = None
+            if "spatial_signature_json" in npz.files:
+                raw = str(npz["spatial_signature_json"].item())
+                parsed = json.loads(raw)
+                if isinstance(parsed, dict):
+                    signature = parsed
+            if signature is None:
+                return None
+            if "X" in npz.files:
+                x_matrix = np.asarray(npz["X"])
+                if x_matrix.ndim == 2:
+                    signature = dict(signature)
+                    signature["feature_count"] = int(x_matrix.shape[1])
+            return signature
+    except Exception as exc:
+        LOGGER.warning("Failed to read existing cache signature from %s: %s", cache_path, exc)
+        return None
 
 
 def build_feature_cache(
@@ -124,19 +208,25 @@ def build_feature_cache(
         target_path.parent.mkdir(parents=True, exist_ok=True)
 
         if target_path.exists() and not force:
+            existing_signature = _read_existing_cache_signature(target_path)
             manifest_rows.append(
                 {
                     "group_id": str(group_id),
                     "cache_path": str(target_path.resolve()),
                     "n_samples": int(len(group_rows)),
-                    "n_voxels": pd.NA,
+                    "n_voxels": (
+                        int(existing_signature["feature_count"])
+                        if existing_signature and "feature_count" in existing_signature
+                        else pd.NA
+                    ),
                     "skipped_existing": True,
+                    **_signature_manifest_fields(existing_signature),
                 }
             )
             continue
 
         mask_path = _resolve_data_path(str(group_rows.iloc[0]["mask_path"]), data_root=data_root)
-        mask_bool = load_mask(mask_path)
+        mask_bool, spatial_signature = _load_mask_and_signature(mask_path)
 
         vectors: list[np.ndarray] = []
         for _, row in group_rows.iterrows():
@@ -144,6 +234,13 @@ def build_feature_cache(
             vectors.append(extract_masked_vector(beta_path=beta_path, mask_bool=mask_bool))
 
         x_matrix = np.vstack(vectors).astype(np.float32, copy=False)
+        if int(spatial_signature["mask_voxel_count"]) != int(x_matrix.shape[1]):
+            raise ValueError(
+                "Mask voxel count does not match extracted feature count for "
+                "group "
+                f"'{group_id}': {spatial_signature['mask_voxel_count']} != {x_matrix.shape[1]}"
+            )
+        spatial_signature["feature_count"] = int(x_matrix.shape[1])
         y = (
             group_rows["emotion"]
             .fillna(group_rows["regressor_label"])
@@ -158,6 +255,7 @@ def build_feature_cache(
             y=y,
             metadata_json=np.array(metadata_json),
             group_id=np.array(str(group_id)),
+            spatial_signature_json=np.array(json.dumps(spatial_signature, sort_keys=True)),
         )
 
         manifest_rows.append(
@@ -167,6 +265,7 @@ def build_feature_cache(
                 "n_samples": int(x_matrix.shape[0]),
                 "n_voxels": int(x_matrix.shape[1]),
                 "skipped_existing": False,
+                **_signature_manifest_fields(spatial_signature),
             }
         )
 

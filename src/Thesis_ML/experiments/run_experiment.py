@@ -43,6 +43,7 @@ _TARGET_ALIASES = {
     "task": "task",
     "regressor_label": "regressor_label",
 }
+_SPATIAL_AFFINE_ATOL = 1e-5
 
 
 def _current_git_commit() -> str | None:
@@ -99,9 +100,205 @@ def _resolve_cv_mode(cv: str) -> str:
     return cv
 
 
+def _write_json(path: Path, payload: dict[str, Any]) -> None:
+    path.write_text(f"{json.dumps(payload, indent=2)}\n", encoding="utf-8")
+
+
+def _normalize_spatial_signature(raw_signature: Any, cache_path: Path) -> dict[str, Any]:
+    if not isinstance(raw_signature, dict):
+        raise ValueError(f"invalid spatial signature payload in {cache_path}")
+
+    required = ("image_shape", "affine", "mask_voxel_count", "feature_count", "mask_sha256")
+    missing = [key for key in required if key not in raw_signature]
+    if missing:
+        raise ValueError(
+            f"missing required spatial signature field(s) {missing} in {cache_path}"
+        )
+
+    image_shape = [int(value) for value in list(raw_signature["image_shape"])]
+    affine_array = np.asarray(raw_signature["affine"], dtype=np.float64)
+    if affine_array.shape != (4, 4):
+        raise ValueError(
+            f"invalid affine shape in {cache_path}: expected (4, 4), got {affine_array.shape}"
+        )
+
+    voxel_size_raw = raw_signature.get("voxel_size", [])
+    voxel_size = [float(value) for value in list(voxel_size_raw)]
+    mask_sha256 = str(raw_signature["mask_sha256"]).strip()
+    if not mask_sha256:
+        raise ValueError(f"empty mask_sha256 in {cache_path}")
+
+    return {
+        "signature_version": int(raw_signature.get("signature_version", 1)),
+        "image_shape": image_shape,
+        "affine": affine_array.tolist(),
+        "voxel_size": voxel_size,
+        "mask_voxel_count": int(raw_signature["mask_voxel_count"]),
+        "feature_count": int(raw_signature["feature_count"]),
+        "mask_sha256": mask_sha256,
+    }
+
+
+def _spatial_mismatch_reasons(
+    reference_signature: dict[str, Any],
+    candidate_signature: dict[str, Any],
+    affine_atol: float,
+) -> list[str]:
+    reasons: list[str] = []
+
+    ref_shape = [int(value) for value in reference_signature["image_shape"]]
+    cand_shape = [int(value) for value in candidate_signature["image_shape"]]
+    if cand_shape != ref_shape:
+        reasons.append(f"image_shape mismatch ({cand_shape} != {ref_shape})")
+
+    ref_affine = np.asarray(reference_signature["affine"], dtype=np.float64)
+    cand_affine = np.asarray(candidate_signature["affine"], dtype=np.float64)
+    if not np.allclose(cand_affine, ref_affine, rtol=0.0, atol=affine_atol):
+        reasons.append("affine mismatch")
+
+    ref_voxel_size = np.asarray(reference_signature.get("voxel_size", []), dtype=np.float64)
+    cand_voxel_size = np.asarray(candidate_signature.get("voxel_size", []), dtype=np.float64)
+    if ref_voxel_size.size > 0 and cand_voxel_size.size > 0:
+        if not np.allclose(cand_voxel_size, ref_voxel_size, rtol=0.0, atol=1e-6):
+            reasons.append("voxel_size mismatch")
+
+    ref_mask_voxels = int(reference_signature["mask_voxel_count"])
+    cand_mask_voxels = int(candidate_signature["mask_voxel_count"])
+    if cand_mask_voxels != ref_mask_voxels:
+        reasons.append(f"mask_voxel_count mismatch ({cand_mask_voxels} != {ref_mask_voxels})")
+
+    ref_feature_count = int(reference_signature["feature_count"])
+    cand_feature_count = int(candidate_signature["feature_count"])
+    if cand_feature_count != ref_feature_count:
+        reasons.append(f"feature_count mismatch ({cand_feature_count} != {ref_feature_count})")
+
+    ref_hash = str(reference_signature["mask_sha256"])
+    cand_hash = str(candidate_signature["mask_sha256"])
+    if cand_hash != ref_hash:
+        reasons.append("mask_sha256 mismatch")
+
+    return reasons
+
+
+def _build_spatial_compatibility_report(
+    cache_groups: list[dict[str, Any]],
+    affine_atol: float,
+) -> dict[str, Any]:
+    checked_groups: list[dict[str, Any]] = []
+    mismatches: list[dict[str, Any]] = []
+    reference_signature: dict[str, Any] | None = None
+    reference_group_id: str | None = None
+
+    for group in cache_groups:
+        group_id = str(group["group_id"])
+        cache_path = str(group["cache_path"])
+        n_features = int(group["n_features"])
+        n_selected_samples = int(group["n_selected_samples"])
+        raw_signature = group.get("raw_signature")
+        normalized_signature: dict[str, Any] | None = None
+        reasons: list[str] = []
+
+        if raw_signature is None:
+            reasons.append("missing spatial signature metadata")
+        else:
+            try:
+                normalized_signature = _normalize_spatial_signature(
+                    raw_signature=raw_signature,
+                    cache_path=Path(cache_path),
+                )
+            except ValueError as exc:
+                reasons.append(str(exc))
+
+        if normalized_signature is not None:
+            signature_feature_count = int(normalized_signature["feature_count"])
+            signature_mask_voxels = int(normalized_signature["mask_voxel_count"])
+            if signature_feature_count != n_features:
+                reasons.append(
+                    "feature_count mismatch against cached matrix width "
+                    f"({signature_feature_count} != {n_features})"
+                )
+            if signature_mask_voxels != n_features:
+                reasons.append(
+                    "mask_voxel_count mismatch against cached matrix width "
+                    f"({signature_mask_voxels} != {n_features})"
+                )
+            if reference_signature is None:
+                reference_signature = normalized_signature
+                reference_group_id = group_id
+            else:
+                reasons.extend(
+                    _spatial_mismatch_reasons(
+                        reference_signature=reference_signature,
+                        candidate_signature=normalized_signature,
+                        affine_atol=affine_atol,
+                    )
+                )
+
+        checked_groups.append(
+            {
+                "group_id": group_id,
+                "cache_path": cache_path,
+                "n_selected_samples": n_selected_samples,
+                "n_features": n_features,
+                "spatial_signature": normalized_signature,
+            }
+        )
+        if reasons:
+            mismatches.append(
+                {
+                    "group_id": group_id,
+                    "cache_path": cache_path,
+                    "reasons": reasons,
+                }
+            )
+
+    if not cache_groups:
+        mismatches.append(
+            {
+                "group_id": None,
+                "cache_path": None,
+                "reasons": ["no cache groups matched selected samples"],
+            }
+        )
+
+    passed = bool(cache_groups) and not mismatches and reference_signature is not None
+    return {
+        "status": "passed" if passed else "failed",
+        "passed": passed,
+        "affine_atol": float(affine_atol),
+        "n_groups_checked": int(len(cache_groups)),
+        "reference_group_id": reference_group_id,
+        "reference_signature": reference_signature,
+        "checked_groups": checked_groups,
+        "mismatches": mismatches,
+    }
+
+
+def _raise_spatial_compatibility_error(report: dict[str, Any]) -> None:
+    mismatch_summaries: list[str] = []
+    for mismatch in report.get("mismatches", [])[:5]:
+        group_id = mismatch.get("group_id")
+        group_label = str(group_id) if group_id is not None else "<unknown-group>"
+        reasons = mismatch.get("reasons", [])
+        if reasons:
+            reason_text = "; ".join(str(reason) for reason in reasons)
+        else:
+            reason_text = "unknown mismatch"
+        mismatch_summaries.append(f"{group_label}: {reason_text}")
+
+    details = " | ".join(mismatch_summaries) if mismatch_summaries else "unknown mismatch"
+    raise ValueError(
+        "Spatial compatibility validation failed before feature stacking. "
+        f"{details}. Rebuild cache with thesisml-cache-features --force if metadata is stale."
+    )
+
+
 def _load_features_from_cache(
-    index_df: pd.DataFrame, cache_manifest_path: Path
-) -> tuple[np.ndarray, pd.DataFrame]:
+    index_df: pd.DataFrame,
+    cache_manifest_path: Path,
+    spatial_report_path: Path | None = None,
+    affine_atol: float = _SPATIAL_AFFINE_ATOL,
+) -> tuple[np.ndarray, pd.DataFrame, dict[str, Any]]:
     manifest = pd.read_csv(cache_manifest_path)
     if manifest.empty:
         raise ValueError(f"Cache manifest is empty: {cache_manifest_path}")
@@ -109,6 +306,7 @@ def _load_features_from_cache(
     selected_ids = set(index_df["sample_id"].astype(str))
     feature_map: dict[str, np.ndarray] = {}
     metadata_map: dict[str, dict[str, Any]] = {}
+    selected_cache_groups: list[dict[str, Any]] = []
 
     for _, row in manifest.iterrows():
         cache_path = Path(str(row["cache_path"]))
@@ -120,17 +318,47 @@ def _load_features_from_cache(
             x_block = np.asarray(npz["X"], dtype=np.float32)
             metadata_json = str(npz["metadata_json"].item())
             metadata_records = json.loads(metadata_json)
+            raw_signature = None
+            if "spatial_signature_json" in npz.files:
+                raw_signature = json.loads(str(npz["spatial_signature_json"].item()))
+            group_id = (
+                str(npz["group_id"].item())
+                if "group_id" in npz.files
+                else str(row.get("group_id", cache_path.name))
+            )
 
         if x_block.shape[0] != len(metadata_records):
             raise ValueError(
                 f"Cache row mismatch in {cache_path}: {x_block.shape[0]} != {len(metadata_records)}"
             )
 
+        selected_in_group = 0
         for row_idx, metadata in enumerate(metadata_records):
             sample_id = str(metadata.get("sample_id", ""))
             if sample_id and sample_id in selected_ids:
                 feature_map[sample_id] = x_block[row_idx]
                 metadata_map[sample_id] = metadata
+                selected_in_group += 1
+
+        if selected_in_group > 0:
+            selected_cache_groups.append(
+                {
+                    "group_id": group_id,
+                    "cache_path": str(cache_path.resolve()),
+                    "n_selected_samples": int(selected_in_group),
+                    "n_features": int(x_block.shape[1]),
+                    "raw_signature": raw_signature,
+                }
+            )
+
+    spatial_report = _build_spatial_compatibility_report(
+        cache_groups=selected_cache_groups,
+        affine_atol=affine_atol,
+    )
+    if spatial_report_path is not None:
+        _write_json(spatial_report_path, spatial_report)
+    if not spatial_report["passed"]:
+        _raise_spatial_compatibility_error(spatial_report)
 
     vectors: list[np.ndarray] = []
     metadata_rows: list[dict[str, Any]] = []
@@ -155,7 +383,7 @@ def _load_features_from_cache(
 
     x_matrix = np.vstack(vectors).astype(np.float32, copy=False)
     metadata_df = pd.DataFrame(metadata_rows)
-    return x_matrix, metadata_df
+    return x_matrix, metadata_df, spatial_report
 
 
 def _scores_for_predictions(estimator: Pipeline, x_test: np.ndarray) -> dict[str, list[Any]]:
@@ -412,6 +640,20 @@ def run_experiment(
         if str(test_subject) not in subjects_after_target:
             raise ValueError(f"No samples found for test_subject '{test_subject}'.")
 
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    resolved_run_id = run_id or f"{timestamp}_{model}_{target_column}"
+    report_dir = reports_root / resolved_run_id
+    report_dir.mkdir(parents=True, exist_ok=True)
+
+    fold_metrics_path = report_dir / "fold_metrics.csv"
+    fold_splits_path = report_dir / "fold_splits.csv"
+    predictions_path = report_dir / "predictions.csv"
+    metrics_path = report_dir / "metrics.json"
+    config_path = report_dir / "config.json"
+    spatial_compatibility_report_path = report_dir / "spatial_compatibility_report.json"
+    interpretability_summary_path = report_dir / "interpretability_summary.json"
+    interpretability_fold_artifacts_path = report_dir / "interpretability_fold_explanations.csv"
+
     manifest_path = build_feature_cache(
         index_csv=index_csv,
         data_root=data_root,
@@ -419,8 +661,11 @@ def run_experiment(
         group_key="subject_session_bas",
         force=False,
     )
-    x_matrix, metadata_df = _load_features_from_cache(
-        index_df=index_df, cache_manifest_path=manifest_path
+    x_matrix, metadata_df, spatial_compatibility = _load_features_from_cache(
+        index_df=index_df,
+        cache_manifest_path=manifest_path,
+        spatial_report_path=spatial_compatibility_report_path,
+        affine_atol=_SPATIAL_AFFINE_ATOL,
     )
     metadata_df = with_coarse_affect(
         metadata_df, emotion_column="emotion", coarse_column="coarse_affect"
@@ -488,19 +733,6 @@ def run_experiment(
         n_features=x_matrix.shape[1],
         seed=seed,
     )
-
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    resolved_run_id = run_id or f"{timestamp}_{model}_{target_column}"
-    report_dir = reports_root / resolved_run_id
-    report_dir.mkdir(parents=True, exist_ok=True)
-
-    fold_metrics_path = report_dir / "fold_metrics.csv"
-    fold_splits_path = report_dir / "fold_splits.csv"
-    predictions_path = report_dir / "predictions.csv"
-    metrics_path = report_dir / "metrics.json"
-    config_path = report_dir / "config.json"
-    interpretability_summary_path = report_dir / "interpretability_summary.json"
-    interpretability_fold_artifacts_path = report_dir / "interpretability_fold_explanations.csv"
 
     interpretability_enabled = cv_mode == "within_subject_loso_session"
     interpretability_fold_rows: list[dict[str, Any]] = []
@@ -695,6 +927,14 @@ def run_experiment(
         "macro_f1": overall_macro_f1,
         "labels": labels_sorted,
         "confusion_matrix": cmatrix.tolist(),
+        "spatial_compatibility": {
+            "status": str(spatial_compatibility["status"]),
+            "passed": bool(spatial_compatibility["passed"]),
+            "n_groups_checked": int(spatial_compatibility["n_groups_checked"]),
+            "reference_group_id": spatial_compatibility["reference_group_id"],
+            "affine_atol": float(spatial_compatibility["affine_atol"]),
+            "report_path": str(spatial_compatibility_report_path.resolve()),
+        },
     }
 
     if n_permutations > 0:
@@ -790,6 +1030,12 @@ def run_experiment(
         "filter_modality": filter_modality,
         "n_permutations": int(n_permutations),
         "fold_splits_path": str(fold_splits_path.resolve()),
+        "spatial_compatibility_status": str(spatial_compatibility["status"]),
+        "spatial_compatibility_passed": bool(spatial_compatibility["passed"]),
+        "spatial_compatibility_n_groups_checked": int(spatial_compatibility["n_groups_checked"]),
+        "spatial_compatibility_reference_group_id": spatial_compatibility["reference_group_id"],
+        "spatial_compatibility_affine_atol": float(spatial_compatibility["affine_atol"]),
+        "spatial_compatibility_report_path": str(spatial_compatibility_report_path.resolve()),
         "interpretability_enabled": bool(interpretability_summary["enabled"]),
         "interpretability_performed": bool(interpretability_summary["performed"]),
         "interpretability_status": str(interpretability_summary["status"]),
@@ -812,6 +1058,7 @@ def run_experiment(
         "fold_metrics_path": str(fold_metrics_path.resolve()),
         "fold_splits_path": str(fold_splits_path.resolve()),
         "predictions_path": str(predictions_path.resolve()),
+        "spatial_compatibility_report_path": str(spatial_compatibility_report_path.resolve()),
         "interpretability_summary_path": str(interpretability_summary_path.resolve()),
         "interpretability_fold_artifacts_path": interpretability_summary["fold_artifacts_path"],
         "metrics": metrics,
