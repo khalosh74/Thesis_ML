@@ -358,9 +358,45 @@ def test_experiment_cli_accepts_coarse_affect_target() -> None:
             "coarse_affect",
             "--model",
             "ridge",
+            "--cv",
+            "loso_session",
         ]
     )
     assert args.target == "coarse_affect"
+    assert args.cv == "loso_session"
+
+
+def test_experiment_cli_requires_cv(capsys: pytest.CaptureFixture[str]) -> None:
+    parser = _build_parser()
+    with pytest.raises(SystemExit) as exc:
+        parser.parse_args(
+            [
+                "--index-csv",
+                "dataset_index.csv",
+                "--data-root",
+                "Data",
+                "--cache-dir",
+                "cache",
+                "--target",
+                "coarse_affect",
+                "--model",
+                "ridge",
+            ]
+        )
+
+    assert exc.value.code == 2
+    captured = capsys.readouterr()
+    assert "--cv" in captured.err
+    assert "required" in captured.err
+
+
+def test_experiment_cli_help_describes_modes() -> None:
+    parser = _build_parser()
+    help_text = parser.format_help()
+    assert "within_subject_loso_session" in help_text
+    assert "frozen_cross_person_transfer" in help_text
+    assert "loso_session" in help_text
+    assert "primary thesis mode" in help_text
 
 
 def test_experiment_cli_accepts_within_subject_mode() -> None:

@@ -834,9 +834,13 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--cv",
-        default="loso_session",
+        required=True,
         choices=list(_CV_MODES),
-        help="Cross-validation scheme.",
+        help=(
+            "Experiment mode. Required. within_subject_loso_session=primary thesis mode; "
+            "frozen_cross_person_transfer=secondary transfer mode; "
+            "loso_session=auxiliary grouped mode."
+        ),
     )
     parser.add_argument(
         "--subject",

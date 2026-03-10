@@ -1,90 +1,136 @@
-# Experiments Guide
+# Experiments Guide (Current Thesis Stage)
+
+This guide documents the current implemented experiment modes in
+`src/Thesis_ML/experiments/run_experiment.py`.
+
+Method priority for this thesis stage:
+- Primary evidence path: within-subject held-out-session decoding
+- Secondary evidence path: frozen cross-person transfer
+- Auxiliary mode: grouped `loso_session` (non-primary)
 
 ## Leakage rules
 
-The experiment runner enforces leakage-safe evaluation by design:
+Leakage-safe behavior is enforced by the runner:
+- Preprocessing and model fitting are inside a sklearn `Pipeline`.
+- The scaler (`StandardScaler`) is fit only on training data.
+- Test data is never used during fold fitting.
+- In permutation mode (`--n-permutations N`), labels are shuffled only in training data before fit.
 
-- Splits are grouped with `LeaveOneGroupOut` using `subject_session` groups.
-- Any transformation is fit only on training folds through sklearn `Pipeline`.
-- Current default pipeline:
-  - `StandardScaler(with_mean=True, with_std=True)`
-  - selected linear classifier (`logreg`, `linearsvc`, `ridge`)
-- No scaler/model fitting happens on test fold data.
+## Primary Thesis Experiment
 
-Permutation mode (`--n-permutations N`) is also leakage-safe:
-- Labels are shuffled only inside each training fold before fitting.
-- Test labels are never shuffled.
+Primary settings:
+- `--target coarse_affect`
+- `--cv within_subject_loso_session`
+- one subject per run (`--subject`)
+- training and testing are from the same subject, with held-out session folds
 
-## Recommended templates
-
-### Template 1: within-subject/session-grouped LOSO (default)
-
-Use all available sessions and evaluate generalization to unseen sessions:
+Example:
 
 ```powershell
 thesisml-run-experiment `
   --index-csv Data/processed/dataset_index.csv `
   --data-root Data `
   --cache-dir Data/processed/feature_cache `
-  --target emotion `
+  --target coarse_affect `
   --model ridge `
-  --cv loso_session `
+  --cv within_subject_loso_session `
+  --subject sub-001 `
   --seed 42
 ```
 
-### Template 2: task-restricted comparison
+## Secondary Thesis Experiment
 
-Focus only one task to reduce heterogeneity:
+Frozen cross-person transfer settings:
+- `--cv frozen_cross_person_transfer`
+- explicit `--train-subject` and `--test-subject`
+- `train_subject` and `test_subject` must differ
+- model is fit once on train subject only, then applied to test subject without re-fit/re-tuning
+
+Example:
 
 ```powershell
 thesisml-run-experiment `
   --index-csv Data/processed/dataset_index.csv `
   --data-root Data `
   --cache-dir Data/processed/feature_cache `
-  --target emotion `
-  --filter-task passive `
+  --target coarse_affect `
+  --model ridge `
+  --cv frozen_cross_person_transfer `
+  --train-subject sub-001 `
+  --test-subject sub-002 `
+  --seed 42
+```
+
+Reverse direction should be run separately when needed.
+
+## Interpretability (Within-Subject Linear Runs)
+
+For `within_subject_loso_session`, fold-level explanation artifacts are exported for supported linear baselines (`logreg`, `linearsvc`, `ridge`):
+- per-fold coefficient files: `interpretability/fold_###_coefficients.npz`
+- fold explanation index: `interpretability_fold_explanations.csv`
+- stability summary: `interpretability_summary.json`
+
+Stability summary currently reports simple fold-level coefficient stability measures:
+- pairwise coefficient correlation
+- sign consistency
+- top-k overlap
+
+Interpretability outputs are for model-behavior robustness evidence only. They are not direct neural localization claims.
+
+## Optional Filters
+
+Task and modality filters are available in all modes:
+- `--filter-task <task>`
+- `--filter-modality <modality>`
+
+Example (primary mode + task filter):
+
+```powershell
+thesisml-run-experiment `
+  --index-csv Data/processed/dataset_index.csv `
+  --data-root Data `
+  --cache-dir Data/processed/feature_cache `
+  --target coarse_affect `
   --model linearsvc `
-  --cv loso_session `
+  --cv within_subject_loso_session `
+  --subject sub-001 `
+  --filter-task passive `
   --seed 42
 ```
 
-### Template 3: modality-restricted comparison
+## Auxiliary Grouped Mode (Non-Primary)
 
-Compare models on single-modality inputs:
+`loso_session` remains available as a grouped auxiliary analysis mode and is not the primary thesis evaluation path.
+
+Example:
 
 ```powershell
 thesisml-run-experiment `
   --index-csv Data/processed/dataset_index.csv `
   --data-root Data `
   --cache-dir Data/processed/feature_cache `
-  --target emotion `
-  --filter-modality audio `
+  --target coarse_affect `
   --model logreg `
   --cv loso_session `
   --seed 42
 ```
 
-## Artifacts and interpretation
+## Artifacts Reference
 
 Each run writes to `reports/experiments/<run_id>/`:
-
 - `config.json`
-  - full CLI args, seed, package versions, and git commit (if available)
 - `metrics.json`
-  - overall metrics: `accuracy`, `balanced_accuracy`, `macro_f1`
-  - confusion matrix and class labels
-  - optional permutation stats and p-value
 - `fold_metrics.csv`
-  - one row per CV fold with fold-level metrics and held-out groups
+- `fold_splits.csv`
 - `predictions.csv`
-  - per-sample predictions:
-    - `y_true`, `y_pred`
-    - decision/probability outputs when available
-    - metadata (`subject`, `session`, `task`, `modality`, `bas`)
+- `interpretability_summary.json`
 
-## Notes for thesis reporting
+For within-subject linear runs, the run directory also includes:
+- `interpretability_fold_explanations.csv`
+- `interpretability/fold_###_coefficients.npz`
 
-- Report both `accuracy` and `balanced_accuracy`, especially with class imbalance.
-- Use `macro_f1` for class-balanced summary independent of support.
-- Include fold-level variance from `fold_metrics.csv` to discuss stability.
-- Keep model comparisons on identical splits and identical filters for fairness.
+Audit notes:
+- `config.json` records mode, subjects, target, model, seed, and interpretability status/paths.
+- `fold_splits.csv` records train/test split membership and sample counts.
+- `predictions.csv` includes row-level metadata (`subject`, `session`, labels) and prediction outputs.
+- `metrics.json` contains aggregate metrics plus interpretability summary linkage.
