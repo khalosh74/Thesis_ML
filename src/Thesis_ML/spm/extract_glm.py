@@ -192,7 +192,7 @@ def extract_glm_session(
     out_dir: Path,
     absolute_paths: bool = False,
 ) -> dict[str, Any]:
-    """Extract a single BAS* GLM session into tabular outputs."""
+    """Extract a single BAS2 GLM session into tabular outputs."""
     glm_dir = Path(glm_dir)
     out_dir = Path(out_dir)
 
@@ -260,7 +260,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Extract regressor-beta mapping from one GLM session."
     )
-    parser.add_argument("--glm-dir", required=True, help="Path to BAS* GLM directory.")
+    parser.add_argument("--glm-dir", required=True, help="Path to BAS2 GLM directory.")
     parser.add_argument("--out-dir", required=True, help="Output directory for CSV/JSON artifacts.")
     parser.add_argument(
         "--absolute-paths",

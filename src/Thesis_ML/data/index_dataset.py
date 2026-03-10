@@ -1,4 +1,4 @@
-"""Dataset indexing across multiple BAS* GLM sessions."""
+"""Dataset indexing across multiple BAS2 GLM sessions."""
 
 from __future__ import annotations
 
@@ -46,12 +46,12 @@ def _build_sample_id(row: pd.Series, subject: str, session: str, bas: str) -> st
 def build_dataset_index(
     data_root: Path,
     out_csv: Path,
-    pattern: str = "sub-*/ses-*/BAS*",
+    pattern: str = "sub-*/ses-*/**/BAS2",
     use_cache: bool = True,
     cache_root: Path | None = None,
 ) -> Path:
     """
-    Build an ML dataset index from many BAS* GLM folders.
+    Build an ML dataset index from many BAS2 GLM folders.
 
     Extracted mapping files are cached under:
     data_root/processed/extractions/<sub>/<ses>/<bas>/
@@ -156,15 +156,15 @@ def build_dataset_index(
 
 
 def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Build a dataset index across many BAS* sessions.")
+    parser = argparse.ArgumentParser(description="Build a dataset index across many BAS2 sessions.")
     parser.add_argument(
-        "--data-root", required=True, help="Root containing sub-*/ses-*/BAS* folders."
+        "--data-root", required=True, help="Root containing sub-*/ses-*/**/BAS2 folders."
     )
     parser.add_argument("--out-csv", required=True, help="Output CSV path for dataset index.")
     parser.add_argument(
         "--pattern",
-        default="sub-*/ses-*/BAS*",
-        help="Glob pattern relative to data-root (default: sub-*/ses-*/BAS*).",
+        default="sub-*/ses-*/**/BAS2",
+        help="Glob pattern relative to data-root (default: sub-*/ses-*/**/BAS2).",
     )
     parser.add_argument(
         "--no-cache",
