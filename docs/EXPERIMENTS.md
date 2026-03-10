@@ -15,6 +15,15 @@ Leakage-safe behavior is enforced by the runner:
 - The scaler (`StandardScaler`) is fit only on training data.
 - Test data is never used during fold fitting.
 - In permutation mode (`--n-permutations N`), labels are shuffled only in training data before fit.
+- Within-subject and frozen-transfer runs are intentionally separate modes answering different questions.
+
+## Spatial safeguards
+
+Spatial checks are enforced in two stages:
+- During feature extraction/cache build, each beta image must match its mask in shape and affine.
+  - On mismatch, extraction fails immediately (no resampling or auto-repair).
+- Before experiment stacking/fitting, cache groups selected for a run must share compatible spatial signatures.
+  - A machine-readable `spatial_compatibility_report.json` is written for auditability.
 
 ## Primary Thesis Experiment
 
@@ -123,6 +132,7 @@ Each run writes to `reports/experiments/<run_id>/`:
 - `fold_metrics.csv`
 - `fold_splits.csv`
 - `predictions.csv`
+- `spatial_compatibility_report.json`
 - `interpretability_summary.json`
 
 For within-subject linear runs, the run directory also includes:
@@ -131,6 +141,8 @@ For within-subject linear runs, the run directory also includes:
 
 Audit notes:
 - `config.json` records mode, subjects, target, model, seed, and interpretability status/paths.
+- `config.json` also records spatial compatibility status and report path.
 - `fold_splits.csv` records train/test split membership and sample counts.
 - `predictions.csv` includes row-level metadata (`subject`, `session`, labels) and prediction outputs.
-- `metrics.json` contains aggregate metrics plus interpretability summary linkage.
+- `metrics.json` contains aggregate metrics plus interpretability and spatial-compatibility linkage.
+- `spatial_compatibility_report.json` records checked groups, reference signature, tolerance, and pass/fail details.

@@ -79,10 +79,11 @@ thesisml-cache-features `
 
 Cache behavior:
 - One compressed `.npz` per `subject_session_bas` group.
-- Contains `X` (`n_samples x n_voxels`), `y`, and row metadata.
+- Contains `X` (`n_samples x n_voxels`), `y`, row metadata, and spatial-signature metadata.
+- Each beta is validated against its mask for shape + affine compatibility before vectorization.
 - Existing cache files are skipped unless `--force` is passed.
 
-### 4) Run primary within-person session-held-out experiment
+### 4) Run primary within-person session-held-out experiment (`within_subject_loso_session`)
 
 ```powershell
 thesisml-run-experiment `
@@ -96,7 +97,22 @@ thesisml-run-experiment `
   --seed 42
 ```
 
-Optional grouped LOSO across all subject-session groups:
+### 5) Run secondary frozen cross-person transfer (`frozen_cross_person_transfer`)
+
+```powershell
+thesisml-run-experiment `
+  --index-csv Data/processed/dataset_index.csv `
+  --data-root Data `
+  --cache-dir Data/processed/feature_cache `
+  --target coarse_affect `
+  --model ridge `
+  --cv frozen_cross_person_transfer `
+  --train-subject sub-001 `
+  --test-subject sub-002 `
+  --seed 42
+```
+
+Auxiliary grouped comparison mode (non-primary thesis evidence path):
 
 ```powershell
 thesisml-run-experiment `
@@ -123,13 +139,22 @@ reports/experiments/<run_id>/
   fold_metrics.csv
   fold_splits.csv
   predictions.csv
+  spatial_compatibility_report.json
+  interpretability_summary.json
 ```
 
-All models use the same split schema and metric set:
+Within-subject linear runs (`logreg`, `linearsvc`, `ridge`) additionally write:
+- `interpretability_fold_explanations.csv`
+- `interpretability/fold_###_coefficients.npz`
+
+All models use the same split/metrics core:
 - `accuracy`
 - `balanced_accuracy`
 - `macro_f1`
 - confusion matrix + fold-level metrics
+
+Interpretability outputs are supporting model-behavior robustness evidence only; they are not
+direct neural localization claims.
 
 ## Adding a new model to the registry
 

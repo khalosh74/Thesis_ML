@@ -256,6 +256,95 @@ def test_feature_cache(tmp_path: Path) -> None:
     } <= set(manifest.columns)
 
 
+def test_feature_cache_passes_with_matching_non_identity_affine(tmp_path: Path) -> None:
+    data_root = tmp_path / "Data"
+    affine = np.array(
+        [
+            [2.0, 0.0, 0.0, 0.0],
+            [0.0, 2.0, 0.0, 0.0],
+            [0.0, 0.0, 2.0, 0.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ],
+        dtype=np.float64,
+    )
+    _create_glm_session(
+        glm_dir=data_root / "sub-001" / "ses-01" / "BAS2",
+        labels=[
+            "run-1_passive_anger_audio",
+            "run-1_passive_happiness_video",
+        ],
+        affine=affine,
+    )
+    out_csv = tmp_path / "dataset_index.csv"
+    build_dataset_index(data_root=data_root, out_csv=out_csv)
+
+    cache_dir = tmp_path / "cache"
+    manifest_path = build_feature_cache(index_csv=out_csv, data_root=data_root, cache_dir=cache_dir)
+    manifest = pd.read_csv(manifest_path)
+    npz_path = Path(manifest.loc[0, "cache_path"])
+    with np.load(npz_path, allow_pickle=False) as npz:
+        x_matrix = np.asarray(npz["X"], dtype=np.float32)
+    assert x_matrix.shape == (2, 8)
+
+
+def test_feature_cache_rejects_beta_mask_affine_mismatch(tmp_path: Path) -> None:
+    data_root = tmp_path / "Data"
+    glm_dir = data_root / "sub-001" / "ses-01" / "BAS2"
+    _create_glm_session(
+        glm_dir=glm_dir,
+        labels=[
+            "run-1_passive_anger_audio",
+            "run-1_passive_happiness_video",
+        ],
+    )
+    _write_nifti(
+        glm_dir / "beta_0002.nii",
+        np.full((3, 3, 3), fill_value=2.0, dtype=np.float32),
+        affine=np.diag([2.0, 1.0, 1.0, 1.0]),
+    )
+
+    out_csv = tmp_path / "dataset_index.csv"
+    build_dataset_index(data_root=data_root, out_csv=out_csv)
+
+    with pytest.raises(ValueError) as exc:
+        build_feature_cache(index_csv=out_csv, data_root=data_root, cache_dir=tmp_path / "cache")
+
+    message = str(exc.value)
+    assert "Beta/mask spatial compatibility validation failed" in message
+    assert "affine mismatch" in message
+    assert "beta_0002.nii" in message
+    assert "mask.nii" in message
+
+
+def test_feature_cache_rejects_beta_mask_shape_mismatch(tmp_path: Path) -> None:
+    data_root = tmp_path / "Data"
+    glm_dir = data_root / "sub-001" / "ses-01" / "BAS2"
+    _create_glm_session(
+        glm_dir=glm_dir,
+        labels=[
+            "run-1_passive_anger_audio",
+            "run-1_passive_happiness_video",
+        ],
+    )
+    _write_nifti(
+        glm_dir / "beta_0002.nii",
+        np.full((4, 3, 3), fill_value=2.0, dtype=np.float32),
+        affine=np.eye(4, dtype=np.float64),
+    )
+
+    out_csv = tmp_path / "dataset_index.csv"
+    build_dataset_index(data_root=data_root, out_csv=out_csv)
+
+    with pytest.raises(ValueError) as exc:
+        build_feature_cache(index_csv=out_csv, data_root=data_root, cache_dir=tmp_path / "cache")
+
+    message = str(exc.value)
+    assert "Beta/mask spatial compatibility validation failed" in message
+    assert "shape mismatch" in message
+    assert "beta_0002.nii" in message
+    assert "mask.nii" in message
+
+
 def test_experiment_runner_smoke(tmp_path: Path) -> None:
     data_root = tmp_path / "Data"
     labels = [

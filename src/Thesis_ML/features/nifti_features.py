@@ -18,6 +18,7 @@ from Thesis_ML.data.affect_labels import with_coarse_affect
 
 LOGGER = logging.getLogger(__name__)
 _SPATIAL_SIGNATURE_VERSION = 1
+_BETA_MASK_AFFINE_ATOL = 1e-5
 
 _REQUIRED_INDEX_COLUMNS = {
     "sample_id",
@@ -81,7 +82,38 @@ def load_mask(mask_path: Path) -> np.ndarray:
     return mask_bool
 
 
-def extract_masked_vector(beta_path: Path, mask_bool: np.ndarray) -> np.ndarray:
+def _validate_beta_mask_compatibility(
+    *,
+    beta_path: Path,
+    beta_shape: tuple[int, ...],
+    beta_affine: np.ndarray,
+    mask_path: Path,
+    mask_shape: tuple[int, ...],
+    mask_affine: np.ndarray,
+    affine_atol: float = _BETA_MASK_AFFINE_ATOL,
+) -> None:
+    mismatch_reasons: list[str] = []
+    if beta_shape != mask_shape:
+        mismatch_reasons.append(f"shape mismatch (beta {beta_shape} != mask {mask_shape})")
+
+    if not np.allclose(beta_affine, mask_affine, rtol=0.0, atol=affine_atol):
+        mismatch_reasons.append("affine mismatch")
+
+    if mismatch_reasons:
+        reasons_text = "; ".join(mismatch_reasons)
+        raise ValueError(
+            "Beta/mask spatial compatibility validation failed "
+            f"(beta='{beta_path}', mask='{mask_path}'): {reasons_text}"
+        )
+
+
+def extract_masked_vector(
+    beta_path: Path,
+    mask_bool: np.ndarray,
+    *,
+    mask_path: Path,
+    mask_affine: np.ndarray,
+) -> np.ndarray:
     """Extract a float32 voxel vector from a beta map using a pre-loaded mask."""
     beta_path = Path(beta_path)
     if not beta_path.exists():
@@ -89,11 +121,15 @@ def extract_masked_vector(beta_path: Path, mask_bool: np.ndarray) -> np.ndarray:
 
     beta_img = nib.load(str(beta_path))
     beta_data = np.asarray(beta_img.get_fdata(dtype=np.float32))
-    if beta_data.shape != mask_bool.shape:
-        raise ValueError(
-            "Shape mismatch between beta "
-            f"{beta_data.shape} and mask {mask_bool.shape} for {beta_path}"
-        )
+    beta_affine = np.asarray(beta_img.affine, dtype=np.float64)
+    _validate_beta_mask_compatibility(
+        beta_path=beta_path,
+        beta_shape=tuple(int(value) for value in beta_data.shape),
+        beta_affine=beta_affine,
+        mask_path=Path(mask_path),
+        mask_shape=tuple(int(value) for value in mask_bool.shape),
+        mask_affine=np.asarray(mask_affine, dtype=np.float64),
+    )
 
     vector = beta_data[mask_bool]
     return np.nan_to_num(vector, nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32, copy=False)
@@ -227,11 +263,19 @@ def build_feature_cache(
 
         mask_path = _resolve_data_path(str(group_rows.iloc[0]["mask_path"]), data_root=data_root)
         mask_bool, spatial_signature = _load_mask_and_signature(mask_path)
+        mask_affine = np.asarray(spatial_signature["affine"], dtype=np.float64)
 
         vectors: list[np.ndarray] = []
         for _, row in group_rows.iterrows():
             beta_path = _resolve_data_path(str(row["beta_path"]), data_root=data_root)
-            vectors.append(extract_masked_vector(beta_path=beta_path, mask_bool=mask_bool))
+            vectors.append(
+                extract_masked_vector(
+                    beta_path=beta_path,
+                    mask_bool=mask_bool,
+                    mask_path=mask_path,
+                    mask_affine=mask_affine,
+                )
+            )
 
         x_matrix = np.vstack(vectors).astype(np.float32, copy=False)
         if int(spatial_signature["mask_voxel_count"]) != int(x_matrix.shape[1]):
