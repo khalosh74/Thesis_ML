@@ -1,0 +1,436 @@
+{
+  "schema_version": "1.0",
+  "description": "Decision-support experiment registry for thesis method locks (E01-E11).",
+  "experiments": [
+    {
+      "experiment_id": "E01",
+      "title": "Target granularity experiment",
+      "stage": "Stage 1 - Target lock",
+      "decision_id": "D01",
+      "manipulated_factor": "Target definition",
+      "fixed_controls": "ridge model, within_subject_loso_session split, seed=42, no task/modality filter.",
+      "dataset_scope": "Internal BAS2 repeated-session index.",
+      "target_definition": "coarse_affect vs emotion (binary valence-like currently not implemented).",
+      "split_logic": "within_subject_loso_session, per subject.",
+      "models": [
+        "ridge"
+      ],
+      "primary_metric": "balanced_accuracy",
+      "secondary_metrics": [
+        "macro_f1",
+        "accuracy"
+      ],
+      "output_dir": "artifacts/decision_support/E01",
+      "notes": "Binary valence-like target remains blocked until implemented in runner target aliases.",
+      "executable_now": true,
+      "execution_status": "partially_blocked",
+      "blocked_reasons": [
+        "binary valence-like target not implemented in thesisml-run-experiment target choices."
+      ],
+      "variant_templates": [
+        {
+          "template_id": "coarse_affect_within_subject",
+          "supported": true,
+          "params": {
+            "target": "coarse_affect",
+            "model": "ridge",
+            "cv": "within_subject_loso_session"
+          },
+          "expand": {
+            "subject": "subjects"
+          }
+        },
+        {
+          "template_id": "emotion_within_subject",
+          "supported": true,
+          "params": {
+            "target": "emotion",
+            "model": "ridge",
+            "cv": "within_subject_loso_session"
+          },
+          "expand": {
+            "subject": "subjects"
+          }
+        },
+        {
+          "template_id": "binary_valence_like",
+          "supported": false,
+          "unsupported_reason": "target alias 'binary_valence_like' not implemented."
+        }
+      ]
+    },
+    {
+      "experiment_id": "E02",
+      "title": "Task pooling experiment",
+      "stage": "Stage 1 - Target lock",
+      "decision_id": "D01",
+      "manipulated_factor": "Pooling strategy by task",
+      "fixed_controls": "coarse_affect target, ridge model, within_subject_loso_session split, seed=42.",
+      "dataset_scope": "Internal BAS2 repeated-session index.",
+      "target_definition": "coarse_affect",
+      "split_logic": "within_subject_loso_session, per subject.",
+      "models": [
+        "ridge"
+      ],
+      "primary_metric": "balanced_accuracy",
+      "secondary_metrics": [
+        "macro_f1",
+        "accuracy"
+      ],
+      "output_dir": "artifacts/decision_support/E02",
+      "notes": "Compares pooled tasks vs per-task filtering.",
+      "executable_now": true,
+      "execution_status": "executable",
+      "blocked_reasons": [],
+      "variant_templates": [
+        {
+          "template_id": "pooled_tasks",
+          "supported": true,
+          "params": {
+            "target": "coarse_affect",
+            "model": "ridge",
+            "cv": "within_subject_loso_session"
+          },
+          "expand": {
+            "subject": "subjects"
+          }
+        },
+        {
+          "template_id": "task_specific",
+          "supported": true,
+          "params": {
+            "target": "coarse_affect",
+            "model": "ridge",
+            "cv": "within_subject_loso_session"
+          },
+          "expand": {
+            "subject": "subjects",
+            "filter_task": "tasks"
+          }
+        }
+      ]
+    },
+    {
+      "experiment_id": "E03",
+      "title": "Modality pooling experiment",
+      "stage": "Stage 1 - Target lock",
+      "decision_id": "D01",
+      "manipulated_factor": "Pooling strategy by modality",
+      "fixed_controls": "coarse_affect target, ridge model, within_subject_loso_session split, seed=42.",
+      "dataset_scope": "Internal BAS2 repeated-session index.",
+      "target_definition": "coarse_affect",
+      "split_logic": "within_subject_loso_session, per subject.",
+      "models": [
+        "ridge"
+      ],
+      "primary_metric": "balanced_accuracy",
+      "secondary_metrics": [
+        "macro_f1",
+        "accuracy"
+      ],
+      "output_dir": "artifacts/decision_support/E03",
+      "notes": "Compares pooled modalities vs per-modality filtering.",
+      "executable_now": true,
+      "execution_status": "executable",
+      "blocked_reasons": [],
+      "variant_templates": [
+        {
+          "template_id": "pooled_modalities",
+          "supported": true,
+          "params": {
+            "target": "coarse_affect",
+            "model": "ridge",
+            "cv": "within_subject_loso_session"
+          },
+          "expand": {
+            "subject": "subjects"
+          }
+        },
+        {
+          "template_id": "modality_specific",
+          "supported": true,
+          "params": {
+            "target": "coarse_affect",
+            "model": "ridge",
+            "cv": "within_subject_loso_session"
+          },
+          "expand": {
+            "subject": "subjects",
+            "filter_modality": "modalities"
+          }
+        }
+      ]
+    },
+    {
+      "experiment_id": "E04",
+      "title": "Split-strength stress test",
+      "stage": "Stage 2 - Split lock",
+      "decision_id": "D02",
+      "manipulated_factor": "Split logic",
+      "fixed_controls": "coarse_affect target, ridge model, seed=42.",
+      "dataset_scope": "Internal BAS2 repeated-session index.",
+      "target_definition": "coarse_affect",
+      "split_logic": "loso_session vs within_subject_loso_session (record-wise random split blocked).",
+      "models": [
+        "ridge"
+      ],
+      "primary_metric": "balanced_accuracy",
+      "secondary_metrics": [
+        "macro_f1",
+        "accuracy"
+      ],
+      "output_dir": "artifacts/decision_support/E04",
+      "notes": "Record-wise random split not available in current runner.",
+      "executable_now": true,
+      "execution_status": "partially_blocked",
+      "blocked_reasons": [
+        "record-wise random split mode is not implemented in runner."
+      ],
+      "variant_templates": [
+        {
+          "template_id": "aux_grouped_loso_session",
+          "supported": true,
+          "params": {
+            "target": "coarse_affect",
+            "model": "ridge",
+            "cv": "loso_session"
+          }
+        },
+        {
+          "template_id": "strict_within_subject",
+          "supported": true,
+          "params": {
+            "target": "coarse_affect",
+            "model": "ridge",
+            "cv": "within_subject_loso_session"
+          },
+          "expand": {
+            "subject": "subjects"
+          }
+        },
+        {
+          "template_id": "record_random_split",
+          "supported": false,
+          "unsupported_reason": "record-wise random split not implemented."
+        }
+      ]
+    },
+    {
+      "experiment_id": "E05",
+      "title": "Cross-person transfer design",
+      "stage": "Stage 2 - Split lock",
+      "decision_id": "D02",
+      "manipulated_factor": "Transfer protocol",
+      "fixed_controls": "coarse_affect target, ridge model, seed=42, frozen_cross_person_transfer mode.",
+      "dataset_scope": "Internal BAS2 repeated-session index.",
+      "target_definition": "coarse_affect",
+      "split_logic": "frozen train-on-A test-on-B and reverse direction.",
+      "models": [
+        "ridge"
+      ],
+      "primary_metric": "balanced_accuracy",
+      "secondary_metrics": [
+        "macro_f1",
+        "accuracy"
+      ],
+      "output_dir": "artifacts/decision_support/E05",
+      "notes": "Directional transfer only; no pooled cross-person fitting.",
+      "executable_now": true,
+      "execution_status": "executable",
+      "blocked_reasons": [],
+      "variant_templates": [
+        {
+          "template_id": "all_directional_pairs",
+          "supported": true,
+          "params": {
+            "target": "coarse_affect",
+            "model": "ridge",
+            "cv": "frozen_cross_person_transfer"
+          },
+          "expand": {
+            "train_test_pair": "ordered_subject_pairs"
+          }
+        }
+      ]
+    },
+    {
+      "experiment_id": "E06",
+      "title": "Linear model family comparison",
+      "stage": "Stage 3 - Model lock",
+      "decision_id": "D03",
+      "manipulated_factor": "Model family",
+      "fixed_controls": "coarse_affect target, within_subject_loso_session split, seed=42.",
+      "dataset_scope": "Internal BAS2 repeated-session index.",
+      "target_definition": "coarse_affect",
+      "split_logic": "within_subject_loso_session, per subject.",
+      "models": [
+        "ridge",
+        "logreg",
+        "linearsvc"
+      ],
+      "primary_metric": "balanced_accuracy",
+      "secondary_metrics": [
+        "macro_f1",
+        "accuracy"
+      ],
+      "output_dir": "artifacts/decision_support/E06",
+      "notes": "Uses fixed model configurations in current runner.",
+      "executable_now": true,
+      "execution_status": "executable",
+      "blocked_reasons": [],
+      "variant_templates": [
+        {
+          "template_id": "model_family_compare",
+          "supported": true,
+          "params": {
+            "target": "coarse_affect",
+            "cv": "within_subject_loso_session"
+          },
+          "expand": {
+            "subject": "subjects",
+            "model": "models_linear"
+          }
+        }
+      ]
+    },
+    {
+      "experiment_id": "E07",
+      "title": "Class weighting experiment",
+      "stage": "Stage 3 - Model lock",
+      "decision_id": "D04",
+      "manipulated_factor": "Weighting strategy",
+      "fixed_controls": "coarse_affect target, fixed split and model family.",
+      "dataset_scope": "Internal BAS2 repeated-session index.",
+      "target_definition": "coarse_affect",
+      "split_logic": "within_subject_loso_session intended.",
+      "models": [
+        "ridge",
+        "logreg",
+        "linearsvc"
+      ],
+      "primary_metric": "balanced_accuracy",
+      "secondary_metrics": [
+        "macro_f1",
+        "accuracy"
+      ],
+      "output_dir": "artifacts/decision_support/E07",
+      "notes": "Blocked until class weighting is exposed as runner parameter.",
+      "executable_now": false,
+      "execution_status": "blocked",
+      "blocked_reasons": [
+        "No class weighting flag/parameter exposed in thesisml-run-experiment."
+      ],
+      "variant_templates": []
+    },
+    {
+      "experiment_id": "E08",
+      "title": "Hyperparameter strategy experiment",
+      "stage": "Stage 3 - Model lock",
+      "decision_id": "D05",
+      "manipulated_factor": "Tuning strategy",
+      "fixed_controls": "coarse_affect target and claim-matched split.",
+      "dataset_scope": "Internal BAS2 repeated-session index.",
+      "target_definition": "coarse_affect",
+      "split_logic": "within_subject_loso_session intended.",
+      "models": [
+        "ridge",
+        "logreg",
+        "linearsvc"
+      ],
+      "primary_metric": "balanced_accuracy",
+      "secondary_metrics": [
+        "macro_f1",
+        "accuracy"
+      ],
+      "output_dir": "artifacts/decision_support/E08",
+      "notes": "Blocked until nested tuning/fixed strategy switch is implemented.",
+      "executable_now": false,
+      "execution_status": "blocked",
+      "blocked_reasons": [
+        "No nested tuning strategy option is implemented in current runner."
+      ],
+      "variant_templates": []
+    },
+    {
+      "experiment_id": "E09",
+      "title": "Whole-brain versus ROI experiment",
+      "stage": "Stage 4 - Feature/preprocessing lock",
+      "decision_id": "D06",
+      "manipulated_factor": "Feature space",
+      "fixed_controls": "coarse_affect target, claim-matched split, fixed model baseline.",
+      "dataset_scope": "Internal BAS2 repeated-session index and feature cache.",
+      "target_definition": "coarse_affect",
+      "split_logic": "within_subject_loso_session intended.",
+      "models": [
+        "ridge"
+      ],
+      "primary_metric": "balanced_accuracy",
+      "secondary_metrics": [
+        "macro_f1",
+        "accuracy"
+      ],
+      "output_dir": "artifacts/decision_support/E09",
+      "notes": "Blocked until ROI feature-space switch is available in cache/runner.",
+      "executable_now": false,
+      "execution_status": "blocked",
+      "blocked_reasons": [
+        "Feature-space selection (whole-brain vs ROI) is not parameterized in current experiment path."
+      ],
+      "variant_templates": []
+    },
+    {
+      "experiment_id": "E10",
+      "title": "Dimensionality reduction experiment",
+      "stage": "Stage 4 - Feature/preprocessing lock",
+      "decision_id": "D06",
+      "manipulated_factor": "Feature reduction strategy",
+      "fixed_controls": "coarse_affect target, claim-matched split, fixed model baseline.",
+      "dataset_scope": "Internal BAS2 repeated-session index and feature cache.",
+      "target_definition": "coarse_affect",
+      "split_logic": "within_subject_loso_session intended.",
+      "models": [
+        "ridge"
+      ],
+      "primary_metric": "balanced_accuracy",
+      "secondary_metrics": [
+        "macro_f1",
+        "accuracy"
+      ],
+      "output_dir": "artifacts/decision_support/E10",
+      "notes": "Blocked until dimensionality reduction option is implemented in pipeline.",
+      "executable_now": false,
+      "execution_status": "blocked",
+      "blocked_reasons": [
+        "No dimensionality reduction strategy option is exposed in runner pipeline."
+      ],
+      "variant_templates": []
+    },
+    {
+      "experiment_id": "E11",
+      "title": "Scaling and normalization experiment",
+      "stage": "Stage 4 - Feature/preprocessing lock",
+      "decision_id": "D07",
+      "manipulated_factor": "Scaling policy",
+      "fixed_controls": "coarse_affect target, claim-matched split, fixed model baseline.",
+      "dataset_scope": "Internal BAS2 repeated-session index and feature cache.",
+      "target_definition": "coarse_affect",
+      "split_logic": "within_subject_loso_session intended.",
+      "models": [
+        "ridge"
+      ],
+      "primary_metric": "balanced_accuracy",
+      "secondary_metrics": [
+        "macro_f1",
+        "accuracy"
+      ],
+      "output_dir": "artifacts/decision_support/E11",
+      "notes": "Blocked until scaling policy is configurable (currently fixed StandardScaler in pipeline).",
+      "executable_now": false,
+      "execution_status": "blocked",
+      "blocked_reasons": [
+        "Scaling policy is fixed in _build_pipeline and not externally configurable."
+      ],
+      "variant_templates": []
+    }
+  ]
+}

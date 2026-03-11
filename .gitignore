@@ -25,6 +25,7 @@ data/**
 Data/**
 models/**
 reports/**
+artifacts/**
 spm_glm_extraction_out/**
 
 # Keep scaffold placeholders only
@@ -38,6 +39,7 @@ spm_glm_extraction_out/**
 # Local-only notebooks currently in repo root
 hello.ipynb
 BAS1_data_investigation.ipynb
+thesis_experiment_program_v2_checked.xlsx
 
 # Secrets and local environment files
 .env

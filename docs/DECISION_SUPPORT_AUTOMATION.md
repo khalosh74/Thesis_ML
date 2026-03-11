@@ -1,0 +1,63 @@
+# Decision-Support Automation (E01-E11)
+
+This repo now includes a registry-driven orchestrator to run thesis decision-support experiments
+(E01-E11) using the existing `Thesis_ML.experiments.run_experiment` path.
+
+## Files
+
+- `decision_support_registry.json`: machine-readable experiment definitions for E01-E11.
+- `run_decision_support_experiments.py`: orchestrator CLI.
+- Output root (default): `artifacts/decision_support/`.
+
+## What it does
+
+For each selected experiment/stage:
+
+- expands registry templates into concrete run variants (subject/task/modality/pair scoped),
+- runs supported variants through `run_experiment` (or marks unsupported variants as blocked),
+- writes per-variant run manifests,
+- exports workbook-friendly summaries:
+  - `run_log_export.csv`
+  - `decision_support_summary.csv`
+  - `decision_recommendations.md`
+- writes stage summary artifacts:
+  - `stage1_target_lock_summary.csv`
+  - `stage2_split_lock_summary.csv`
+  - `stage3_model_lock_summary.csv`
+  - `stage4_feature_lock_summary.csv`
+
+## Usage
+
+Run one stage (recommended first run):
+
+```powershell
+python run_decision_support_experiments.py `
+  --stage "Stage 1 - Target lock" `
+  --index-csv Data/processed/dataset_index.csv `
+  --data-root Data `
+  --cache-dir Data/processed/feature_cache
+```
+
+Run one experiment:
+
+```powershell
+python run_decision_support_experiments.py --experiment-id E06
+```
+
+Run all registry experiments:
+
+```powershell
+python run_decision_support_experiments.py --all
+```
+
+Dry-run (expand + manifest only, no model fitting):
+
+```powershell
+python run_decision_support_experiments.py --all --dry-run
+```
+
+## Notes
+
+- Unsupported variants are not silently skipped; they are recorded as `blocked` with reasons.
+- Stage ordering follows the thesis governance sequence in the registry.
+- This automation is decision-support only; it does not run confirmatory experiments.
