@@ -29,6 +29,15 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.svm import LinearSVC
 
+from Thesis_ML.artifacts.registry import (
+    ARTIFACT_TYPE_EXPERIMENT_REPORT,
+    ARTIFACT_TYPE_FEATURE_CACHE,
+    ARTIFACT_TYPE_FEATURE_MATRIX_BUNDLE,
+    ARTIFACT_TYPE_INTERPRETABILITY_BUNDLE,
+    ARTIFACT_TYPE_METRICS_BUNDLE,
+    compute_config_hash,
+    register_artifact,
+)
 from Thesis_ML.data.affect_labels import with_coarse_affect
 from Thesis_ML.features.nifti_features import build_feature_cache
 
@@ -650,6 +659,9 @@ def run_experiment(
     resolved_run_id = run_id or f"{timestamp}_{model}_{target_column}"
     report_dir = reports_root / resolved_run_id
     report_dir.mkdir(parents=True, exist_ok=True)
+    artifact_registry_path = reports_root / "artifact_registry.sqlite3"
+    code_ref = _current_git_commit()
+    artifact_ids: dict[str, str] = {}
 
     fold_metrics_path = report_dir / "fold_metrics.csv"
     fold_splits_path = report_dir / "fold_splits.csv"
@@ -667,12 +679,55 @@ def run_experiment(
         group_key="subject_session_bas",
         force=False,
     )
+    feature_cache_artifact = register_artifact(
+        registry_path=artifact_registry_path,
+        artifact_type=ARTIFACT_TYPE_FEATURE_CACHE,
+        run_id=resolved_run_id,
+        upstream_artifact_ids=[],
+        config_hash=compute_config_hash(
+            {
+                "index_csv": str(index_csv.resolve()),
+                "data_root": str(data_root.resolve()),
+                "cache_dir": str(cache_dir.resolve()),
+                "group_key": "subject_session_bas",
+                "force": False,
+            }
+        ),
+        code_ref=code_ref,
+        path=manifest_path,
+        status="created",
+    )
+    artifact_ids[ARTIFACT_TYPE_FEATURE_CACHE] = feature_cache_artifact.artifact_id
+
     x_matrix, metadata_df, spatial_compatibility = _load_features_from_cache(
         index_df=index_df,
         cache_manifest_path=manifest_path,
         spatial_report_path=spatial_compatibility_report_path,
         affine_atol=_SPATIAL_AFFINE_ATOL,
     )
+    feature_matrix_artifact = register_artifact(
+        registry_path=artifact_registry_path,
+        artifact_type=ARTIFACT_TYPE_FEATURE_MATRIX_BUNDLE,
+        run_id=resolved_run_id,
+        upstream_artifact_ids=[feature_cache_artifact.artifact_id],
+        config_hash=compute_config_hash(
+            {
+                "target": target_column,
+                "cv_mode": cv_mode,
+                "subject": subject,
+                "train_subject": train_subject,
+                "test_subject": test_subject,
+                "filter_task": filter_task,
+                "filter_modality": filter_modality,
+                "cache_manifest_path": str(manifest_path.resolve()),
+            }
+        ),
+        code_ref=code_ref,
+        path=spatial_compatibility_report_path,
+        status="created",
+    )
+    artifact_ids[ARTIFACT_TYPE_FEATURE_MATRIX_BUNDLE] = feature_matrix_artifact.artifact_id
+
     metadata_df = with_coarse_affect(
         metadata_df, emotion_column="emotion", coarse_column="coarse_affect"
     )
@@ -1050,9 +1105,63 @@ def run_experiment(
         "pandas_version": pd.__version__,
         "sklearn_version": sklearn.__version__,
         "nibabel_version": nib.__version__,
-        "git_commit": _current_git_commit(),
+        "git_commit": code_ref,
     }
     config_path.write_text(f"{json.dumps(config, indent=2)}\n", encoding="utf-8")
+
+    metrics_artifact = register_artifact(
+        registry_path=artifact_registry_path,
+        artifact_type=ARTIFACT_TYPE_METRICS_BUNDLE,
+        run_id=resolved_run_id,
+        upstream_artifact_ids=[feature_matrix_artifact.artifact_id],
+        config_hash=compute_config_hash(
+            {
+                "run_id": resolved_run_id,
+                "target": target_column,
+                "model": model,
+                "cv": cv_mode,
+                "seed": int(seed),
+            }
+        ),
+        code_ref=code_ref,
+        path=metrics_path,
+        status="created",
+    )
+    artifact_ids[ARTIFACT_TYPE_METRICS_BUNDLE] = metrics_artifact.artifact_id
+
+    interpretability_artifact = register_artifact(
+        registry_path=artifact_registry_path,
+        artifact_type=ARTIFACT_TYPE_INTERPRETABILITY_BUNDLE,
+        run_id=resolved_run_id,
+        upstream_artifact_ids=[metrics_artifact.artifact_id],
+        config_hash=compute_config_hash(
+            {
+                "run_id": resolved_run_id,
+                "cv": cv_mode,
+                "model": model,
+                "target": target_column,
+                "subject": subject,
+                "performed": bool(interpretability_summary["performed"]),
+            }
+        ),
+        code_ref=code_ref,
+        path=interpretability_summary_path,
+        status=str(interpretability_summary["status"]),
+    )
+    artifact_ids[ARTIFACT_TYPE_INTERPRETABILITY_BUNDLE] = interpretability_artifact.artifact_id
+
+    report_upstream = [metrics_artifact.artifact_id, interpretability_artifact.artifact_id]
+    experiment_report_artifact = register_artifact(
+        registry_path=artifact_registry_path,
+        artifact_type=ARTIFACT_TYPE_EXPERIMENT_REPORT,
+        run_id=resolved_run_id,
+        upstream_artifact_ids=report_upstream,
+        config_hash=compute_config_hash({"run_id": resolved_run_id, "report_dir": str(report_dir)}),
+        code_ref=code_ref,
+        path=report_dir,
+        status="created",
+    )
+    artifact_ids[ARTIFACT_TYPE_EXPERIMENT_REPORT] = experiment_report_artifact.artifact_id
 
     return {
         "run_id": resolved_run_id,
@@ -1065,6 +1174,8 @@ def run_experiment(
         "spatial_compatibility_report_path": str(spatial_compatibility_report_path.resolve()),
         "interpretability_summary_path": str(interpretability_summary_path.resolve()),
         "interpretability_fold_artifacts_path": interpretability_summary["fold_artifacts_path"],
+        "artifact_registry_path": str(artifact_registry_path.resolve()),
+        "artifact_ids": artifact_ids,
         "metrics": metrics,
     }
 

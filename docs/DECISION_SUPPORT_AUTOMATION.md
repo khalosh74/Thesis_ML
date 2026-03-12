@@ -6,7 +6,8 @@ This repo now includes a registry-driven orchestrator to run thesis decision-sup
 ## Files
 
 - `decision_support_registry.json`: machine-readable experiment definitions for E01-E11.
-- `run_decision_support_experiments.py`: orchestrator CLI.
+- `src/Thesis_ML/orchestration/decision_support.py`: packaged orchestrator implementation.
+- `run_decision_support_experiments.py`: backward-compatible CLI shim.
 - Output root (default): `artifacts/decision_support/`.
 
 ## What it does
@@ -32,6 +33,16 @@ Run one stage (recommended first run):
 
 ```powershell
 python run_decision_support_experiments.py `
+  --stage "Stage 1 - Target lock" `
+  --index-csv Data/processed/dataset_index.csv `
+  --data-root Data `
+  --cache-dir Data/processed/feature_cache
+```
+
+Equivalent installed entry point:
+
+```powershell
+thesisml-run-decision-support `
   --stage "Stage 1 - Target lock" `
   --index-csv Data/processed/dataset_index.csv `
   --data-root Data `

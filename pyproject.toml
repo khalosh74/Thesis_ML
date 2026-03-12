@@ -13,6 +13,8 @@ dependencies = [
     "pandas>=2.2",
     "nibabel>=5.2",
     "scikit-learn>=1.5",
+    "openpyxl>=3.1",
+    "pydantic>=2.8",
 ]
 
 [project.optional-dependencies]
@@ -30,6 +32,7 @@ thesisml-extract-glm = "Thesis_ML.spm.extract_glm:main"
 thesisml-build-index = "Thesis_ML.data.index_dataset:main"
 thesisml-cache-features = "Thesis_ML.features.nifti_features:main"
 thesisml-run-experiment = "Thesis_ML.experiments.run_experiment:main"
+thesisml-run-decision-support = "Thesis_ML.orchestration.decision_support:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}

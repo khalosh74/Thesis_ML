@@ -5,7 +5,9 @@ from pathlib import Path
 
 import pandas as pd
 import pytest
-import run_decision_support_experiments as orchestrator
+
+from Thesis_ML.artifacts.registry import ARTIFACT_TYPE_EXPERIMENT_REPORT, list_artifacts_for_run
+from Thesis_ML.orchestration import decision_support as orchestrator
 
 
 def _write_index_csv(path: Path) -> None:
@@ -165,6 +167,12 @@ def test_campaign_writes_exports_and_marks_blocked(
         run_log_df.columns
     )
     assert set(run_log_df["Experiment_ID"].astype(str).tolist()) >= {"E01", "E07"}
+    output_root = tmp_path / "artifacts" / "decision_support"
+    registry_path = output_root / "artifact_registry.sqlite3"
+    assert registry_path.exists()
+    first_run_id = str(run_log_df.iloc[0]["Run_ID"])
+    run_artifacts = list_artifacts_for_run(registry_path=registry_path, run_id=first_run_id)
+    assert any(record.artifact_type == ARTIFACT_TYPE_EXPERIMENT_REPORT for record in run_artifacts)
 
 
 def test_single_blocked_experiment_raises(tmp_path: Path) -> None:

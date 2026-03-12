@@ -16,6 +16,9 @@ OUT_XLSX = Path("thesis_experiment_program.xlsx")
 SHEET_ORDER = [
     "README",
     "Master_Experiments",
+    "Data_Selection_Design",
+    "Grouping_Strategy_Map",
+    "Data_Profile",
     "Run_Log",
     "Decision_Log",
     "Confirmatory_Set",
@@ -78,16 +81,28 @@ RUN_LOG_COLUMNS = [
     "Run_Date",
     "Dataset_Name",
     "Data_Subset",
+    "Data_Slice_ID",
+    "Grouping_Strategy_ID",
     "Code_Commit_or_Version",
     "Config_File_or_Path",
     "Random_Seed",
     "Target",
     "Split_ID_or_Fold_Definition",
+    "Train_Group_Rule",
+    "Test_Group_Rule",
+    "Transfer_Direction",
+    "Session_Coverage",
+    "Task_Coverage",
+    "Modality_Coverage",
     "Model",
     "Feature_Set",
     "Run_Type",
     "Affects_Frozen_Pipeline",
     "Eligible_for_Method_Decision",
+    "Sample_Count",
+    "Class_Counts",
+    "Imbalance_Status",
+    "Leakage_Check_Status",
     "Primary_Metric_Value",
     "Secondary_Metric_1",
     "Secondary_Metric_2",
@@ -97,6 +112,45 @@ RUN_LOG_COLUMNS = [
     "Reviewed",
     "Used_in_Thesis",
     "Artifact_Path",
+    "Notes",
+]
+
+DATA_SELECTION_COLUMNS = [
+    "Data_Slice_ID",
+    "Slice_Name",
+    "Purpose",
+    "Subject_Scope",
+    "Session_Scope",
+    "Time_Window",
+    "Task_Scope",
+    "Modality_Scope",
+    "Target_Type",
+    "Label_Set",
+    "Inclusion_Rule",
+    "Exclusion_Rule",
+    "Class_Balance_Policy",
+    "Minimum_Samples_Rule",
+    "Leakage_Risk",
+    "Valid_Use_Case",
+    "Thesis_Use",
+    "Notes",
+]
+
+GROUPING_STRATEGY_COLUMNS = [
+    "Grouping_Strategy_ID",
+    "Strategy_Name",
+    "Split_Family",
+    "Train_Group_Unit",
+    "Test_Group_Unit",
+    "Grouping_Level",
+    "Train_Rule",
+    "Test_Rule",
+    "Leakage_Safeguard",
+    "Suitable_For",
+    "Not_Suitable_For",
+    "Interpretation_Boundary",
+    "Typical_Experiments",
+    "Thesis_Section",
     "Notes",
 ]
 
@@ -220,12 +274,60 @@ VOCABS = {
     "Required_for_Main_Claim": ["No", "Yes"],
     "Ready_for_Chapter_4": ["No", "Yes"],
     "YesNo": ["No", "Yes"],
+    "Subject_Scope": ["all_subjects", "single_subject", "cross_person_transfer"],
+    "Session_Scope": ["all_sessions", "early_only", "late_only", "held_out_session", "custom_window"],
+    "Task_Scope": ["pooled_all_tasks", "passive_only", "emo_only", "rating_only", "task_specific_other"],
+    "Modality_Scope": ["pooled_all_modalities", "audio_only", "video_only", "audiovisual_only"],
+    "Class_Balance_Policy": ["as_is", "balanced_subset", "weighted_only", "min_count_threshold"],
+    "Split_Family": ["within_subject", "cross_person", "temporal", "weak_split_demo", "diagnostic"],
+    "Imbalance_Status": ["unknown", "balanced", "mild_imbalance", "severe_imbalance"],
+    "Leakage_Check_Status": ["not_checked", "passed", "warning", "failed"],
+    "Thesis_Use_Tag": [
+        "method_choice",
+        "main_confirmatory",
+        "supporting_robustness",
+        "discussion_limitations",
+        "appendix_exploratory",
+    ],
+    "Use_Case": [
+        "method_choice",
+        "confirmatory_within_person",
+        "confirmatory_cross_person_transfer",
+        "robustness_support",
+        "weak_split_demo_only",
+        "diagnostic_only",
+        "exploratory_only",
+    ],
+    "Group_Unit": [
+        "subject",
+        "session",
+        "task",
+        "modality",
+        "subject_session",
+        "task_modality",
+        "custom_group",
+    ],
+    "Grouping_Level": [
+        "within_subject",
+        "across_subject",
+        "session_level",
+        "task_level",
+        "modality_level",
+        "task_modality_level",
+        "mixed_level",
+    ],
+    "Transfer_Direction": ["none_or_within_subject", "A_to_B", "B_to_A", "bidirectional", "custom"],
+    "Leakage_Risk_Level": ["low", "medium", "high", "critical"],
+    "Target_Type": ["coarse_affect", "binary_valence_like", "fine_emotion", "custom_target"],
 }
 
 DEFINITIONS = [
     ("confirmatory", "Pre-specified, locked-pipeline evidence analysis supporting main thesis claims."),
     ("decision-support", "Method-choice analysis performed before locking confirmatory settings."),
     ("exploratory", "Hypothesis-generating extension outside confirmatory core."),
+    ("data slice", "Explicit subset policy over subjects/sessions/tasks/modalities/labels used by runs."),
+    ("grouping strategy", "Explicit train/test grouping logic and split family for claim-matched evaluation."),
+    ("weak split demo", "Intentionally weak split used only to demonstrate inflation risk; not confirmatory evidence."),
     ("construct validity", "How well labels/features operationalize intended constructs."),
     ("internal validity", "Protection against confounds and leakage in design and execution."),
     ("statistical conclusion validity", "Reliability of metric-based inference."),
@@ -307,6 +409,19 @@ def add_named_list(wb: Workbook, list_name: str, sheet_name: str, col: int, star
     wb.defined_names.add(DefinedName(name=list_name, attr_text=f"'{sheet_name}'!${letter}${start}:${letter}${end}"))
 
 
+def add_dynamic_named_list(wb: Workbook, list_name: str, sheet_name: str, col: int, start: int) -> None:
+    letter = get_column_letter(col)
+    formula = (
+        f"'{sheet_name}'!${letter}${start}:"
+        f"INDEX('{sheet_name}'!${letter}:${letter},MATCH(\"zzz\",'{sheet_name}'!${letter}:${letter}))"
+    )
+    wb.defined_names.add(DefinedName(name=list_name, attr_text=formula))
+
+
+def col_idx(columns: list[str], name: str) -> int:
+    return columns.index(name) + 1
+
+
 def build_experiments() -> list[dict[str, str]]:
     base = {
         "Priority": "Medium",
@@ -372,11 +487,17 @@ def fill_readme_sheet(ws) -> None:
 
     blocks = [
         ("Purpose", "Scientific control system for thesis experiment governance: pre-interpretation design, lock tracking, leakage-aware execution traceability, and chapter-ready evidence mapping."),
+        ("Governance layers", "Experiment governance documents what each experiment is allowed to conclude. Data-slice governance documents what subset policy and grouping strategy were used in each run and what claims they can support."),
         ("Evidence tiers", "Primary confirmatory; Primary-supporting robustness; Secondary decision-support; Exploratory extension. Each tier has explicit interpretation boundaries."),
         ("Stage system", "Stage 1 Target lock -> Stage 2 Split lock -> Stage 3 Model lock -> Stage 4 Feature/preprocessing lock -> Stage 5 Confirmatory analysis -> Stage 6 Robustness analysis -> Stage 7 Exploratory extension."),
         ("Freeze policy", "Confirmatory eligibility requires D01-D07 locked in Decision_Log. Chapter 4 readiness additionally requires required confirmatory/supporting items completed and marked Ready_for_Chapter_4=YES."),
+        ("Data_Selection_Design", "Defines allowed data slices (subject/session/task/modality/target scope, inclusion/exclusion, class-balance policy, leakage risk, and thesis-use boundary)."),
+        ("Grouping_Strategy_Map", "Defines split family, train/test grouping units, leakage safeguards, and interpretation boundaries for each grouping strategy identifier."),
+        ("Data_Profile", "Structured worksheet for manual or imported descriptive counts by subject/session/task/modality/target/class and by Data_Slice_ID, with formula-based sparsity/imbalance flags."),
+        ("Claim boundaries", "Within-person held-out-session claims and cross-person transfer claims are different scientific claims and must not be interpreted interchangeably."),
+        ("Weak-split policy", "Weak split results are allowed only as inflation demonstrations and diagnostic contrast. They are not confirmatory evidence."),
         ("Governance additions", "Claim_Ledger enforces claim discipline. AI_Usage_Log supports tool transparency and human verification traceability. Ethics_Governance_Notes supports risk/mitigation accountability."),
-        ("Workflow", "Master_Experiments -> Run_Log -> Decision_Log -> Confirmatory_Set -> Claim_Ledger/AI_Usage_Log/Ethics_Governance_Notes -> Thesis_Map -> Dashboard."),
+        ("Workflow", "Master_Experiments + Data_Selection_Design + Grouping_Strategy_Map -> Run_Log -> Decision_Log -> Confirmatory_Set -> Claim_Ledger/AI_Usage_Log/Ethics_Governance_Notes -> Thesis_Map -> Dashboard."),
     ]
     row = 3
     for title, text in blocks:
@@ -389,11 +510,19 @@ def fill_readme_sheet(ws) -> None:
             for cc in range(1, 10):
                 ws.cell(rr, cc).border = THIN
         row += 3
-    ws["A22"] = "This workbook is aligned to thesis method-choice/method-application workflow and reporting governance requirements."
-    ws.merge_cells("A22:I23")
-    ws["A22"].fill = PatternFill("solid", fgColor="FFF8E1")
-    ws["A22"].alignment = Alignment(wrap_text=True, vertical="top")
-    ws["A22"].border = THIN
+
+    summary_row = row
+    ws[f"A{summary_row}"] = (
+        "This workbook is aligned to thesis method-choice/method-application workflow, "
+        "data-slice/grouping governance, and leakage-aware reporting requirements."
+    )
+    ws.merge_cells(start_row=summary_row, start_column=1, end_row=summary_row + 1, end_column=9)
+    ws[f"A{summary_row}"].fill = PatternFill("solid", fgColor="FFF8E1")
+    ws[f"A{summary_row}"].alignment = Alignment(wrap_text=True, vertical="top")
+    ws[f"A{summary_row}"].border = THIN
+    for cc in range(1, 10):
+        ws.cell(summary_row + 1, cc).border = THIN
+
     set_widths(ws, {"A": 22, "B": 24, "C": 24, "D": 24, "E": 24, "F": 24, "G": 24, "H": 24, "I": 24})
     ws.freeze_panes = "A2"
 
@@ -450,28 +579,662 @@ def fill_master_sheet(ws) -> int:
     return last
 
 
+def fill_data_selection_design_sheet(ws, wb: Workbook) -> int:
+    for i, h in enumerate(DATA_SELECTION_COLUMNS, start=1):
+        ws.cell(1, i, h)
+    style_header(ws, 1, len(DATA_SELECTION_COLUMNS))
+
+    rows = [
+        {
+            "Data_Slice_ID": "DS01",
+            "Slice_Name": "All subjects, all sessions, pooled task, pooled modality, coarse_affect",
+            "Purpose": "Global baseline for target/split/model method-choice comparisons.",
+            "Subject_Scope": "all_subjects",
+            "Session_Scope": "all_sessions",
+            "Time_Window": "full_study_window",
+            "Task_Scope": "pooled_all_tasks",
+            "Modality_Scope": "pooled_all_modalities",
+            "Target_Type": "coarse_affect",
+            "Label_Set": "coarse_affect",
+            "Inclusion_Rule": "All QC-passed repeated-session beta maps with valid labels.",
+            "Exclusion_Rule": "Drop failed-preprocessing rows and missing targets.",
+            "Class_Balance_Policy": "as_is",
+            "Minimum_Samples_Rule": "Prefer >=20 per class before claim-level interpretation.",
+            "Leakage_Risk": "medium",
+            "Valid_Use_Case": "method_choice",
+            "Thesis_Use": "method_choice",
+            "Notes": "",
+        },
+        {
+            "Data_Slice_ID": "DS02",
+            "Slice_Name": "Subject-specific pooled-task pooled-modality",
+            "Purpose": "Primary within-person held-out-session claim support.",
+            "Subject_Scope": "single_subject",
+            "Session_Scope": "held_out_session",
+            "Time_Window": "full_study_window",
+            "Task_Scope": "pooled_all_tasks",
+            "Modality_Scope": "pooled_all_modalities",
+            "Target_Type": "coarse_affect",
+            "Label_Set": "coarse_affect",
+            "Inclusion_Rule": "One subject at a time with all eligible sessions.",
+            "Exclusion_Rule": "No cross-subject pooling inside fold-level fit.",
+            "Class_Balance_Policy": "weighted_only",
+            "Minimum_Samples_Rule": "Per-class floor checked per subject.",
+            "Leakage_Risk": "low",
+            "Valid_Use_Case": "confirmatory_within_person",
+            "Thesis_Use": "main_confirmatory",
+            "Notes": "Matches held-out-session inference boundary.",
+        },
+        {
+            "Data_Slice_ID": "DS03",
+            "Slice_Name": "Task-specific pooled-modality",
+            "Purpose": "Task pooling vs task-specific method-choice and diagnostics.",
+            "Subject_Scope": "all_subjects",
+            "Session_Scope": "all_sessions",
+            "Time_Window": "full_study_window",
+            "Task_Scope": "task_specific_other",
+            "Modality_Scope": "pooled_all_modalities",
+            "Target_Type": "coarse_affect",
+            "Label_Set": "coarse_affect by task",
+            "Inclusion_Rule": "Restrict each run to one task family.",
+            "Exclusion_Rule": "Exclude off-task records for that run.",
+            "Class_Balance_Policy": "as_is",
+            "Minimum_Samples_Rule": "Minimum counts checked per task-specific slice.",
+            "Leakage_Risk": "medium",
+            "Valid_Use_Case": "method_choice",
+            "Thesis_Use": "method_choice",
+            "Notes": "",
+        },
+        {
+            "Data_Slice_ID": "DS04",
+            "Slice_Name": "Modality-specific pooled-task",
+            "Purpose": "Modality pooling vs modality-specific method-choice checks.",
+            "Subject_Scope": "all_subjects",
+            "Session_Scope": "all_sessions",
+            "Time_Window": "full_study_window",
+            "Task_Scope": "pooled_all_tasks",
+            "Modality_Scope": "audio_only",
+            "Target_Type": "coarse_affect",
+            "Label_Set": "coarse_affect",
+            "Inclusion_Rule": "One modality family per run (audio/video/audiovisual variants).",
+            "Exclusion_Rule": "Exclude other modalities in each modality-specific run.",
+            "Class_Balance_Policy": "as_is",
+            "Minimum_Samples_Rule": "Check sample sufficiency per modality variant.",
+            "Leakage_Risk": "medium",
+            "Valid_Use_Case": "method_choice",
+            "Thesis_Use": "method_choice",
+            "Notes": "Seed modality is audio_only; clone row for other modalities.",
+        },
+        {
+            "Data_Slice_ID": "DS05",
+            "Slice_Name": "Subject-specific task x modality subset",
+            "Purpose": "Fine-grained diagnostic sensitivity slices.",
+            "Subject_Scope": "single_subject",
+            "Session_Scope": "all_sessions",
+            "Time_Window": "full_study_window",
+            "Task_Scope": "task_specific_other",
+            "Modality_Scope": "audiovisual_only",
+            "Target_Type": "coarse_affect",
+            "Label_Set": "coarse_affect",
+            "Inclusion_Rule": "Single subject + selected task + selected modality combination.",
+            "Exclusion_Rule": "Exclude all records outside the chosen intersection.",
+            "Class_Balance_Policy": "min_count_threshold",
+            "Minimum_Samples_Rule": "Hard floor required before reporting.",
+            "Leakage_Risk": "high",
+            "Valid_Use_Case": "diagnostic_only",
+            "Thesis_Use": "discussion_limitations",
+            "Notes": "",
+        },
+        {
+            "Data_Slice_ID": "DS06",
+            "Slice_Name": "Early sessions only",
+            "Purpose": "Temporal drift checks and early-to-late transfer design.",
+            "Subject_Scope": "all_subjects",
+            "Session_Scope": "early_only",
+            "Time_Window": "early_window",
+            "Task_Scope": "pooled_all_tasks",
+            "Modality_Scope": "pooled_all_modalities",
+            "Target_Type": "coarse_affect",
+            "Label_Set": "coarse_affect",
+            "Inclusion_Rule": "Use sessions pre-registered as early window.",
+            "Exclusion_Rule": "Exclude late-window sessions.",
+            "Class_Balance_Policy": "as_is",
+            "Minimum_Samples_Rule": "Check class floor by temporal window.",
+            "Leakage_Risk": "medium",
+            "Valid_Use_Case": "robustness_support",
+            "Thesis_Use": "supporting_robustness",
+            "Notes": "",
+        },
+        {
+            "Data_Slice_ID": "DS07",
+            "Slice_Name": "Late sessions only",
+            "Purpose": "Temporal drift checks and early-to-late transfer design.",
+            "Subject_Scope": "all_subjects",
+            "Session_Scope": "late_only",
+            "Time_Window": "late_window",
+            "Task_Scope": "pooled_all_tasks",
+            "Modality_Scope": "pooled_all_modalities",
+            "Target_Type": "coarse_affect",
+            "Label_Set": "coarse_affect",
+            "Inclusion_Rule": "Use sessions pre-registered as late window.",
+            "Exclusion_Rule": "Exclude early-window sessions.",
+            "Class_Balance_Policy": "as_is",
+            "Minimum_Samples_Rule": "Check class floor by temporal window.",
+            "Leakage_Risk": "medium",
+            "Valid_Use_Case": "robustness_support",
+            "Thesis_Use": "supporting_robustness",
+            "Notes": "",
+        },
+        {
+            "Data_Slice_ID": "DS08",
+            "Slice_Name": "Balanced subset only",
+            "Purpose": "Imbalance-aware sensitivity diagnostics.",
+            "Subject_Scope": "all_subjects",
+            "Session_Scope": "all_sessions",
+            "Time_Window": "full_study_window",
+            "Task_Scope": "pooled_all_tasks",
+            "Modality_Scope": "pooled_all_modalities",
+            "Target_Type": "coarse_affect",
+            "Label_Set": "coarse_affect",
+            "Inclusion_Rule": "Only include rows passing balancing policy.",
+            "Exclusion_Rule": "Exclude classes below predefined minimum count floor.",
+            "Class_Balance_Policy": "balanced_subset",
+            "Minimum_Samples_Rule": "Set explicit class floor in analysis config.",
+            "Leakage_Risk": "low",
+            "Valid_Use_Case": "robustness_support",
+            "Thesis_Use": "supporting_robustness",
+            "Notes": "Do not replace confirmatory as-is evidence with this slice.",
+        },
+    ]
+
+    for r, row in enumerate(rows, start=2):
+        for c, name in enumerate(DATA_SELECTION_COLUMNS, start=1):
+            ws.cell(r, c, row.get(name, ""))
+
+    last = 41
+    style_body(ws, 2, last, 1, len(DATA_SELECTION_COLUMNS))
+    add_table(ws, "DataSelectionTable", f"A1:R{last}", style="TableStyleMedium3")
+    ws.freeze_panes = "A2"
+    ws.auto_filter.ref = f"A1:R{last}"
+
+    add_list_validation(ws, "=List_Subject_Scope", col_idx(DATA_SELECTION_COLUMNS, "Subject_Scope"), 2, 1000)
+    add_list_validation(ws, "=List_Session_Scope", col_idx(DATA_SELECTION_COLUMNS, "Session_Scope"), 2, 1000)
+    add_list_validation(ws, "=List_Task_Scope", col_idx(DATA_SELECTION_COLUMNS, "Task_Scope"), 2, 1000)
+    add_list_validation(ws, "=List_Modality_Scope", col_idx(DATA_SELECTION_COLUMNS, "Modality_Scope"), 2, 1000)
+    add_list_validation(ws, "=List_Target_Type", col_idx(DATA_SELECTION_COLUMNS, "Target_Type"), 2, 1000)
+    add_list_validation(ws, "=List_Class_Balance_Policy", col_idx(DATA_SELECTION_COLUMNS, "Class_Balance_Policy"), 2, 1000)
+    add_list_validation(ws, "=List_Leakage_Risk_Level", col_idx(DATA_SELECTION_COLUMNS, "Leakage_Risk"), 2, 1000)
+    add_list_validation(ws, "=List_Use_Case", col_idx(DATA_SELECTION_COLUMNS, "Valid_Use_Case"), 2, 1000)
+    add_list_validation(ws, "=List_Thesis_Use_Tag", col_idx(DATA_SELECTION_COLUMNS, "Thesis_Use"), 2, 1000)
+
+    set_widths(
+        ws,
+        {
+            "A": 13,
+            "B": 42,
+            "C": 34,
+            "D": 18,
+            "E": 16,
+            "F": 18,
+            "G": 20,
+            "H": 22,
+            "I": 16,
+            "J": 22,
+            "K": 34,
+            "L": 32,
+            "M": 20,
+            "N": 24,
+            "O": 14,
+            "P": 22,
+            "Q": 22,
+            "R": 30,
+        },
+    )
+
+    add_dynamic_named_list(
+        wb,
+        "List_Data_Slice_ID",
+        ws.title,
+        col_idx(DATA_SELECTION_COLUMNS, "Data_Slice_ID"),
+        2,
+    )
+    return last
+
+
+def fill_grouping_strategy_map_sheet(ws, wb: Workbook) -> int:
+    for i, h in enumerate(GROUPING_STRATEGY_COLUMNS, start=1):
+        ws.cell(1, i, h)
+    style_header(ws, 1, len(GROUPING_STRATEGY_COLUMNS))
+
+    rows = [
+        {
+            "Grouping_Strategy_ID": "GS01",
+            "Strategy_Name": "within-subject LOSO-session",
+            "Split_Family": "within_subject",
+            "Train_Group_Unit": "subject_session",
+            "Test_Group_Unit": "session",
+            "Grouping_Level": "within_subject",
+            "Train_Rule": "Per subject: train on all but one session.",
+            "Test_Rule": "Per subject: test on held-out session.",
+            "Leakage_Safeguard": "No held-out session rows in any train-side fit/tune stage.",
+            "Suitable_For": "confirmatory_within_person",
+            "Not_Suitable_For": "confirmatory_cross_person_transfer",
+            "Interpretation_Boundary": "Supports within-person held-out-session claim only.",
+            "Typical_Experiments": "E04,E16",
+            "Thesis_Section": "Chapter 4 Main results",
+            "Notes": "",
+        },
+        {
+            "Grouping_Strategy_ID": "GS02",
+            "Strategy_Name": "pooled-task within-subject LOSO-session",
+            "Split_Family": "within_subject",
+            "Train_Group_Unit": "subject_session",
+            "Test_Group_Unit": "session",
+            "Grouping_Level": "within_subject",
+            "Train_Rule": "Within each subject, pool tasks and hold out one session.",
+            "Test_Rule": "Evaluate on held-out session with pooled task scope.",
+            "Leakage_Safeguard": "No test-session information in pooled train transforms.",
+            "Suitable_For": "confirmatory_within_person",
+            "Not_Suitable_For": "confirmatory_cross_person_transfer",
+            "Interpretation_Boundary": "Within-person conclusion under pooled task policy.",
+            "Typical_Experiments": "E02,E16",
+            "Thesis_Section": "Chapter 3 Method choice",
+            "Notes": "",
+        },
+        {
+            "Grouping_Strategy_ID": "GS03",
+            "Strategy_Name": "task-specific within-subject LOSO-session",
+            "Split_Family": "within_subject",
+            "Train_Group_Unit": "subject_session",
+            "Test_Group_Unit": "session",
+            "Grouping_Level": "task_level",
+            "Train_Rule": "Within each subject/task, hold out one session.",
+            "Test_Rule": "Test on same-task held-out session.",
+            "Leakage_Safeguard": "Task-specific split manifests and train-only preprocessing.",
+            "Suitable_For": "method_choice",
+            "Not_Suitable_For": "confirmatory_cross_person_transfer",
+            "Interpretation_Boundary": "Task-conditioned within-person evidence only.",
+            "Typical_Experiments": "E02,E15",
+            "Thesis_Section": "Chapter 3 Method choice",
+            "Notes": "",
+        },
+        {
+            "Grouping_Strategy_ID": "GS04",
+            "Strategy_Name": "modality-specific within-subject LOSO-session",
+            "Split_Family": "within_subject",
+            "Train_Group_Unit": "subject_session",
+            "Test_Group_Unit": "session",
+            "Grouping_Level": "modality_level",
+            "Train_Rule": "Within each subject/modality, hold out one session.",
+            "Test_Rule": "Test on same-modality held-out session.",
+            "Leakage_Safeguard": "Modality-specific fold manifests with strict train-only fit.",
+            "Suitable_For": "method_choice",
+            "Not_Suitable_For": "confirmatory_cross_person_transfer",
+            "Interpretation_Boundary": "Modality-conditioned within-person evidence only.",
+            "Typical_Experiments": "E03,E15",
+            "Thesis_Section": "Chapter 3 Method choice",
+            "Notes": "",
+        },
+        {
+            "Grouping_Strategy_ID": "GS05",
+            "Strategy_Name": "early-train late-test",
+            "Split_Family": "temporal",
+            "Train_Group_Unit": "session",
+            "Test_Group_Unit": "session",
+            "Grouping_Level": "session_level",
+            "Train_Rule": "Train on pre-defined early sessions.",
+            "Test_Rule": "Test on disjoint late sessions.",
+            "Leakage_Safeguard": "Fixed temporal boundary and no late-session tuning.",
+            "Suitable_For": "robustness_support",
+            "Not_Suitable_For": "confirmatory_within_person",
+            "Interpretation_Boundary": "Temporal transfer sensitivity, not the primary confirmatory claim.",
+            "Typical_Experiments": "E04,E15",
+            "Thesis_Section": "Chapter 4 Supporting robustness",
+            "Notes": "",
+        },
+        {
+            "Grouping_Strategy_ID": "GS06",
+            "Strategy_Name": "frozen cross-person transfer A->B",
+            "Split_Family": "cross_person",
+            "Train_Group_Unit": "subject",
+            "Test_Group_Unit": "subject",
+            "Grouping_Level": "across_subject",
+            "Train_Rule": "Fit on subject A only (frozen pipeline).",
+            "Test_Rule": "Evaluate on subject B without refit/re-tune.",
+            "Leakage_Safeguard": "No test-subject fitting; strict direction lock.",
+            "Suitable_For": "confirmatory_cross_person_transfer",
+            "Not_Suitable_For": "confirmatory_within_person",
+            "Interpretation_Boundary": "Directional transfer under domain shift only.",
+            "Typical_Experiments": "E05,E17",
+            "Thesis_Section": "Chapter 4 Main results",
+            "Notes": "",
+        },
+        {
+            "Grouping_Strategy_ID": "GS07",
+            "Strategy_Name": "frozen cross-person transfer B->A",
+            "Split_Family": "cross_person",
+            "Train_Group_Unit": "subject",
+            "Test_Group_Unit": "subject",
+            "Grouping_Level": "across_subject",
+            "Train_Rule": "Fit on subject B only (frozen pipeline).",
+            "Test_Rule": "Evaluate on subject A without refit/re-tune.",
+            "Leakage_Safeguard": "No test-subject fitting; strict direction lock.",
+            "Suitable_For": "confirmatory_cross_person_transfer",
+            "Not_Suitable_For": "confirmatory_within_person",
+            "Interpretation_Boundary": "Directional transfer under domain shift only.",
+            "Typical_Experiments": "E05,E17",
+            "Thesis_Section": "Chapter 4 Main results",
+            "Notes": "",
+        },
+        {
+            "Grouping_Strategy_ID": "GS08",
+            "Strategy_Name": "weak split inflation demo",
+            "Split_Family": "weak_split_demo",
+            "Train_Group_Unit": "custom_group",
+            "Test_Group_Unit": "custom_group",
+            "Grouping_Level": "mixed_level",
+            "Train_Rule": "Use intentionally weaker split variant for contrast.",
+            "Test_Rule": "Evaluate inflation magnitude vs strict split.",
+            "Leakage_Safeguard": "Tag as weak split and exclude from confirmatory claims.",
+            "Suitable_For": "weak_split_demo_only",
+            "Not_Suitable_For": "confirmatory_within_person",
+            "Interpretation_Boundary": "Inflation demonstration only; non-confirmatory.",
+            "Typical_Experiments": "E04",
+            "Thesis_Section": "Chapter 3 Method choice",
+            "Notes": "Permitted only as cautionary demonstration.",
+        },
+        {
+            "Grouping_Strategy_ID": "GS09",
+            "Strategy_Name": "task x modality diagnostic split",
+            "Split_Family": "diagnostic",
+            "Train_Group_Unit": "task_modality",
+            "Test_Group_Unit": "task_modality",
+            "Grouping_Level": "task_modality_level",
+            "Train_Rule": "Train within selected task/modality intersections.",
+            "Test_Rule": "Test on matched or held-out intersections per protocol.",
+            "Leakage_Safeguard": "Pre-registered intersection mapping and no adaptive relabeling.",
+            "Suitable_For": "diagnostic_only",
+            "Not_Suitable_For": "confirmatory_within_person",
+            "Interpretation_Boundary": "Diagnostic sensitivity only; not core evidence.",
+            "Typical_Experiments": "E15",
+            "Thesis_Section": "Chapter 5 Discussion",
+            "Notes": "",
+        },
+    ]
+
+    for r, row in enumerate(rows, start=2):
+        for c, name in enumerate(GROUPING_STRATEGY_COLUMNS, start=1):
+            ws.cell(r, c, row.get(name, ""))
+
+    last = 41
+    style_body(ws, 2, last, 1, len(GROUPING_STRATEGY_COLUMNS))
+    add_table(ws, "GroupingStrategyTable", f"A1:O{last}", style="TableStyleMedium4")
+    ws.freeze_panes = "A2"
+    ws.auto_filter.ref = f"A1:O{last}"
+
+    add_list_validation(ws, "=List_Split_Family", col_idx(GROUPING_STRATEGY_COLUMNS, "Split_Family"), 2, 1000)
+    add_list_validation(ws, "=List_Group_Unit", col_idx(GROUPING_STRATEGY_COLUMNS, "Train_Group_Unit"), 2, 1000)
+    add_list_validation(ws, "=List_Group_Unit", col_idx(GROUPING_STRATEGY_COLUMNS, "Test_Group_Unit"), 2, 1000)
+    add_list_validation(ws, "=List_Grouping_Level", col_idx(GROUPING_STRATEGY_COLUMNS, "Grouping_Level"), 2, 1000)
+    add_list_validation(ws, "=List_Use_Case", col_idx(GROUPING_STRATEGY_COLUMNS, "Suitable_For"), 2, 1000)
+    add_list_validation(ws, "=List_Use_Case", col_idx(GROUPING_STRATEGY_COLUMNS, "Not_Suitable_For"), 2, 1000)
+    add_list_validation(ws, "=List_Reporting_Destination", col_idx(GROUPING_STRATEGY_COLUMNS, "Thesis_Section"), 2, 1000)
+
+    set_widths(
+        ws,
+        {
+            "A": 16,
+            "B": 36,
+            "C": 16,
+            "D": 18,
+            "E": 18,
+            "F": 18,
+            "G": 30,
+            "H": 30,
+            "I": 32,
+            "J": 20,
+            "K": 22,
+            "L": 36,
+            "M": 20,
+            "N": 24,
+            "O": 26,
+        },
+    )
+
+    add_dynamic_named_list(
+        wb,
+        "List_Grouping_Strategy_ID",
+        ws.title,
+        col_idx(GROUPING_STRATEGY_COLUMNS, "Grouping_Strategy_ID"),
+        2,
+    )
+    return last
+
+
+def fill_data_profile_sheet(ws) -> int:
+    ws.merge_cells("A1:J1")
+    ws["A1"] = "Data Profile and Imbalance Diagnostics"
+    ws["A1"].font = Font(size=14, bold=True)
+    ws["A1"].fill = PatternFill("solid", fgColor=COL["title_bg"])
+    ws["A1"].alignment = Alignment(horizontal="left")
+
+    ws["A3"] = "How to use"
+    ws["A3"].font = Font(bold=True)
+    ws["A3"].fill = PatternFill("solid", fgColor="EEF3FB")
+    ws.merge_cells("B3:J4")
+    ws["B3"] = (
+        "Paste exported counts into Count columns (or maintain manually). "
+        "Formulas compute shares, imbalance flags, and sparsity flags."
+    )
+    ws["B3"].alignment = Alignment(wrap_text=True, vertical="top")
+    for rr in range(3, 5):
+        for cc in range(1, 11):
+            ws.cell(rr, cc).border = THIN
+
+    ws["A6"] = "Threshold controls"
+    ws["A6"].font = Font(bold=True)
+    ws["A6"].fill = PatternFill("solid", fgColor="EEF3FB")
+    ws["A7"] = "Sparse count threshold"
+    ws["A8"] = "Mild imbalance ratio (max/min)"
+    ws["A9"] = "Severe imbalance ratio (max/min)"
+    ws["B7"] = 20
+    ws["B8"] = 2
+    ws["B9"] = 3
+    for rr in range(7, 10):
+        ws.cell(rr, 1).border = THIN
+        ws.cell(rr, 2).border = THIN
+        if rr % 2 == 0:
+            ws.cell(rr, 1).fill = PatternFill("solid", fgColor=COL["zebra"])
+            ws.cell(rr, 2).fill = PatternFill("solid", fgColor=COL["zebra"])
+
+    ws["D6"] = "Profile summary"
+    ws["D6"].font = Font(bold=True)
+    ws["D6"].fill = PatternFill("solid", fgColor="EEF3FB")
+    summary_labels = [
+        ("Total_subject_samples", '=SUM(B13:B20)'),
+        ("Total_session_samples", '=SUM(B25:B34)'),
+        ("Total_task_samples", '=SUM(B39:B45)'),
+        ("Total_modality_samples", '=SUM(B50:B55)'),
+        ("Total_class_samples", '=SUM(B60:B65)'),
+        ("Class_imbalance_ratio_max_min", '=IFERROR(MAX(B60:B65)/MIN(B60:B65),"")'),
+        (
+            "Class_imbalance_flag",
+            '=IF(B60="","",IF(OR(MIN(B60:B65)=0,G12>$B$9),"SEVERE_IMBALANCE",IF(G12>$B$8,"MILD_IMBALANCE","BALANCED")))',
+        ),
+    ]
+    for i, (label, formula) in enumerate(summary_labels, start=7):
+        ws.cell(i, 4, label)
+        ws.cell(i, 7, formula)
+        ws.cell(i, 4).border = THIN
+        ws.cell(i, 7).border = THIN
+        if i % 2 == 0:
+            ws.cell(i, 4).fill = PatternFill("solid", fgColor=COL["zebra"])
+            ws.cell(i, 7).fill = PatternFill("solid", fgColor=COL["zebra"])
+
+    def write_count_block(
+        start_row: int,
+        title: str,
+        key_header: str,
+        keys: list[str],
+        table_name: str,
+    ) -> int:
+        ws.merge_cells(start_row=start_row, start_column=1, end_row=start_row, end_column=5)
+        ws.cell(start_row, 1, title)
+        ws.cell(start_row, 1).font = Font(size=11, bold=True)
+        ws.cell(start_row, 1).fill = PatternFill("solid", fgColor="EEF3FB")
+        ws.cell(start_row, 1).border = THIN
+
+        header_row = start_row + 1
+        headers = [key_header, "Count", "Share_of_Block", "Flag", "Notes"]
+        for c, h in enumerate(headers, start=1):
+            ws.cell(header_row, c, h)
+        style_header(ws, header_row, len(headers))
+
+        data_start = header_row + 1
+        data_end = data_start + len(keys) - 1
+        for r, key in enumerate(keys, start=data_start):
+            ws.cell(r, 1, key)
+            ws.cell(r, 3, f'=IFERROR(B{r}/SUM($B${data_start}:$B${data_end}),0)')
+            ws.cell(r, 4, f'=IF(B{r}="","",IF(B{r}<$B$7,"SPARSE","OK"))')
+        style_body(ws, data_start, data_end, 1, 5)
+        add_table(ws, table_name, f"A{header_row}:E{data_end}", style="TableStyleMedium6")
+        return data_end
+
+    write_count_block(
+        11,
+        "Counts by subject",
+        "Subject_ID",
+        ["sub-001", "sub-002", "sub-003", "sub-004", "sub-005", "sub-006", "sub-007", "sub-008"],
+        "ProfileSubjectTable",
+    )
+    write_count_block(
+        23,
+        "Counts by session",
+        "Session_ID",
+        ["ses-01", "ses-02", "ses-03", "ses-04", "ses-05", "ses-06", "ses-07", "ses-08", "ses-09", "ses-10"],
+        "ProfileSessionTable",
+    )
+    write_count_block(
+        37,
+        "Counts by task",
+        "Task_ID",
+        ["pooled_all_tasks", "passive_only", "emo_only", "rating_only", "task_specific_other", "custom_task_1", "custom_task_2"],
+        "ProfileTaskTable",
+    )
+    write_count_block(
+        48,
+        "Counts by modality",
+        "Modality_ID",
+        ["pooled_all_modalities", "audio_only", "video_only", "audiovisual_only", "custom_modality_1", "custom_modality_2"],
+        "ProfileModalityTable",
+    )
+    write_count_block(
+        58,
+        "Counts by target/class",
+        "Target_or_Class_ID",
+        ["coarse_affect_neg", "coarse_affect_neu", "coarse_affect_pos", "binary_neg", "binary_pos", "custom_class_1"],
+        "ProfileTargetClassTable",
+    )
+
+    slice_start = 69
+    ws.merge_cells(start_row=slice_start, start_column=1, end_row=slice_start, end_column=5)
+    ws.cell(slice_start, 1, "Counts by Data_Slice_ID")
+    ws.cell(slice_start, 1).font = Font(size=11, bold=True)
+    ws.cell(slice_start, 1).fill = PatternFill("solid", fgColor="EEF3FB")
+    ws.cell(slice_start, 1).border = THIN
+    for c, h in enumerate(["Data_Slice_ID", "Count", "Share_of_Block", "Flag", "Notes"], start=1):
+        ws.cell(slice_start + 1, c, h)
+    style_header(ws, slice_start + 1, 5)
+
+    data_start = slice_start + 2
+    data_end = data_start + 9
+    for r in range(data_start, data_end + 1):
+        source_row = r - data_start + 2
+        ws.cell(r, 1, f'=IFERROR(Data_Selection_Design!$A{source_row},"")')
+        ws.cell(r, 3, f'=IFERROR(B{r}/SUM($B${data_start}:$B${data_end}),0)')
+        ws.cell(r, 4, f'=IF(B{r}="","",IF(B{r}<$B$7,"SPARSE","OK"))')
+    style_body(ws, data_start, data_end, 1, 5)
+    add_table(ws, "ProfileDataSliceTable", f"A{slice_start + 1}:E{data_end}", style="TableStyleMedium6")
+
+    class_flag_range = "$B$60:$B$65"
+    for r in range(60, 66):
+        ws.cell(
+            r,
+            4,
+            f'=IF(B{r}="","",IF(OR(MIN({class_flag_range})=0,MAX({class_flag_range})/MIN({class_flag_range})>$B$9),'
+            f'"SEVERE_IMBALANCE",IF(MAX({class_flag_range})/MIN({class_flag_range})>$B$8,"MILD_IMBALANCE","BALANCED")))',
+        )
+
+    set_widths(ws, {"A": 26, "B": 14, "C": 16, "D": 20, "E": 38, "F": 4, "G": 24, "H": 14, "I": 12, "J": 12})
+    ws.freeze_panes = "A12"
+    return data_end
+
+
 def fill_run_log_sheet(ws) -> int:
     for i, h in enumerate(RUN_LOG_COLUMNS, start=1):
         ws.cell(1, i, h)
     style_header(ws, 1, len(RUN_LOG_COLUMNS))
     last = 41
     style_body(ws, 2, last, 1, len(RUN_LOG_COLUMNS))
-    add_table(ws, "RunLogTable", f"A1:Y{last}", style="TableStyleMedium9")
+    end_col = get_column_letter(len(RUN_LOG_COLUMNS))
+    add_table(ws, "RunLogTable", f"A1:{end_col}{last}", style="TableStyleMedium9")
     ws.freeze_panes = "A2"
-    ws.auto_filter.ref = f"A1:Y{last}"
+    ws.auto_filter.ref = f"A1:{end_col}{last}"
 
-    add_list_validation(ws, "=List_Run_Type", 13, 2, 1000)
-    add_list_validation(ws, "=List_Affects_Frozen_Pipeline", 14, 2, 1000)
-    add_list_validation(ws, "=List_Eligible_for_Method_Decision", 15, 2, 1000)
-    add_list_validation(ws, "=List_Reviewed", 22, 2, 1000)
-    add_list_validation(ws, "=List_Used_in_Thesis", 23, 2, 1000)
+    add_list_validation(ws, "=List_Data_Slice_ID", col_idx(RUN_LOG_COLUMNS, "Data_Slice_ID"), 2, 1000)
+    add_list_validation(ws, "=List_Grouping_Strategy_ID", col_idx(RUN_LOG_COLUMNS, "Grouping_Strategy_ID"), 2, 1000)
+    add_list_validation(ws, "=List_Transfer_Direction", col_idx(RUN_LOG_COLUMNS, "Transfer_Direction"), 2, 1000)
+    add_list_validation(ws, "=List_Session_Scope", col_idx(RUN_LOG_COLUMNS, "Session_Coverage"), 2, 1000)
+    add_list_validation(ws, "=List_Task_Scope", col_idx(RUN_LOG_COLUMNS, "Task_Coverage"), 2, 1000)
+    add_list_validation(ws, "=List_Modality_Scope", col_idx(RUN_LOG_COLUMNS, "Modality_Coverage"), 2, 1000)
+    add_list_validation(ws, "=List_Run_Type", col_idx(RUN_LOG_COLUMNS, "Run_Type"), 2, 1000)
+    add_list_validation(ws, "=List_Affects_Frozen_Pipeline", col_idx(RUN_LOG_COLUMNS, "Affects_Frozen_Pipeline"), 2, 1000)
+    add_list_validation(ws, "=List_Eligible_for_Method_Decision", col_idx(RUN_LOG_COLUMNS, "Eligible_for_Method_Decision"), 2, 1000)
+    add_list_validation(ws, "=List_Imbalance_Status", col_idx(RUN_LOG_COLUMNS, "Imbalance_Status"), 2, 1000)
+    add_list_validation(ws, "=List_Leakage_Check_Status", col_idx(RUN_LOG_COLUMNS, "Leakage_Check_Status"), 2, 1000)
+    add_list_validation(ws, "=List_Reviewed", col_idx(RUN_LOG_COLUMNS, "Reviewed"), 2, 1000)
+    add_list_validation(ws, "=List_Used_in_Thesis", col_idx(RUN_LOG_COLUMNS, "Used_in_Thesis"), 2, 1000)
 
     set_widths(
         ws,
         {
-            "A": 18, "B": 13, "C": 12, "D": 20, "E": 24, "F": 22, "G": 30, "H": 12, "I": 16, "J": 24,
-            "K": 16, "L": 22, "M": 18, "N": 18, "O": 22, "P": 18, "Q": 18, "R": 18, "S": 30, "T": 28,
-            "U": 34, "V": 12, "W": 14, "X": 36, "Y": 28,
+            "A": 18,
+            "B": 13,
+            "C": 12,
+            "D": 20,
+            "E": 22,
+            "F": 12,
+            "G": 16,
+            "H": 22,
+            "I": 30,
+            "J": 12,
+            "K": 16,
+            "L": 24,
+            "M": 22,
+            "N": 22,
+            "O": 18,
+            "P": 18,
+            "Q": 18,
+            "R": 20,
+            "S": 16,
+            "T": 22,
+            "U": 18,
+            "V": 18,
+            "W": 22,
+            "X": 12,
+            "Y": 20,
+            "Z": 18,
+            "AA": 20,
+            "AB": 18,
+            "AC": 18,
+            "AD": 18,
+            "AE": 30,
+            "AF": 28,
+            "AG": 34,
+            "AH": 12,
+            "AI": 14,
+            "AJ": 36,
+            "AK": 28,
         }
     )
     return last
@@ -669,7 +1432,6 @@ def fill_dictionary_sheet(ws, wb: Workbook) -> None:
     ws["A1"] = "Controlled vocabularies (drives dropdown validation)"
     ws["A1"].font = Font(size=12, bold=True)
     ws["A1"].fill = PatternFill("solid", fgColor=COL["title_bg"])
-    ws.merge_cells("A1:U1")
 
     names = [
         "Category",
@@ -693,7 +1455,23 @@ def fill_dictionary_sheet(ws, wb: Workbook) -> None:
         "Required_for_Main_Claim",
         "Ready_for_Chapter_4",
         "YesNo",
+        "Subject_Scope",
+        "Session_Scope",
+        "Task_Scope",
+        "Modality_Scope",
+        "Class_Balance_Policy",
+        "Split_Family",
+        "Imbalance_Status",
+        "Leakage_Check_Status",
+        "Thesis_Use_Tag",
+        "Use_Case",
+        "Group_Unit",
+        "Grouping_Level",
+        "Transfer_Direction",
+        "Leakage_Risk_Level",
+        "Target_Type",
     ]
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=len(names))
     for c, name in enumerate(names, start=1):
         ws.cell(2, c, name)
         ws.cell(2, c).font = Font(color=COL["header_fg"], bold=True)
@@ -706,34 +1484,37 @@ def fill_dictionary_sheet(ws, wb: Workbook) -> None:
                 ws.cell(r, c).fill = PatternFill("solid", fgColor=COL["zebra"])
         add_named_list(wb, f"List_{name}", ws.title, c, 3, 2 + len(items))
 
-    ws["V1"] = "Term definitions"
-    ws["V1"].font = Font(size=12, bold=True)
-    ws["V1"].fill = PatternFill("solid", fgColor=COL["title_bg"])
-    ws.merge_cells("V1:W1")
-    ws["V2"] = "Term"
-    ws["W2"] = "Definition"
-    for cell in ("V2", "W2"):
-        ws[cell].font = Font(color=COL["header_fg"], bold=True)
-        ws[cell].fill = PatternFill("solid", fgColor=COL["header_bg"])
+    def_col = len(names) + 1
+    term_col = def_col
+    definition_col = def_col + 1
+    ws.cell(1, term_col, "Term definitions")
+    ws.cell(1, term_col).font = Font(size=12, bold=True)
+    ws.cell(1, term_col).fill = PatternFill("solid", fgColor=COL["title_bg"])
+    ws.merge_cells(start_row=1, start_column=term_col, end_row=1, end_column=definition_col)
+    ws.cell(2, term_col, "Term")
+    ws.cell(2, definition_col, "Definition")
+    for c in (term_col, definition_col):
+        ws.cell(2, c).font = Font(color=COL["header_fg"], bold=True)
+        ws.cell(2, c).fill = PatternFill("solid", fgColor=COL["header_bg"])
     for r, (term, definition) in enumerate(DEFINITIONS, start=3):
-        ws.cell(r, 22, term)
-        ws.cell(r, 23, definition)
-        ws.cell(r, 22).border = THIN
-        ws.cell(r, 23).border = THIN
-        ws.cell(r, 23).alignment = Alignment(wrap_text=True, vertical="top")
+        ws.cell(r, term_col, term)
+        ws.cell(r, definition_col, definition)
+        ws.cell(r, term_col).border = THIN
+        ws.cell(r, definition_col).border = THIN
+        ws.cell(r, definition_col).alignment = Alignment(wrap_text=True, vertical="top")
         if r % 2 == 0:
-            ws.cell(r, 22).fill = PatternFill("solid", fgColor=COL["zebra"])
-            ws.cell(r, 23).fill = PatternFill("solid", fgColor=COL["zebra"])
+            ws.cell(r, term_col).fill = PatternFill("solid", fgColor=COL["zebra"])
+            ws.cell(r, definition_col).fill = PatternFill("solid", fgColor=COL["zebra"])
 
-    for c in range(1, 22):
+    for c in range(1, len(names) + 1):
         ws.column_dimensions[get_column_letter(c)].width = 22
-    ws.column_dimensions["V"].width = 24
-    ws.column_dimensions["W"].width = 84
+    ws.column_dimensions[get_column_letter(term_col)].width = 24
+    ws.column_dimensions[get_column_letter(definition_col)].width = 84
     ws.freeze_panes = "A3"
 
 
 def fill_dashboard_sheet(ws) -> None:
-    ws.merge_cells("A1:I1")
+    ws.merge_cells("A1:N1")
     ws["A1"] = "Thesis Experiment Program Dashboard (v2)"
     ws["A1"].font = Font(size=15, bold=True)
     ws["A1"].fill = PatternFill("solid", fgColor=COL["title_bg"])
@@ -762,6 +1543,12 @@ def fill_dashboard_sheet(ws) -> None:
         "Claims with Evidence_Status = open",
         "AI log entries",
         "Open ethics/governance notes",
+        "Runs flagged with imbalance warning",
+        "Runs flagged with leakage warning/fail",
+        "Distinct data slices used in Run_Log",
+        "Distinct grouping strategies used in Run_Log",
+        "Runs with Data_Slice_ID recorded",
+        "Runs with Grouping_Strategy_ID recorded",
     ]
     formulas = [
         '=COUNTA(Master_Experiments!$A$2:$A$500)',
@@ -782,6 +1569,12 @@ def fill_dashboard_sheet(ws) -> None:
         '=COUNTIF(Claim_Ledger!$E$2:$E$500,"open")',
         '=COUNTA(AI_Usage_Log!$A$2:$A$500)',
         '=COUNTIF(Ethics_Governance_Notes!$G$2:$G$500,"Open")',
+        '=COUNTIFS(Run_Log!$Z$2:$Z$2000,"mild_imbalance")+COUNTIFS(Run_Log!$Z$2:$Z$2000,"severe_imbalance")',
+        '=COUNTIFS(Run_Log!$AA$2:$AA$2000,"warning")+COUNTIFS(Run_Log!$AA$2:$AA$2000,"failed")',
+        '=SUMPRODUCT((Run_Log!$F$2:$F$2000<>"")/COUNTIF(Run_Log!$F$2:$F$2000,Run_Log!$F$2:$F$2000&""))',
+        '=SUMPRODUCT((Run_Log!$G$2:$G$2000<>"")/COUNTIF(Run_Log!$G$2:$G$2000,Run_Log!$G$2:$G$2000&""))',
+        '=COUNTIF(Run_Log!$F$2:$F$2000,"<>")',
+        '=COUNTIF(Run_Log!$G$2:$G$2000,"<>")',
     ]
 
     for i, (label, formula) in enumerate(zip(labels, formulas, strict=True), start=4):
@@ -814,7 +1607,88 @@ def fill_dashboard_sheet(ws) -> None:
         ws.cell(i, 8).border = THIN
         ws.cell(i, 7).alignment = Alignment(wrap_text=True)
 
-    set_widths(ws, {"A": 46, "B": 16, "C": 3, "D": 26, "E": 10, "F": 3, "G": 36, "H": 10, "I": 3})
+    ws["J3"] = "Experiments by data slice"
+    ws["J3"].font = Font(size=12, bold=True)
+    ws["J3"].fill = PatternFill("solid", fgColor="EEF3FB")
+    ws.merge_cells("J3:K3")
+    for i in range(4, 16):
+        src_row = i - 2
+        ws.cell(i, 10, f'=IFERROR(Data_Selection_Design!$A{src_row},"")')
+        ws.cell(
+            i,
+            11,
+            f'=IF(J{i}="","",SUMPRODUCT((Run_Log!$F$2:$F$2000=J{i})*(Run_Log!$B$2:$B$2000<>"")/'
+            f'IFERROR(COUNTIFS(Run_Log!$F$2:$F$2000,J{i},Run_Log!$B$2:$B$2000,Run_Log!$B$2:$B$2000),1)))',
+        )
+        ws.cell(i, 10).border = THIN
+        ws.cell(i, 11).border = THIN
+
+    ws["M3"] = "Experiments by grouping strategy"
+    ws["M3"].font = Font(size=12, bold=True)
+    ws["M3"].fill = PatternFill("solid", fgColor="EEF3FB")
+    ws.merge_cells("M3:N3")
+    for i in range(4, 16):
+        src_row = i - 2
+        ws.cell(i, 13, f'=IFERROR(Grouping_Strategy_Map!$A{src_row},"")')
+        ws.cell(
+            i,
+            14,
+            f'=IF(M{i}="","",SUMPRODUCT((Run_Log!$G$2:$G$2000=M{i})*(Run_Log!$B$2:$B$2000<>"")/'
+            f'IFERROR(COUNTIFS(Run_Log!$G$2:$G$2000,M{i},Run_Log!$B$2:$B$2000,Run_Log!$B$2:$B$2000),1)))',
+        )
+        ws.cell(i, 13).border = THIN
+        ws.cell(i, 14).border = THIN
+
+    ws["D17"] = "Quick comparison counts (run-level)"
+    ws["D17"].font = Font(size=12, bold=True)
+    ws["D17"].fill = PatternFill("solid", fgColor="EEF3FB")
+    ws.merge_cells("D17:E17")
+    comp_labels = [
+        "Pooled task runs",
+        "Task-specific runs",
+        "Pooled modality runs",
+        "Modality-specific runs",
+        "Within-person runs",
+        "Cross-person runs",
+        "Temporal split runs",
+    ]
+    comp_formulas = [
+        '=COUNTIF(Run_Log!$Q$2:$Q$2000,"pooled_all_tasks")',
+        '=COUNTIFS(Run_Log!$Q$2:$Q$2000,"<>",Run_Log!$Q$2:$Q$2000,"<>pooled_all_tasks")',
+        '=COUNTIF(Run_Log!$R$2:$R$2000,"pooled_all_modalities")',
+        '=COUNTIFS(Run_Log!$R$2:$R$2000,"<>",Run_Log!$R$2:$R$2000,"<>pooled_all_modalities")',
+        '=SUMPRODUCT((Grouping_Strategy_Map!$C$2:$C$200="within_subject")*COUNTIF(Run_Log!$G$2:$G$2000,Grouping_Strategy_Map!$A$2:$A$200))',
+        '=SUMPRODUCT((Grouping_Strategy_Map!$C$2:$C$200="cross_person")*COUNTIF(Run_Log!$G$2:$G$2000,Grouping_Strategy_Map!$A$2:$A$200))',
+        '=SUMPRODUCT((Grouping_Strategy_Map!$C$2:$C$200="temporal")*COUNTIF(Run_Log!$G$2:$G$2000,Grouping_Strategy_Map!$A$2:$A$200))',
+    ]
+    for i, (label, formula) in enumerate(zip(comp_labels, comp_formulas, strict=True), start=18):
+        ws.cell(i, 4, label)
+        ws.cell(i, 5, formula)
+        ws.cell(i, 4).border = THIN
+        ws.cell(i, 5).border = THIN
+        if i % 2 == 0:
+            ws.cell(i, 4).fill = PatternFill("solid", fgColor=COL["zebra"])
+            ws.cell(i, 5).fill = PatternFill("solid", fgColor=COL["zebra"])
+
+    set_widths(
+        ws,
+        {
+            "A": 46,
+            "B": 16,
+            "C": 3,
+            "D": 30,
+            "E": 12,
+            "F": 3,
+            "G": 36,
+            "H": 12,
+            "I": 3,
+            "J": 24,
+            "K": 12,
+            "L": 3,
+            "M": 28,
+            "N": 12,
+        },
+    )
     ws.freeze_panes = "A4"
     ws.conditional_formatting.add("B9:B14", FormulaRule(formula=['B9="YES"'], fill=PatternFill("solid", fgColor=COL["ok"])))
     ws.conditional_formatting.add("B9:B14", FormulaRule(formula=['B9="NO"'], fill=PatternFill("solid", fgColor=COL["bad"])))
@@ -828,6 +1702,9 @@ def build_workbook() -> Workbook:
 
     fill_readme_sheet(wb["README"])
     fill_master_sheet(wb["Master_Experiments"])
+    fill_data_selection_design_sheet(wb["Data_Selection_Design"], wb)
+    fill_grouping_strategy_map_sheet(wb["Grouping_Strategy_Map"], wb)
+    fill_data_profile_sheet(wb["Data_Profile"])
     fill_run_log_sheet(wb["Run_Log"])
     fill_decision_log_sheet(wb["Decision_Log"])
     fill_confirmatory_sheet(wb["Confirmatory_Set"])
@@ -839,8 +1716,8 @@ def build_workbook() -> Workbook:
     fill_ethics_sheet(wb["Ethics_Governance_Notes"])
 
     wb.calculation.fullCalcOnLoad = True
-    wb["README"]["A25"] = "Generated by create_thesis_experiment_workbook.py (v2)"
-    wb["README"]["A25"].font = Font(italic=True, color="4B5563")
+    wb["README"]["A45"] = "Generated by create_thesis_experiment_workbook.py (v2)"
+    wb["README"]["A45"].font = Font(italic=True, color="4B5563")
     return wb
 
 
@@ -849,28 +1726,102 @@ def validate(path: Path) -> dict[str, str]:
     sheets = [ws.title for ws in wb.worksheets]
     sheet_ok = sheets == SHEET_ORDER
     missing_sheets = [s for s in SHEET_ORDER if s not in sheets]
+    legacy_required = [
+        "README",
+        "Master_Experiments",
+        "Run_Log",
+        "Decision_Log",
+        "Confirmatory_Set",
+        "Thesis_Map",
+        "Dictionary_Validation",
+        "Dashboard",
+        "Claim_Ledger",
+        "AI_Usage_Log",
+        "Ethics_Governance_Notes",
+    ]
+    legacy_sheets_present = all(s in sheets for s in legacy_required)
+    new_sheets = ["Data_Selection_Design", "Grouping_Strategy_Map", "Data_Profile"]
+    new_sheets_present = all(s in sheets for s in new_sheets)
 
     master = wb["Master_Experiments"]
     confirm = wb["Confirmatory_Set"]
     dash = wb["Dashboard"]
     dictionary = wb["Dictionary_Validation"]
+    run_log = wb["Run_Log"]
 
     dv_count = sum(
         len(wb[name].data_validations.dataValidation)
-        for name in ["Master_Experiments", "Run_Log", "Decision_Log", "Confirmatory_Set", "Claim_Ledger", "AI_Usage_Log", "Ethics_Governance_Notes"]
+        for name in [
+            "Master_Experiments",
+            "Data_Selection_Design",
+            "Grouping_Strategy_Map",
+            "Run_Log",
+            "Decision_Log",
+            "Confirmatory_Set",
+            "Claim_Ledger",
+            "AI_Usage_Log",
+            "Ethics_Governance_Notes",
+        ]
     )
     stage_values = {master[f"E{r}"].value for r in range(2, master.max_row + 1)}
     stage_vocab = set(STAGE_V2)
     stage_consistent = stage_values.issubset(stage_vocab)
+    run_log_headers = [run_log.cell(1, c).value for c in range(1, len(RUN_LOG_COLUMNS) + 1)]
+    run_log_new_cols = [
+        "Data_Slice_ID",
+        "Grouping_Strategy_ID",
+        "Train_Group_Rule",
+        "Test_Group_Rule",
+        "Transfer_Direction",
+        "Sample_Count",
+        "Class_Counts",
+        "Imbalance_Status",
+        "Leakage_Check_Status",
+        "Session_Coverage",
+        "Task_Coverage",
+        "Modality_Coverage",
+    ]
+    run_log_columns_ok = all(col in run_log_headers for col in run_log_new_cols)
+
+    required_named_lists = [
+        "List_Data_Slice_ID",
+        "List_Grouping_Strategy_ID",
+        "List_Subject_Scope",
+        "List_Session_Scope",
+        "List_Task_Scope",
+        "List_Modality_Scope",
+        "List_Class_Balance_Policy",
+        "List_Split_Family",
+        "List_Imbalance_Status",
+        "List_Leakage_Check_Status",
+        "List_Transfer_Direction",
+    ]
+    defined_names = {name for name in wb.defined_names.keys()}
+    named_lists_ok = all(name in defined_names for name in required_named_lists)
+    missing_named_lists = [name for name in required_named_lists if name not in defined_names]
+
+    confirmatory_formulas_ok = all(
+        isinstance(confirm[cell].value, str) and confirm[cell].value.startswith("=")
+        for cell in ["F2", "G2", "J2"]
+    ) and isinstance(master["AF2"].value, str) and master["AF2"].value.startswith("=")
+    dashboard_core_formulas_ok = all(
+        isinstance(dash[cell].value, str) and dash[cell].value.startswith("=")
+        for cell in ["B13", "B14", "B22", "B23", "B24", "B25", "K4", "N4", "E18"]
+    )
 
     return {
         "sheet_order_ok": str(sheet_ok),
         "missing_sheets": ", ".join(missing_sheets) if missing_sheets else "None",
+        "legacy_sheets_present": str(legacy_sheets_present),
+        "new_sheets_present": str(new_sheets_present),
         "sheet_count": str(len(sheets)),
         "data_validations_found": str(dv_count),
-        "experiment_ready_formula_present": str(bool(master["AF2"].value)),
-        "confirmatory_formula_present": str(bool(confirm["F2"].value and confirm["G2"].value and confirm["J2"].value)),
-        "dashboard_formula_present": str(bool(dash["B13"].value and dash["B14"].value)),
+        "run_log_new_columns_present": str(run_log_columns_ok),
+        "required_named_lists_present": str(named_lists_ok),
+        "missing_named_lists": ", ".join(missing_named_lists) if missing_named_lists else "None",
+        "experiment_ready_formula_present": str(isinstance(master["AF2"].value, str) and master["AF2"].value.startswith("=")),
+        "confirmatory_formula_present": str(confirmatory_formulas_ok),
+        "dashboard_formula_present": str(dashboard_core_formulas_ok),
         "stage_vocab_consistent": str(stage_consistent),
         "stage_vocab_rows": str(len([v for v in stage_values if v is not None])),
         "dictionary_stage_head": str(dictionary["C3"].value),
@@ -884,8 +1835,13 @@ def main() -> None:
     print("Created workbook:", OUT_XLSX.resolve())
     print("Sheet order valid:", summary["sheet_order_ok"])
     print("Missing required sheets:", summary["missing_sheets"])
+    print("Legacy required sheets present:", summary["legacy_sheets_present"])
+    print("New sheets present:", summary["new_sheets_present"])
     print("Sheet count:", summary["sheet_count"])
     print("Data validations found:", summary["data_validations_found"])
+    print("Run_Log new columns present:", summary["run_log_new_columns_present"])
+    print("Required named lists present:", summary["required_named_lists_present"])
+    print("Missing named lists:", summary["missing_named_lists"])
     print("Experiment_Ready formula present:", summary["experiment_ready_formula_present"])
     print("Confirmatory formulas present:", summary["confirmatory_formula_present"])
     print("Dashboard formulas present:", summary["dashboard_formula_present"])

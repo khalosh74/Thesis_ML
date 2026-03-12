@@ -13,6 +13,14 @@ from sklearn.dummy import DummyClassifier
 from sklearn.linear_model import LogisticRegression, RidgeClassifier
 from sklearn.svm import LinearSVC
 
+from Thesis_ML.artifacts.registry import (
+    ARTIFACT_TYPE_EXPERIMENT_REPORT,
+    ARTIFACT_TYPE_FEATURE_CACHE,
+    ARTIFACT_TYPE_FEATURE_MATRIX_BUNDLE,
+    ARTIFACT_TYPE_INTERPRETABILITY_BUNDLE,
+    ARTIFACT_TYPE_METRICS_BUNDLE,
+    list_artifacts_for_run,
+)
 from Thesis_ML.data.affect_labels import COARSE_AFFECT_BY_EMOTION, derive_coarse_affect
 from Thesis_ML.data.index_dataset import build_dataset_index
 from Thesis_ML.experiments.run_experiment import _build_parser, _make_model, run_experiment
@@ -412,6 +420,20 @@ def test_experiment_runner_smoke(tmp_path: Path) -> None:
         "emotion",
         "coarse_affect",
     } <= set(predictions.columns)
+
+    registry_path = reports_root / "artifact_registry.sqlite3"
+    artifacts = list_artifacts_for_run(registry_path=registry_path, run_id="smoke_ridge_emotion")
+    assert len(artifacts) >= 5
+    artifact_types = {artifact.artifact_type for artifact in artifacts}
+    assert {
+        ARTIFACT_TYPE_FEATURE_CACHE,
+        ARTIFACT_TYPE_FEATURE_MATRIX_BUNDLE,
+        ARTIFACT_TYPE_METRICS_BUNDLE,
+        ARTIFACT_TYPE_INTERPRETABILITY_BUNDLE,
+        ARTIFACT_TYPE_EXPERIMENT_REPORT,
+    } <= artifact_types
+    assert "artifact_registry_path" in result
+    assert "artifact_ids" in result
 
 
 def test_experiment_runner_coarse_affect_target(tmp_path: Path) -> None:
