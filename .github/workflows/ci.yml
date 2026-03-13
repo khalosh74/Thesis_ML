@@ -149,87 +149,9 @@ jobs:
           tests/test_workbook_roundtrip.py tests/test_execution_idempotency.py
           --exclude src/Thesis_ML/workbook/template_builder.py
 
-      - name: Workbook generation smoke
+      - name: Gold acceptance smoke
         run: |
-          python -m uv run thesisml-workbook --output /tmp/thesis_experiment_program.xlsx
-          test -f /tmp/thesis_experiment_program.xlsx
-
-      - name: Validate shipped workbook asset(s)
-        run: |
-          python -m uv run python - <<'PY'
-          from pathlib import Path
-
-          from Thesis_ML.orchestration.workbook_compiler import compile_workbook_file
-          from Thesis_ML.workbook.validation import validate_workbook
-
-          def _is_true(value: object) -> bool:
-              return str(value).strip().lower() in {"true", "1", "yes"}
-
-          def _is_none_or_empty(value: object) -> bool:
-              return str(value).strip() in {"", "None", "none", "[]"}
-
-          template_path = Path("templates/thesis_experiment_program.xlsx")
-          if not template_path.exists():
-              raise FileNotFoundError(f"Missing shipped workbook template: {template_path}")
-
-          summary = validate_workbook(template_path)
-          assert _is_true(summary.get("sheet_order_ok")), summary
-          assert _is_none_or_empty(summary.get("missing_sheets")), summary.get("missing_sheets")
-          assert _is_true(summary.get("required_named_lists_present")), summary
-          assert _is_true(summary.get("workbook_schema_supported")), summary
-
-          try:
-              template_manifest = compile_workbook_file(template_path)
-          except ValueError as exc:
-              message = str(exc)
-              if "No enabled executable rows were found in Experiment_Definitions." not in message:
-                  raise
-              print("Template compile expectation: non-runnable template (no enabled rows).")
-          else:
-              if len(template_manifest.trial_specs) == 0:
-                  raise AssertionError("Workbook template compiled with zero trial specs.")
-              print(
-                  f"Template compile expectation: runnable template with {len(template_manifest.trial_specs)} trial specs."
-              )
-
-          workbook_assets = sorted(template_path.parent.glob("*.xlsx"))
-          sample_paths = [path for path in workbook_assets if path.resolve() != template_path.resolve()]
-
-          if sample_paths:
-              for sample_path in sample_paths:
-                  sample_manifest = compile_workbook_file(sample_path)
-                  if len(sample_manifest.trial_specs) == 0:
-                      raise AssertionError(
-                          f"Workbook asset compiled with zero trial specs: {sample_path}"
-                      )
-                  print(
-                      f"Compiled workbook asset: {sample_path} ({len(sample_manifest.trial_specs)} trial specs)."
-                  )
-          else:
-              print("No additional committed workbook assets detected under templates/.")
-          PY
-
-      - name: Shipped registry dry-run smoke
-        run: |
-          python -m uv run python - <<'PY'
-          from pathlib import Path
-          import pandas as pd
-
-          temp_root = Path("/tmp/thesisml_ci_registry")
-          temp_root.mkdir(parents=True, exist_ok=True)
-          pd.DataFrame(
-              [{"subject": "sub-001", "task": "passive", "modality": "audio"}]
-          ).to_csv(temp_root / "dataset_index.csv", index=False)
-          PY
-
-          python -m uv run thesisml-run-decision-support \
-            --registry configs/decision_support_registry.json \
-            --index-csv /tmp/thesisml_ci_registry/dataset_index.csv \
-            --data-root /tmp/thesisml_ci_registry/Data \
-            --cache-dir /tmp/thesisml_ci_registry/cache \
-            --output-root /tmp/thesisml_ci_registry/outputs \
-            --all \
-            --dry-run
+          python -m uv run python scripts/acceptance_smoke.py
 
       - name: Workbook compile/write-back smoke
         run: |
@@ -238,7 +160,3 @@ jobs:
       - name: Segment execution smoke
         run: |
           python -m uv run python -m pytest tests/test_segment_execution.py::test_segment_execution_feature_matrix_to_evaluation -q
-
-      - name: Decision-support CLI smoke
-        run: |
-          python -m uv run thesisml-run-decision-support --help

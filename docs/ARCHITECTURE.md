@@ -22,18 +22,24 @@ Core package root: `src/Thesis_ML/`
   - indexing, cache extraction, SPM utilities
 - `experiments/`
   - full pipeline wrapper (`run_experiment.py`)
-  - section contracts (`sections.py`)
+  - section contracts/runtime adapters (`sections.py`)
+  - shared section I/O models (`section_models.py`)
+  - segment helper layer (`segment_execution_helpers.py`)
   - segment planner/executor (`segment_execution.py`)
   - idempotency/run-state policy (`execution_policy.py`)
 - `orchestration/`
   - manifest contracts/compiler (`contracts.py`, `compiler.py`, `workbook_compiler.py`)
   - campaign execution (`campaign_engine.py`)
   - campaign CLI plumbing (`campaign_cli.py`)
+  - result aggregation core + row rendering (`result_aggregation_core.py`, `result_aggregation_rows.py`)
+  - compatibility facade (`result_aggregation.py`)
   - reporting/write-back bridge modules
   - backward-compatible facade (`decision_support.py`, `campaign_runner.py`)
 - `workbook/`
   - workbook builder facade (`builder.py`)
-  - current workbook implementation (`template_builder.py`)
+  - workbook builder/orchestration facade (`template_builder.py`)
+  - workbook primitives and structured sheet helpers (`template_primitives.py`, `structured_execution_sheets.py`)
+  - workbook validation layer (`template_validation.py`, `validation.py`)
   - metadata helpers (`schema_metadata.py`)
   - compatibility sheet/style helpers (`sheets/`, `styles.py`, `named_ranges.py`)
 
@@ -76,4 +82,3 @@ Compatibility wrappers are still present but deprecated:
 - `create_thesis_experiment_workbook.py`
 - `scripts/create_thesis_experiment_workbook.py`
 - `scripts/run_baseline.py`
-

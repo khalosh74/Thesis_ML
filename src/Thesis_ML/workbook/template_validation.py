@@ -90,7 +90,9 @@ def validate_template_workbook(
     stage_values = {master[f"E{row_idx}"].value for row_idx in range(2, master.max_row + 1)}
     stage_vocab = set(stage_vocabulary)
     stage_consistent = stage_values.issubset(stage_vocab)
-    run_log_headers = [run_log.cell(1, col_idx).value for col_idx in range(1, len(run_log_columns) + 1)]
+    run_log_headers = [
+        run_log.cell(1, col_idx).value for col_idx in range(1, len(run_log_columns) + 1)
+    ]
     run_log_new_cols = [
         "Data_Slice_ID",
         "Grouping_Strategy_ID",
@@ -137,10 +139,14 @@ def validate_template_workbook(
     named_lists_ok = all(name in defined_names for name in required_named_lists)
     missing_named_lists = [name for name in required_named_lists if name not in defined_names]
 
-    confirmatory_formulas_ok = all(
-        isinstance(confirm[cell_name].value, str) and confirm[cell_name].value.startswith("=")
-        for cell_name in ["F2", "G2", "J2"]
-    ) and isinstance(master["AF2"].value, str) and master["AF2"].value.startswith("=")
+    confirmatory_formulas_ok = (
+        all(
+            isinstance(confirm[cell_name].value, str) and confirm[cell_name].value.startswith("=")
+            for cell_name in ["F2", "G2", "J2"]
+        )
+        and isinstance(master["AF2"].value, str)
+        and master["AF2"].value.startswith("=")
+    )
     dashboard_core_formulas_ok = all(
         isinstance(dash[cell_name].value, str) and dash[cell_name].value.startswith("=")
         for cell_name in ["B13", "B14", "B22", "B23", "B24", "B25", "K4", "N4", "E18"]

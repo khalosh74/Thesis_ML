@@ -135,9 +135,11 @@ docker run --rm thesis-ml:dev
 ## Operator documentation
 
 - Architecture: `docs/ARCHITECTURE.md`
+- Operator quick path: `docs/OPERATOR_GUIDE.md`
 - Runbook: `docs/RUNBOOK.md`
 - Workbook workflow: `docs/WORKBOOK_WORKFLOW.md`
 - Segment execution: `docs/SEGMENT_EXECUTION.md`
+- Maintainer quick path: `docs/MAINTAINER_GUIDE.md`
 - Extension guide: `docs/EXTENDING.md`
 - Schema/version migration notes: `docs/SCHEMA_MIGRATIONS.md`
 - Decision-support specifics: `docs/DECISION_SUPPORT_AUTOMATION.md`
@@ -278,6 +280,7 @@ python -m uv run python -m mypy
 python -m uv run python -m ruff check src/Thesis_ML/artifacts src/Thesis_ML/orchestration src/Thesis_ML/workbook src/Thesis_ML/experiments/segment_execution.py src/Thesis_ML/experiments/sections.py src/Thesis_ML/experiments/run_experiment.py --exclude src/Thesis_ML/workbook/template_builder.py
 python -m uv run python -m ruff format --check src/Thesis_ML/artifacts src/Thesis_ML/orchestration src/Thesis_ML/workbook src/Thesis_ML/experiments/segment_execution.py src/Thesis_ML/experiments/sections.py src/Thesis_ML/experiments/run_experiment.py --exclude src/Thesis_ML/workbook/template_builder.py
 python -m uv run python -m pytest -q
+python -m uv run python scripts/acceptance_smoke.py
 ```
 
 `mypy` in CI is required and checks:

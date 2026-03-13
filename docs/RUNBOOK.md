@@ -136,3 +136,14 @@ python -m pytest -q
 `mypy` is a required CI gate and includes nibabel boundary modules:
 - `src/Thesis_ML/spm/extract_glm.py`
 - `src/Thesis_ML/features/nifti_features.py`
+
+## 9) Gold acceptance check
+
+```bash
+python scripts/acceptance_smoke.py
+```
+
+This is the canonical pre-release/pre-campaign acceptance path and validates:
+- shipped workbook asset compatibility
+- canonical workbook CLI generation
+- shipped registry dry-run through canonical decision-support CLI

@@ -39,33 +39,9 @@ jobs:
           )"
           python -m pip install --force-reinstall "${WHEEL_PATH}"
 
-      - name: Wheel CLI smoke
+      - name: Gold acceptance smoke
         run: |
-          thesisml-run-decision-support --help
-          thesisml-workbook --output /tmp/thesis_experiment_program_release_gate.xlsx
-          test -f /tmp/thesis_experiment_program_release_gate.xlsx
-
-      - name: Wheel shipped-registry dry-run smoke
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-          import pandas as pd
-
-          temp_root = Path("/tmp/thesisml_release_registry")
-          temp_root.mkdir(parents=True, exist_ok=True)
-          pd.DataFrame(
-              [{"subject": "sub-001", "task": "passive", "modality": "audio"}]
-          ).to_csv(temp_root / "dataset_index.csv", index=False)
-          PY
-
-          thesisml-run-decision-support \
-            --registry configs/decision_support_registry.json \
-            --index-csv /tmp/thesisml_release_registry/dataset_index.csv \
-            --data-root /tmp/thesisml_release_registry/Data \
-            --cache-dir /tmp/thesisml_release_registry/cache \
-            --output-root /tmp/thesisml_release_registry/outputs \
-            --all \
-            --dry-run
+          python scripts/acceptance_smoke.py
 
       - name: Lightweight runtime test
         run: |

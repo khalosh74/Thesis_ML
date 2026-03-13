@@ -53,3 +53,22 @@ print(json.dumps({
     )
     assert probe["run_experiment_loaded"] is False
     assert probe["nibabel_loaded"] is False
+
+
+def test_sections_impl_import_does_not_load_sections_module() -> None:
+    probe = _run_import_probe(
+        """
+import importlib
+import json
+import sys
+
+importlib.import_module("Thesis_ML.experiments.sections_impl")
+
+print(json.dumps({
+    "sections_loaded": "Thesis_ML.experiments.sections" in sys.modules,
+    "section_models_loaded": "Thesis_ML.experiments.section_models" in sys.modules,
+}))
+"""
+    )
+    assert probe["sections_loaded"] is False
+    assert probe["section_models_loaded"] is False

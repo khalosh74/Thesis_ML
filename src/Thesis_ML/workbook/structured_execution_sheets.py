@@ -227,7 +227,9 @@ def fill_trial_results(ws: Worksheet, *, trial_results_columns: list[str]) -> in
         },
         starter_rows=None,
     )
-    add_list_validation(ws, "=List_Experiment_ID", col_idx(trial_results_columns, "experiment_id"), 3, 1000)
+    add_list_validation(
+        ws, "=List_Experiment_ID", col_idx(trial_results_columns, "experiment_id"), 3, 1000
+    )
     add_list_validation(ws, "=List_Status", col_idx(trial_results_columns, "status"), 3, 1000)
     return last
 
