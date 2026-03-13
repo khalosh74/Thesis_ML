@@ -195,6 +195,20 @@ def test_workbook_roundtrip_compile_execute_writeback(
     assert trial_ws.cell(latest_trial_row, trial_cols["report_path"]).value
     assert trial_ws.cell(latest_trial_row, trial_cols["metrics_path"]).value
 
+    summary_ws = output_wb["Summary_Outputs"]
+    summary_cols = _sheet_header_map(summary_ws, 2)
+    summary_rows = [
+        row
+        for row in range(3, summary_ws.max_row + 1)
+        if str(summary_ws.cell(row, summary_cols["summary_type"]).value or "") != ""
+    ]
+    assert summary_rows
+    summary_types = {
+        str(summary_ws.cell(row, summary_cols["summary_type"]).value)
+        for row in summary_rows
+    }
+    assert "best_full_pipeline" in summary_types
+
     run_log_ws = output_wb["Run_Log"]
     run_log_cols = _sheet_header_map(run_log_ws, 1)
     run_log_rows = [
@@ -216,4 +230,3 @@ def test_workbook_roundtrip_compile_execute_writeback(
         if str(source_trial_ws.cell(row, source_trial_cols["experiment_id"]).value or "") == "E16"
     ]
     assert source_rows_with_e16 == []
-

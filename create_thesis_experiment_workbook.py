@@ -17,11 +17,13 @@ SHEET_ORDER = [
     "README",
     "Master_Experiments",
     "Experiment_Definitions",
+    "Search_Spaces",
     "Artifact_Registry",
     "Fixed_Configs",
     "Objectives",
     "Machine_Status",
     "Trial_Results",
+    "Summary_Outputs",
     "Data_Selection_Design",
     "Grouping_Strategy_Map",
     "Data_Profile",
@@ -136,6 +138,19 @@ EXPERIMENT_DEFINITIONS_COLUMNS = [
     "filter_task",
     "filter_modality",
     "reuse_policy",
+    "search_space_id",
+]
+
+SEARCH_SPACES_COLUMNS = [
+    "search_space_id",
+    "enabled",
+    "optimization_mode",
+    "parameter_name",
+    "parameter_values",
+    "parameter_scope",
+    "objective_metric",
+    "max_trials",
+    "notes",
 ]
 
 ARTIFACT_REGISTRY_COLUMNS = [
@@ -193,6 +208,23 @@ TRIAL_RESULTS_COLUMNS = [
     "report_path",
     "metrics_path",
     "artifact_bundle",
+    "notes",
+]
+
+SUMMARY_OUTPUTS_COLUMNS = [
+    "summary_type",
+    "summary_key",
+    "primary_metric_name",
+    "primary_metric_value",
+    "run_id",
+    "experiment_id",
+    "start_section",
+    "end_section",
+    "model",
+    "cv",
+    "target",
+    "xai_method",
+    "report_path",
     "notes",
 ]
 
@@ -410,6 +442,8 @@ VOCABS = {
         "evaluation",
     ],
     "Reuse_Policy": ["auto", "require_explicit_base", "disallow"],
+    "Search_Optimization_Mode": ["deterministic_grid", "optuna"],
+    "Search_Parameter_Scope": ["parameter", "segment", "xai"],
 }
 
 DEFINITIONS = [
@@ -691,6 +725,7 @@ def fill_experiment_definitions_sheet(ws) -> int:
             "filter_task": "",
             "filter_modality": "",
             "reuse_policy": "auto",
+            "search_space_id": "",
         },
         {
             "experiment_id": "E17",
@@ -707,6 +742,7 @@ def fill_experiment_definitions_sheet(ws) -> int:
             "filter_task": "",
             "filter_modality": "",
             "reuse_policy": "auto",
+            "search_space_id": "",
         },
     ]
     for r, row in enumerate(seed_rows, start=2):
@@ -715,15 +751,16 @@ def fill_experiment_definitions_sheet(ws) -> int:
 
     last = 81
     style_body(ws, 2, last, 1, len(EXPERIMENT_DEFINITIONS_COLUMNS))
-    add_table(ws, "ExperimentDefinitionsTable", f"A1:N{last}", style="TableStyleMedium2")
+    add_table(ws, "ExperimentDefinitionsTable", f"A1:O{last}", style="TableStyleMedium2")
     ws.freeze_panes = "A2"
-    ws.auto_filter.ref = f"A1:N{last}"
+    ws.auto_filter.ref = f"A1:O{last}"
 
     add_list_validation(ws, "=List_Experiment_ID", col_idx(EXPERIMENT_DEFINITIONS_COLUMNS, "experiment_id"), 2, 1000)
     add_list_validation(ws, "=List_YesNo", col_idx(EXPERIMENT_DEFINITIONS_COLUMNS, "enabled"), 2, 1000)
     add_list_validation(ws, "=List_Execution_Section", col_idx(EXPERIMENT_DEFINITIONS_COLUMNS, "start_section"), 2, 1000)
     add_list_validation(ws, "=List_Execution_Section", col_idx(EXPERIMENT_DEFINITIONS_COLUMNS, "end_section"), 2, 1000)
     add_list_validation(ws, "=List_Reuse_Policy", col_idx(EXPERIMENT_DEFINITIONS_COLUMNS, "reuse_policy"), 2, 1000)
+    add_list_validation(ws, "=List_Search_Space_ID", col_idx(EXPERIMENT_DEFINITIONS_COLUMNS, "search_space_id"), 2, 1000)
 
     set_widths(
         ws,
@@ -742,7 +779,76 @@ def fill_experiment_definitions_sheet(ws) -> int:
             "L": 16,
             "M": 18,
             "N": 18,
+            "O": 16,
         },
+    )
+    return last
+
+
+def fill_search_spaces_sheet(ws, wb: Workbook) -> int:
+    seed_rows = [
+        {
+            "search_space_id": "SS01",
+            "enabled": "No",
+            "optimization_mode": "deterministic_grid",
+            "parameter_name": "model",
+            "parameter_values": "ridge|logreg|linearsvc",
+            "parameter_scope": "parameter",
+            "objective_metric": "balanced_accuracy",
+            "max_trials": "",
+            "notes": "Example model-family search.",
+        },
+        {
+            "search_space_id": "SS01",
+            "enabled": "No",
+            "optimization_mode": "deterministic_grid",
+            "parameter_name": "start_section",
+            "parameter_values": "dataset_selection|feature_matrix_load",
+            "parameter_scope": "segment",
+            "objective_metric": "balanced_accuracy",
+            "max_trials": "",
+            "notes": "Example section-start search.",
+        },
+    ]
+    last = _fill_simple_structured_sheet(
+        ws=ws,
+        columns=SEARCH_SPACES_COLUMNS,
+        table_name="SearchSpacesTable",
+        title="Search Space Definitions",
+        width_map={
+            "A": 16,
+            "B": 10,
+            "C": 20,
+            "D": 24,
+            "E": 34,
+            "F": 14,
+            "G": 20,
+            "H": 12,
+            "I": 32,
+        },
+        starter_rows=seed_rows,
+    )
+    add_list_validation(ws, "=List_YesNo", col_idx(SEARCH_SPACES_COLUMNS, "enabled"), 3, 1000)
+    add_list_validation(
+        ws,
+        "=List_Search_Optimization_Mode",
+        col_idx(SEARCH_SPACES_COLUMNS, "optimization_mode"),
+        3,
+        1000,
+    )
+    add_list_validation(
+        ws,
+        "=List_Search_Parameter_Scope",
+        col_idx(SEARCH_SPACES_COLUMNS, "parameter_scope"),
+        3,
+        1000,
+    )
+    add_dynamic_named_list(
+        wb,
+        "List_Search_Space_ID",
+        ws.title,
+        col_idx(SEARCH_SPACES_COLUMNS, "search_space_id"),
+        3,
     )
     return last
 
@@ -949,6 +1055,32 @@ def fill_trial_results_sheet(ws) -> int:
     add_list_validation(ws, "=List_Experiment_ID", col_idx(TRIAL_RESULTS_COLUMNS, "experiment_id"), 3, 1000)
     add_list_validation(ws, "=List_Status", col_idx(TRIAL_RESULTS_COLUMNS, "status"), 3, 1000)
     return last
+
+
+def fill_summary_outputs_sheet(ws) -> int:
+    return _fill_simple_structured_sheet(
+        ws=ws,
+        columns=SUMMARY_OUTPUTS_COLUMNS,
+        table_name="SummaryOutputsTable",
+        title="Machine Summary Outputs (Best Runs and Patterns)",
+        width_map={
+            "A": 18,
+            "B": 22,
+            "C": 20,
+            "D": 18,
+            "E": 26,
+            "F": 14,
+            "G": 18,
+            "H": 18,
+            "I": 14,
+            "J": 24,
+            "K": 18,
+            "L": 20,
+            "M": 34,
+            "N": 36,
+        },
+        starter_rows=None,
+    )
 
 
 def fill_data_selection_design_sheet(ws, wb: Workbook) -> int:
@@ -1844,6 +1976,8 @@ def fill_dictionary_sheet(ws, wb: Workbook) -> None:
         "Target_Type",
         "Execution_Section",
         "Reuse_Policy",
+        "Search_Optimization_Mode",
+        "Search_Parameter_Scope",
     ]
     ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=len(names))
     for c, name in enumerate(names, start=1):
@@ -2078,11 +2212,13 @@ def build_workbook() -> Workbook:
     fill_master_sheet(wb["Master_Experiments"])
     add_dynamic_named_list(wb, "List_Experiment_ID", "Master_Experiments", col_idx(MASTER_COLUMNS, "Experiment_ID"), 2)
     fill_experiment_definitions_sheet(wb["Experiment_Definitions"])
+    fill_search_spaces_sheet(wb["Search_Spaces"], wb)
     fill_artifact_registry_sheet(wb["Artifact_Registry"])
     fill_fixed_configs_sheet(wb["Fixed_Configs"])
     fill_objectives_sheet(wb["Objectives"])
     fill_machine_status_sheet(wb["Machine_Status"])
     fill_trial_results_sheet(wb["Trial_Results"])
+    fill_summary_outputs_sheet(wb["Summary_Outputs"])
     fill_data_selection_design_sheet(wb["Data_Selection_Design"], wb)
     fill_grouping_strategy_map_sheet(wb["Grouping_Strategy_Map"], wb)
     fill_data_profile_sheet(wb["Data_Profile"])
@@ -2111,11 +2247,13 @@ def validate(path: Path) -> dict[str, str]:
         "README",
         "Master_Experiments",
         "Experiment_Definitions",
+        "Search_Spaces",
         "Artifact_Registry",
         "Fixed_Configs",
         "Objectives",
         "Machine_Status",
         "Trial_Results",
+        "Summary_Outputs",
         "Run_Log",
         "Decision_Log",
         "Confirmatory_Set",
@@ -2129,11 +2267,13 @@ def validate(path: Path) -> dict[str, str]:
     legacy_sheets_present = all(s in sheets for s in legacy_required)
     new_sheets = [
         "Experiment_Definitions",
+        "Search_Spaces",
         "Artifact_Registry",
         "Fixed_Configs",
         "Objectives",
         "Machine_Status",
         "Trial_Results",
+        "Summary_Outputs",
         "Data_Selection_Design",
         "Grouping_Strategy_Map",
         "Data_Profile",
@@ -2152,6 +2292,7 @@ def validate(path: Path) -> dict[str, str]:
         for name in [
             "Master_Experiments",
             "Experiment_Definitions",
+            "Search_Spaces",
             "Data_Selection_Design",
             "Grouping_Strategy_Map",
             "Run_Log",
@@ -2204,6 +2345,9 @@ def validate(path: Path) -> dict[str, str]:
         "List_Transfer_Direction",
         "List_Execution_Section",
         "List_Reuse_Policy",
+        "List_Search_Optimization_Mode",
+        "List_Search_Parameter_Scope",
+        "List_Search_Space_ID",
     ]
     defined_names = {name for name in wb.defined_names.keys()}
     named_lists_ok = all(name in defined_names for name in required_named_lists)

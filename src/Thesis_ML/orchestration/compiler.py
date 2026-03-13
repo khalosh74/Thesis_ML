@@ -10,6 +10,7 @@ from pydantic import ValidationError
 from Thesis_ML.orchestration.contracts import (
     CompiledStudyManifest,
     ExperimentSpec,
+    SearchSpaceSpec,
     TrialSpec,
     supported_sections,
 )
@@ -50,6 +51,21 @@ def compile_registry_payload(
 
     compiled_experiments: list[ExperimentSpec] = []
     compiled_trials: list[TrialSpec] = []
+    compiled_search_spaces: list[SearchSpaceSpec] = []
+
+    raw_search_spaces = payload.get("search_spaces", [])
+    if raw_search_spaces is None:
+        raw_search_spaces = []
+    if not isinstance(raw_search_spaces, list):
+        raise ValueError("Invalid registry payload: expected 'search_spaces' to be a list.")
+    for raw_space in raw_search_spaces:
+        if not isinstance(raw_space, dict):
+            raise ValueError("Invalid search space payload: each search space must be an object.")
+        try:
+            compiled_search_spaces.append(SearchSpaceSpec.model_validate(dict(raw_space)))
+        except ValidationError as exc:
+            space_id = str(raw_space.get("search_space_id", "<missing-search-space-id>"))
+            raise ValueError(f"Invalid search space '{space_id}': {exc}") from exc
 
     for raw_experiment in experiments_payload:
         if not isinstance(raw_experiment, dict):
@@ -92,6 +108,7 @@ def compile_registry_payload(
         "supported_sections": supported_sections(),
         "experiments": compiled_experiments,
         "trial_specs": compiled_trials,
+        "search_spaces": compiled_search_spaces,
     }
 
     try:

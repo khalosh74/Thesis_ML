@@ -11,6 +11,7 @@ from openpyxl.worksheet.worksheet import Worksheet
 
 _MACHINE_STATUS_SHEET = "Machine_Status"
 _TRIAL_RESULTS_SHEET = "Trial_Results"
+_SUMMARY_OUTPUTS_SHEET = "Summary_Outputs"
 _RUN_LOG_SHEET = "Run_Log"
 
 _MACHINE_STATUS_COLUMNS = [
@@ -33,6 +34,22 @@ _TRIAL_RESULTS_COLUMNS = [
     "report_path",
     "metrics_path",
     "artifact_bundle",
+    "notes",
+]
+_SUMMARY_OUTPUTS_COLUMNS = [
+    "summary_type",
+    "summary_key",
+    "primary_metric_name",
+    "primary_metric_value",
+    "run_id",
+    "experiment_id",
+    "start_section",
+    "end_section",
+    "model",
+    "cv",
+    "target",
+    "xai_method",
+    "report_path",
     "notes",
 ]
 _RUN_LOG_COLUMNS = [
@@ -205,6 +222,7 @@ def write_workbook_results(
     version_tag: str,
     machine_status_rows: list[dict[str, Any]],
     trial_result_rows: list[dict[str, Any]],
+    summary_output_rows: list[dict[str, Any]] | None = None,
     run_log_rows: list[dict[str, Any]] | None = None,
     append_run_log: bool = True,
     output_dir: Path | None = None,
@@ -216,6 +234,8 @@ def write_workbook_results(
         raise ValueError(f"Workbook missing required write-back sheet: '{_MACHINE_STATUS_SHEET}'")
     if _TRIAL_RESULTS_SHEET not in wb.sheetnames:
         raise ValueError(f"Workbook missing required write-back sheet: '{_TRIAL_RESULTS_SHEET}'")
+    if _SUMMARY_OUTPUTS_SHEET not in wb.sheetnames:
+        raise ValueError(f"Workbook missing required write-back sheet: '{_SUMMARY_OUTPUTS_SHEET}'")
 
     machine_ws = wb[_MACHINE_STATUS_SHEET]
     machine_headers = _assert_required_columns(
@@ -252,6 +272,24 @@ def write_workbook_results(
             hyperlink_columns={"report_path", "metrics_path", "artifact_bundle"},
         )
 
+    summary_ws = wb[_SUMMARY_OUTPUTS_SHEET]
+    summary_headers = _assert_required_columns(
+        summary_ws,
+        header_row=2,
+        required_columns=_SUMMARY_OUTPUTS_COLUMNS,
+    )
+    for row in summary_output_rows or []:
+        _append_row(
+            summary_ws,
+            header_map=summary_headers,
+            row_payload=row,
+            key_column="summary_key",
+            data_start_row=3,
+            style_template_row=3,
+            max_column=len(_SUMMARY_OUTPUTS_COLUMNS),
+            hyperlink_columns={"report_path"},
+        )
+
     if append_run_log and run_log_rows:
         if _RUN_LOG_SHEET not in wb.sheetnames:
             raise ValueError(f"Workbook missing optional write-back sheet: '{_RUN_LOG_SHEET}'")
@@ -279,4 +317,3 @@ def write_workbook_results(
         version_tag=version_tag,
         output_dir=output_dir,
     )
-

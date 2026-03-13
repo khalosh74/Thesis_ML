@@ -33,6 +33,19 @@ _EXPERIMENT_DEFINITION_REQUIRED_COLUMNS = [
     "filter_modality",
     "reuse_policy",
 ]
+_EXPERIMENT_DEFINITION_OPTIONAL_COLUMNS = {"search_space_id"}
+
+_SEARCH_SPACES_COLUMNS = [
+    "search_space_id",
+    "enabled",
+    "optimization_mode",
+    "parameter_name",
+    "parameter_values",
+    "parameter_scope",
+    "objective_metric",
+    "max_trials",
+    "notes",
+]
 
 _SECTION_ORDER: tuple[str, ...] = (
     SectionName.DATASET_SELECTION.value,
@@ -53,9 +66,9 @@ def _normalize_text(value: Any) -> str:
     return str(value).strip()
 
 
-def _header_index_map(ws) -> dict[str, int]:
+def _header_index_map(ws, header_row: int = 1) -> dict[str, int]:
     mapping: dict[str, int] = {}
-    for idx, cell in enumerate(ws[1], start=1):
+    for idx, cell in enumerate(ws[header_row], start=1):
         header = _normalize_text(cell.value)
         if header:
             mapping[header] = idx
@@ -252,9 +265,102 @@ def _parse_experiment_definitions_rows(ws) -> list[dict[str, Any]]:
                 "end_section": end_section,
                 "base_artifact_id": base_artifact_id,
                 "reuse_policy": reuse_policy,
+                "search_space_id": (
+                    _normalize_text(_read_cell(row, header_map, "search_space_id")) or None
+                ),
             }
         )
     return compiled_trials
+
+
+def _parse_search_values(raw_text: str) -> list[Any]:
+    text = raw_text.strip()
+    if not text:
+        return []
+    values: list[Any] = []
+    for token in text.split("|"):
+        item = token.strip()
+        if not item:
+            continue
+        lowered = item.lower()
+        if lowered == "true":
+            values.append(True)
+            continue
+        if lowered == "false":
+            values.append(False)
+            continue
+        try:
+            if "." in item:
+                values.append(float(item))
+            else:
+                values.append(int(item))
+            continue
+        except ValueError:
+            values.append(item)
+    return values
+
+
+def _parse_search_spaces_rows(workbook: Workbook) -> list[dict[str, Any]]:
+    if "Search_Spaces" not in workbook.sheetnames:
+        return []
+    ws = workbook["Search_Spaces"]
+    header_map = _header_index_map(ws, header_row=2)
+    missing = [name for name in _SEARCH_SPACES_COLUMNS if name not in header_map]
+    if missing:
+        raise ValueError("Search_Spaces is missing required columns: " + ", ".join(missing))
+
+    grouped: dict[str, dict[str, Any]] = {}
+    for row_index, row in enumerate(ws.iter_rows(min_row=3, values_only=True), start=3):
+        search_space_id = _normalize_text(_read_cell(row, header_map, "search_space_id"))
+        if not search_space_id:
+            continue
+        enabled = _parse_enabled(_read_cell(row, header_map, "enabled"), row_index=row_index)
+        if not enabled:
+            continue
+        parameter_name = _normalize_text(_read_cell(row, header_map, "parameter_name"))
+        raw_values = _normalize_text(_read_cell(row, header_map, "parameter_values"))
+        if not parameter_name:
+            raise ValueError(
+                f"Search_Spaces row {row_index} is missing parameter_name for '{search_space_id}'."
+            )
+        values = _parse_search_values(raw_values)
+        if not values:
+            raise ValueError(
+                f"Search_Spaces row {row_index} has empty parameter_values for '{search_space_id}'."
+            )
+
+        space = grouped.setdefault(
+            search_space_id,
+            {
+                "search_space_id": search_space_id,
+                "enabled": True,
+                "optimization_mode": _normalize_text(
+                    _read_cell(row, header_map, "optimization_mode")
+                )
+                or "deterministic_grid",
+                "objective_metric": _normalize_text(
+                    _read_cell(row, header_map, "objective_metric")
+                )
+                or "balanced_accuracy",
+                "max_trials": (
+                    int(_read_cell(row, header_map, "max_trials"))
+                    if _read_cell(row, header_map, "max_trials") not in (None, "")
+                    else None
+                ),
+                "notes": _normalize_text(_read_cell(row, header_map, "notes")) or None,
+                "dimensions": [],
+            },
+        )
+        space["dimensions"].append(
+            {
+                "parameter_name": parameter_name,
+                "values": values,
+                "parameter_scope": _normalize_text(_read_cell(row, header_map, "parameter_scope"))
+                or "parameter",
+            }
+        )
+
+    return [grouped[key] for key in sorted(grouped)]
 
 
 def compile_workbook_workbook(
@@ -269,6 +375,7 @@ def compile_workbook_workbook(
 
     master_map = _parse_master_experiment_rows(workbook["Master_Experiments"])
     trial_specs = _parse_experiment_definitions_rows(workbook["Experiment_Definitions"])
+    search_spaces = _parse_search_spaces_rows(workbook)
     if not trial_specs:
         raise ValueError("No enabled executable rows were found in Experiment_Definitions.")
 
@@ -299,6 +406,7 @@ def compile_workbook_workbook(
         "schema_version": "workbook-v1",
         "description": "Compiled from thesis_experiment_program.xlsx",
         "experiments": experiments_payload,
+        "search_spaces": search_spaces,
     }
     return compile_registry_payload(payload, source_registry_path=source_workbook_path)
 
@@ -307,4 +415,3 @@ def compile_workbook_file(path: Path) -> CompiledStudyManifest:
     workbook_path = Path(path)
     workbook = load_workbook(workbook_path, data_only=False)
     return compile_workbook_workbook(workbook, source_workbook_path=workbook_path)
-

@@ -104,3 +104,27 @@ def test_compile_workbook_invalid_base_artifact_usage_raises(tmp_path: Path) -> 
 
     with pytest.raises(ValueError, match="Invalid base artifact usage"):
         compile_workbook_file(workbook_path)
+
+
+def test_compile_workbook_with_search_space_rows(tmp_path: Path) -> None:
+    workbook_path = tmp_path / "thesis_experiment_program.xlsx"
+    _make_workbook(workbook_path)
+    _set_executable_row(workbook_path)
+
+    workbook = load_workbook(workbook_path)
+    defs_ws = workbook["Experiment_Definitions"]
+    search_ws = workbook["Search_Spaces"]
+    headers = [defs_ws.cell(1, col).value for col in range(1, defs_ws.max_column + 1)]
+    defs_col = {str(name): idx + 1 for idx, name in enumerate(headers)}
+    defs_ws.cell(2, defs_col["search_space_id"], "SS01")
+
+    search_headers = [search_ws.cell(2, col).value for col in range(1, search_ws.max_column + 1)]
+    search_col = {str(name): idx + 1 for idx, name in enumerate(search_headers)}
+    search_ws.cell(3, search_col["enabled"], "Yes")
+    search_ws.cell(4, search_col["enabled"], "Yes")
+    workbook.save(workbook_path)
+
+    manifest = compile_workbook_file(workbook_path)
+    assert len(manifest.search_spaces) == 1
+    assert manifest.search_spaces[0].search_space_id == "SS01"
+    assert manifest.trial_specs[0].search_space_id == "SS01"

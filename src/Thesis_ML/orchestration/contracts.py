@@ -22,6 +22,11 @@ class ReusePolicy(StrEnum):
     DISALLOW = "disallow"
 
 
+class SearchMode(StrEnum):
+    DETERMINISTIC_GRID = "deterministic_grid"
+    OPTUNA = "optuna"
+
+
 def supported_sections() -> list[str]:
     return [section.value for section in SectionName]
 
@@ -55,6 +60,7 @@ class TrialSpec(_ContractModel):
     end_section: SectionName = SectionName.EVALUATION
     base_artifact_id: str | None = None
     reuse_policy: ReusePolicy = ReusePolicy.AUTO
+    search_space_id: str | None = None
 
     @model_validator(mode="after")
     def _validate_supported_template_params(self) -> TrialSpec:
@@ -71,6 +77,40 @@ class TrialSpec(_ContractModel):
                 )
         if self.base_artifact_id is not None and not self.base_artifact_id.strip():
             raise ValueError("base_artifact_id must be non-empty when provided.")
+        if self.search_space_id is not None and not self.search_space_id.strip():
+            raise ValueError("search_space_id must be non-empty when provided.")
+        return self
+
+
+class SearchDimensionSpec(_ContractModel):
+    parameter_name: str = Field(min_length=1)
+    values: list[Any] = Field(default_factory=list)
+    parameter_scope: str = "parameter"
+
+    @model_validator(mode="after")
+    def _validate_values(self) -> SearchDimensionSpec:
+        if not self.values:
+            raise ValueError("Search dimension values must contain at least one value.")
+        return self
+
+
+class SearchSpaceSpec(_ContractModel):
+    search_space_id: str = Field(min_length=1)
+    enabled: bool = True
+    optimization_mode: SearchMode = SearchMode.DETERMINISTIC_GRID
+    objective_metric: str = "balanced_accuracy"
+    max_trials: int | None = None
+    dimensions: list[SearchDimensionSpec] = Field(default_factory=list)
+    notes: str | None = None
+
+    @model_validator(mode="after")
+    def _validate_shape(self) -> SearchSpaceSpec:
+        if self.enabled and not self.dimensions:
+            raise ValueError(
+                f"Enabled search space '{self.search_space_id}' must define at least one dimension."
+            )
+        if self.max_trials is not None and self.max_trials <= 0:
+            raise ValueError("max_trials must be > 0 when provided.")
         return self
 
 
@@ -111,6 +151,7 @@ class CompiledStudyManifest(_ContractModel):
     supported_sections: list[SectionName] = Field(default_factory=supported_sections)
     experiments: list[ExperimentSpec]
     trial_specs: list[TrialSpec]
+    search_spaces: list[SearchSpaceSpec] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def _validate_trial_coverage(self) -> CompiledStudyManifest:
@@ -126,6 +167,19 @@ class CompiledStudyManifest(_ContractModel):
             raise ValueError(
                 "Compiled trial specs reference unknown experiments for templates: "
                 + ", ".join(unknown_trials)
+            )
+        known_spaces = {space.search_space_id for space in self.search_spaces}
+        unknown_search_space_refs = sorted(
+            {
+                str(trial.search_space_id)
+                for trial in self.trial_specs
+                if trial.search_space_id and str(trial.search_space_id) not in known_spaces
+            }
+        )
+        if unknown_search_space_refs:
+            raise ValueError(
+                "Compiled trial specs reference unknown search_space_id values: "
+                + ", ".join(unknown_search_space_refs)
             )
         return self
 

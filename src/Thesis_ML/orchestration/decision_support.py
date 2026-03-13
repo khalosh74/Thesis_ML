@@ -21,7 +21,15 @@ from Thesis_ML.artifacts.registry import (
 from Thesis_ML.orchestration.compiler import compile_registry_file
 from Thesis_ML.orchestration.workbook_compiler import compile_workbook_file
 from Thesis_ML.orchestration.contracts import CompiledStudyManifest
+from Thesis_ML.orchestration.search_space import (
+    build_search_space_map,
+    expand_variant_search_space,
+)
 from Thesis_ML.orchestration.workbook_writeback import write_workbook_results
+from Thesis_ML.orchestration.result_aggregation import (
+    aggregate_variant_records,
+    build_summary_output_rows,
+)
 
 STAGE_ORDER = [
     "Stage 1 - Target lock",
@@ -111,6 +119,8 @@ VARIANT_EXPORT_COLUMNS = [
     "end_section",
     "base_artifact_id",
     "reuse_policy",
+    "search_space_id",
+    "search_assignment",
     "primary_metric_name",
     "primary_metric_value",
     "balanced_accuracy",
@@ -277,7 +287,12 @@ def _expand_template_variants(
     experiment: dict[str, Any],
     template: dict[str, Any],
     dataset_scope: dict[str, Any],
+    search_space_map: dict[str, Any] | None = None,
+    search_seed: int = 42,
+    optuna_enabled: bool = False,
+    optuna_trials: int | None = None,
 ) -> list[dict[str, Any]]:
+    search_map = search_space_map or {}
     template_id = str(template.get("template_id", "template"))
     supported = bool(template.get("supported", False))
     base_params = dict(template.get("params", {}))
@@ -285,6 +300,9 @@ def _expand_template_variants(
     end_section = template.get("end_section")
     base_artifact_id = template.get("base_artifact_id")
     reuse_policy = template.get("reuse_policy")
+    search_space_id = (
+        str(template.get("search_space_id")).strip() if template.get("search_space_id") else None
+    )
     if not supported:
         reason = str(template.get("unsupported_reason", "template marked unsupported"))
         return [
@@ -298,6 +316,8 @@ def _expand_template_variants(
                 "end_section": end_section,
                 "base_artifact_id": base_artifact_id,
                 "reuse_policy": reuse_policy,
+                "search_space_id": search_space_id,
+                "search_assignment": None,
             }
         ]
 
@@ -329,6 +349,8 @@ def _expand_template_variants(
                     "end_section": end_section,
                     "base_artifact_id": base_artifact_id,
                     "reuse_policy": reuse_policy,
+                    "search_space_id": search_space_id,
+                    "search_assignment": None,
                 }
             ]
 
@@ -354,19 +376,70 @@ def _expand_template_variants(
                 )
         variants = expanded
 
+    unresolved: list[dict[str, Any]] = []
+    for row in variants:
+        base_variant = {
+            "template_id": template_id,
+            "params": row["params"],
+            "supported": bool(row["supported"]),
+            "blocked_reason": row["blocked_reason"],
+            "start_section": start_section,
+            "end_section": end_section,
+            "base_artifact_id": base_artifact_id,
+            "reuse_policy": reuse_policy,
+            "search_space_id": search_space_id,
+            "search_assignment": None,
+        }
+        if not search_space_id:
+            unresolved.append(base_variant)
+            continue
+        search_space = search_map.get(search_space_id)
+        if search_space is None:
+            unresolved.append(
+                {
+                    **base_variant,
+                    "supported": False,
+                    "blocked_reason": (
+                        f"Search space '{search_space_id}' was referenced by template "
+                        f"'{template_id}' but is not defined."
+                    ),
+                }
+            )
+            continue
+        try:
+            expanded_variants = expand_variant_search_space(
+                base_variant,
+                search_space=search_space,
+                seed=search_seed,
+                optuna_enabled=optuna_enabled,
+                optuna_trials=optuna_trials,
+            )
+        except ValueError as exc:
+            unresolved.append(
+                {
+                    **base_variant,
+                    "supported": False,
+                    "blocked_reason": str(exc),
+                }
+            )
+            continue
+        unresolved.extend(expanded_variants)
+
     resolved: list[dict[str, Any]] = []
-    for idx, row in enumerate(variants, start=1):
+    for idx, row in enumerate(unresolved, start=1):
         resolved.append(
             {
                 "template_id": template_id,
                 "variant_index": idx,
                 "params": row["params"],
-                "supported": bool(row["supported"]),
-                "blocked_reason": row["blocked_reason"],
-                "start_section": start_section,
-                "end_section": end_section,
-                "base_artifact_id": base_artifact_id,
-                "reuse_policy": reuse_policy,
+                "supported": bool(row.get("supported", True)),
+                "blocked_reason": row.get("blocked_reason"),
+                "start_section": row.get("start_section"),
+                "end_section": row.get("end_section"),
+                "base_artifact_id": row.get("base_artifact_id"),
+                "reuse_policy": row.get("reuse_policy"),
+                "search_space_id": row.get("search_space_id"),
+                "search_assignment": row.get("search_assignment"),
             }
         )
     return resolved
@@ -375,6 +448,10 @@ def _expand_template_variants(
 def _expand_experiment_variants(
     experiment: dict[str, Any],
     dataset_scope: dict[str, Any],
+    search_space_map: dict[str, Any] | None = None,
+    search_seed: int = 42,
+    optuna_enabled: bool = False,
+    optuna_trials: int | None = None,
     max_runs_per_experiment: int | None = None,
 ) -> tuple[list[dict[str, Any]], list[str]]:
     templates = list(experiment.get("variant_templates", []))
@@ -407,6 +484,10 @@ def _expand_experiment_variants(
             experiment=experiment,
             template=template,
             dataset_scope=dataset_scope,
+            search_space_map=search_space_map or {},
+            search_seed=search_seed,
+            optuna_enabled=optuna_enabled,
+            optuna_trials=optuna_trials,
         )
         variants.extend(template_variants)
 
@@ -545,6 +626,12 @@ def _execute_variant(
         else None
     )
     reuse_policy = str(variant.get("reuse_policy")).strip() if variant.get("reuse_policy") else None
+    search_space_id = (
+        str(variant.get("search_space_id")).strip()
+        if variant.get("search_space_id")
+        else None
+    )
+    search_assignment = variant.get("search_assignment")
 
     run_id = f"ds_{experiment_id}_{template_id}_{variant_index:03d}_{campaign_id}"
     reports_root = experiment_root / "reports"
@@ -641,6 +728,8 @@ def _execute_variant(
             "end_section": end_section,
             "base_artifact_id": base_artifact_id,
             "reuse_policy": reuse_policy,
+            "search_space_id": search_space_id,
+            "search_assignment": search_assignment,
             "params": params,
         },
         "dataset_subset": _build_dataset_subset_label(params),
@@ -722,6 +811,12 @@ def _execute_variant(
         "end_section": end_section,
         "base_artifact_id": base_artifact_id,
         "reuse_policy": reuse_policy,
+        "search_space_id": search_space_id,
+        "search_assignment": (
+            json.dumps(search_assignment, sort_keys=True)
+            if isinstance(search_assignment, dict)
+            else (str(search_assignment) if search_assignment is not None else None)
+        ),
         "primary_metric_name": primary_metric_name,
         "primary_metric_value": primary_metric_value,
         "balanced_accuracy": _safe_float(metrics.get("balanced_accuracy")),
@@ -1229,6 +1324,8 @@ def run_decision_support_campaign(
     workbook_source_path: Path | None = None,
     workbook_output_dir: Path | None = None,
     append_workbook_run_log: bool = True,
+    search_mode: str = "deterministic",
+    optuna_trials: int | None = None,
 ) -> dict[str, Any]:
     registry = registry_manifest if registry_manifest is not None else _read_registry(registry_path)
     selected_experiments = _select_experiments(
@@ -1250,6 +1347,11 @@ def run_decision_support_campaign(
 
     commit = _git_commit()
     artifact_registry_path = output_root / "artifact_registry.sqlite3"
+    search_space_map = build_search_space_map(list(registry.search_spaces))
+    search_mode_value = str(search_mode).strip().lower()
+    if search_mode_value not in {"deterministic", "optuna"}:
+        raise ValueError("search_mode must be one of: deterministic, optuna")
+    optuna_enabled = search_mode_value == "optuna"
     all_variant_records: list[dict[str, Any]] = []
     blocked_experiments: list[dict[str, Any]] = []
     experiment_roots: dict[str, str] = {}
@@ -1263,6 +1365,10 @@ def run_decision_support_campaign(
         variants, warnings = _expand_experiment_variants(
             experiment=experiment,
             dataset_scope=dataset_scope,
+            search_space_map=search_space_map,
+            search_seed=seed,
+            optuna_enabled=optuna_enabled,
+            optuna_trials=optuna_trials,
             max_runs_per_experiment=max_runs_per_experiment,
         )
         variant_records: list[dict[str, Any]] = []
@@ -1332,6 +1438,16 @@ def run_decision_support_campaign(
         variant_records=all_variant_records,
     )
 
+    aggregation = aggregate_variant_records(all_variant_records, top_k=5)
+    aggregation_path = campaign_root / "result_aggregation.json"
+    aggregation_path.write_text(
+        f"{json.dumps(aggregation, indent=2)}\n",
+        encoding="utf-8",
+    )
+    summary_output_rows = build_summary_output_rows(aggregation)
+    summary_output_path = campaign_root / "summary_outputs_export.csv"
+    pd.DataFrame(summary_output_rows).to_csv(summary_output_path, index=False)
+
     campaign_metrics_artifact = register_artifact(
         registry_path=artifact_registry_path,
         artifact_type=ARTIFACT_TYPE_METRICS_BUNDLE,
@@ -1361,6 +1477,7 @@ def run_decision_support_campaign(
             variant_records=all_variant_records,
         )
         trial_rows = _build_trial_results_rows(all_variant_records)
+        summary_rows = list(summary_output_rows)
         run_log_rows = _build_run_log_writeback_rows(
             variant_records=all_variant_records,
             dataset_name=dataset_name,
@@ -1372,6 +1489,7 @@ def run_decision_support_campaign(
             version_tag=campaign_id,
             machine_status_rows=machine_rows,
             trial_result_rows=trial_rows,
+            summary_output_rows=summary_rows,
             run_log_rows=run_log_rows,
             append_run_log=append_workbook_run_log,
             output_dir=workbook_output_dir,
@@ -1386,12 +1504,17 @@ def run_decision_support_campaign(
         "seed": int(seed),
         "n_permutations": int(n_permutations),
         "dry_run": bool(dry_run),
+        "search_mode": search_mode_value,
+        "optuna_trials": int(optuna_trials) if optuna_trials is not None else None,
+        "search_space_ids": sorted(search_space_map.keys()),
         "status_counts": _status_snapshot(all_variant_records),
         "experiment_roots": experiment_roots,
         "exports": {
             "run_log_export": str(run_log_path.resolve()),
             "decision_support_summary": str(decision_summary_path.resolve()),
             "decision_recommendations": str(decision_report_path.resolve()),
+            "result_aggregation": str(aggregation_path.resolve()),
+            "summary_outputs_export": str(summary_output_path.resolve()),
             "stage_summaries": [str(path.resolve()) for path in stage_summary_paths],
             "stage_decision_notes": [str(path.resolve()) for path in stage_decision_paths],
             "workbook_output_path": (
@@ -1432,6 +1555,8 @@ def run_decision_support_campaign(
         "run_log_export_path": str(run_log_path.resolve()),
         "decision_support_summary_path": str(decision_summary_path.resolve()),
         "decision_recommendations_path": str(decision_report_path.resolve()),
+        "result_aggregation_path": str(aggregation_path.resolve()),
+        "summary_outputs_export_path": str(summary_output_path.resolve()),
         "campaign_manifest_path": str(campaign_manifest_path.resolve()),
         "workbook_output_path": (
             str(workbook_output_path.resolve()) if workbook_output_path is not None else None
@@ -1460,6 +1585,8 @@ def run_workbook_decision_support_campaign(
     write_back_to_workbook: bool = True,
     workbook_output_dir: Path | None = None,
     append_workbook_run_log: bool = True,
+    search_mode: str = "deterministic",
+    optuna_trials: int | None = None,
 ) -> dict[str, Any]:
     workbook_manifest = compile_workbook_file(workbook_path)
     return run_decision_support_campaign(
@@ -1484,6 +1611,8 @@ def run_workbook_decision_support_campaign(
         workbook_source_path=workbook_path,
         workbook_output_dir=workbook_output_dir,
         append_workbook_run_log=append_workbook_run_log,
+        search_mode=search_mode,
+        optuna_trials=optuna_trials,
     )
 
 
@@ -1570,6 +1699,21 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Resolve variants and write manifests without invoking model runs.",
     )
     parser.add_argument(
+        "--search-mode",
+        choices=["deterministic", "optuna"],
+        default="deterministic",
+        help=(
+            "Search execution mode for optional Search_Spaces. "
+            "'deterministic' expands grid dimensions; 'optuna' enables Optuna-backed sampling."
+        ),
+    )
+    parser.add_argument(
+        "--optuna-trials",
+        type=int,
+        default=None,
+        help="Optional number of Optuna trials per search space when --search-mode optuna is used.",
+    )
+    parser.add_argument(
         "--write-back-workbook",
         action="store_true",
         help="When --workbook is used, write machine/trial outputs back to a versioned workbook copy.",
@@ -1640,6 +1784,10 @@ def _print_stage1_commands(args: argparse.Namespace) -> None:
         base.extend(["--tasks", *args.tasks])
     if args.modalities:
         base.extend(["--modalities", *args.modalities])
+    if str(args.search_mode) != "deterministic":
+        base.extend(["--search-mode", str(args.search_mode)])
+    if args.optuna_trials:
+        base.extend(["--optuna-trials", str(args.optuna_trials)])
 
     command = _command_to_text(base)
     print("Stage 1 command:")
@@ -1681,6 +1829,8 @@ def main(argv: list[str] | None = None) -> int:
                 write_back_to_workbook=bool(args.write_back_workbook),
                 workbook_output_dir=workbook_output_dir,
                 append_workbook_run_log=not bool(args.no_write_back_run_log),
+                search_mode=str(args.search_mode),
+                optuna_trials=args.optuna_trials,
             )
         else:
             result = run_decision_support_campaign(
@@ -1700,6 +1850,8 @@ def main(argv: list[str] | None = None) -> int:
                 modalities_filter=args.modalities,
                 max_runs_per_experiment=args.max_runs_per_experiment,
                 dataset_name=args.dataset_name,
+                search_mode=str(args.search_mode),
+                optuna_trials=args.optuna_trials,
             )
     except RuntimeError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
