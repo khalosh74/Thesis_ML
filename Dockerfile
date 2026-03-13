@@ -14,7 +14,9 @@ RUN apt-get update \
 COPY --from=ghcr.io/astral-sh/uv:0.10.9 /uv /usr/local/bin/uv
 
 COPY pyproject.toml uv.lock README.md ./
-RUN uv sync --frozen --extra dev
+# Install locked dependencies first for better layer caching.
+# Do not install the local project yet; src/ is copied in the next step.
+RUN uv sync --frozen --extra dev --no-install-project
 
 COPY . .
 RUN uv sync --frozen --extra dev
