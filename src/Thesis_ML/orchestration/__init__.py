@@ -20,8 +20,10 @@ __all__ = [
     "compile_registry_payload",
     "compile_workbook_file",
     "compile_workbook_workbook",
+    "write_workbook_results",
     "decision_support",
     "run_decision_support_campaign",
+    "run_workbook_decision_support_campaign",
 ]
 
 _CONTRACT_EXPORTS = {
@@ -39,6 +41,7 @@ _COMPILER_EXPORTS = {
     "compile_workbook_file",
     "compile_workbook_workbook",
 }
+_WRITEBACK_EXPORTS = {"write_workbook_results"}
 
 
 if TYPE_CHECKING:
@@ -53,7 +56,11 @@ if TYPE_CHECKING:
         TrialSpec,
     )
     from .workbook_compiler import compile_workbook_file, compile_workbook_workbook
-    from .decision_support import run_decision_support_campaign
+    from .workbook_writeback import write_workbook_results
+    from .decision_support import (
+        run_decision_support_campaign,
+        run_workbook_decision_support_campaign,
+    )
 
 
 def __getattr__(name: str) -> Any:
@@ -66,7 +73,13 @@ def __getattr__(name: str) -> Any:
         else:
             module = import_module("Thesis_ML.orchestration.compiler")
         return getattr(module, name)
+    if name in _WRITEBACK_EXPORTS:
+        module = import_module("Thesis_ML.orchestration.workbook_writeback")
+        return getattr(module, name)
     if name == "run_decision_support_campaign":
+        module = import_module("Thesis_ML.orchestration.decision_support")
+        return getattr(module, name)
+    if name == "run_workbook_decision_support_campaign":
         module = import_module("Thesis_ML.orchestration.decision_support")
         return getattr(module, name)
     if name == "decision_support":

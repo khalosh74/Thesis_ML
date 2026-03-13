@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import platform
 import shlex
 import subprocess
 import sys
@@ -18,7 +19,9 @@ from Thesis_ML.artifacts.registry import (
     register_artifact,
 )
 from Thesis_ML.orchestration.compiler import compile_registry_file
+from Thesis_ML.orchestration.workbook_compiler import compile_workbook_file
 from Thesis_ML.orchestration.contracts import CompiledStudyManifest
+from Thesis_ML.orchestration.workbook_writeback import write_workbook_results
 
 STAGE_ORDER = [
     "Stage 1 - Target lock",
@@ -978,6 +981,130 @@ def _write_run_log_export(
     return out_path
 
 
+def _status_for_machine_sheet(variant_records: list[dict[str, Any]]) -> str:
+    statuses = {str(row.get("status", "unknown")) for row in variant_records}
+    if "failed" in statuses:
+        return "Monitoring"
+    if statuses and statuses.issubset({"completed", "blocked", "dry_run"}):
+        return "Closed"
+    return "Open"
+
+
+def _build_machine_status_rows(
+    *,
+    campaign_id: str,
+    source_workbook_path: Path,
+    variant_records: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    total = len(variant_records)
+    completed = sum(1 for row in variant_records if str(row.get("status")) == "completed")
+    failed = sum(1 for row in variant_records if str(row.get("status")) == "failed")
+    blocked = sum(1 for row in variant_records if str(row.get("status")) == "blocked")
+    dry_run = sum(1 for row in variant_records if str(row.get("status")) == "dry_run")
+    notes = (
+        f"Workbook source={source_workbook_path.resolve().name}; "
+        f"campaign_id={campaign_id}; total={total}; completed={completed}; "
+        f"failed={failed}; blocked={blocked}; dry_run={dry_run}"
+    )
+    return [
+        {
+            "machine_id": f"campaign_{campaign_id}",
+            "hostname": platform.node(),
+            "environment_name": "decision_support_orchestrator",
+            "python_version": platform.python_version(),
+            "gpu": "not_recorded",
+            "status": _status_for_machine_sheet(variant_records),
+            "last_checked": _utc_timestamp(),
+            "notes": notes,
+        }
+    ]
+
+
+def _build_trial_results_rows(variant_records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for row in variant_records:
+        notes = str(row.get("blocked_reason") or row.get("error") or "")
+        rows.append(
+            {
+                "trial_id": row.get("variant_id"),
+                "experiment_id": row.get("experiment_id"),
+                "run_id": row.get("run_id"),
+                "status": row.get("status"),
+                "primary_metric_name": row.get("primary_metric_name") or "balanced_accuracy",
+                "primary_metric_value": _safe_float(row.get("primary_metric_value")),
+                "report_path": row.get("report_dir"),
+                "metrics_path": row.get("metrics_path"),
+                "artifact_bundle": row.get("orchestrator_artifact_id") or row.get("manifest_path"),
+                "notes": notes,
+            }
+        )
+    return rows
+
+
+def _derive_transfer_direction(row: dict[str, Any]) -> str:
+    train_subject = str(row.get("train_subject") or "").strip()
+    test_subject = str(row.get("test_subject") or "").strip()
+    if train_subject and test_subject:
+        if train_subject == test_subject:
+            return "none_or_within_subject"
+        return "custom"
+    return "none_or_within_subject"
+
+
+def _build_run_log_writeback_rows(
+    *,
+    variant_records: list[dict[str, Any]],
+    dataset_name: str,
+    seed: int,
+    commit: str | None,
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for row in variant_records:
+        notes = str(row.get("blocked_reason") or row.get("error") or "")
+        rows.append(
+            {
+                "Run_ID": row.get("run_id"),
+                "Experiment_ID": row.get("experiment_id"),
+                "Run_Date": str(row.get("started_at", ""))[:10],
+                "Dataset_Name": dataset_name,
+                "Data_Subset": _build_dataset_subset_label(row),
+                "Data_Slice_ID": "",
+                "Grouping_Strategy_ID": "",
+                "Code_Commit_or_Version": commit or "",
+                "Config_File_or_Path": row.get("config_path") or "",
+                "Random_Seed": seed,
+                "Target": row.get("target"),
+                "Split_ID_or_Fold_Definition": row.get("cv"),
+                "Train_Group_Rule": row.get("start_section") or "",
+                "Test_Group_Rule": row.get("end_section") or "",
+                "Transfer_Direction": _derive_transfer_direction(row),
+                "Session_Coverage": "",
+                "Task_Coverage": "",
+                "Modality_Coverage": "",
+                "Model": row.get("model"),
+                "Feature_Set": "masked whole-brain voxel cache (current pipeline)",
+                "Run_Type": "Decision-support",
+                "Affects_Frozen_Pipeline": "Yes",
+                "Eligible_for_Method_Decision": "Yes" if row.get("status") == "completed" else "No",
+                "Sample_Count": "",
+                "Class_Counts": "",
+                "Imbalance_Status": "unknown",
+                "Leakage_Check_Status": "not_checked",
+                "Primary_Metric_Value": _safe_float(row.get("primary_metric_value")),
+                "Secondary_Metric_1": _safe_float(row.get("macro_f1")),
+                "Secondary_Metric_2": _safe_float(row.get("accuracy")),
+                "Robustness_Output_Summary": "",
+                "Result_Summary": row.get("status"),
+                "Preliminary_Interpretation": "",
+                "Reviewed": "No",
+                "Used_in_Thesis": "No",
+                "Artifact_Path": row.get("report_dir") or row.get("manifest_path"),
+                "Notes": notes,
+            }
+        )
+    return rows
+
+
 def _decision_text_for_experiment(
     experiment: dict[str, Any],
     rows: list[dict[str, Any]],
@@ -1097,8 +1224,13 @@ def run_decision_support_campaign(
     modalities_filter: list[str] | None = None,
     max_runs_per_experiment: int | None = None,
     dataset_name: str = "Internal BAS2",
+    registry_manifest: CompiledStudyManifest | None = None,
+    write_back_to_workbook: bool = False,
+    workbook_source_path: Path | None = None,
+    workbook_output_dir: Path | None = None,
+    append_workbook_run_log: bool = True,
 ) -> dict[str, Any]:
-    registry = _read_registry(registry_path)
+    registry = registry_manifest if registry_manifest is not None else _read_registry(registry_path)
     selected_experiments = _select_experiments(
         registry=registry,
         experiment_id=experiment_id,
@@ -1219,6 +1351,32 @@ def run_decision_support_campaign(
         status="created",
     )
 
+    workbook_output_path: Path | None = None
+    if write_back_to_workbook:
+        if workbook_source_path is None:
+            raise ValueError("write_back_to_workbook=True requires workbook_source_path.")
+        machine_rows = _build_machine_status_rows(
+            campaign_id=campaign_id,
+            source_workbook_path=workbook_source_path,
+            variant_records=all_variant_records,
+        )
+        trial_rows = _build_trial_results_rows(all_variant_records)
+        run_log_rows = _build_run_log_writeback_rows(
+            variant_records=all_variant_records,
+            dataset_name=dataset_name,
+            seed=seed,
+            commit=commit,
+        )
+        workbook_output_path = write_workbook_results(
+            source_workbook_path=workbook_source_path,
+            version_tag=campaign_id,
+            machine_status_rows=machine_rows,
+            trial_result_rows=trial_rows,
+            run_log_rows=run_log_rows,
+            append_run_log=append_workbook_run_log,
+            output_dir=workbook_output_dir,
+        )
+
     campaign_manifest = {
         "campaign_id": campaign_id,
         "created_at": _utc_timestamp(),
@@ -1236,6 +1394,9 @@ def run_decision_support_campaign(
             "decision_recommendations": str(decision_report_path.resolve()),
             "stage_summaries": [str(path.resolve()) for path in stage_summary_paths],
             "stage_decision_notes": [str(path.resolve()) for path in stage_decision_paths],
+            "workbook_output_path": (
+                str(workbook_output_path.resolve()) if workbook_output_path is not None else None
+            ),
         },
         "artifact_registry_path": str(artifact_registry_path.resolve()),
         "campaign_metrics_artifact_id": campaign_metrics_artifact.artifact_id,
@@ -1272,7 +1433,58 @@ def run_decision_support_campaign(
         "decision_support_summary_path": str(decision_summary_path.resolve()),
         "decision_recommendations_path": str(decision_report_path.resolve()),
         "campaign_manifest_path": str(campaign_manifest_path.resolve()),
+        "workbook_output_path": (
+            str(workbook_output_path.resolve()) if workbook_output_path is not None else None
+        ),
     }
+
+
+def run_workbook_decision_support_campaign(
+    *,
+    workbook_path: Path,
+    index_csv: Path,
+    data_root: Path,
+    cache_dir: Path,
+    output_root: Path,
+    experiment_id: str | None,
+    stage: str | None,
+    run_all: bool,
+    seed: int,
+    n_permutations: int,
+    dry_run: bool,
+    subjects_filter: list[str] | None = None,
+    tasks_filter: list[str] | None = None,
+    modalities_filter: list[str] | None = None,
+    max_runs_per_experiment: int | None = None,
+    dataset_name: str = "Internal BAS2",
+    write_back_to_workbook: bool = True,
+    workbook_output_dir: Path | None = None,
+    append_workbook_run_log: bool = True,
+) -> dict[str, Any]:
+    workbook_manifest = compile_workbook_file(workbook_path)
+    return run_decision_support_campaign(
+        registry_path=workbook_path,
+        index_csv=index_csv,
+        data_root=data_root,
+        cache_dir=cache_dir,
+        output_root=output_root,
+        experiment_id=experiment_id,
+        stage=stage,
+        run_all=run_all,
+        seed=seed,
+        n_permutations=n_permutations,
+        dry_run=dry_run,
+        subjects_filter=subjects_filter,
+        tasks_filter=tasks_filter,
+        modalities_filter=modalities_filter,
+        max_runs_per_experiment=max_runs_per_experiment,
+        dataset_name=dataset_name,
+        registry_manifest=workbook_manifest,
+        write_back_to_workbook=write_back_to_workbook,
+        workbook_source_path=workbook_path,
+        workbook_output_dir=workbook_output_dir,
+        append_workbook_run_log=append_workbook_run_log,
+    )
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -1286,6 +1498,11 @@ def _build_parser() -> argparse.ArgumentParser:
         "--registry",
         default="decision_support_registry.json",
         help="Path to decision-support experiment registry JSON.",
+    )
+    parser.add_argument(
+        "--workbook",
+        default=None,
+        help="Optional workbook path. If provided, compile Experiment_Definitions and run from workbook.",
     )
     parser.add_argument(
         "--index-csv",
@@ -1352,6 +1569,21 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Resolve variants and write manifests without invoking model runs.",
     )
+    parser.add_argument(
+        "--write-back-workbook",
+        action="store_true",
+        help="When --workbook is used, write machine/trial outputs back to a versioned workbook copy.",
+    )
+    parser.add_argument(
+        "--workbook-output-dir",
+        default=None,
+        help="Optional directory for versioned workbook write-back output.",
+    )
+    parser.add_argument(
+        "--no-write-back-run-log",
+        action="store_true",
+        help="When writing back workbook results, skip appending summary rows to Run_Log.",
+    )
     return parser
 
 
@@ -1381,8 +1613,6 @@ def _print_stage1_commands(args: argparse.Namespace) -> None:
     base = [
         sys.executable,
         "run_decision_support_experiments.py",
-        "--registry",
-        str(args.registry),
         "--index-csv",
         str(args.index_csv),
         "--data-root",
@@ -1396,6 +1626,10 @@ def _print_stage1_commands(args: argparse.Namespace) -> None:
         "--seed",
         str(args.seed),
     ]
+    if args.workbook:
+        base.extend(["--workbook", str(args.workbook)])
+    else:
+        base.extend(["--registry", str(args.registry)])
     if args.n_permutations > 0:
         base.extend(["--n-permutations", str(args.n_permutations)])
     if args.max_runs_per_experiment:
@@ -1417,31 +1651,56 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     registry_path = Path(args.registry)
+    workbook_path = Path(args.workbook) if args.workbook else None
     index_csv = Path(args.index_csv)
     data_root = Path(args.data_root)
     cache_dir = Path(args.cache_dir)
     output_root = Path(args.output_root)
+    workbook_output_dir = Path(args.workbook_output_dir) if args.workbook_output_dir else None
 
-    registry = _read_registry(registry_path)
+    registry = _read_registry(registry_path) if workbook_path is None else compile_workbook_file(workbook_path)
     try:
-        result = run_decision_support_campaign(
-            registry_path=registry_path,
-            index_csv=index_csv,
-            data_root=data_root,
-            cache_dir=cache_dir,
-            output_root=output_root,
-            experiment_id=args.experiment_id,
-            stage=args.stage,
-            run_all=bool(args.all),
-            seed=args.seed,
-            n_permutations=args.n_permutations,
-            dry_run=bool(args.dry_run),
-            subjects_filter=args.subjects,
-            tasks_filter=args.tasks,
-            modalities_filter=args.modalities,
-            max_runs_per_experiment=args.max_runs_per_experiment,
-            dataset_name=args.dataset_name,
-        )
+        if workbook_path is not None:
+            result = run_workbook_decision_support_campaign(
+                workbook_path=workbook_path,
+                index_csv=index_csv,
+                data_root=data_root,
+                cache_dir=cache_dir,
+                output_root=output_root,
+                experiment_id=args.experiment_id,
+                stage=args.stage,
+                run_all=bool(args.all),
+                seed=args.seed,
+                n_permutations=args.n_permutations,
+                dry_run=bool(args.dry_run),
+                subjects_filter=args.subjects,
+                tasks_filter=args.tasks,
+                modalities_filter=args.modalities,
+                max_runs_per_experiment=args.max_runs_per_experiment,
+                dataset_name=args.dataset_name,
+                write_back_to_workbook=bool(args.write_back_workbook),
+                workbook_output_dir=workbook_output_dir,
+                append_workbook_run_log=not bool(args.no_write_back_run_log),
+            )
+        else:
+            result = run_decision_support_campaign(
+                registry_path=registry_path,
+                index_csv=index_csv,
+                data_root=data_root,
+                cache_dir=cache_dir,
+                output_root=output_root,
+                experiment_id=args.experiment_id,
+                stage=args.stage,
+                run_all=bool(args.all),
+                seed=args.seed,
+                n_permutations=args.n_permutations,
+                dry_run=bool(args.dry_run),
+                subjects_filter=args.subjects,
+                tasks_filter=args.tasks,
+                modalities_filter=args.modalities,
+                max_runs_per_experiment=args.max_runs_per_experiment,
+                dataset_name=args.dataset_name,
+            )
     except RuntimeError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         _print_registry_status(registry)
