@@ -17,7 +17,6 @@ from Thesis_ML.artifacts.registry import (
     compute_config_hash,
     register_artifact,
 )
-from Thesis_ML.experiments.run_experiment import run_experiment
 from Thesis_ML.orchestration.compiler import compile_registry_file
 from Thesis_ML.orchestration.contracts import CompiledStudyManifest
 
@@ -116,6 +115,12 @@ VARIANT_EXPORT_COLUMNS = [
     "blocked_reason",
     "error",
 ]
+
+
+def run_experiment(**kwargs: Any) -> dict[str, Any]:
+    from Thesis_ML.experiments.run_experiment import run_experiment as _run_experiment
+
+    return _run_experiment(**kwargs)
 
 
 def _now_timestamp() -> str:

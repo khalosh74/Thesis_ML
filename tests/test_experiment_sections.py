@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import nibabel as nib
@@ -14,8 +15,24 @@ from Thesis_ML.artifacts.registry import (
     list_artifacts_for_run,
 )
 from Thesis_ML.data.index_dataset import build_dataset_index
-from Thesis_ML.experiments.run_experiment import run_experiment
-from Thesis_ML.experiments.sections import DatasetSelectionInput, dataset_selection
+from Thesis_ML.experiments.run_experiment import (
+    _build_pipeline,
+    _compute_interpretability_stability,
+    _evaluate_permutations,
+    _extract_linear_coefficients,
+    _scores_for_predictions,
+    run_experiment,
+)
+from Thesis_ML.experiments.sections import (
+    DatasetSelectionInput,
+    EvaluationInput,
+    InterpretabilityInput,
+    ModelFitInput,
+    dataset_selection,
+    evaluation,
+    interpretability,
+    model_fit,
+)
 
 
 def _write_nifti(path: Path, data: np.ndarray, affine: np.ndarray | None = None) -> None:
@@ -163,3 +180,179 @@ def test_run_experiment_registers_section_boundary_artifacts(tmp_path: Path) -> 
     assert metrics_record.upstream_artifact_ids == [feature_matrix_id]
     assert interpretability_record.upstream_artifact_ids == [feature_matrix_id]
     assert set(report_record.upstream_artifact_ids) == {metrics_id, interpretability_id}
+
+
+def test_extracted_sections_model_fit_interpretability_evaluation(tmp_path: Path) -> None:
+    report_dir = tmp_path / "run"
+    report_dir.mkdir(parents=True, exist_ok=True)
+    registry_path = tmp_path / "artifact_registry.sqlite3"
+
+    metadata_df = pd.DataFrame(
+        [
+            {
+                "sample_id": "s1",
+                "subject": "sub-001",
+                "session": "ses-01",
+                "bas": "BAS2",
+                "task": "passive",
+                "modality": "audio",
+                "emotion": "anger",
+                "coarse_affect": "negative",
+            },
+            {
+                "sample_id": "s2",
+                "subject": "sub-001",
+                "session": "ses-01",
+                "bas": "BAS2",
+                "task": "passive",
+                "modality": "video",
+                "emotion": "happiness",
+                "coarse_affect": "positive",
+            },
+            {
+                "sample_id": "s3",
+                "subject": "sub-001",
+                "session": "ses-02",
+                "bas": "BAS2",
+                "task": "passive",
+                "modality": "audio",
+                "emotion": "anger",
+                "coarse_affect": "negative",
+            },
+            {
+                "sample_id": "s4",
+                "subject": "sub-001",
+                "session": "ses-02",
+                "bas": "BAS2",
+                "task": "passive",
+                "modality": "video",
+                "emotion": "happiness",
+                "coarse_affect": "positive",
+            },
+            {
+                "sample_id": "s5",
+                "subject": "sub-001",
+                "session": "ses-03",
+                "bas": "BAS2",
+                "task": "passive",
+                "modality": "audio",
+                "emotion": "anger",
+                "coarse_affect": "negative",
+            },
+            {
+                "sample_id": "s6",
+                "subject": "sub-001",
+                "session": "ses-03",
+                "bas": "BAS2",
+                "task": "passive",
+                "modality": "video",
+                "emotion": "happiness",
+                "coarse_affect": "positive",
+            },
+        ]
+    )
+    x_matrix = np.asarray(
+        [
+            [4.0, 0.2, 0.1, 0.0],
+            [-4.0, -0.2, -0.1, 0.0],
+            [3.8, 0.1, 0.2, 0.1],
+            [-3.9, -0.1, -0.2, -0.1],
+            [4.1, 0.3, 0.2, 0.2],
+            [-4.2, -0.3, -0.2, -0.2],
+        ],
+        dtype=np.float32,
+    )
+
+    fit_output = model_fit(
+        ModelFitInput(
+            x_matrix=x_matrix,
+            metadata_df=metadata_df,
+            target_column="coarse_affect",
+            cv_mode="within_subject_loso_session",
+            model="ridge",
+            subject="sub-001",
+            seed=11,
+            run_id="sections_unit_smoke",
+            config_filename="config.json",
+            report_dir=report_dir,
+            build_pipeline_fn=_build_pipeline,
+            scores_for_predictions_fn=_scores_for_predictions,
+            extract_linear_coefficients_fn=_extract_linear_coefficients,
+        )
+    )
+    assert fit_output.interpretability_enabled is True
+    assert len(fit_output.splits) == 3
+    assert len(fit_output.fold_rows) == 3
+    assert len(fit_output.prediction_rows) == 6
+
+    interpretability_output = interpretability(
+        InterpretabilityInput(
+            interpretability_enabled=fit_output.interpretability_enabled,
+            interpretability_fold_rows=fit_output.interpretability_fold_rows,
+            interpretability_vectors=fit_output.interpretability_vectors,
+            fold_artifacts_path=report_dir / "interpretability_fold_explanations.csv",
+            summary_path=report_dir / "interpretability_summary.json",
+            compute_interpretability_stability_fn=_compute_interpretability_stability,
+            run_id="sections_unit_smoke",
+            artifact_registry_path=registry_path,
+            upstream_feature_matrix_artifact_id="feature_matrix_bundle_test",
+            cv_mode="within_subject_loso_session",
+            model="ridge",
+            target_column="coarse_affect",
+            subject="sub-001",
+        )
+    )
+    summary = interpretability_output.interpretability_summary
+    assert summary["performed"] is True
+    assert Path(str(summary["fold_artifacts_path"])).exists()
+    assert Path(report_dir / "interpretability_summary.json").exists()
+
+    evaluation_output = evaluation(
+        EvaluationInput(
+            x_matrix=x_matrix,
+            y=fit_output.y,
+            splits=fit_output.splits,
+            fold_rows=fit_output.fold_rows,
+            split_rows=fit_output.split_rows,
+            prediction_rows=fit_output.prediction_rows,
+            y_true_all=fit_output.y_true_all,
+            y_pred_all=fit_output.y_pred_all,
+            subject="sub-001",
+            n_permutations=0,
+            spatial_compatibility={
+                "status": "passed",
+                "passed": True,
+                "n_groups_checked": 3,
+                "reference_group_id": "sub-001_ses-01_BAS2",
+                "affine_atol": 1e-5,
+            },
+            spatial_report_path=report_dir / "spatial_compatibility_report.json",
+            interpretability_summary=summary,
+            interpretability_summary_path=report_dir / "interpretability_summary.json",
+            fold_metrics_path=report_dir / "fold_metrics.csv",
+            fold_splits_path=report_dir / "fold_splits.csv",
+            predictions_path=report_dir / "predictions.csv",
+            config_filename="config.json",
+            build_pipeline_fn=_build_pipeline,
+            evaluate_permutations_fn=_evaluate_permutations,
+            run_id="sections_unit_smoke",
+            artifact_registry_path=registry_path,
+            upstream_feature_matrix_artifact_id="feature_matrix_bundle_test",
+            metrics_path=report_dir / "metrics.json",
+            model="ridge",
+            target_column="coarse_affect",
+            cv_mode="within_subject_loso_session",
+            seed=11,
+        )
+    )
+    assert Path(report_dir / "metrics.json").exists()
+    metrics = json.loads((report_dir / "metrics.json").read_text(encoding="utf-8"))
+    assert {"accuracy", "balanced_accuracy", "macro_f1", "interpretability"} <= set(metrics)
+    assert evaluation_output.metrics["n_folds"] == 3
+
+    metrics_record = get_artifact(
+        registry_path=registry_path,
+        artifact_id=evaluation_output.metrics_artifact_id,
+    )
+    assert metrics_record is not None
+    assert metrics_record.upstream_artifact_ids == ["feature_matrix_bundle_test"]

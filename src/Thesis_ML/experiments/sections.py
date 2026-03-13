@@ -111,8 +111,21 @@ class SpatialValidationOutput(_SectionModel):
 
 
 class ModelFitInput(_SectionModel):
-    fit_fn: Callable[[dict[str, Any]], dict[str, Any]]
-    payload: dict[str, Any]
+    x_matrix: np.ndarray
+    metadata_df: pd.DataFrame
+    target_column: str = Field(min_length=1)
+    cv_mode: str = Field(min_length=1)
+    model: str = Field(min_length=1)
+    subject: str | None = None
+    train_subject: str | None = None
+    test_subject: str | None = None
+    seed: int
+    run_id: str = Field(min_length=1)
+    config_filename: str = Field(min_length=1)
+    report_dir: Path
+    build_pipeline_fn: Callable[..., Any]
+    scores_for_predictions_fn: Callable[..., dict[str, list[Any]]]
+    extract_linear_coefficients_fn: Callable[..., tuple[np.ndarray, np.ndarray, list[str]]]
 
 
 class ModelFitOutput(_SectionModel):
@@ -131,8 +144,12 @@ class ModelFitOutput(_SectionModel):
 
 
 class InterpretabilityInput(_SectionModel):
-    interpretability_fn: Callable[[dict[str, Any]], dict[str, Any]]
-    payload: dict[str, Any]
+    interpretability_enabled: bool
+    interpretability_fold_rows: list[dict[str, Any]]
+    interpretability_vectors: list[np.ndarray]
+    fold_artifacts_path: Path
+    summary_path: Path
+    compute_interpretability_stability_fn: Callable[[list[np.ndarray]], dict[str, Any]]
     run_id: str = Field(min_length=1)
     artifact_registry_path: Path
     code_ref: str | None = None
@@ -150,8 +167,28 @@ class InterpretabilityOutput(_SectionModel):
 
 
 class EvaluationInput(_SectionModel):
-    evaluate_fn: Callable[[dict[str, Any]], dict[str, Any]]
-    payload: dict[str, Any]
+    x_matrix: np.ndarray
+    y: np.ndarray
+    splits: list[tuple[np.ndarray, np.ndarray]]
+    fold_rows: list[dict[str, Any]]
+    split_rows: list[dict[str, Any]]
+    prediction_rows: list[dict[str, Any]]
+    y_true_all: list[str]
+    y_pred_all: list[str]
+    subject: str | None = None
+    train_subject: str | None = None
+    test_subject: str | None = None
+    n_permutations: int = 0
+    spatial_compatibility: dict[str, Any]
+    spatial_report_path: Path
+    interpretability_summary: dict[str, Any]
+    interpretability_summary_path: Path
+    fold_metrics_path: Path
+    fold_splits_path: Path
+    predictions_path: Path
+    config_filename: str = Field(min_length=1)
+    build_pipeline_fn: Callable[..., Any]
+    evaluate_permutations_fn: Callable[..., dict[str, Any]]
     run_id: str = Field(min_length=1)
     artifact_registry_path: Path
     code_ref: str | None = None
@@ -307,12 +344,16 @@ def spatial_validation(section_input: SpatialValidationInput) -> SpatialValidati
 
 
 def model_fit(section_input: ModelFitInput) -> ModelFitOutput:
-    output_payload = section_input.fit_fn(section_input.payload)
+    from Thesis_ML.experiments.sections_impl import execute_model_fit
+
+    output_payload = execute_model_fit(section_input)
     return ModelFitOutput.model_validate(output_payload)
 
 
 def interpretability(section_input: InterpretabilityInput) -> InterpretabilityOutput:
-    summary = section_input.interpretability_fn(section_input.payload)
+    from Thesis_ML.experiments.sections_impl import execute_interpretability
+
+    summary = execute_interpretability(section_input)
     artifact = register_artifact(
         registry_path=section_input.artifact_registry_path,
         artifact_type=ARTIFACT_TYPE_INTERPRETABILITY_BUNDLE,
@@ -339,7 +380,9 @@ def interpretability(section_input: InterpretabilityInput) -> InterpretabilityOu
 
 
 def evaluation(section_input: EvaluationInput) -> EvaluationOutput:
-    metrics = section_input.evaluate_fn(section_input.payload)
+    from Thesis_ML.experiments.sections_impl import execute_evaluation
+
+    metrics = execute_evaluation(section_input)
     artifact = register_artifact(
         registry_path=section_input.artifact_registry_path,
         artifact_type=ARTIFACT_TYPE_METRICS_BUNDLE,
