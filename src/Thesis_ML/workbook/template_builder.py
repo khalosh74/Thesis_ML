@@ -2,13 +2,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from openpyxl import Workbook, load_workbook
+from openpyxl import Workbook
 from openpyxl.formatting.rule import FormulaRule
-from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
-from openpyxl.workbook.defined_name import DefinedName
-from openpyxl.worksheet.datavalidation import DataValidation
-from openpyxl.worksheet.table import Table, TableStyleInfo
 
 from Thesis_ML.config.paths import DEFAULT_WORKBOOK_TEMPLATE
 from Thesis_ML.config.schema_versions import (
@@ -16,11 +13,28 @@ from Thesis_ML.config.schema_versions import (
     WORKBOOK_SCHEMA_METADATA_START_ROW,
     WORKBOOK_SCHEMA_VERSION,
 )
-from Thesis_ML.workbook.schema_metadata import (
-    expected_schema_metadata,
-    read_schema_metadata,
-    write_schema_metadata,
+from Thesis_ML.workbook.schema_metadata import write_schema_metadata
+from Thesis_ML.workbook.sheets.structured_execution import (
+    fill_artifact_registry as _fill_artifact_registry_sheet,
+    fill_fixed_configs as _fill_fixed_configs_sheet,
+    fill_machine_status as _fill_machine_status_sheet,
+    fill_objectives as _fill_objectives_sheet,
+    fill_simple_structured_sheet as _fill_simple_structured_sheet_impl,
+    fill_summary_outputs as _fill_summary_outputs_sheet,
+    fill_trial_results as _fill_trial_results_sheet,
 )
+from Thesis_ML.workbook.template_primitives import (
+    COL,
+    add_dynamic_named_list,
+    add_list_validation,
+    add_named_list,
+    add_table,
+    col_idx,
+    set_widths,
+    style_body,
+    style_header,
+)
+from Thesis_ML.workbook.template_validation import validate_template_workbook
 
 OUT_XLSX = Path(DEFAULT_WORKBOOK_TEMPLATE)
 
@@ -473,91 +487,6 @@ DEFINITIONS = [
     ("interpretability stability", "Consistency of model-behavior explanation signals across folds."),
 ]
 
-COL = {
-    "header_bg": "1F4E78",
-    "header_fg": "FFFFFF",
-    "title_bg": "D9E1F2",
-    "zebra": "F8FAFC",
-    "confirmatory": "E2F0D9",
-    "exploratory": "FCE4D6",
-    "critical": "FFF2CC",
-    "dropped": "E7E6E6",
-    "missing": "FBE5E7",
-    "ok": "E2F0D9",
-    "bad": "FBE5E7",
-    "open": "FCE4D6",
-}
-
-THIN = Border(
-    left=Side(style="thin", color="D0D7DE"),
-    right=Side(style="thin", color="D0D7DE"),
-    top=Side(style="thin", color="D0D7DE"),
-    bottom=Side(style="thin", color="D0D7DE"),
-)
-
-
-def style_header(ws, row: int, n_cols: int) -> None:
-    for c in range(1, n_cols + 1):
-        cell = ws.cell(row=row, column=c)
-        cell.fill = PatternFill("solid", fgColor=COL["header_bg"])
-        cell.font = Font(color=COL["header_fg"], bold=True)
-        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-        cell.border = THIN
-
-
-def style_body(ws, r1: int, r2: int, c1: int, c2: int, zebra: bool = True) -> None:
-    fill = PatternFill("solid", fgColor=COL["zebra"])
-    for r in range(r1, r2 + 1):
-        for c in range(c1, c2 + 1):
-            cell = ws.cell(r, c)
-            cell.border = THIN
-            cell.alignment = Alignment(vertical="top", wrap_text=True)
-            if zebra and r % 2 == 0:
-                cell.fill = fill
-
-
-def set_widths(ws, widths: dict[str, float]) -> None:
-    for col, width in widths.items():
-        ws.column_dimensions[col].width = width
-
-
-def add_table(ws, name: str, ref: str, style: str = "TableStyleMedium2") -> None:
-    table = Table(displayName=name, ref=ref)
-    table.tableStyleInfo = TableStyleInfo(
-        name=style,
-        showFirstColumn=False,
-        showLastColumn=False,
-        showRowStripes=True,
-        showColumnStripes=False,
-    )
-    ws.add_table(table)
-
-
-def add_list_validation(ws, formula: str, col: int, start: int, end: int, allow_blank: bool = True) -> None:
-    dv = DataValidation(type="list", formula1=formula, allow_blank=allow_blank)
-    ws.add_data_validation(dv)
-    letter = get_column_letter(col)
-    dv.add(f"{letter}{start}:{letter}{end}")
-
-
-def add_named_list(wb: Workbook, list_name: str, sheet_name: str, col: int, start: int, end: int) -> None:
-    letter = get_column_letter(col)
-    wb.defined_names.add(DefinedName(name=list_name, attr_text=f"'{sheet_name}'!${letter}${start}:${letter}${end}"))
-
-
-def add_dynamic_named_list(wb: Workbook, list_name: str, sheet_name: str, col: int, start: int) -> None:
-    letter = get_column_letter(col)
-    formula = (
-        f"'{sheet_name}'!${letter}${start}:"
-        f"INDEX('{sheet_name}'!${letter}:${letter},MATCH(\"zzz\",'{sheet_name}'!${letter}:${letter}))"
-    )
-    wb.defined_names.add(DefinedName(name=list_name, attr_text=formula))
-
-
-def col_idx(columns: list[str], name: str) -> int:
-    return columns.index(name) + 1
-
-
 def build_experiments() -> list[dict[str, str]]:
     base = {
         "Priority": "Medium",
@@ -872,225 +801,55 @@ def _fill_simple_structured_sheet(
     width_map: dict[str, float],
     starter_rows: list[dict[str, str]] | None = None,
 ) -> int:
-    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=len(columns))
-    ws.cell(1, 1, title)
-    ws.cell(1, 1).font = Font(size=12, bold=True)
-    ws.cell(1, 1).fill = PatternFill("solid", fgColor=COL["title_bg"])
-    ws.cell(1, 1).alignment = Alignment(horizontal="left")
-    for i, h in enumerate(columns, start=1):
-        ws.cell(2, i, h)
-    style_header(ws, 2, len(columns))
-
-    if starter_rows:
-        for r, row in enumerate(starter_rows, start=3):
-            for c, name in enumerate(columns, start=1):
-                ws.cell(r, c, row.get(name, ""))
-
-    last = 61
-    style_body(ws, 3, last, 1, len(columns))
-    end_col = get_column_letter(len(columns))
-    add_table(ws, table_name, f"A2:{end_col}{last}", style="TableStyleMedium6")
-    ws.freeze_panes = "A3"
-    ws.auto_filter.ref = f"A2:{end_col}{last}"
-    set_widths(ws, width_map)
-    return last
+    return _fill_simple_structured_sheet_impl(
+        ws=ws,
+        columns=columns,
+        table_name=table_name,
+        title=title,
+        width_map=width_map,
+        starter_rows=starter_rows,
+    )
 
 
 def fill_artifact_registry_sheet(ws) -> int:
-    starter = [
-        {
-            "artifact_id": "",
-            "artifact_type": "",
-            "run_id": "",
-            "status": "",
-            "created_at": "",
-            "path": "",
-            "upstream_artifact_ids": "",
-            "config_hash": "",
-            "code_ref": "",
-            "notes": "Optional workbook mirror of machine registry for audit snapshots.",
-        }
-    ]
-    return _fill_simple_structured_sheet(
+    return _fill_artifact_registry_sheet(
         ws=ws,
-        columns=ARTIFACT_REGISTRY_COLUMNS,
-        table_name="WorkbookArtifactRegistryTable",
-        title="Workbook Artifact Registry Snapshot",
-        width_map={
-            "A": 32,
-            "B": 20,
-            "C": 24,
-            "D": 14,
-            "E": 24,
-            "F": 40,
-            "G": 32,
-            "H": 24,
-            "I": 20,
-            "J": 34,
-        },
-        starter_rows=starter,
+        artifact_registry_columns=ARTIFACT_REGISTRY_COLUMNS,
     )
 
 
 def fill_fixed_configs_sheet(ws) -> int:
-    starter = [
-        {
-            "config_key": "default_target",
-            "config_value": "coarse_affect",
-            "scope": "global",
-            "locked": "No",
-            "owner": "Khaled",
-            "last_updated": "",
-            "notes": "Machine-readable defaults for execution templates.",
-        },
-        {
-            "config_key": "default_model",
-            "config_value": "ridge",
-            "scope": "global",
-            "locked": "No",
-            "owner": "Khaled",
-            "last_updated": "",
-            "notes": "",
-        },
-    ]
-    last = _fill_simple_structured_sheet(
+    return _fill_fixed_configs_sheet(
         ws=ws,
-        columns=FIXED_CONFIGS_COLUMNS,
-        table_name="FixedConfigsTable",
-        title="Fixed Configurations and Locks",
-        width_map={
-            "A": 28,
-            "B": 28,
-            "C": 14,
-            "D": 10,
-            "E": 16,
-            "F": 16,
-            "G": 36,
-        },
-        starter_rows=starter,
+        fixed_configs_columns=FIXED_CONFIGS_COLUMNS,
     )
-    add_list_validation(ws, "=List_YesNo", col_idx(FIXED_CONFIGS_COLUMNS, "locked"), 3, 1000)
-    return last
 
 
 def fill_objectives_sheet(ws) -> int:
-    starter = [
-        {
-            "objective_id": "OBJ01",
-            "objective_text": "Lock target definition under leakage-aware evaluation.",
-            "stage": "Stage 1 - Target lock",
-            "linked_experiment_id": "E01",
-            "primary_metric": "balanced_accuracy",
-            "success_criterion": "Decision D01 locked with pre-registered rationale.",
-            "status": "Planned",
-            "notes": "",
-        }
-    ]
-    last = _fill_simple_structured_sheet(
+    return _fill_objectives_sheet(
         ws=ws,
-        columns=OBJECTIVES_COLUMNS,
-        table_name="ObjectivesTable",
-        title="Program Objectives",
-        width_map={
-            "A": 12,
-            "B": 44,
-            "C": 28,
-            "D": 18,
-            "E": 20,
-            "F": 34,
-            "G": 14,
-            "H": 30,
-        },
-        starter_rows=starter,
+        objectives_columns=OBJECTIVES_COLUMNS,
     )
-    add_list_validation(ws, "=List_Stage", col_idx(OBJECTIVES_COLUMNS, "stage"), 3, 1000)
-    add_list_validation(ws, "=List_Experiment_ID", col_idx(OBJECTIVES_COLUMNS, "linked_experiment_id"), 3, 1000)
-    add_list_validation(ws, "=List_Status", col_idx(OBJECTIVES_COLUMNS, "status"), 3, 1000)
-    return last
 
 
 def fill_machine_status_sheet(ws) -> int:
-    starter = [
-        {
-            "machine_id": "M01",
-            "hostname": "",
-            "environment_name": "thesis-dev",
-            "python_version": "",
-            "gpu": "",
-            "status": "Monitoring",
-            "last_checked": "",
-            "notes": "Track execution environment snapshots used for thesis runs.",
-        }
-    ]
-    last = _fill_simple_structured_sheet(
+    return _fill_machine_status_sheet(
         ws=ws,
-        columns=MACHINE_STATUS_COLUMNS,
-        table_name="MachineStatusTable",
-        title="Machine Status and Environment",
-        width_map={
-            "A": 12,
-            "B": 20,
-            "C": 22,
-            "D": 18,
-            "E": 20,
-            "F": 14,
-            "G": 16,
-            "H": 34,
-        },
-        starter_rows=starter,
+        machine_status_columns=MACHINE_STATUS_COLUMNS,
     )
-    add_list_validation(ws, "=List_Ethics_Status", col_idx(MACHINE_STATUS_COLUMNS, "status"), 3, 1000)
-    return last
 
 
 def fill_trial_results_sheet(ws) -> int:
-    last = _fill_simple_structured_sheet(
+    return _fill_trial_results_sheet(
         ws=ws,
-        columns=TRIAL_RESULTS_COLUMNS,
-        table_name="TrialResultsTable",
-        title="Trial Results (Manual Import or Future Sync)",
-        width_map={
-            "A": 22,
-            "B": 14,
-            "C": 24,
-            "D": 14,
-            "E": 22,
-            "F": 18,
-            "G": 34,
-            "H": 34,
-            "I": 28,
-            "J": 30,
-        },
-        starter_rows=None,
+        trial_results_columns=TRIAL_RESULTS_COLUMNS,
     )
-    add_list_validation(ws, "=List_Experiment_ID", col_idx(TRIAL_RESULTS_COLUMNS, "experiment_id"), 3, 1000)
-    add_list_validation(ws, "=List_Status", col_idx(TRIAL_RESULTS_COLUMNS, "status"), 3, 1000)
-    return last
 
 
 def fill_summary_outputs_sheet(ws) -> int:
-    return _fill_simple_structured_sheet(
+    return _fill_summary_outputs_sheet(
         ws=ws,
-        columns=SUMMARY_OUTPUTS_COLUMNS,
-        table_name="SummaryOutputsTable",
-        title="Machine Summary Outputs (Best Runs and Patterns)",
-        width_map={
-            "A": 18,
-            "B": 22,
-            "C": 20,
-            "D": 18,
-            "E": 26,
-            "F": 14,
-            "G": 18,
-            "H": 18,
-            "I": 14,
-            "J": 24,
-            "K": 18,
-            "L": 20,
-            "M": 34,
-            "N": 36,
-        },
-        starter_rows=None,
+        summary_outputs_columns=SUMMARY_OUTPUTS_COLUMNS,
     )
 
 
@@ -2252,162 +2011,15 @@ def build_workbook() -> Workbook:
 
 
 def validate(path: Path) -> dict[str, str]:
-    wb = load_workbook(path)
-    sheets = [ws.title for ws in wb.worksheets]
-    sheet_ok = sheets == SHEET_ORDER
-    missing_sheets = [s for s in SHEET_ORDER if s not in sheets]
-    legacy_required = [
-        "README",
-        "Master_Experiments",
-        "Experiment_Definitions",
-        "Search_Spaces",
-        "Artifact_Registry",
-        "Fixed_Configs",
-        "Objectives",
-        "Machine_Status",
-        "Trial_Results",
-        "Summary_Outputs",
-        "Run_Log",
-        "Decision_Log",
-        "Confirmatory_Set",
-        "Thesis_Map",
-        "Dictionary_Validation",
-        "Dashboard",
-        "Claim_Ledger",
-        "AI_Usage_Log",
-        "Ethics_Governance_Notes",
-    ]
-    legacy_sheets_present = all(s in sheets for s in legacy_required)
-    new_sheets = [
-        "Experiment_Definitions",
-        "Search_Spaces",
-        "Artifact_Registry",
-        "Fixed_Configs",
-        "Objectives",
-        "Machine_Status",
-        "Trial_Results",
-        "Summary_Outputs",
-        "Data_Selection_Design",
-        "Grouping_Strategy_Map",
-        "Data_Profile",
-    ]
-    new_sheets_present = all(s in sheets for s in new_sheets)
-
-    master = wb["Master_Experiments"]
-    experiment_definitions = wb["Experiment_Definitions"]
-    readme = wb["README"]
-    confirm = wb["Confirmatory_Set"]
-    dash = wb["Dashboard"]
-    dictionary = wb["Dictionary_Validation"]
-    run_log = wb["Run_Log"]
-
-    dv_count = sum(
-        len(wb[name].data_validations.dataValidation)
-        for name in [
-            "Master_Experiments",
-            "Experiment_Definitions",
-            "Search_Spaces",
-            "Data_Selection_Design",
-            "Grouping_Strategy_Map",
-            "Run_Log",
-            "Decision_Log",
-            "Confirmatory_Set",
-            "Claim_Ledger",
-            "AI_Usage_Log",
-            "Ethics_Governance_Notes",
-        ]
+    return validate_template_workbook(
+        path,
+        sheet_order=SHEET_ORDER,
+        stage_vocabulary=STAGE_V2,
+        run_log_columns=RUN_LOG_COLUMNS,
+        experiment_definitions_columns=EXPERIMENT_DEFINITIONS_COLUMNS,
+        workbook_schema_version=WORKBOOK_SCHEMA_VERSION,
+        supported_workbook_schema_versions=SUPPORTED_WORKBOOK_SCHEMA_VERSIONS,
     )
-    stage_values = {master[f"E{r}"].value for r in range(2, master.max_row + 1)}
-    stage_vocab = set(STAGE_V2)
-    stage_consistent = stage_values.issubset(stage_vocab)
-    run_log_headers = [run_log.cell(1, c).value for c in range(1, len(RUN_LOG_COLUMNS) + 1)]
-    run_log_new_cols = [
-        "Data_Slice_ID",
-        "Grouping_Strategy_ID",
-        "Train_Group_Rule",
-        "Test_Group_Rule",
-        "Transfer_Direction",
-        "Sample_Count",
-        "Class_Counts",
-        "Imbalance_Status",
-        "Leakage_Check_Status",
-        "Session_Coverage",
-        "Task_Coverage",
-        "Modality_Coverage",
-    ]
-    run_log_columns_ok = all(col in run_log_headers for col in run_log_new_cols)
-    experiment_definitions_headers = [
-        experiment_definitions.cell(1, c).value
-        for c in range(1, len(EXPERIMENT_DEFINITIONS_COLUMNS) + 1)
-    ]
-    experiment_definitions_columns_ok = (
-        experiment_definitions_headers == EXPERIMENT_DEFINITIONS_COLUMNS
-    )
-
-    required_named_lists = [
-        "List_Experiment_ID",
-        "List_Data_Slice_ID",
-        "List_Grouping_Strategy_ID",
-        "List_Subject_Scope",
-        "List_Session_Scope",
-        "List_Task_Scope",
-        "List_Modality_Scope",
-        "List_Class_Balance_Policy",
-        "List_Split_Family",
-        "List_Imbalance_Status",
-        "List_Leakage_Check_Status",
-        "List_Transfer_Direction",
-        "List_Execution_Section",
-        "List_Reuse_Policy",
-        "List_Search_Optimization_Mode",
-        "List_Search_Parameter_Scope",
-        "List_Search_Space_ID",
-    ]
-    defined_names = {name for name in wb.defined_names.keys()}
-    named_lists_ok = all(name in defined_names for name in required_named_lists)
-    missing_named_lists = [name for name in required_named_lists if name not in defined_names]
-
-    confirmatory_formulas_ok = all(
-        isinstance(confirm[cell].value, str) and confirm[cell].value.startswith("=")
-        for cell in ["F2", "G2", "J2"]
-    ) and isinstance(master["AF2"].value, str) and master["AF2"].value.startswith("=")
-    dashboard_core_formulas_ok = all(
-        isinstance(dash[cell].value, str) and dash[cell].value.startswith("=")
-        for cell in ["B13", "B14", "B22", "B23", "B24", "B25", "K4", "N4", "E18"]
-    )
-    schema_metadata = read_schema_metadata(readme)
-    required_schema_metadata = expected_schema_metadata()
-    schema_metadata_keys_present = all(
-        key in schema_metadata for key in required_schema_metadata
-    )
-    workbook_schema_version_value = schema_metadata.get(
-        "workbook_schema_version", WORKBOOK_SCHEMA_VERSION
-    )
-    workbook_schema_supported = (
-        workbook_schema_version_value in SUPPORTED_WORKBOOK_SCHEMA_VERSIONS
-    )
-
-    return {
-        "sheet_order_ok": str(sheet_ok),
-        "missing_sheets": ", ".join(missing_sheets) if missing_sheets else "None",
-        "legacy_sheets_present": str(legacy_sheets_present),
-        "new_sheets_present": str(new_sheets_present),
-        "sheet_count": str(len(sheets)),
-        "data_validations_found": str(dv_count),
-        "experiment_definitions_columns_ok": str(experiment_definitions_columns_ok),
-        "run_log_new_columns_present": str(run_log_columns_ok),
-        "required_named_lists_present": str(named_lists_ok),
-        "missing_named_lists": ", ".join(missing_named_lists) if missing_named_lists else "None",
-        "experiment_ready_formula_present": str(isinstance(master["AF2"].value, str) and master["AF2"].value.startswith("=")),
-        "confirmatory_formula_present": str(confirmatory_formulas_ok),
-        "dashboard_formula_present": str(dashboard_core_formulas_ok),
-        "stage_vocab_consistent": str(stage_consistent),
-        "stage_vocab_rows": str(len([v for v in stage_values if v is not None])),
-        "dictionary_stage_head": str(dictionary["C3"].value),
-        "schema_metadata_keys_present": str(schema_metadata_keys_present),
-        "workbook_schema_version": workbook_schema_version_value,
-        "workbook_schema_supported": str(workbook_schema_supported),
-    }
 
 
 def main() -> None:
