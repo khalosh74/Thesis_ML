@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Set
 from pathlib import Path
 
 from openpyxl import load_workbook
@@ -18,7 +19,7 @@ def validate_template_workbook(
     run_log_columns: list[str],
     experiment_definitions_columns: list[str],
     workbook_schema_version: str,
-    supported_workbook_schema_versions: set[str],
+    supported_workbook_schema_versions: Set[str],
 ) -> dict[str, str]:
     wb = load_workbook(path)
     sheets = [ws.title for ws in wb.worksheets]

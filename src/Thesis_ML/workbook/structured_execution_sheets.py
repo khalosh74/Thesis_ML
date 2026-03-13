@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from openpyxl.utils import get_column_letter
 from openpyxl.styles import Alignment, Font, PatternFill
+from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.worksheet import Worksheet
 
 from Thesis_ML.workbook.template_primitives import (
