@@ -7,6 +7,7 @@ from pathlib import Path
 
 import numpy as np
 
+from Thesis_ML.config.paths import DEFAULT_BASELINE_MODELS_DIR, DEFAULT_BASELINE_REPORTS_DIR
 
 def _validate_config(
     n_samples: int,
@@ -78,8 +79,8 @@ def run_baseline(
     n_features: int = 12,
     noise_std: float = 0.3,
     test_fraction: float = 0.2,
-    reports_dir: Path | str = "reports",
-    models_dir: Path | str = "models",
+    reports_dir: Path | str = DEFAULT_BASELINE_REPORTS_DIR,
+    models_dir: Path | str = DEFAULT_BASELINE_MODELS_DIR,
 ) -> dict[str, object]:
     """
     Run a deterministic synthetic regression baseline and persist outputs locally.

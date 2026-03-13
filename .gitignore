@@ -23,18 +23,16 @@ dist/
 # Local private/output directories
 data/**
 Data/**
-models/**
-reports/**
-artifacts/**
-spm_glm_extraction_out/**
+outputs/**
 
 # Keep scaffold placeholders only
-!models/
-!models/README.md
-!models/.gitkeep
-!reports/
-!reports/README.md
-!reports/.gitkeep
+!outputs/
+!outputs/models/
+!outputs/models/README.md
+!outputs/models/.gitkeep
+!outputs/reports/
+!outputs/reports/README.md
+!outputs/reports/.gitkeep
 
 # Local-only notebooks currently in repo root
 hello.ipynb

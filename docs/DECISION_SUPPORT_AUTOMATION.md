@@ -5,10 +5,11 @@ This repo now includes a registry-driven orchestrator to run thesis decision-sup
 
 ## Files
 
-- `decision_support_registry.json`: machine-readable experiment definitions for E01-E11.
-- `src/Thesis_ML/orchestration/decision_support.py`: packaged orchestrator implementation.
+- `configs/decision_support_registry.json`: machine-readable experiment definitions for E01-E11.
+- `src/Thesis_ML/orchestration/campaign_runner.py`: primary orchestrator implementation.
+- `src/Thesis_ML/orchestration/decision_support.py`: backward-compatible facade.
 - `run_decision_support_experiments.py`: backward-compatible CLI shim.
-- Output root (default): `artifacts/decision_support/`.
+- Output root (default): `outputs/artifacts/decision_support/`.
 
 ## What it does
 

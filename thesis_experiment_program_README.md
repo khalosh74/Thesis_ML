@@ -1,7 +1,7 @@
 # Thesis Experiment Program Workbook (v2)
 
 ## Purpose
-`thesis_experiment_program.xlsx` is the thesis experiment governance workbook for:
+`templates/thesis_experiment_program.xlsx` is the thesis experiment governance workbook for:
 - pre-interpretation experiment specification,
 - explicit separation of confirmatory, decision-support, and exploratory evidence,
 - lock-traceable method decisions,
@@ -68,4 +68,5 @@ This distinction prevents premature reporting when method locks exist but report
 - No numerical results, locked decisions, or completion statuses are fabricated.
 - Defaults remain conservative (`Planned`, `Open`, blank outcomes) until evidence is entered.
 - Placeholders are used where grounding links are not yet finalized (e.g., source packet linkage).
-- Workbook regeneration is deterministic via `create_thesis_experiment_workbook.py`.
+- Workbook regeneration is deterministic via `thesisml-workbook`
+  (or the compatibility wrapper `create_thesis_experiment_workbook.py`).

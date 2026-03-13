@@ -133,7 +133,7 @@ thesisml-run-experiment `
 Each run writes:
 
 ```text
-reports/experiments/<run_id>/
+outputs/reports/experiments/<run_id>/
   config.json
   metrics.json
   fold_metrics.csv
@@ -158,11 +158,11 @@ direct neural localization claims.
 
 ## Adding a new model to the registry
 
-Edit `src/Thesis_ML/experiments/run_experiment.py`:
-- Add a new case in `_make_model`.
-- Keep preprocessing/model composition inside `_build_pipeline` so transforms are fit only on
+Edit `src/Thesis_ML/experiments/model_factory.py`:
+- Add a new case in `make_model`.
+- Keep preprocessing/model composition inside `build_pipeline` so transforms are fit only on
   training folds.
-- Add the model name to CLI choices (`_MODEL_NAMES` + parser choices).
+- Add the model name to `MODEL_NAMES`.
 - Keep output schema unchanged (`metrics.json`, `fold_metrics.csv`, `predictions.csv`) for
   comparability.
 
@@ -183,5 +183,5 @@ python scripts/run_baseline.py
 ```
 
 Outputs:
-- `reports/metrics.json`
-- `models/baseline_model.npz`
+- `outputs/reports/metrics.json`
+- `outputs/models/baseline_model.npz`

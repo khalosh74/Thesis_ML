@@ -20,7 +20,7 @@
         "macro_f1",
         "accuracy"
       ],
-      "output_dir": "artifacts/decision_support/E01",
+      "output_dir": "outputs/artifacts/decision_support/E01",
       "notes": "Binary valence-like target remains blocked until implemented in runner target aliases.",
       "executable_now": true,
       "execution_status": "partially_blocked",
@@ -77,7 +77,7 @@
         "macro_f1",
         "accuracy"
       ],
-      "output_dir": "artifacts/decision_support/E02",
+      "output_dir": "outputs/artifacts/decision_support/E02",
       "notes": "Compares pooled tasks vs per-task filtering.",
       "executable_now": true,
       "execution_status": "executable",
@@ -128,7 +128,7 @@
         "macro_f1",
         "accuracy"
       ],
-      "output_dir": "artifacts/decision_support/E03",
+      "output_dir": "outputs/artifacts/decision_support/E03",
       "notes": "Compares pooled modalities vs per-modality filtering.",
       "executable_now": true,
       "execution_status": "executable",
@@ -179,7 +179,7 @@
         "macro_f1",
         "accuracy"
       ],
-      "output_dir": "artifacts/decision_support/E04",
+      "output_dir": "outputs/artifacts/decision_support/E04",
       "notes": "Record-wise random split not available in current runner.",
       "executable_now": true,
       "execution_status": "partially_blocked",
@@ -233,7 +233,7 @@
         "macro_f1",
         "accuracy"
       ],
-      "output_dir": "artifacts/decision_support/E05",
+      "output_dir": "outputs/artifacts/decision_support/E05",
       "notes": "Directional transfer only; no pooled cross-person fitting.",
       "executable_now": true,
       "execution_status": "executable",
@@ -273,7 +273,7 @@
         "macro_f1",
         "accuracy"
       ],
-      "output_dir": "artifacts/decision_support/E06",
+      "output_dir": "outputs/artifacts/decision_support/E06",
       "notes": "Uses fixed model configurations in current runner.",
       "executable_now": true,
       "execution_status": "executable",
@@ -313,7 +313,7 @@
         "macro_f1",
         "accuracy"
       ],
-      "output_dir": "artifacts/decision_support/E07",
+      "output_dir": "outputs/artifacts/decision_support/E07",
       "notes": "Blocked until class weighting is exposed as runner parameter.",
       "executable_now": false,
       "execution_status": "blocked",
@@ -342,7 +342,7 @@
         "macro_f1",
         "accuracy"
       ],
-      "output_dir": "artifacts/decision_support/E08",
+      "output_dir": "outputs/artifacts/decision_support/E08",
       "notes": "Blocked until nested tuning/fixed strategy switch is implemented.",
       "executable_now": false,
       "execution_status": "blocked",
@@ -369,7 +369,7 @@
         "macro_f1",
         "accuracy"
       ],
-      "output_dir": "artifacts/decision_support/E09",
+      "output_dir": "outputs/artifacts/decision_support/E09",
       "notes": "Blocked until ROI feature-space switch is available in cache/runner.",
       "executable_now": false,
       "execution_status": "blocked",
@@ -396,7 +396,7 @@
         "macro_f1",
         "accuracy"
       ],
-      "output_dir": "artifacts/decision_support/E10",
+      "output_dir": "outputs/artifacts/decision_support/E10",
       "notes": "Blocked until dimensionality reduction option is implemented in pipeline.",
       "executable_now": false,
       "execution_status": "blocked",
@@ -423,7 +423,7 @@
         "macro_f1",
         "accuracy"
       ],
-      "output_dir": "artifacts/decision_support/E11",
+      "output_dir": "outputs/artifacts/decision_support/E11",
       "notes": "Blocked until scaling policy is configurable (currently fixed StandardScaler in pipeline).",
       "executable_now": false,
       "execution_status": "blocked",

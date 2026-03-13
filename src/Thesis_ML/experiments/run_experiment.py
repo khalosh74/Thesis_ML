@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import itertools
 import json
 import logging
 import platform
@@ -16,12 +15,8 @@ import nibabel as nib
 import numpy as np
 import pandas as pd
 import sklearn
-from sklearn.base import clone
-from sklearn.linear_model import LogisticRegression, RidgeClassifier
-from sklearn.metrics import accuracy_score
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
-from sklearn.svm import LinearSVC
 
 from Thesis_ML.artifacts.registry import (
     ARTIFACT_TYPE_EXPERIMENT_REPORT,
@@ -30,14 +25,23 @@ from Thesis_ML.artifacts.registry import (
     compute_config_hash,
     register_artifact,
 )
+from Thesis_ML.config.paths import DEFAULT_EXPERIMENT_REPORTS_ROOT
+from Thesis_ML.experiments.cache_loading import load_features_from_cache
+from Thesis_ML.experiments.metrics import (
+    compute_interpretability_stability,
+    evaluate_permutations,
+    extract_linear_coefficients,
+    scores_for_predictions,
+)
+from Thesis_ML.experiments.model_factory import MODEL_NAMES, make_model
 from Thesis_ML.experiments.segment_execution import (
     SegmentExecutionRequest,
     execute_section_segment,
 )
+from Thesis_ML.experiments.spatial_validation import SPATIAL_AFFINE_ATOL
 
 LOGGER = logging.getLogger(__name__)
 
-_MODEL_NAMES = ("logreg", "linearsvc", "ridge")
 _CV_MODES = ("loso_session", "within_subject_loso_session", "frozen_cross_person_transfer")
 _TARGET_ALIASES = {
     "emotion": "emotion",
@@ -46,7 +50,6 @@ _TARGET_ALIASES = {
     "task": "task",
     "regressor_label": "regressor_label",
 }
-_SPATIAL_AFFINE_ATOL = 1e-5
 
 
 def _current_git_commit() -> str | None:
@@ -62,23 +65,12 @@ def _current_git_commit() -> str | None:
     return process.stdout.strip() or None
 
 
+
 def _make_model(name: str, seed: int) -> Any:
-    # Keep model hyperparameters fixed across runs to avoid hidden dependence on
-    # full selected dataset geometry before fold-level train/test splitting.
-    if name == "logreg":
-        return LogisticRegression(
-            solver="saga",
-            max_iter=5000,
-            random_state=seed,
-        )
-    if name == "linearsvc":
-        return LinearSVC(dual=True, random_state=seed, max_iter=5000)
-    if name == "ridge":
-        return RidgeClassifier(random_state=seed)
-    raise ValueError(f"Unknown model: {name}")
+    return make_model(name=name, seed=seed)
 
 
-def _build_pipeline(model_name: str, seed: int) -> Pipeline:
+def _build_pipeline(model_name: str, seed: int):
     model = _make_model(name=model_name, seed=seed)
     # fMRI voxel vectors are dense numeric arrays; centered scaling is appropriate.
     return Pipeline(
@@ -107,315 +99,26 @@ def _write_json(path: Path, payload: dict[str, Any]) -> None:
     path.write_text(f"{json.dumps(payload, indent=2)}\n", encoding="utf-8")
 
 
-def _normalize_spatial_signature(raw_signature: Any, cache_path: Path) -> dict[str, Any]:
-    if not isinstance(raw_signature, dict):
-        raise ValueError(f"invalid spatial signature payload in {cache_path}")
-
-    required = ("image_shape", "affine", "mask_voxel_count", "feature_count", "mask_sha256")
-    missing = [key for key in required if key not in raw_signature]
-    if missing:
-        raise ValueError(
-            f"missing required spatial signature field(s) {missing} in {cache_path}"
-        )
-
-    image_shape = [int(value) for value in list(raw_signature["image_shape"])]
-    affine_array = np.asarray(raw_signature["affine"], dtype=np.float64)
-    if affine_array.shape != (4, 4):
-        raise ValueError(
-            f"invalid affine shape in {cache_path}: expected (4, 4), got {affine_array.shape}"
-        )
-
-    voxel_size_raw = raw_signature.get("voxel_size", [])
-    voxel_size = [float(value) for value in list(voxel_size_raw)]
-    mask_sha256 = str(raw_signature["mask_sha256"]).strip()
-    if not mask_sha256:
-        raise ValueError(f"empty mask_sha256 in {cache_path}")
-
-    return {
-        "signature_version": int(raw_signature.get("signature_version", 1)),
-        "image_shape": image_shape,
-        "affine": affine_array.tolist(),
-        "voxel_size": voxel_size,
-        "mask_voxel_count": int(raw_signature["mask_voxel_count"]),
-        "feature_count": int(raw_signature["feature_count"]),
-        "mask_sha256": mask_sha256,
-    }
-
-
-def _spatial_mismatch_reasons(
-    reference_signature: dict[str, Any],
-    candidate_signature: dict[str, Any],
-    affine_atol: float,
-) -> list[str]:
-    reasons: list[str] = []
-
-    ref_shape = [int(value) for value in reference_signature["image_shape"]]
-    cand_shape = [int(value) for value in candidate_signature["image_shape"]]
-    if cand_shape != ref_shape:
-        reasons.append(f"image_shape mismatch ({cand_shape} != {ref_shape})")
-
-    ref_affine = np.asarray(reference_signature["affine"], dtype=np.float64)
-    cand_affine = np.asarray(candidate_signature["affine"], dtype=np.float64)
-    if not np.allclose(cand_affine, ref_affine, rtol=0.0, atol=affine_atol):
-        reasons.append("affine mismatch")
-
-    ref_voxel_size = np.asarray(reference_signature.get("voxel_size", []), dtype=np.float64)
-    cand_voxel_size = np.asarray(candidate_signature.get("voxel_size", []), dtype=np.float64)
-    if ref_voxel_size.size > 0 and cand_voxel_size.size > 0:
-        if not np.allclose(cand_voxel_size, ref_voxel_size, rtol=0.0, atol=1e-6):
-            reasons.append("voxel_size mismatch")
-
-    ref_mask_voxels = int(reference_signature["mask_voxel_count"])
-    cand_mask_voxels = int(candidate_signature["mask_voxel_count"])
-    if cand_mask_voxels != ref_mask_voxels:
-        reasons.append(f"mask_voxel_count mismatch ({cand_mask_voxels} != {ref_mask_voxels})")
-
-    ref_feature_count = int(reference_signature["feature_count"])
-    cand_feature_count = int(candidate_signature["feature_count"])
-    if cand_feature_count != ref_feature_count:
-        reasons.append(f"feature_count mismatch ({cand_feature_count} != {ref_feature_count})")
-
-    ref_hash = str(reference_signature["mask_sha256"])
-    cand_hash = str(candidate_signature["mask_sha256"])
-    if cand_hash != ref_hash:
-        reasons.append("mask_sha256 mismatch")
-
-    return reasons
-
-
-def _build_spatial_compatibility_report(
-    cache_groups: list[dict[str, Any]],
-    affine_atol: float,
-) -> dict[str, Any]:
-    checked_groups: list[dict[str, Any]] = []
-    mismatches: list[dict[str, Any]] = []
-    reference_signature: dict[str, Any] | None = None
-    reference_group_id: str | None = None
-
-    for group in cache_groups:
-        group_id = str(group["group_id"])
-        cache_path = str(group["cache_path"])
-        n_features = int(group["n_features"])
-        n_selected_samples = int(group["n_selected_samples"])
-        raw_signature = group.get("raw_signature")
-        normalized_signature: dict[str, Any] | None = None
-        reasons: list[str] = []
-
-        if raw_signature is None:
-            reasons.append("missing spatial signature metadata")
-        else:
-            try:
-                normalized_signature = _normalize_spatial_signature(
-                    raw_signature=raw_signature,
-                    cache_path=Path(cache_path),
-                )
-            except ValueError as exc:
-                reasons.append(str(exc))
-
-        if normalized_signature is not None:
-            signature_feature_count = int(normalized_signature["feature_count"])
-            signature_mask_voxels = int(normalized_signature["mask_voxel_count"])
-            if signature_feature_count != n_features:
-                reasons.append(
-                    "feature_count mismatch against cached matrix width "
-                    f"({signature_feature_count} != {n_features})"
-                )
-            if signature_mask_voxels != n_features:
-                reasons.append(
-                    "mask_voxel_count mismatch against cached matrix width "
-                    f"({signature_mask_voxels} != {n_features})"
-                )
-            if reference_signature is None:
-                reference_signature = normalized_signature
-                reference_group_id = group_id
-            else:
-                reasons.extend(
-                    _spatial_mismatch_reasons(
-                        reference_signature=reference_signature,
-                        candidate_signature=normalized_signature,
-                        affine_atol=affine_atol,
-                    )
-                )
-
-        checked_groups.append(
-            {
-                "group_id": group_id,
-                "cache_path": cache_path,
-                "n_selected_samples": n_selected_samples,
-                "n_features": n_features,
-                "spatial_signature": normalized_signature,
-            }
-        )
-        if reasons:
-            mismatches.append(
-                {
-                    "group_id": group_id,
-                    "cache_path": cache_path,
-                    "reasons": reasons,
-                }
-            )
-
-    if not cache_groups:
-        mismatches.append(
-            {
-                "group_id": None,
-                "cache_path": None,
-                "reasons": ["no cache groups matched selected samples"],
-            }
-        )
-
-    passed = bool(cache_groups) and not mismatches and reference_signature is not None
-    return {
-        "status": "passed" if passed else "failed",
-        "passed": passed,
-        "affine_atol": float(affine_atol),
-        "n_groups_checked": int(len(cache_groups)),
-        "reference_group_id": reference_group_id,
-        "reference_signature": reference_signature,
-        "checked_groups": checked_groups,
-        "mismatches": mismatches,
-    }
-
-
-def _raise_spatial_compatibility_error(report: dict[str, Any]) -> None:
-    mismatch_summaries: list[str] = []
-    for mismatch in report.get("mismatches", [])[:5]:
-        group_id = mismatch.get("group_id")
-        group_label = str(group_id) if group_id is not None else "<unknown-group>"
-        reasons = mismatch.get("reasons", [])
-        if reasons:
-            reason_text = "; ".join(str(reason) for reason in reasons)
-        else:
-            reason_text = "unknown mismatch"
-        mismatch_summaries.append(f"{group_label}: {reason_text}")
-
-    details = " | ".join(mismatch_summaries) if mismatch_summaries else "unknown mismatch"
-    raise ValueError(
-        "Spatial compatibility validation failed before feature stacking. "
-        f"{details}. Rebuild cache with thesisml-cache-features --force if metadata is stale."
-    )
-
-
 def _load_features_from_cache(
     index_df: pd.DataFrame,
     cache_manifest_path: Path,
     spatial_report_path: Path | None = None,
-    affine_atol: float = _SPATIAL_AFFINE_ATOL,
+    affine_atol: float = SPATIAL_AFFINE_ATOL,
 ) -> tuple[np.ndarray, pd.DataFrame, dict[str, Any]]:
-    manifest = pd.read_csv(cache_manifest_path)
-    if manifest.empty:
-        raise ValueError(f"Cache manifest is empty: {cache_manifest_path}")
-
-    selected_ids = set(index_df["sample_id"].astype(str))
-    feature_map: dict[str, np.ndarray] = {}
-    metadata_map: dict[str, dict[str, Any]] = {}
-    selected_cache_groups: list[dict[str, Any]] = []
-
-    for _, row in manifest.iterrows():
-        cache_path = Path(str(row["cache_path"]))
-        if not cache_path.exists():
-            LOGGER.warning("Skipping missing cache file: %s", cache_path)
-            continue
-
-        with np.load(cache_path, allow_pickle=False) as npz:
-            x_block = np.asarray(npz["X"], dtype=np.float32)
-            metadata_json = str(npz["metadata_json"].item())
-            metadata_records = json.loads(metadata_json)
-            raw_signature = None
-            if "spatial_signature_json" in npz.files:
-                raw_signature = json.loads(str(npz["spatial_signature_json"].item()))
-            group_id = (
-                str(npz["group_id"].item())
-                if "group_id" in npz.files
-                else str(row.get("group_id", cache_path.name))
-            )
-
-        if x_block.shape[0] != len(metadata_records):
-            raise ValueError(
-                f"Cache row mismatch in {cache_path}: {x_block.shape[0]} != {len(metadata_records)}"
-            )
-
-        selected_in_group = 0
-        for row_idx, metadata in enumerate(metadata_records):
-            sample_id = str(metadata.get("sample_id", ""))
-            if sample_id and sample_id in selected_ids:
-                feature_map[sample_id] = x_block[row_idx]
-                metadata_map[sample_id] = metadata
-                selected_in_group += 1
-
-        if selected_in_group > 0:
-            selected_cache_groups.append(
-                {
-                    "group_id": group_id,
-                    "cache_path": str(cache_path.resolve()),
-                    "n_selected_samples": int(selected_in_group),
-                    "n_features": int(x_block.shape[1]),
-                    "raw_signature": raw_signature,
-                }
-            )
-
-    spatial_report = _build_spatial_compatibility_report(
-        cache_groups=selected_cache_groups,
+    return load_features_from_cache(
+        index_df=index_df,
+        cache_manifest_path=cache_manifest_path,
+        spatial_report_path=spatial_report_path,
         affine_atol=affine_atol,
     )
-    if spatial_report_path is not None:
-        _write_json(spatial_report_path, spatial_report)
-    if not spatial_report["passed"]:
-        _raise_spatial_compatibility_error(spatial_report)
-
-    vectors: list[np.ndarray] = []
-    metadata_rows: list[dict[str, Any]] = []
-    missing_samples: list[str] = []
-
-    for _, row in index_df.iterrows():
-        sample_id = str(row["sample_id"])
-        if sample_id not in feature_map:
-            missing_samples.append(sample_id)
-            continue
-        vectors.append(feature_map[sample_id])
-        merged = dict(metadata_map[sample_id])
-        merged.update(row.to_dict())
-        metadata_rows.append(merged)
-
-    if missing_samples:
-        preview = ", ".join(missing_samples[:5])
-        raise ValueError(
-            f"{len(missing_samples)} samples were missing in cache. "
-            f"First missing sample_id values: {preview}"
-        )
-
-    x_matrix = np.vstack(vectors).astype(np.float32, copy=False)
-    metadata_df = pd.DataFrame(metadata_rows)
-    return x_matrix, metadata_df, spatial_report
 
 
-def _scores_for_predictions(estimator: Pipeline, x_test: np.ndarray) -> dict[str, list[Any]]:
-    result: dict[str, list[Any]] = {
-        "decision_value": [pd.NA] * len(x_test),
-        "decision_vector": [pd.NA] * len(x_test),
-        "proba_value": [pd.NA] * len(x_test),
-        "proba_vector": [pd.NA] * len(x_test),
-    }
-
-    if hasattr(estimator, "decision_function"):
-        decision = estimator.decision_function(x_test)
-        decision_array = np.asarray(decision)
-        if decision_array.ndim == 1:
-            result["decision_value"] = decision_array.astype(float).tolist()
-        else:
-            result["decision_vector"] = [json.dumps(row.tolist()) for row in decision_array]
-
-    if hasattr(estimator, "predict_proba"):
-        proba = estimator.predict_proba(x_test)
-        proba_array = np.asarray(proba)
-        result["proba_value"] = proba_array.max(axis=1).astype(float).tolist()
-        result["proba_vector"] = [json.dumps(row.tolist()) for row in proba_array]
-
-    return result
+def _scores_for_predictions(estimator, x_test: np.ndarray) -> dict[str, list[Any]]:
+    return scores_for_predictions(estimator=estimator, x_test=x_test)
 
 
 def _evaluate_permutations(
-    pipeline_template: Pipeline,
+    pipeline_template,
     x_matrix: np.ndarray,
     y: np.ndarray,
     splits: list[tuple[np.ndarray, np.ndarray]],
@@ -423,143 +126,23 @@ def _evaluate_permutations(
     n_permutations: int,
     observed_accuracy: float,
 ) -> dict[str, Any]:
-    rng = np.random.default_rng(seed)
-    permutation_accuracies: list[float] = []
-
-    for _ in range(n_permutations):
-        y_true_all: list[str] = []
-        y_pred_all: list[str] = []
-
-        for train_idx, test_idx in splits:
-            y_train = y[train_idx].copy()
-            rng.shuffle(y_train)
-
-            estimator = clone(pipeline_template)
-            estimator.fit(x_matrix[train_idx], y_train)
-            pred = estimator.predict(x_matrix[test_idx])
-
-            y_true_all.extend(y[test_idx].tolist())
-            y_pred_all.extend(pred.tolist())
-
-        permutation_accuracies.append(float(accuracy_score(y_true_all, y_pred_all)))
-
-    ge_count = sum(score >= observed_accuracy for score in permutation_accuracies)
-    p_value = (ge_count + 1.0) / (n_permutations + 1.0)
-    return {
-        "n_permutations": int(n_permutations),
-        "permutation_accuracy_mean": float(np.mean(permutation_accuracies)),
-        "permutation_accuracy_std": float(np.std(permutation_accuracies)),
-        "permutation_p_value": float(p_value),
-    }
+    return evaluate_permutations(
+        pipeline_template=pipeline_template,
+        x_matrix=x_matrix,
+        y=y,
+        splits=splits,
+        seed=seed,
+        n_permutations=n_permutations,
+        observed_accuracy=observed_accuracy,
+    )
 
 
-def _extract_linear_coefficients(estimator: Pipeline) -> tuple[np.ndarray, np.ndarray, list[str]]:
-    model = estimator.named_steps.get("model")
-    if model is None or not hasattr(model, "coef_"):
-        raise ValueError(
-            "Interpretability export requires a fitted linear model with a 'coef_' attribute."
-        )
-
-    coef_array = np.asarray(model.coef_, dtype=np.float64)
-    if coef_array.ndim == 1:
-        coef_array = coef_array.reshape(1, -1)
-    if coef_array.ndim != 2:
-        raise ValueError(f"Unsupported coefficient shape for interpretability: {coef_array.shape}")
-
-    intercept_raw = getattr(model, "intercept_", np.zeros(coef_array.shape[0], dtype=np.float64))
-    intercept_array = np.asarray(intercept_raw, dtype=np.float64).reshape(-1)
-    if intercept_array.size == 1 and coef_array.shape[0] > 1:
-        intercept_array = np.repeat(intercept_array, coef_array.shape[0])
-
-    classes = getattr(model, "classes_", None)
-    if classes is None:
-        class_labels = [f"class_{idx}" for idx in range(coef_array.shape[0])]
-    else:
-        class_labels = [str(value) for value in np.asarray(classes).tolist()]
-
-    return coef_array, intercept_array, class_labels
-
-
-def _safe_corr(a: np.ndarray, b: np.ndarray) -> float:
-    if a.size == 0 or b.size == 0:
-        return 0.0
-    std_a = float(np.std(a))
-    std_b = float(np.std(b))
-    if std_a == 0.0 or std_b == 0.0:
-        return 0.0
-    return float(np.corrcoef(a, b)[0, 1])
+def _extract_linear_coefficients(estimator) -> tuple[np.ndarray, np.ndarray, list[str]]:
+    return extract_linear_coefficients(estimator=estimator)
 
 
 def _compute_interpretability_stability(coef_vectors: list[np.ndarray]) -> dict[str, Any]:
-    if not coef_vectors:
-        return {
-            "status": "no_coefficients",
-            "n_folds": 0,
-            "n_pairs": 0,
-            "mean_pairwise_correlation": None,
-            "mean_sign_consistency": None,
-            "top_k": 0,
-            "mean_top_k_overlap": None,
-        }
-
-    lengths = {int(vector.size) for vector in coef_vectors}
-    if len(lengths) != 1:
-        return {
-            "status": "incompatible_coefficient_shapes",
-            "n_folds": int(len(coef_vectors)),
-            "n_pairs": 0,
-            "mean_pairwise_correlation": None,
-            "mean_sign_consistency": None,
-            "top_k": 0,
-            "mean_top_k_overlap": None,
-        }
-
-    stacked = np.vstack(coef_vectors).astype(np.float64, copy=False)
-    n_folds, n_coeffs = stacked.shape
-    pair_indices = list(itertools.combinations(range(n_folds), 2))
-
-    pairwise_corrs = [
-        _safe_corr(stacked[left_idx], stacked[right_idx]) for left_idx, right_idx in pair_indices
-    ]
-    mean_pairwise_corr = float(np.mean(pairwise_corrs)) if pairwise_corrs else None
-
-    sign_matrix = np.sign(stacked)
-    sign_consistency = np.maximum.reduce(
-        [
-            np.mean(sign_matrix == -1.0, axis=0),
-            np.mean(sign_matrix == 0.0, axis=0),
-            np.mean(sign_matrix == 1.0, axis=0),
-        ]
-    )
-    mean_sign_consistency = float(np.mean(sign_consistency))
-
-    top_k = int(min(100, n_coeffs))
-    if top_k > 0:
-        top_k_sets = [
-            set(np.argpartition(np.abs(row), -top_k)[-top_k:].tolist()) for row in stacked
-        ]
-        top_k_overlaps = []
-        for left_idx, right_idx in pair_indices:
-            left = top_k_sets[left_idx]
-            right = top_k_sets[right_idx]
-            denom = len(left | right)
-            overlap = float(len(left & right) / denom) if denom > 0 else 0.0
-            top_k_overlaps.append(overlap)
-        mean_top_k_overlap = float(np.mean(top_k_overlaps)) if top_k_overlaps else None
-    else:
-        mean_top_k_overlap = None
-
-    return {
-        "status": "ok",
-        "n_folds": int(n_folds),
-        "n_pairs": int(len(pair_indices)),
-        "mean_pairwise_correlation": mean_pairwise_corr,
-        "mean_sign_consistency": mean_sign_consistency,
-        "top_k": top_k,
-        "mean_top_k_overlap": mean_top_k_overlap,
-    }
-
-
+    return compute_interpretability_stability(coef_vectors=coef_vectors)
 def run_experiment(
     index_csv: Path,
     data_root: Path,
@@ -575,7 +158,7 @@ def run_experiment(
     filter_modality: str | None = None,
     n_permutations: int = 0,
     run_id: str | None = None,
-    reports_root: Path | str = Path("reports") / "experiments",
+    reports_root: Path | str = DEFAULT_EXPERIMENT_REPORTS_ROOT,
     start_section: str | None = None,
     end_section: str | None = None,
     base_artifact_id: str | None = None,
@@ -650,7 +233,7 @@ def run_experiment(
             report_dir=report_dir,
             artifact_registry_path=artifact_registry_path,
             code_ref=code_ref,
-            affine_atol=_SPATIAL_AFFINE_ATOL,
+            affine_atol=SPATIAL_AFFINE_ATOL,
             fold_metrics_path=fold_metrics_path,
             fold_splits_path=fold_splits_path,
             predictions_path=predictions_path,
@@ -795,7 +378,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--model",
         required=True,
-        choices=[*_MODEL_NAMES, "all"],
+        choices=[*MODEL_NAMES, "all"],
         help="Model to evaluate.",
     )
     parser.add_argument(
@@ -847,7 +430,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--reports-root",
-        default=str(Path("reports") / "experiments"),
+        default=str(DEFAULT_EXPERIMENT_REPORTS_ROOT),
         help="Root directory for experiment reports.",
     )
     parser.add_argument(
@@ -881,7 +464,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 
-    models = list(_MODEL_NAMES) if args.model == "all" else [args.model]
+    models = list(MODEL_NAMES) if args.model == "all" else [args.model]
     results: list[dict[str, Any]] = []
 
     for model_name in models:

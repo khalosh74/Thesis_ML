@@ -126,7 +126,7 @@ thesisml-run-experiment `
 
 ## Artifacts Reference
 
-Each run writes to `reports/experiments/<run_id>/`:
+Each run writes to `outputs/reports/experiments/<run_id>/`:
 - `config.json`
 - `metrics.json`
 - `fold_metrics.csv`

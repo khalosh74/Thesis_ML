@@ -1,28 +1,16 @@
 from __future__ import annotations
 
-import importlib.util
 from pathlib import Path
 
 import pytest
 from openpyxl import load_workbook
 
+from Thesis_ML.workbook.builder import build_workbook
 from Thesis_ML.orchestration.workbook_compiler import compile_workbook_file
-
-_WORKBOOK_SCRIPT_PATH = (
-    Path(__file__).resolve().parents[1] / "create_thesis_experiment_workbook.py"
-)
-_WORKBOOK_SCRIPT_SPEC = importlib.util.spec_from_file_location(
-    "create_thesis_experiment_workbook",
-    _WORKBOOK_SCRIPT_PATH,
-)
-if _WORKBOOK_SCRIPT_SPEC is None or _WORKBOOK_SCRIPT_SPEC.loader is None:
-    raise RuntimeError(f"Unable to load workbook script from {_WORKBOOK_SCRIPT_PATH}")
-_workbook_script = importlib.util.module_from_spec(_WORKBOOK_SCRIPT_SPEC)
-_WORKBOOK_SCRIPT_SPEC.loader.exec_module(_workbook_script)
 
 
 def _make_workbook(path: Path) -> None:
-    workbook = _workbook_script.build_workbook()
+    workbook = build_workbook()
     workbook.save(path)
 
 

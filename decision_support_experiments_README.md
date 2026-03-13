@@ -1,7 +1,7 @@
 # Decision-Support Experiment Automation
 
 `run_decision_support_experiments.py` automates thesis decision-support experiments E01-E11
-from `decision_support_registry.json` using the existing `run_experiment` pipeline.
+from `configs/decision_support_registry.json` using the existing `run_experiment` pipeline.
 
 ## Typical commands
 
@@ -37,13 +37,13 @@ python run_decision_support_experiments.py --all --dry-run
 
 Per-experiment execution roots:
 
-- `artifacts/decision_support/E01/<campaign_timestamp>/`
-- `.../reports/<run_id>/...` for run artifacts from `run_experiment`
+- `outputs/artifacts/decision_support/E01/<campaign_timestamp>/`
+- `.../outputs/reports/experiments/<run_id>/...` for run artifacts from `run_experiment`
 - `.../run_manifests/*.json` for per-variant audit manifests
 
 Campaign summary root:
 
-- `artifacts/decision_support/campaigns/<campaign_timestamp>/`
+- `outputs/artifacts/decision_support/campaigns/<campaign_timestamp>/`
 - `run_log_export.csv`
 - `decision_support_summary.csv`
 - `decision_recommendations.md`
