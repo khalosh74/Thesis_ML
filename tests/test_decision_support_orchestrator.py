@@ -67,6 +67,38 @@ def _write_registry(path: Path) -> None:
     path.write_text(f"{json.dumps(payload, indent=2)}\n", encoding="utf-8")
 
 
+def _write_segment_registry(path: Path) -> None:
+    payload = {
+        "schema_version": "test",
+        "experiments": [
+            {
+                "experiment_id": "E02",
+                "title": "Segment execution experiment",
+                "stage": "Stage 1 - Target lock",
+                "decision_id": "D01",
+                "manipulated_factor": "Section range",
+                "primary_metric": "balanced_accuracy",
+                "variant_templates": [
+                    {
+                        "template_id": "segment_variant",
+                        "supported": True,
+                        "start_section": "feature_matrix_load",
+                        "end_section": "evaluation",
+                        "base_artifact_id": "feature_cache_base_123",
+                        "reuse_policy": "require_explicit_base",
+                        "params": {
+                            "target": "coarse_affect",
+                            "model": "ridge",
+                            "cv": "loso_session",
+                        },
+                    }
+                ],
+            }
+        ],
+    }
+    path.write_text(f"{json.dumps(payload, indent=2)}\n", encoding="utf-8")
+
+
 def _stub_run_experiment(**kwargs: object) -> dict[str, object]:
     run_id = str(kwargs["run_id"])
     reports_root = Path(kwargs["reports_root"])
@@ -195,3 +227,41 @@ def test_single_blocked_experiment_raises(tmp_path: Path) -> None:
             n_permutations=0,
             dry_run=False,
         )
+
+
+def test_campaign_passes_segment_arguments_to_runner(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    registry_path = tmp_path / "decision_support_registry.json"
+    index_csv = tmp_path / "dataset_index.csv"
+    _write_segment_registry(registry_path)
+    _write_index_csv(index_csv)
+
+    seen_kwargs: list[dict[str, object]] = []
+
+    def _capturing_stub(**kwargs: object) -> dict[str, object]:
+        seen_kwargs.append(dict(kwargs))
+        return _stub_run_experiment(**kwargs)
+
+    monkeypatch.setattr(orchestrator, "run_experiment", _capturing_stub)
+
+    orchestrator.run_decision_support_campaign(
+        registry_path=registry_path,
+        index_csv=index_csv,
+        data_root=tmp_path / "Data",
+        cache_dir=tmp_path / "cache",
+        output_root=tmp_path / "artifacts" / "decision_support",
+        experiment_id=None,
+        stage=None,
+        run_all=True,
+        seed=42,
+        n_permutations=0,
+        dry_run=False,
+    )
+
+    assert len(seen_kwargs) == 1
+    call = seen_kwargs[0]
+    assert call["start_section"] == "feature_matrix_load"
+    assert call["end_section"] == "evaluation"
+    assert call["base_artifact_id"] == "feature_cache_base_123"
+    assert call["reuse_policy"] == "require_explicit_base"

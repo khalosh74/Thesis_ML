@@ -104,6 +104,10 @@ VARIANT_EXPORT_COLUMNS = [
     "test_subject",
     "filter_task",
     "filter_modality",
+    "start_section",
+    "end_section",
+    "base_artifact_id",
+    "reuse_policy",
     "primary_metric_name",
     "primary_metric_value",
     "balanced_accuracy",
@@ -274,6 +278,10 @@ def _expand_template_variants(
     template_id = str(template.get("template_id", "template"))
     supported = bool(template.get("supported", False))
     base_params = dict(template.get("params", {}))
+    start_section = template.get("start_section")
+    end_section = template.get("end_section")
+    base_artifact_id = template.get("base_artifact_id")
+    reuse_policy = template.get("reuse_policy")
     if not supported:
         reason = str(template.get("unsupported_reason", "template marked unsupported"))
         return [
@@ -283,6 +291,10 @@ def _expand_template_variants(
                 "params": base_params,
                 "supported": False,
                 "blocked_reason": reason,
+                "start_section": start_section,
+                "end_section": end_section,
+                "base_artifact_id": base_artifact_id,
+                "reuse_policy": reuse_policy,
             }
         ]
 
@@ -310,6 +322,10 @@ def _expand_template_variants(
                     "params": base_params,
                     "supported": False,
                     "blocked_reason": blocked_reason,
+                    "start_section": start_section,
+                    "end_section": end_section,
+                    "base_artifact_id": base_artifact_id,
+                    "reuse_policy": reuse_policy,
                 }
             ]
 
@@ -344,6 +360,10 @@ def _expand_template_variants(
                 "params": row["params"],
                 "supported": bool(row["supported"]),
                 "blocked_reason": row["blocked_reason"],
+                "start_section": start_section,
+                "end_section": end_section,
+                "base_artifact_id": base_artifact_id,
+                "reuse_policy": reuse_policy,
             }
         )
     return resolved
@@ -410,6 +430,10 @@ def _build_command(
     seed: int,
     n_permutations: int,
     params: dict[str, Any],
+    start_section: str | None = None,
+    end_section: str | None = None,
+    base_artifact_id: str | None = None,
+    reuse_policy: str | None = None,
 ) -> list[str]:
     command = [
         sys.executable,
@@ -446,6 +470,14 @@ def _build_command(
         command.extend(["--filter-task", str(params["filter_task"])])
     if params.get("filter_modality"):
         command.extend(["--filter-modality", str(params["filter_modality"])])
+    if start_section:
+        command.extend(["--start-section", str(start_section)])
+    if end_section:
+        command.extend(["--end-section", str(end_section)])
+    if base_artifact_id:
+        command.extend(["--base-artifact-id", str(base_artifact_id)])
+    if reuse_policy:
+        command.extend(["--reuse-policy", str(reuse_policy)])
     return command
 
 
@@ -500,6 +532,16 @@ def _execute_variant(
     params = dict(variant.get("params", {}))
     supported = bool(variant.get("supported", False))
     blocked_reason = variant.get("blocked_reason")
+    start_section = (
+        str(variant.get("start_section")).strip() if variant.get("start_section") else None
+    )
+    end_section = str(variant.get("end_section")).strip() if variant.get("end_section") else None
+    base_artifact_id = (
+        str(variant.get("base_artifact_id")).strip()
+        if variant.get("base_artifact_id")
+        else None
+    )
+    reuse_policy = str(variant.get("reuse_policy")).strip() if variant.get("reuse_policy") else None
 
     run_id = f"ds_{experiment_id}_{template_id}_{variant_index:03d}_{campaign_id}"
     reports_root = experiment_root / "reports"
@@ -526,6 +568,10 @@ def _execute_variant(
             seed=seed,
             n_permutations=n_permutations,
             params=params,
+            start_section=start_section,
+            end_section=end_section,
+            base_artifact_id=base_artifact_id,
+            reuse_policy=reuse_policy,
         )
         command_text = _command_to_text(command)
         if dry_run:
@@ -554,6 +600,10 @@ def _execute_variant(
                     n_permutations=n_permutations,
                     run_id=run_id,
                     reports_root=reports_root,
+                    start_section=start_section,
+                    end_section=end_section,
+                    base_artifact_id=base_artifact_id,
+                    reuse_policy=reuse_policy,
                 )
                 status = "completed"
             except Exception as exc:
@@ -584,6 +634,10 @@ def _execute_variant(
             "cache_dir": str(cache_dir.resolve()),
             "seed": int(seed),
             "n_permutations": int(n_permutations),
+            "start_section": start_section,
+            "end_section": end_section,
+            "base_artifact_id": base_artifact_id,
+            "reuse_policy": reuse_policy,
             "params": params,
         },
         "dataset_subset": _build_dataset_subset_label(params),
@@ -661,6 +715,10 @@ def _execute_variant(
         "test_subject": params.get("test_subject"),
         "filter_task": params.get("filter_task"),
         "filter_modality": params.get("filter_modality"),
+        "start_section": start_section,
+        "end_section": end_section,
+        "base_artifact_id": base_artifact_id,
+        "reuse_policy": reuse_policy,
         "primary_metric_name": primary_metric_name,
         "primary_metric_value": primary_metric_value,
         "balanced_accuracy": _safe_float(metrics.get("balanced_accuracy")),

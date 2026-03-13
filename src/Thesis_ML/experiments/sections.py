@@ -154,7 +154,6 @@ class InterpretabilityInput(_SectionModel):
     artifact_registry_path: Path
     code_ref: str | None = None
     upstream_feature_matrix_artifact_id: str
-    summary_path: Path
     cv_mode: str = Field(min_length=1)
     model: str = Field(min_length=1)
     target_column: str = Field(min_length=1)

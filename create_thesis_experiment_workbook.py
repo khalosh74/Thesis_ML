@@ -16,6 +16,12 @@ OUT_XLSX = Path("thesis_experiment_program.xlsx")
 SHEET_ORDER = [
     "README",
     "Master_Experiments",
+    "Experiment_Definitions",
+    "Artifact_Registry",
+    "Fixed_Configs",
+    "Objectives",
+    "Machine_Status",
+    "Trial_Results",
     "Data_Selection_Design",
     "Grouping_Strategy_Map",
     "Data_Profile",
@@ -113,6 +119,81 @@ RUN_LOG_COLUMNS = [
     "Used_in_Thesis",
     "Artifact_Path",
     "Notes",
+]
+
+EXPERIMENT_DEFINITIONS_COLUMNS = [
+    "experiment_id",
+    "enabled",
+    "start_section",
+    "end_section",
+    "base_artifact_id",
+    "target",
+    "cv",
+    "model",
+    "subject",
+    "train_subject",
+    "test_subject",
+    "filter_task",
+    "filter_modality",
+    "reuse_policy",
+]
+
+ARTIFACT_REGISTRY_COLUMNS = [
+    "artifact_id",
+    "artifact_type",
+    "run_id",
+    "status",
+    "created_at",
+    "path",
+    "upstream_artifact_ids",
+    "config_hash",
+    "code_ref",
+    "notes",
+]
+
+FIXED_CONFIGS_COLUMNS = [
+    "config_key",
+    "config_value",
+    "scope",
+    "locked",
+    "owner",
+    "last_updated",
+    "notes",
+]
+
+OBJECTIVES_COLUMNS = [
+    "objective_id",
+    "objective_text",
+    "stage",
+    "linked_experiment_id",
+    "primary_metric",
+    "success_criterion",
+    "status",
+    "notes",
+]
+
+MACHINE_STATUS_COLUMNS = [
+    "machine_id",
+    "hostname",
+    "environment_name",
+    "python_version",
+    "gpu",
+    "status",
+    "last_checked",
+    "notes",
+]
+
+TRIAL_RESULTS_COLUMNS = [
+    "trial_id",
+    "experiment_id",
+    "run_id",
+    "status",
+    "primary_metric_name",
+    "primary_metric_value",
+    "report_path",
+    "metrics_path",
+    "artifact_bundle",
+    "notes",
 ]
 
 DATA_SELECTION_COLUMNS = [
@@ -319,6 +400,16 @@ VOCABS = {
     "Transfer_Direction": ["none_or_within_subject", "A_to_B", "B_to_A", "bidirectional", "custom"],
     "Leakage_Risk_Level": ["low", "medium", "high", "critical"],
     "Target_Type": ["coarse_affect", "binary_valence_like", "fine_emotion", "custom_target"],
+    "Execution_Section": [
+        "dataset_selection",
+        "feature_cache_build",
+        "feature_matrix_load",
+        "spatial_validation",
+        "model_fit",
+        "interpretability",
+        "evaluation",
+    ],
+    "Reuse_Policy": ["auto", "require_explicit_base", "disallow"],
 }
 
 DEFINITIONS = [
@@ -576,6 +667,287 @@ def fill_master_sheet(ws) -> int:
             fill=PatternFill("solid", fgColor=COL["missing"]),
         ),
     )
+    return last
+
+
+def fill_experiment_definitions_sheet(ws) -> int:
+    for i, h in enumerate(EXPERIMENT_DEFINITIONS_COLUMNS, start=1):
+        ws.cell(1, i, h)
+    style_header(ws, 1, len(EXPERIMENT_DEFINITIONS_COLUMNS))
+
+    seed_rows = [
+        {
+            "experiment_id": "E16",
+            "enabled": "No",
+            "start_section": "dataset_selection",
+            "end_section": "evaluation",
+            "base_artifact_id": "",
+            "target": "coarse_affect",
+            "cv": "within_subject_loso_session",
+            "model": "ridge",
+            "subject": "sub-001",
+            "train_subject": "",
+            "test_subject": "",
+            "filter_task": "",
+            "filter_modality": "",
+            "reuse_policy": "auto",
+        },
+        {
+            "experiment_id": "E17",
+            "enabled": "No",
+            "start_section": "dataset_selection",
+            "end_section": "evaluation",
+            "base_artifact_id": "",
+            "target": "coarse_affect",
+            "cv": "frozen_cross_person_transfer",
+            "model": "ridge",
+            "subject": "",
+            "train_subject": "sub-001",
+            "test_subject": "sub-002",
+            "filter_task": "",
+            "filter_modality": "",
+            "reuse_policy": "auto",
+        },
+    ]
+    for r, row in enumerate(seed_rows, start=2):
+        for c, name in enumerate(EXPERIMENT_DEFINITIONS_COLUMNS, start=1):
+            ws.cell(r, c, row.get(name, ""))
+
+    last = 81
+    style_body(ws, 2, last, 1, len(EXPERIMENT_DEFINITIONS_COLUMNS))
+    add_table(ws, "ExperimentDefinitionsTable", f"A1:N{last}", style="TableStyleMedium2")
+    ws.freeze_panes = "A2"
+    ws.auto_filter.ref = f"A1:N{last}"
+
+    add_list_validation(ws, "=List_Experiment_ID", col_idx(EXPERIMENT_DEFINITIONS_COLUMNS, "experiment_id"), 2, 1000)
+    add_list_validation(ws, "=List_YesNo", col_idx(EXPERIMENT_DEFINITIONS_COLUMNS, "enabled"), 2, 1000)
+    add_list_validation(ws, "=List_Execution_Section", col_idx(EXPERIMENT_DEFINITIONS_COLUMNS, "start_section"), 2, 1000)
+    add_list_validation(ws, "=List_Execution_Section", col_idx(EXPERIMENT_DEFINITIONS_COLUMNS, "end_section"), 2, 1000)
+    add_list_validation(ws, "=List_Reuse_Policy", col_idx(EXPERIMENT_DEFINITIONS_COLUMNS, "reuse_policy"), 2, 1000)
+
+    set_widths(
+        ws,
+        {
+            "A": 14,
+            "B": 10,
+            "C": 20,
+            "D": 20,
+            "E": 28,
+            "F": 18,
+            "G": 28,
+            "H": 14,
+            "I": 12,
+            "J": 14,
+            "K": 14,
+            "L": 16,
+            "M": 18,
+            "N": 18,
+        },
+    )
+    return last
+
+
+def _fill_simple_structured_sheet(
+    ws,
+    columns: list[str],
+    table_name: str,
+    title: str,
+    width_map: dict[str, float],
+    starter_rows: list[dict[str, str]] | None = None,
+) -> int:
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=len(columns))
+    ws.cell(1, 1, title)
+    ws.cell(1, 1).font = Font(size=12, bold=True)
+    ws.cell(1, 1).fill = PatternFill("solid", fgColor=COL["title_bg"])
+    ws.cell(1, 1).alignment = Alignment(horizontal="left")
+    for i, h in enumerate(columns, start=1):
+        ws.cell(2, i, h)
+    style_header(ws, 2, len(columns))
+
+    if starter_rows:
+        for r, row in enumerate(starter_rows, start=3):
+            for c, name in enumerate(columns, start=1):
+                ws.cell(r, c, row.get(name, ""))
+
+    last = 61
+    style_body(ws, 3, last, 1, len(columns))
+    end_col = get_column_letter(len(columns))
+    add_table(ws, table_name, f"A2:{end_col}{last}", style="TableStyleMedium6")
+    ws.freeze_panes = "A3"
+    ws.auto_filter.ref = f"A2:{end_col}{last}"
+    set_widths(ws, width_map)
+    return last
+
+
+def fill_artifact_registry_sheet(ws) -> int:
+    starter = [
+        {
+            "artifact_id": "",
+            "artifact_type": "",
+            "run_id": "",
+            "status": "",
+            "created_at": "",
+            "path": "",
+            "upstream_artifact_ids": "",
+            "config_hash": "",
+            "code_ref": "",
+            "notes": "Optional workbook mirror of machine registry for audit snapshots.",
+        }
+    ]
+    return _fill_simple_structured_sheet(
+        ws=ws,
+        columns=ARTIFACT_REGISTRY_COLUMNS,
+        table_name="WorkbookArtifactRegistryTable",
+        title="Workbook Artifact Registry Snapshot",
+        width_map={
+            "A": 32,
+            "B": 20,
+            "C": 24,
+            "D": 14,
+            "E": 24,
+            "F": 40,
+            "G": 32,
+            "H": 24,
+            "I": 20,
+            "J": 34,
+        },
+        starter_rows=starter,
+    )
+
+
+def fill_fixed_configs_sheet(ws) -> int:
+    starter = [
+        {
+            "config_key": "default_target",
+            "config_value": "coarse_affect",
+            "scope": "global",
+            "locked": "No",
+            "owner": "Khaled",
+            "last_updated": "",
+            "notes": "Machine-readable defaults for execution templates.",
+        },
+        {
+            "config_key": "default_model",
+            "config_value": "ridge",
+            "scope": "global",
+            "locked": "No",
+            "owner": "Khaled",
+            "last_updated": "",
+            "notes": "",
+        },
+    ]
+    last = _fill_simple_structured_sheet(
+        ws=ws,
+        columns=FIXED_CONFIGS_COLUMNS,
+        table_name="FixedConfigsTable",
+        title="Fixed Configurations and Locks",
+        width_map={
+            "A": 28,
+            "B": 28,
+            "C": 14,
+            "D": 10,
+            "E": 16,
+            "F": 16,
+            "G": 36,
+        },
+        starter_rows=starter,
+    )
+    add_list_validation(ws, "=List_YesNo", col_idx(FIXED_CONFIGS_COLUMNS, "locked"), 3, 1000)
+    return last
+
+
+def fill_objectives_sheet(ws) -> int:
+    starter = [
+        {
+            "objective_id": "OBJ01",
+            "objective_text": "Lock target definition under leakage-aware evaluation.",
+            "stage": "Stage 1 - Target lock",
+            "linked_experiment_id": "E01",
+            "primary_metric": "balanced_accuracy",
+            "success_criterion": "Decision D01 locked with pre-registered rationale.",
+            "status": "Planned",
+            "notes": "",
+        }
+    ]
+    last = _fill_simple_structured_sheet(
+        ws=ws,
+        columns=OBJECTIVES_COLUMNS,
+        table_name="ObjectivesTable",
+        title="Program Objectives",
+        width_map={
+            "A": 12,
+            "B": 44,
+            "C": 28,
+            "D": 18,
+            "E": 20,
+            "F": 34,
+            "G": 14,
+            "H": 30,
+        },
+        starter_rows=starter,
+    )
+    add_list_validation(ws, "=List_Stage", col_idx(OBJECTIVES_COLUMNS, "stage"), 3, 1000)
+    add_list_validation(ws, "=List_Experiment_ID", col_idx(OBJECTIVES_COLUMNS, "linked_experiment_id"), 3, 1000)
+    add_list_validation(ws, "=List_Status", col_idx(OBJECTIVES_COLUMNS, "status"), 3, 1000)
+    return last
+
+
+def fill_machine_status_sheet(ws) -> int:
+    starter = [
+        {
+            "machine_id": "M01",
+            "hostname": "",
+            "environment_name": "thesis-dev",
+            "python_version": "",
+            "gpu": "",
+            "status": "Monitoring",
+            "last_checked": "",
+            "notes": "Track execution environment snapshots used for thesis runs.",
+        }
+    ]
+    last = _fill_simple_structured_sheet(
+        ws=ws,
+        columns=MACHINE_STATUS_COLUMNS,
+        table_name="MachineStatusTable",
+        title="Machine Status and Environment",
+        width_map={
+            "A": 12,
+            "B": 20,
+            "C": 22,
+            "D": 18,
+            "E": 20,
+            "F": 14,
+            "G": 16,
+            "H": 34,
+        },
+        starter_rows=starter,
+    )
+    add_list_validation(ws, "=List_Ethics_Status", col_idx(MACHINE_STATUS_COLUMNS, "status"), 3, 1000)
+    return last
+
+
+def fill_trial_results_sheet(ws) -> int:
+    last = _fill_simple_structured_sheet(
+        ws=ws,
+        columns=TRIAL_RESULTS_COLUMNS,
+        table_name="TrialResultsTable",
+        title="Trial Results (Manual Import or Future Sync)",
+        width_map={
+            "A": 22,
+            "B": 14,
+            "C": 24,
+            "D": 14,
+            "E": 22,
+            "F": 18,
+            "G": 34,
+            "H": 34,
+            "I": 28,
+            "J": 30,
+        },
+        starter_rows=None,
+    )
+    add_list_validation(ws, "=List_Experiment_ID", col_idx(TRIAL_RESULTS_COLUMNS, "experiment_id"), 3, 1000)
+    add_list_validation(ws, "=List_Status", col_idx(TRIAL_RESULTS_COLUMNS, "status"), 3, 1000)
     return last
 
 
@@ -1470,6 +1842,8 @@ def fill_dictionary_sheet(ws, wb: Workbook) -> None:
         "Transfer_Direction",
         "Leakage_Risk_Level",
         "Target_Type",
+        "Execution_Section",
+        "Reuse_Policy",
     ]
     ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=len(names))
     for c, name in enumerate(names, start=1):
@@ -1702,6 +2076,13 @@ def build_workbook() -> Workbook:
 
     fill_readme_sheet(wb["README"])
     fill_master_sheet(wb["Master_Experiments"])
+    add_dynamic_named_list(wb, "List_Experiment_ID", "Master_Experiments", col_idx(MASTER_COLUMNS, "Experiment_ID"), 2)
+    fill_experiment_definitions_sheet(wb["Experiment_Definitions"])
+    fill_artifact_registry_sheet(wb["Artifact_Registry"])
+    fill_fixed_configs_sheet(wb["Fixed_Configs"])
+    fill_objectives_sheet(wb["Objectives"])
+    fill_machine_status_sheet(wb["Machine_Status"])
+    fill_trial_results_sheet(wb["Trial_Results"])
     fill_data_selection_design_sheet(wb["Data_Selection_Design"], wb)
     fill_grouping_strategy_map_sheet(wb["Grouping_Strategy_Map"], wb)
     fill_data_profile_sheet(wb["Data_Profile"])
@@ -1729,6 +2110,12 @@ def validate(path: Path) -> dict[str, str]:
     legacy_required = [
         "README",
         "Master_Experiments",
+        "Experiment_Definitions",
+        "Artifact_Registry",
+        "Fixed_Configs",
+        "Objectives",
+        "Machine_Status",
+        "Trial_Results",
         "Run_Log",
         "Decision_Log",
         "Confirmatory_Set",
@@ -1740,10 +2127,21 @@ def validate(path: Path) -> dict[str, str]:
         "Ethics_Governance_Notes",
     ]
     legacy_sheets_present = all(s in sheets for s in legacy_required)
-    new_sheets = ["Data_Selection_Design", "Grouping_Strategy_Map", "Data_Profile"]
+    new_sheets = [
+        "Experiment_Definitions",
+        "Artifact_Registry",
+        "Fixed_Configs",
+        "Objectives",
+        "Machine_Status",
+        "Trial_Results",
+        "Data_Selection_Design",
+        "Grouping_Strategy_Map",
+        "Data_Profile",
+    ]
     new_sheets_present = all(s in sheets for s in new_sheets)
 
     master = wb["Master_Experiments"]
+    experiment_definitions = wb["Experiment_Definitions"]
     confirm = wb["Confirmatory_Set"]
     dash = wb["Dashboard"]
     dictionary = wb["Dictionary_Validation"]
@@ -1753,6 +2151,7 @@ def validate(path: Path) -> dict[str, str]:
         len(wb[name].data_validations.dataValidation)
         for name in [
             "Master_Experiments",
+            "Experiment_Definitions",
             "Data_Selection_Design",
             "Grouping_Strategy_Map",
             "Run_Log",
@@ -1782,8 +2181,16 @@ def validate(path: Path) -> dict[str, str]:
         "Modality_Coverage",
     ]
     run_log_columns_ok = all(col in run_log_headers for col in run_log_new_cols)
+    experiment_definitions_headers = [
+        experiment_definitions.cell(1, c).value
+        for c in range(1, len(EXPERIMENT_DEFINITIONS_COLUMNS) + 1)
+    ]
+    experiment_definitions_columns_ok = (
+        experiment_definitions_headers == EXPERIMENT_DEFINITIONS_COLUMNS
+    )
 
     required_named_lists = [
+        "List_Experiment_ID",
         "List_Data_Slice_ID",
         "List_Grouping_Strategy_ID",
         "List_Subject_Scope",
@@ -1795,6 +2202,8 @@ def validate(path: Path) -> dict[str, str]:
         "List_Imbalance_Status",
         "List_Leakage_Check_Status",
         "List_Transfer_Direction",
+        "List_Execution_Section",
+        "List_Reuse_Policy",
     ]
     defined_names = {name for name in wb.defined_names.keys()}
     named_lists_ok = all(name in defined_names for name in required_named_lists)
@@ -1816,6 +2225,7 @@ def validate(path: Path) -> dict[str, str]:
         "new_sheets_present": str(new_sheets_present),
         "sheet_count": str(len(sheets)),
         "data_validations_found": str(dv_count),
+        "experiment_definitions_columns_ok": str(experiment_definitions_columns_ok),
         "run_log_new_columns_present": str(run_log_columns_ok),
         "required_named_lists_present": str(named_lists_ok),
         "missing_named_lists": ", ".join(missing_named_lists) if missing_named_lists else "None",
@@ -1839,6 +2249,7 @@ def main() -> None:
     print("New sheets present:", summary["new_sheets_present"])
     print("Sheet count:", summary["sheet_count"])
     print("Data validations found:", summary["data_validations_found"])
+    print("Experiment_Definitions columns valid:", summary["experiment_definitions_columns_ok"])
     print("Run_Log new columns present:", summary["run_log_new_columns_present"])
     print("Required named lists present:", summary["required_named_lists_present"])
     print("Missing named lists:", summary["missing_named_lists"])

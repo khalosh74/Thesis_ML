@@ -30,21 +30,9 @@ from Thesis_ML.artifacts.registry import (
     compute_config_hash,
     register_artifact,
 )
-from Thesis_ML.experiments.sections import (
-    DatasetSelectionInput,
-    EvaluationInput,
-    FeatureCacheBuildInput,
-    FeatureMatrixLoadInput,
-    InterpretabilityInput,
-    ModelFitInput,
-    SpatialValidationInput,
-    dataset_selection,
-    evaluation,
-    feature_cache_build,
-    feature_matrix_load,
-    interpretability,
-    model_fit,
-    spatial_validation,
+from Thesis_ML.experiments.segment_execution import (
+    SegmentExecutionRequest,
+    execute_section_segment,
 )
 
 LOGGER = logging.getLogger(__name__)
@@ -588,6 +576,10 @@ def run_experiment(
     n_permutations: int = 0,
     run_id: str | None = None,
     reports_root: Path | str = Path("reports") / "experiments",
+    start_section: str | None = None,
+    end_section: str | None = None,
+    base_artifact_id: str | None = None,
+    reuse_policy: str | None = None,
 ) -> dict[str, Any]:
     """Run one leakage-safe grouped-CV experiment and write standardized artifacts."""
     index_csv = Path(index_csv)
@@ -622,27 +614,12 @@ def run_experiment(
 
     target_column = _resolve_target_column(target)
 
-    selection_output = dataset_selection(
-        DatasetSelectionInput(
-            index_csv=index_csv,
-            target_column=target_column,
-            cv_mode=cv_mode,
-            subject=subject,
-            train_subject=train_subject,
-            test_subject=test_subject,
-            filter_task=filter_task,
-            filter_modality=filter_modality,
-        )
-    )
-    index_df = selection_output.selected_index_df
-
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     resolved_run_id = run_id or f"{timestamp}_{model}_{target_column}"
     report_dir = reports_root / resolved_run_id
     report_dir.mkdir(parents=True, exist_ok=True)
     artifact_registry_path = reports_root / "artifact_registry.sqlite3"
     code_ref = _current_git_commit()
-    artifact_ids: dict[str, str] = {}
 
     fold_metrics_path = report_dir / "fold_metrics.csv"
     fold_splits_path = report_dir / "fold_splits.csv"
@@ -653,138 +630,77 @@ def run_experiment(
     interpretability_summary_path = report_dir / "interpretability_summary.json"
     interpretability_fold_artifacts_path = report_dir / "interpretability_fold_explanations.csv"
 
-    cache_output = feature_cache_build(
-        FeatureCacheBuildInput(
+    segment_result = execute_section_segment(
+        SegmentExecutionRequest(
             index_csv=index_csv,
             data_root=data_root,
             cache_dir=cache_dir,
-            group_key="subject_session_bas",
-            force=False,
-            run_id=resolved_run_id,
-            artifact_registry_path=artifact_registry_path,
-            code_ref=code_ref,
-        )
-    )
-    artifact_ids["feature_cache"] = cache_output.feature_cache_artifact_id
-
-    matrix_output = feature_matrix_load(
-        FeatureMatrixLoadInput(
-            selected_index_df=index_df,
-            cache_manifest_path=cache_output.cache_manifest_path,
-            spatial_report_path=spatial_compatibility_report_path,
-            affine_atol=_SPATIAL_AFFINE_ATOL,
-            run_id=resolved_run_id,
-            artifact_registry_path=artifact_registry_path,
-            code_ref=code_ref,
-            upstream_feature_cache_artifact_id=cache_output.feature_cache_artifact_id,
             target_column=target_column,
             cv_mode=cv_mode,
+            model=model,
             subject=subject,
             train_subject=train_subject,
             test_subject=test_subject,
             filter_task=filter_task,
             filter_modality=filter_modality,
-            load_features_from_cache_fn=_load_features_from_cache,
-        )
-    )
-    artifact_ids["feature_matrix_bundle"] = matrix_output.feature_matrix_artifact_id
-    x_matrix = matrix_output.x_matrix
-    metadata_df = matrix_output.metadata_df
-    spatial_compatibility = matrix_output.spatial_compatibility
-
-    spatial_validation(
-        SpatialValidationInput(spatial_compatibility=spatial_compatibility)
-    )
-    fit_output = model_fit(
-        ModelFitInput(
-            x_matrix=x_matrix,
-            metadata_df=metadata_df,
-            target_column=target_column,
-            cv_mode=cv_mode,
-            model=model,
-            subject=subject,
-            train_subject=train_subject,
-            test_subject=test_subject,
             seed=seed,
+            n_permutations=n_permutations,
             run_id=resolved_run_id,
             config_filename=config_path.name,
             report_dir=report_dir,
-            build_pipeline_fn=_build_pipeline,
-            scores_for_predictions_fn=_scores_for_predictions,
-            extract_linear_coefficients_fn=_extract_linear_coefficients,
-        )
-    )
-    y = fit_output.y
-    splits = fit_output.splits
-    fold_rows = fit_output.fold_rows
-    split_rows = fit_output.split_rows
-    prediction_rows = fit_output.prediction_rows
-    y_true_all = fit_output.y_true_all
-    y_pred_all = fit_output.y_pred_all
-    interpretability_enabled = fit_output.interpretability_enabled
-    interpretability_fold_rows = fit_output.interpretability_fold_rows
-    interpretability_vectors = fit_output.interpretability_vectors
-
-    interpretability_output = interpretability(
-        InterpretabilityInput(
-            interpretability_enabled=interpretability_enabled,
-            interpretability_fold_rows=interpretability_fold_rows,
-            interpretability_vectors=interpretability_vectors,
-            fold_artifacts_path=interpretability_fold_artifacts_path,
-            summary_path=interpretability_summary_path,
-            compute_interpretability_stability_fn=_compute_interpretability_stability,
-            run_id=resolved_run_id,
             artifact_registry_path=artifact_registry_path,
             code_ref=code_ref,
-            upstream_feature_matrix_artifact_id=matrix_output.feature_matrix_artifact_id,
-            cv_mode=cv_mode,
-            model=model,
-            target_column=target_column,
-            subject=subject,
-        )
-    )
-    interpretability_summary = interpretability_output.interpretability_summary
-    artifact_ids[ARTIFACT_TYPE_INTERPRETABILITY_BUNDLE] = (
-        interpretability_output.interpretability_artifact_id
-    )
-
-    evaluation_output = evaluation(
-        EvaluationInput(
-            x_matrix=x_matrix,
-            y=y,
-            splits=splits,
-            fold_rows=fold_rows,
-            split_rows=split_rows,
-            prediction_rows=prediction_rows,
-            y_true_all=y_true_all,
-            y_pred_all=y_pred_all,
-            subject=subject,
-            train_subject=train_subject,
-            test_subject=test_subject,
-            n_permutations=n_permutations,
-            spatial_compatibility=spatial_compatibility,
-            spatial_report_path=spatial_compatibility_report_path,
-            interpretability_summary=interpretability_summary,
-            interpretability_summary_path=interpretability_summary_path,
+            affine_atol=_SPATIAL_AFFINE_ATOL,
             fold_metrics_path=fold_metrics_path,
             fold_splits_path=fold_splits_path,
             predictions_path=predictions_path,
-            config_filename=config_path.name,
-            build_pipeline_fn=_build_pipeline,
-            evaluate_permutations_fn=_evaluate_permutations,
-            run_id=resolved_run_id,
-            artifact_registry_path=artifact_registry_path,
-            code_ref=code_ref,
-            upstream_feature_matrix_artifact_id=matrix_output.feature_matrix_artifact_id,
             metrics_path=metrics_path,
-            model=model,
-            target_column=target_column,
-            cv_mode=cv_mode,
-            seed=seed,
+            spatial_report_path=spatial_compatibility_report_path,
+            interpretability_summary_path=interpretability_summary_path,
+            interpretability_fold_artifacts_path=interpretability_fold_artifacts_path,
+            start_section=start_section,
+            end_section=end_section,
+            base_artifact_id=base_artifact_id,
+            reuse_policy=reuse_policy,
+            build_pipeline_fn=_build_pipeline,
+            load_features_from_cache_fn=_load_features_from_cache,
+            scores_for_predictions_fn=_scores_for_predictions,
+            extract_linear_coefficients_fn=_extract_linear_coefficients,
+            compute_interpretability_stability_fn=_compute_interpretability_stability,
+            evaluate_permutations_fn=_evaluate_permutations,
         )
     )
-    metrics = evaluation_output.metrics
-    artifact_ids[ARTIFACT_TYPE_METRICS_BUNDLE] = evaluation_output.metrics_artifact_id
+    artifact_ids = dict(segment_result.artifact_ids)
+    metrics = dict(segment_result.metrics or {})
+    spatial_compatibility = segment_result.spatial_compatibility
+    interpretability_summary = segment_result.interpretability_summary
+
+    spatial_status = str(spatial_compatibility["status"]) if spatial_compatibility else None
+    spatial_passed = bool(spatial_compatibility["passed"]) if spatial_compatibility else None
+    spatial_groups_checked = (
+        int(spatial_compatibility["n_groups_checked"]) if spatial_compatibility else None
+    )
+    spatial_reference_group = (
+        spatial_compatibility["reference_group_id"] if spatial_compatibility else None
+    )
+    spatial_affine_atol = (
+        float(spatial_compatibility["affine_atol"]) if spatial_compatibility else None
+    )
+
+    interpretability_enabled = (
+        bool(interpretability_summary["enabled"]) if interpretability_summary else None
+    )
+    interpretability_performed = (
+        bool(interpretability_summary["performed"]) if interpretability_summary else None
+    )
+    interpretability_status = (
+        str(interpretability_summary["status"]) if interpretability_summary else None
+    )
+    interpretability_fold_artifacts = (
+        interpretability_summary.get("fold_artifacts_path")
+        if interpretability_summary
+        else None
+    )
 
     config = {
         "run_id": resolved_run_id,
@@ -805,17 +721,23 @@ def run_experiment(
         "filter_task": filter_task,
         "filter_modality": filter_modality,
         "n_permutations": int(n_permutations),
+        "start_section": start_section,
+        "end_section": end_section,
+        "base_artifact_id": base_artifact_id,
+        "reuse_policy": reuse_policy,
+        "planned_sections": segment_result.planned_sections,
+        "executed_sections": segment_result.executed_sections,
         "fold_splits_path": str(fold_splits_path.resolve()),
-        "spatial_compatibility_status": str(spatial_compatibility["status"]),
-        "spatial_compatibility_passed": bool(spatial_compatibility["passed"]),
-        "spatial_compatibility_n_groups_checked": int(spatial_compatibility["n_groups_checked"]),
-        "spatial_compatibility_reference_group_id": spatial_compatibility["reference_group_id"],
-        "spatial_compatibility_affine_atol": float(spatial_compatibility["affine_atol"]),
+        "spatial_compatibility_status": spatial_status,
+        "spatial_compatibility_passed": spatial_passed,
+        "spatial_compatibility_n_groups_checked": spatial_groups_checked,
+        "spatial_compatibility_reference_group_id": spatial_reference_group,
+        "spatial_compatibility_affine_atol": spatial_affine_atol,
         "spatial_compatibility_report_path": str(spatial_compatibility_report_path.resolve()),
-        "interpretability_enabled": bool(interpretability_summary["enabled"]),
-        "interpretability_performed": bool(interpretability_summary["performed"]),
-        "interpretability_status": str(interpretability_summary["status"]),
-        "interpretability_fold_artifacts_path": interpretability_summary["fold_artifacts_path"],
+        "interpretability_enabled": interpretability_enabled,
+        "interpretability_performed": interpretability_performed,
+        "interpretability_status": interpretability_status,
+        "interpretability_fold_artifacts_path": interpretability_fold_artifacts,
         "interpretability_summary_path": str(interpretability_summary_path.resolve()),
         "python_version": platform.python_version(),
         "numpy_version": np.__version__,
@@ -827,9 +749,10 @@ def run_experiment(
     config_path.write_text(f"{json.dumps(config, indent=2)}\n", encoding="utf-8")
 
     report_upstream = [
-        evaluation_output.metrics_artifact_id,
-        interpretability_output.interpretability_artifact_id,
+        artifact_ids.get(ARTIFACT_TYPE_METRICS_BUNDLE),
+        artifact_ids.get(ARTIFACT_TYPE_INTERPRETABILITY_BUNDLE),
     ]
+    report_upstream = [artifact_id for artifact_id in report_upstream if artifact_id]
     experiment_report_artifact = register_artifact(
         registry_path=artifact_registry_path,
         artifact_type=ARTIFACT_TYPE_EXPERIMENT_REPORT,
@@ -852,8 +775,10 @@ def run_experiment(
         "predictions_path": str(predictions_path.resolve()),
         "spatial_compatibility_report_path": str(spatial_compatibility_report_path.resolve()),
         "interpretability_summary_path": str(interpretability_summary_path.resolve()),
-        "interpretability_fold_artifacts_path": interpretability_summary["fold_artifacts_path"],
+        "interpretability_fold_artifacts_path": interpretability_fold_artifacts,
         "artifact_registry_path": str(artifact_registry_path.resolve()),
+        "planned_sections": segment_result.planned_sections,
+        "executed_sections": segment_result.executed_sections,
         "artifact_ids": artifact_ids,
         "metrics": metrics,
     }
@@ -925,6 +850,29 @@ def _build_parser() -> argparse.ArgumentParser:
         default=str(Path("reports") / "experiments"),
         help="Root directory for experiment reports.",
     )
+    parser.add_argument(
+        "--start-section",
+        default=None,
+        help="Optional first section to execute for segmented runs.",
+    )
+    parser.add_argument(
+        "--end-section",
+        default=None,
+        help="Optional last section to execute for segmented runs.",
+    )
+    parser.add_argument(
+        "--base-artifact-id",
+        default=None,
+        help=(
+            "Optional artifact ID used to resume segmented runs when start-section "
+            "is after feature_cache_build."
+        ),
+    )
+    parser.add_argument(
+        "--reuse-policy",
+        default=None,
+        help="Optional reuse policy for segmented runs (auto, require_explicit_base, disallow).",
+    )
     return parser
 
 
@@ -958,15 +906,19 @@ def main(argv: list[str] | None = None) -> int:
             n_permutations=args.n_permutations,
             run_id=model_run_id,
             reports_root=Path(args.reports_root),
+            start_section=args.start_section,
+            end_section=args.end_section,
+            base_artifact_id=args.base_artifact_id,
+            reuse_policy=args.reuse_policy,
         )
         results.append(
             {
                 "model": model_name,
                 "run_id": result["run_id"],
                 "report_dir": result["report_dir"],
-                "accuracy": result["metrics"]["accuracy"],
-                "balanced_accuracy": result["metrics"]["balanced_accuracy"],
-                "macro_f1": result["metrics"]["macro_f1"],
+                "accuracy": result["metrics"].get("accuracy"),
+                "balanced_accuracy": result["metrics"].get("balanced_accuracy"),
+                "macro_f1": result["metrics"].get("macro_f1"),
             }
         )
 

@@ -16,6 +16,12 @@ class SectionName(StrEnum):
     INTERPRETABILITY = "interpretability"
 
 
+class ReusePolicy(StrEnum):
+    AUTO = "auto"
+    REQUIRE_EXPLICIT_BASE = "require_explicit_base"
+    DISALLOW = "disallow"
+
+
 def supported_sections() -> list[str]:
     return [section.value for section in SectionName]
 
@@ -45,6 +51,10 @@ class TrialSpec(_ContractModel):
     expand: dict[str, str] = Field(default_factory=dict)
     sections: list[SectionName] = Field(default_factory=supported_sections)
     artifacts: list[ArtifactRef] = Field(default_factory=list)
+    start_section: SectionName = SectionName.DATASET_SELECTION
+    end_section: SectionName = SectionName.EVALUATION
+    base_artifact_id: str | None = None
+    reuse_policy: ReusePolicy = ReusePolicy.AUTO
 
     @model_validator(mode="after")
     def _validate_supported_template_params(self) -> TrialSpec:
@@ -59,6 +69,8 @@ class TrialSpec(_ContractModel):
                     "Supported trial template must define params keys: "
                     + ", ".join(missing)
                 )
+        if self.base_artifact_id is not None and not self.base_artifact_id.strip():
+            raise ValueError("base_artifact_id must be non-empty when provided.")
         return self
 
 

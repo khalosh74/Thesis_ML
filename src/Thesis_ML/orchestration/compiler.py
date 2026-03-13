@@ -25,6 +25,10 @@ def _compile_trials_for_experiment(
         payload["experiment_id"] = experiment_id
         payload.setdefault("sections", supported_sections())
         payload.setdefault("artifacts", [])
+        payload.setdefault("start_section", "dataset_selection")
+        payload.setdefault("end_section", "evaluation")
+        payload.setdefault("base_artifact_id", None)
+        payload.setdefault("reuse_policy", "auto")
         try:
             compiled_trials.append(TrialSpec.model_validate(payload))
         except ValidationError as exc:

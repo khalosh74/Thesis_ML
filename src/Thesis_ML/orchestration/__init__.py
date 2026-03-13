@@ -12,11 +12,14 @@ __all__ = [
     "ArtifactRef",
     "CompiledStudyManifest",
     "ExperimentSpec",
+    "ReusePolicy",
     "SectionName",
     "TrialResultSummary",
     "TrialSpec",
     "compile_registry_file",
     "compile_registry_payload",
+    "compile_workbook_file",
+    "compile_workbook_workbook",
     "decision_support",
     "run_decision_support_campaign",
 ]
@@ -25,11 +28,17 @@ _CONTRACT_EXPORTS = {
     "ArtifactRef",
     "CompiledStudyManifest",
     "ExperimentSpec",
+    "ReusePolicy",
     "SectionName",
     "TrialResultSummary",
     "TrialSpec",
 }
-_COMPILER_EXPORTS = {"compile_registry_file", "compile_registry_payload"}
+_COMPILER_EXPORTS = {
+    "compile_registry_file",
+    "compile_registry_payload",
+    "compile_workbook_file",
+    "compile_workbook_workbook",
+}
 
 
 if TYPE_CHECKING:
@@ -38,10 +47,12 @@ if TYPE_CHECKING:
         ArtifactRef,
         CompiledStudyManifest,
         ExperimentSpec,
+        ReusePolicy,
         SectionName,
         TrialResultSummary,
         TrialSpec,
     )
+    from .workbook_compiler import compile_workbook_file, compile_workbook_workbook
     from .decision_support import run_decision_support_campaign
 
 
@@ -50,7 +61,10 @@ def __getattr__(name: str) -> Any:
         module = import_module("Thesis_ML.orchestration.contracts")
         return getattr(module, name)
     if name in _COMPILER_EXPORTS:
-        module = import_module("Thesis_ML.orchestration.compiler")
+        if name in {"compile_workbook_file", "compile_workbook_workbook"}:
+            module = import_module("Thesis_ML.orchestration.workbook_compiler")
+        else:
+            module = import_module("Thesis_ML.orchestration.compiler")
         return getattr(module, name)
     if name == "run_decision_support_campaign":
         module = import_module("Thesis_ML.orchestration.decision_support")

@@ -55,6 +55,9 @@ def test_compile_registry_payload_success() -> None:
     assert experiment.experiment_id == "E01"
     assert experiment.variant_templates[0].template_id == "coarse_affect_within_subject"
     assert experiment.variant_templates[0].sections == expected_sections
+    assert experiment.variant_templates[0].start_section == "dataset_selection"
+    assert experiment.variant_templates[0].end_section == "evaluation"
+    assert experiment.variant_templates[0].reuse_policy == "auto"
     assert experiment.variant_templates[1].supported == False  # noqa: E712
 
 
@@ -112,4 +115,20 @@ def test_compile_registry_payload_supported_trial_missing_required_params_raises
     template["params"] = {"target": "coarse_affect", "model": "ridge"}
 
     with pytest.raises(ValueError, match="params keys: cv"):
+        compile_registry_payload(payload)
+
+
+def test_compile_registry_payload_invalid_reuse_policy_raises() -> None:
+    payload = _minimal_registry_payload()
+    experiments = payload["experiments"]
+    assert isinstance(experiments, list)
+    experiment = experiments[0]
+    assert isinstance(experiment, dict)
+    templates = experiment["variant_templates"]
+    assert isinstance(templates, list)
+    template = templates[0]
+    assert isinstance(template, dict)
+    template["reuse_policy"] = "invalid_policy"
+
+    with pytest.raises(ValueError, match="reuse_policy"):
         compile_registry_payload(payload)
