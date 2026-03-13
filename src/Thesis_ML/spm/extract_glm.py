@@ -7,11 +7,12 @@ import json
 import logging
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import nibabel as nib
 import numpy as np
 import pandas as pd
+from nibabel.spatialimages import SpatialImage
 
 LOGGER = logging.getLogger(__name__)
 
@@ -219,7 +220,7 @@ def extract_glm_session(
     mapping_path = out_dir / "regressor_beta_mapping.csv"
     mapping.to_csv(mapping_path, index=False)
 
-    mask_img = nib.load(str(mask_path))
+    mask_img = cast(SpatialImage, nib.load(str(mask_path)))
     mask_data = np.asarray(mask_img.get_fdata(dtype=np.float32))
     mask_bool = np.isfinite(mask_data) & (mask_data > 0)
 

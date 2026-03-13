@@ -14,13 +14,10 @@ from Thesis_ML.artifacts.registry import (
     ARTIFACT_TYPE_FEATURE_MATRIX_BUNDLE,
     ARTIFACT_TYPE_INTERPRETABILITY_BUNDLE,
     ARTIFACT_TYPE_METRICS_BUNDLE,
-    ArtifactRecord,
     compute_config_hash,
-    find_latest_compatible_artifact,
     get_artifact,
-    list_artifacts_for_run,
 )
-from Thesis_ML.experiments.sections import (
+from Thesis_ML.experiments.section_models import (
     DatasetSelectionInput,
     EvaluationInput,
     FeatureCacheBuildInput,
@@ -28,6 +25,8 @@ from Thesis_ML.experiments.sections import (
     InterpretabilityInput,
     ModelFitInput,
     SpatialValidationInput,
+)
+from Thesis_ML.experiments.sections import (
     dataset_selection,
     evaluation,
     feature_cache_build,
@@ -36,21 +35,16 @@ from Thesis_ML.experiments.sections import (
     model_fit,
     spatial_validation,
 )
-from Thesis_ML.orchestration.contracts import ReusePolicy, SectionName
-
-EXECUTION_SECTION_ORDER: tuple[SectionName, ...] = (
-    SectionName.DATASET_SELECTION,
-    SectionName.FEATURE_CACHE_BUILD,
-    SectionName.FEATURE_MATRIX_LOAD,
-    SectionName.SPATIAL_VALIDATION,
-    SectionName.MODEL_FIT,
-    SectionName.INTERPRETABILITY,
-    SectionName.EVALUATION,
+from Thesis_ML.experiments.segment_execution_helpers import (
+    expected_base_artifact_type,
+    find_reusable_run_artifact,
+    is_after_or_equal,
+    normalize_reuse_policy,
+    plan_section_path,
+    require_callable,
+    resolve_base_artifact,
 )
-
-_SECTION_TO_INDEX = {name: idx for idx, name in enumerate(EXECUTION_SECTION_ORDER)}
-_EARLIEST_SECTION = EXECUTION_SECTION_ORDER[0]
-_LATEST_SECTION = EXECUTION_SECTION_ORDER[-1]
+from Thesis_ML.orchestration.contracts import ReusePolicy, SectionName
 
 
 @dataclass(frozen=True)
@@ -111,195 +105,31 @@ class SegmentExecutionResult:
     interpretability_summary: dict[str, Any] | None
 
 
-def _normalize_section_name(
-    value: str | SectionName | None,
-    *,
-    field_name: str,
-    default: SectionName,
-) -> SectionName:
-    if value is None:
-        return default
-    if isinstance(value, SectionName):
-        return value
-    try:
-        return SectionName(str(value))
-    except ValueError as exc:
-        allowed = ", ".join(section.value for section in EXECUTION_SECTION_ORDER)
-        raise ValueError(f"Invalid {field_name}='{value}'. Allowed values: {allowed}") from exc
-
-
-def _normalize_reuse_policy(value: str | ReusePolicy | None) -> ReusePolicy:
-    if value is None:
-        return ReusePolicy.AUTO
-    if isinstance(value, ReusePolicy):
-        return value
-    try:
-        return ReusePolicy(str(value))
-    except ValueError as exc:
-        allowed = ", ".join(policy.value for policy in ReusePolicy)
-        raise ValueError(f"Invalid reuse_policy='{value}'. Allowed values: {allowed}") from exc
-
-
-def plan_section_path(
-    start_section: str | SectionName | None = None,
-    end_section: str | SectionName | None = None,
-) -> list[SectionName]:
-    start = _normalize_section_name(
-        start_section,
-        field_name="start_section",
-        default=_EARLIEST_SECTION,
-    )
-    end = _normalize_section_name(
-        end_section,
-        field_name="end_section",
-        default=_LATEST_SECTION,
-    )
-    start_idx = _SECTION_TO_INDEX[start]
-    end_idx = _SECTION_TO_INDEX[end]
-    if start_idx > end_idx:
-        raise ValueError(
-            "Invalid section range: start_section must be before or equal to end_section."
-        )
-    return list(EXECUTION_SECTION_ORDER[start_idx : end_idx + 1])
-
-
-def _requires_base_artifact(start: SectionName) -> bool:
-    return _SECTION_TO_INDEX[start] >= _SECTION_TO_INDEX[SectionName.FEATURE_MATRIX_LOAD]
-
-
-def _expected_base_artifact_type(start: SectionName) -> str:
-    if start == SectionName.FEATURE_MATRIX_LOAD:
-        return ARTIFACT_TYPE_FEATURE_CACHE
-    return ARTIFACT_TYPE_FEATURE_MATRIX_BUNDLE
-
-
-def _resolve_base_artifact(
-    request: SegmentExecutionRequest,
-    start_section: SectionName,
-    reuse_policy: ReusePolicy,
-) -> ArtifactRecord | None:
-    if not _requires_base_artifact(start_section):
-        if request.base_artifact_id:
-            raise ValueError(
-                "base_artifact_id is only valid when start_section is at or after feature_matrix_load."
-            )
-        return None
-
-    if reuse_policy == ReusePolicy.DISALLOW:
-        raise ValueError(
-            "reuse_policy='disallow' is incompatible with segmented execution that starts after "
-            "feature_cache_build."
-        )
-
-    expected_type = _expected_base_artifact_type(start_section)
-    if request.base_artifact_id:
-        record = get_artifact(
-            registry_path=request.artifact_registry_path,
-            artifact_id=request.base_artifact_id,
-        )
-        if record is None:
-            raise ValueError(
-                f"Base artifact '{request.base_artifact_id}' was not found in registry."
-            )
-        if record.artifact_type != expected_type:
-            raise ValueError(
-                f"Incompatible base artifact '{record.artifact_id}': expected artifact_type "
-                f"'{expected_type}', got '{record.artifact_type}'."
-            )
-        return record
-
-    if reuse_policy == ReusePolicy.REQUIRE_EXPLICIT_BASE:
-        raise ValueError(
-            "reuse_policy='require_explicit_base' requires base_artifact_id for segmented runs."
-        )
-
-    if start_section == SectionName.FEATURE_MATRIX_LOAD:
-        feature_cache_config_hash = compute_config_hash(
-            {
-                "index_csv": str(request.index_csv.resolve()),
-                "data_root": str(request.data_root.resolve()),
-                "cache_dir": str(request.cache_dir.resolve()),
-                "group_key": "subject_session_bas",
-                "force": False,
-            }
-        )
-        cached = find_latest_compatible_artifact(
-            registry_path=request.artifact_registry_path,
-            artifact_type=ARTIFACT_TYPE_FEATURE_CACHE,
-            config_hash=feature_cache_config_hash,
-            code_ref=request.code_ref,
-        )
-        if cached is not None:
-            return cached
-
-    raise ValueError(
-        f"start_section='{start_section.value}' requires a compatible base artifact. "
-        "Provide base_artifact_id explicitly."
-    )
-
-
-def _is_after_or_equal(left: SectionName, right: SectionName) -> bool:
-    return _SECTION_TO_INDEX[left] >= _SECTION_TO_INDEX[right]
-
-
-def _require_callable(name: str, value: Callable[..., Any] | None) -> Callable[..., Any]:
-    if value is None:
-        raise ValueError(f"Missing required callable for segment execution: {name}")
-    return value
-
-
-def _is_reusable_status(status: str) -> bool:
-    lowered = str(status).strip().lower()
-    return lowered not in {"failed", "error", "blocked", "running", "planned"}
-
-
-def _find_reusable_run_artifact(
-    request: SegmentExecutionRequest,
-    *,
-    artifact_type: str,
-    expected_config_hash: str | None,
-) -> ArtifactRecord | None:
-    for record in list_artifacts_for_run(
-        registry_path=request.artifact_registry_path,
-        run_id=request.run_id,
-    ):
-        if record.artifact_type != artifact_type:
-            continue
-        if expected_config_hash is not None and record.config_hash != expected_config_hash:
-            continue
-        if not _is_reusable_status(record.status):
-            continue
-        if not Path(record.path).exists():
-            continue
-        return record
-    return None
-
-
 def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutionResult:
     planned_sections = plan_section_path(request.start_section, request.end_section)
     start_section = planned_sections[0]
-    reuse_policy = _normalize_reuse_policy(request.reuse_policy)
-    base_artifact = _resolve_base_artifact(
+    reuse_policy = normalize_reuse_policy(request.reuse_policy)
+    base_artifact = resolve_base_artifact(
         request=request,
         start_section=start_section,
         reuse_policy=reuse_policy,
     )
 
-    build_pipeline_fn = _require_callable("build_pipeline_fn", request.build_pipeline_fn)
-    load_features_from_cache_fn = _require_callable(
+    build_pipeline_fn = require_callable("build_pipeline_fn", request.build_pipeline_fn)
+    load_features_from_cache_fn = require_callable(
         "load_features_from_cache_fn", request.load_features_from_cache_fn
     )
-    scores_for_predictions_fn = _require_callable(
+    scores_for_predictions_fn = require_callable(
         "scores_for_predictions_fn", request.scores_for_predictions_fn
     )
-    extract_linear_coefficients_fn = _require_callable(
+    extract_linear_coefficients_fn = require_callable(
         "extract_linear_coefficients_fn", request.extract_linear_coefficients_fn
     )
-    compute_interpretability_stability_fn = _require_callable(
+    compute_interpretability_stability_fn = require_callable(
         "compute_interpretability_stability_fn",
         request.compute_interpretability_stability_fn,
     )
-    evaluate_permutations_fn = _require_callable(
+    evaluate_permutations_fn = require_callable(
         "evaluate_permutations_fn", request.evaluate_permutations_fn
     )
 
@@ -318,7 +148,7 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
     interpretability_summary: dict[str, Any] | None = None
     metrics: dict[str, Any] | None = None
 
-    if SectionName.DATASET_SELECTION not in planned_sections and _is_after_or_equal(
+    if SectionName.DATASET_SELECTION not in planned_sections and is_after_or_equal(
         planned_sections[-1], SectionName.FEATURE_MATRIX_LOAD
     ):
         selected_index_df = dataset_selection(
@@ -335,7 +165,7 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
         ).selected_index_df
 
     if base_artifact is not None:
-        expected_type = _expected_base_artifact_type(start_section)
+        expected_type = expected_base_artifact_type(start_section)
         if expected_type == ARTIFACT_TYPE_FEATURE_CACHE:
             cache_manifest_path = Path(base_artifact.path)
             feature_cache_artifact_id = base_artifact.artifact_id
@@ -392,7 +222,7 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
             selected_index_df = selection_output.selected_index_df
         elif section == SectionName.FEATURE_CACHE_BUILD:
             if request.reuse_completed_artifacts:
-                reusable_feature_cache = _find_reusable_run_artifact(
+                reusable_feature_cache = find_reusable_run_artifact(
                     request,
                     artifact_type=ARTIFACT_TYPE_FEATURE_CACHE,
                     expected_config_hash=compute_config_hash(
@@ -439,7 +269,7 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
                     "Run feature_cache_build or provide a compatible base_artifact_id."
                 )
             if request.reuse_completed_artifacts:
-                reusable_feature_matrix = _find_reusable_run_artifact(
+                reusable_feature_matrix = find_reusable_run_artifact(
                     request,
                     artifact_type=ARTIFACT_TYPE_FEATURE_MATRIX_BUNDLE,
                     expected_config_hash=compute_config_hash(
@@ -533,7 +363,7 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
             if feature_matrix_artifact_id is None:
                 raise ValueError("interpretability requires a feature_matrix artifact reference.")
             if request.reuse_completed_artifacts and request.interpretability_summary_path.exists():
-                reusable_interpretability = _find_reusable_run_artifact(
+                reusable_interpretability = find_reusable_run_artifact(
                     request,
                     artifact_type=ARTIFACT_TYPE_INTERPRETABILITY_BUNDLE,
                     expected_config_hash=None,
@@ -590,7 +420,7 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
                     "the section path."
                 )
             if request.reuse_completed_artifacts and request.metrics_path.exists():
-                reusable_metrics = _find_reusable_run_artifact(
+                reusable_metrics = find_reusable_run_artifact(
                     request,
                     artifact_type=ARTIFACT_TYPE_METRICS_BUNDLE,
                     expected_config_hash=compute_config_hash(

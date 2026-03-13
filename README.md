@@ -55,6 +55,12 @@ python -m pip install uv
 python -m uv sync --frozen --extra dev
 ```
 
+Optional extra for Optuna-backed search mode:
+
+```powershell
+python -m uv sync --frozen --extra dev --extra optuna
+```
+
 ## Bootstrap commands (clean machine)
 
 You can run the scripts:
@@ -82,6 +88,20 @@ python -m uv run thesisml-run-decision-support `
   --all
 ```
 
+Optional Optuna-backed variant search:
+
+```powershell
+python -m uv run thesisml-run-decision-support `
+  --registry configs/decision_support_registry.json `
+  --index-csv Data/processed/dataset_index.csv `
+  --data-root Data `
+  --cache-dir Data/processed/feature_cache `
+  --output-root outputs/artifacts/decision_support `
+  --all `
+  --search-mode optuna `
+  --optuna-trials 25
+```
+
 ## Compatibility install path (kept)
 
 The editable `pip` flow remains supported:
@@ -92,6 +112,7 @@ python -m pip install -e ".[dev,spm]"
 ```
 
 If you do not need `SPM.mat` parsing, `.[dev]` is sufficient.
+If you need Optuna search mode, install `.[optuna]` (or `.[dev,optuna]`).
 
 ## Docker / devcontainer
 
@@ -258,6 +279,16 @@ python -m uv run python -m ruff check src/Thesis_ML/artifacts src/Thesis_ML/orch
 python -m uv run python -m ruff format --check src/Thesis_ML/artifacts src/Thesis_ML/orchestration src/Thesis_ML/workbook src/Thesis_ML/experiments/segment_execution.py src/Thesis_ML/experiments/sections.py src/Thesis_ML/experiments/run_experiment.py --exclude src/Thesis_ML/workbook/template_builder.py
 python -m uv run python -m pytest -q
 ```
+
+`mypy` in CI is required and checks:
+- `src/Thesis_ML/artifacts`
+- `src/Thesis_ML/orchestration`
+- `src/Thesis_ML/workbook`
+- `src/Thesis_ML/spm/extract_glm.py`
+- `src/Thesis_ML/features/nifti_features.py`
+- `src/Thesis_ML/experiments/run_experiment.py`
+- `src/Thesis_ML/experiments/segment_execution.py`
+- `src/Thesis_ML/experiments/sections.py`
 
 ## Compatibility wrappers (deprecated)
 

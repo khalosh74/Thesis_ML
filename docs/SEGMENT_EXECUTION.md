@@ -52,6 +52,10 @@ thesisml-run-experiment \
 
 - `resume=True` -> enables controlled same-run completed artifact reuse.
 - `reuse_completed_artifacts=True` -> explicit reuse for compatible same-run section outputs.
+- `force=True` -> clears the run directory and disables resume behavior for that invocation.
+- `force=True` and `resume=True` are mutually exclusive.
+- same-run reuse only applies within the current `run_id` output directory.
+- cross-run reuse requires explicit `base_artifact_id` with compatible segmented start.
 
 Result payload includes:
 
@@ -66,4 +70,3 @@ Result payload includes:
 - start section after end section
 - missing/incompatible base artifact
 - missing prerequisite outputs for requested section path
-

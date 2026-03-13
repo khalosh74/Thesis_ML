@@ -99,6 +99,13 @@ def test_compile_registry_file_sets_source_path(tmp_path: Path) -> None:
     assert manifest.experiments[0].experiment_id == "E01"
 
 
+def test_shipped_registry_compiles() -> None:
+    registry_path = Path(__file__).resolve().parents[1] / "configs" / "decision_support_registry.json"
+    manifest = compile_registry_file(registry_path)
+    assert manifest.source_registry_path == str(registry_path.resolve())
+    assert len(manifest.experiments) >= 1
+
+
 def test_compile_registry_payload_missing_experiments_raises() -> None:
     with pytest.raises(ValueError, match="experiments"):
         compile_registry_payload({"schema_version": "test"})

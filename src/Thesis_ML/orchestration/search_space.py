@@ -51,7 +51,9 @@ def _expand_optuna(
         import optuna
     except Exception as exc:  # pragma: no cover - environment-dependent
         raise ValueError(
-            "Search space requires optimization_mode='optuna' but 'optuna' is not installed."
+            "Search space requires optimization_mode='optuna' but 'optuna' is not installed. "
+            'Install optional dependencies with `pip install -e ".[optuna]"` '
+            "or `uv sync --extra optuna`."
         ) from exc
 
     n_trials = optuna_trials or search_space.max_trials or 10

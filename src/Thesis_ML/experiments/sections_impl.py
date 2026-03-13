@@ -16,7 +16,11 @@ from sklearn.metrics import (
 from sklearn.model_selection import LeaveOneGroupOut
 
 if TYPE_CHECKING:
-    from Thesis_ML.experiments.sections import EvaluationInput, InterpretabilityInput, ModelFitInput
+    from Thesis_ML.experiments.section_models import (
+        EvaluationInput,
+        InterpretabilityInput,
+        ModelFitInput,
+    )
 
 
 def execute_model_fit(section_input: ModelFitInput) -> dict[str, Any]:

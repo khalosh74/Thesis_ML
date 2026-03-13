@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from Thesis_ML.orchestration.contracts import SearchSpaceSpec
 from Thesis_ML.orchestration.result_aggregation import (
     aggregate_variant_records,
@@ -46,10 +48,7 @@ def test_deterministic_search_space_expands_cartesian_grid() -> None:
     )
 
     assert len(expanded) == 4
-    assignments = {
-        (str(row["params"]["model"]), str(row["start_section"]))
-        for row in expanded
-    }
+    assignments = {(str(row["params"]["model"]), str(row["start_section"])) for row in expanded}
     assert assignments == {
         ("ridge", "dataset_selection"),
         ("ridge", "feature_matrix_load"),
@@ -90,6 +89,47 @@ def test_optuna_search_space_requires_optuna_mode_flag() -> None:
         assert "optuna mode is disabled" in str(exc)
     else:
         raise AssertionError("Expected ValueError when optuna search is used without optuna mode.")
+
+
+def test_optuna_search_space_expands_when_enabled() -> None:
+    pytest.importorskip("optuna")
+
+    base_variant = {
+        "template_id": "t1",
+        "params": {
+            "target": "coarse_affect",
+            "cv": "within_subject_loso_session",
+            "model": "ridge",
+        },
+        "supported": True,
+    }
+    search_space = SearchSpaceSpec.model_validate(
+        {
+            "search_space_id": "SS_OPTUNA_ENABLED",
+            "enabled": True,
+            "optimization_mode": "optuna",
+            "dimensions": [
+                {"parameter_name": "model", "values": ["ridge", "logreg"]},
+                {"parameter_name": "start_section", "values": ["dataset_selection"]},
+            ],
+            "max_trials": 4,
+        }
+    )
+
+    expanded = expand_variant_search_space(
+        base_variant,
+        search_space=search_space,
+        seed=42,
+        optuna_enabled=True,
+        optuna_trials=4,
+    )
+
+    assert expanded
+    assert len(expanded) <= 4
+    for row in expanded:
+        assignment = row.get("search_assignment", {})
+        assert str(assignment.get("model")) in {"ridge", "logreg"}
+        assert str(row["params"]["model"]) in {"ridge", "logreg"}
 
 
 def _write_metrics(path: Path, *, performed: bool, status: str) -> None:

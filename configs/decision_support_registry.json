@@ -284,6 +284,7 @@
           "supported": true,
           "params": {
             "target": "coarse_affect",
+            "model": "ridge",
             "cv": "within_subject_loso_session"
           },
           "expand": {

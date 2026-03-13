@@ -361,11 +361,13 @@ def run_experiment(
     }
     config_path.write_text(f"{json.dumps(config, indent=2)}\n", encoding="utf-8")
 
-    report_upstream = [
+    report_upstream_candidates = [
         artifact_ids.get(ARTIFACT_TYPE_METRICS_BUNDLE),
         artifact_ids.get(ARTIFACT_TYPE_INTERPRETABILITY_BUNDLE),
     ]
-    report_upstream = [artifact_id for artifact_id in report_upstream if artifact_id]
+    report_upstream = [
+        artifact_id for artifact_id in report_upstream_candidates if isinstance(artifact_id, str)
+    ]
     experiment_report_artifact = register_artifact(
         registry_path=artifact_registry_path,
         artifact_type=ARTIFACT_TYPE_EXPERIMENT_REPORT,

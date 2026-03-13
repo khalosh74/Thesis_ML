@@ -69,9 +69,17 @@ Dry-run (expand + manifest only, no model fitting):
 thesisml-run-decision-support --all --dry-run
 ```
 
+Optuna-backed search mode (optional dependency):
+
+```powershell
+python -m pip install -e ".[optuna]"
+thesisml-run-decision-support --all --search-mode optuna --optuna-trials 25
+```
+
 ## Notes
 
 - Unsupported variants are not silently skipped; they are recorded as `blocked` with reasons.
 - Stage ordering follows the thesis governance sequence in the registry.
 - This automation is decision-support only; it does not run confirmatory experiments.
 - Campaign IDs include microseconds to avoid output-path collisions on rapid reruns.
+- Default supported operator path remains deterministic (`--search-mode deterministic`).

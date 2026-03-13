@@ -3,6 +3,9 @@
 Schema/version constants are centralized in:
 
 - `src/Thesis_ML/config/schema_versions.py`
+- Authoritative maps:
+  - `PUBLIC_SCHEMA_VERSIONS` (current emitted versions)
+  - `SUPPORTED_SCHEMA_VERSIONS` (accepted versions)
 
 Current public contract versions:
 
@@ -52,4 +55,3 @@ When changing a public schema:
 - Prefer additive changes over destructive renames/removals.
 - Keep at least one prior version readable during migration windows when feasible.
 - Use explicit validation errors; do not silently coerce unknown versions.
-

@@ -27,6 +27,9 @@ dependencies = [
 spm = [
     "scipy>=1.13",
 ]
+optuna = [
+    "optuna>=4.0",
+]
 dev = [
     "pre-commit>=3.7.0",
     "pytest>=8.0.0",
@@ -82,6 +85,9 @@ files = [
     "src/Thesis_ML/artifacts",
     "src/Thesis_ML/orchestration",
     "src/Thesis_ML/workbook",
+    "src/Thesis_ML/spm/extract_glm.py",
+    "src/Thesis_ML/features/nifti_features.py",
+    "src/Thesis_ML/experiments/run_experiment.py",
     "src/Thesis_ML/experiments/segment_execution.py",
     "src/Thesis_ML/experiments/sections.py",
 ]

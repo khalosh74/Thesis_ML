@@ -106,6 +106,22 @@ def test_rerun_without_force_is_blocked(
         run_experiment(**kwargs)
 
 
+def test_force_and_resume_mutually_exclusive_raises(
+    tmp_path: Path,
+) -> None:
+    kwargs = _base_run_kwargs(tmp_path)
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        run_experiment(**kwargs, force=True, resume=True)
+
+
+def test_resume_requires_existing_run_directory(
+    tmp_path: Path,
+) -> None:
+    kwargs = _base_run_kwargs(tmp_path)
+    with pytest.raises(FileNotFoundError, match="Cannot resume run"):
+        run_experiment(**kwargs, resume=True)
+
+
 def test_rerun_with_force_replaces_existing_run_directory(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -164,6 +180,26 @@ def test_resume_after_partial_completion(
     status_after = read_run_status(report_dir)
     assert status_after is not None
     assert status_after["status"] == "completed"
+
+
+def test_explicit_reuse_completed_artifacts_flag_is_forwarded(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    call_state = {"reuse_flag": None}
+
+    def _capturing_stub(request) -> SegmentExecutionResult:
+        call_state["reuse_flag"] = bool(request.reuse_completed_artifacts)
+        return _successful_segment_stub(request)
+
+    monkeypatch.setattr(
+        "Thesis_ML.experiments.run_experiment.execute_section_segment",
+        _capturing_stub,
+    )
+    kwargs = _base_run_kwargs(tmp_path)
+    result = run_experiment(**kwargs, reuse_completed_artifacts=True)
+    assert result["run_mode"] == "fresh"
+    assert call_state["reuse_flag"] is True
 
 
 def test_output_directory_collision_without_status_requires_explicit_mode(

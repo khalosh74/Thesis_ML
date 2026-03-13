@@ -12,10 +12,22 @@ python -m pip install uv
 python -m uv sync --frozen --extra dev
 ```
 
+Optional Optuna support:
+
+```bash
+python -m uv sync --frozen --extra dev --extra optuna
+```
+
 Compatibility:
 
 ```bash
 python -m pip install -e ".[dev]"
+```
+
+For Optuna mode with editable installs:
+
+```bash
+python -m pip install -e ".[dev,optuna]"
 ```
 
 ## 2) Paths and defaults
@@ -51,7 +63,9 @@ thesisml-run-experiment \
 - Existing partial/unknown run dir: fails unless `--resume` or `--force`
 - `--force`: clears run directory, then reruns
 - `--resume`: resumes from existing run directory
-- `--reuse-completed-artifacts`: allows same-run section artifact reuse
+- `--resume` automatically enables same-run section artifact reuse
+- `--reuse-completed-artifacts`: explicitly enables same-run section artifact reuse
+- `--reuse-completed-artifacts` never reuses artifacts from a different `run_id`
 - `--force` and `--resume` are mutually exclusive
 
 Run state file:
@@ -69,6 +83,20 @@ thesisml-run-decision-support \
   --all
 ```
 
+Optuna mode requires optional dependency installation (`--extra optuna` or `.[optuna]`):
+
+```bash
+thesisml-run-decision-support \
+  --registry configs/decision_support_registry.json \
+  --index-csv Data/processed/dataset_index.csv \
+  --data-root Data \
+  --cache-dir Data/processed/feature_cache \
+  --output-root outputs/artifacts/decision_support \
+  --all \
+  --search-mode optuna \
+  --optuna-trials 25
+```
+
 ## 6) Decision-support campaign (workbook-driven)
 
 ```bash
@@ -81,6 +109,10 @@ thesisml-run-decision-support \
   --all \
   --write-back-workbook
 ```
+
+Write-back safety:
+- write-back target name is versioned (`<source>__results_<campaign_id>.xlsx`)
+- existing targets are never overwritten unless explicit API-level `overwrite_existing=True` is used
 
 ## 7) Workbook generation
 
@@ -101,3 +133,6 @@ python -m ruff format --check src/Thesis_ML/artifacts src/Thesis_ML/orchestratio
 python -m pytest -q
 ```
 
+`mypy` is a required CI gate and includes nibabel boundary modules:
+- `src/Thesis_ML/spm/extract_glm.py`
+- `src/Thesis_ML/features/nifti_features.py`

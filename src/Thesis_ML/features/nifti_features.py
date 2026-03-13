@@ -8,11 +8,12 @@ import json
 import logging
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import nibabel as nib
 import numpy as np
 import pandas as pd
+from nibabel.spatialimages import SpatialImage
 
 from Thesis_ML.data.affect_labels import with_coarse_affect
 
@@ -70,7 +71,7 @@ def _load_mask_and_signature(mask_path: Path) -> tuple[np.ndarray, dict[str, Any
     if not mask_path.exists():
         raise FileNotFoundError(f"Mask file does not exist: {mask_path}")
 
-    mask_img = nib.load(str(mask_path))
+    mask_img = cast(SpatialImage, nib.load(str(mask_path)))
     mask_data = np.asarray(mask_img.get_fdata(dtype=np.float32))
     mask_bool = np.isfinite(mask_data) & (mask_data > 0)
     return mask_bool, _build_spatial_signature(mask_img=mask_img, mask_bool=mask_bool)
@@ -119,7 +120,7 @@ def extract_masked_vector(
     if not beta_path.exists():
         raise FileNotFoundError(f"Beta file does not exist: {beta_path}")
 
-    beta_img = nib.load(str(beta_path))
+    beta_img = cast(SpatialImage, nib.load(str(beta_path)))
     beta_data = np.asarray(beta_img.get_fdata(dtype=np.float32))
     beta_affine = np.asarray(beta_img.affine, dtype=np.float64)
     _validate_beta_mask_compatibility(
