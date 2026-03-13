@@ -3,13 +3,23 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from Thesis_ML.orchestration.campaign_runner import (
-    _collect_dataset_scope,
-    _experiment_sort_key,
-    _select_experiments,
-    _stage_sort_key,
-)
+import pandas as pd
+
 from Thesis_ML.orchestration.contracts import CompiledStudyManifest
+
+STAGE_ORDER = [
+    "Stage 1 - Target lock",
+    "Stage 2 - Split lock",
+    "Stage 3 - Model lock",
+    "Stage 4 - Feature/preprocessing lock",
+    "Stage 5 - Confirmatory analysis",
+    "Stage 6 - Robustness analysis",
+    "Stage 7 - Exploratory extension",
+]
+
+
+def _as_str_list(values: pd.Series) -> list[str]:
+    return sorted(values.dropna().astype(str).unique().tolist())
 
 
 def collect_dataset_scope(
@@ -18,12 +28,54 @@ def collect_dataset_scope(
     tasks_filter: list[str] | None = None,
     modalities_filter: list[str] | None = None,
 ) -> dict[str, Any]:
-    return _collect_dataset_scope(
-        index_csv=index_csv,
-        subjects_filter=subjects_filter,
-        tasks_filter=tasks_filter,
-        modalities_filter=modalities_filter,
-    )
+    df = pd.read_csv(index_csv)
+    required = {"subject", "task", "modality"}
+    missing = [column for column in required if column not in df.columns]
+    if missing:
+        raise ValueError(f"Dataset index missing required columns for scope expansion: {missing}")
+
+    subjects = _as_str_list(df["subject"])
+    tasks = _as_str_list(df["task"])
+    modalities = _as_str_list(df["modality"])
+
+    if subjects_filter:
+        selected = set(subjects_filter)
+        subjects = [value for value in subjects if value in selected]
+    if tasks_filter:
+        selected = set(tasks_filter)
+        tasks = [value for value in tasks if value in selected]
+    if modalities_filter:
+        selected = set(modalities_filter)
+        modalities = [value for value in modalities if value in selected]
+
+    ordered_pairs = [(train, test) for train in subjects for test in subjects if train != test]
+
+    return {
+        "subjects": subjects,
+        "tasks": tasks,
+        "modalities": modalities,
+        "ordered_subject_pairs": ordered_pairs,
+        "models_linear": ["ridge", "logreg", "linearsvc"],
+    }
+
+
+def stage_sort_key(stage_name: str) -> int:
+    try:
+        return STAGE_ORDER.index(stage_name)
+    except ValueError:
+        return len(STAGE_ORDER)
+
+
+def experiment_sort_key(experiment: dict[str, Any]) -> tuple[int, int, str]:
+    stage_index = stage_sort_key(str(experiment.get("stage", "")))
+    experiment_id = str(experiment.get("experiment_id", ""))
+    numeric = 9999
+    if experiment_id.startswith("E"):
+        try:
+            numeric = int(experiment_id[1:])
+        except ValueError:
+            numeric = 9999
+    return (stage_index, numeric, experiment_id)
 
 
 def select_experiments(
@@ -32,12 +84,29 @@ def select_experiments(
     stage: str | None,
     run_all: bool,
 ) -> list[dict[str, Any]]:
-    return _select_experiments(
-        registry=registry,
-        experiment_id=experiment_id,
-        stage=stage,
-        run_all=run_all,
-    )
+    experiments = [experiment.model_dump(mode="python") for experiment in registry.experiments]
+    if experiment_id:
+        selected = [exp for exp in experiments if str(exp.get("experiment_id")) == experiment_id]
+        if not selected:
+            raise ValueError(f"Experiment '{experiment_id}' was not found in registry.")
+        return sorted(selected, key=experiment_sort_key)
+
+    if stage:
+        selected = [exp for exp in experiments if str(exp.get("stage")) == stage]
+        if not selected:
+            raise ValueError(f"No experiments found for stage '{stage}'.")
+        return sorted(selected, key=experiment_sort_key)
+
+    if run_all:
+        return sorted(experiments, key=experiment_sort_key)
+
+    raise ValueError("Select one of --experiment-id, --stage, or --all.")
 
 
-__all__ = ["collect_dataset_scope", "select_experiments", "_experiment_sort_key", "_stage_sort_key"]
+__all__ = [
+    "STAGE_ORDER",
+    "collect_dataset_scope",
+    "experiment_sort_key",
+    "select_experiments",
+    "stage_sort_key",
+]

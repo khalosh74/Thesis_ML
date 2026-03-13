@@ -1,0 +1,46 @@
+name: Release Gate
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+jobs:
+  validate_release_artifacts:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Build and validate package
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install build twine pytest
+          python -m build --sdist --wheel
+          python -m twine check dist/*
+
+      - name: Install built wheel
+        run: |
+          python -m pip install --force-reinstall dist/*.whl
+
+      - name: Wheel CLI smoke
+        run: |
+          thesisml-run-decision-support --help
+          thesisml-workbook --output /tmp/thesis_experiment_program_release_gate.xlsx
+          test -f /tmp/thesis_experiment_program_release_gate.xlsx
+
+      - name: Lightweight runtime test
+        run: |
+          python -m pytest tests/test_import_decoupling.py -q
+
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-artifacts
+          path: dist/*

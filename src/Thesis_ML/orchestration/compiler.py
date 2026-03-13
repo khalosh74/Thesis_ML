@@ -7,6 +7,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
+from Thesis_ML.config.schema_versions import COMPILED_MANIFEST_SCHEMA_VERSION
 from Thesis_ML.orchestration.contracts import (
     CompiledStudyManifest,
     ExperimentSpec,
@@ -101,6 +102,7 @@ def compile_registry_payload(
     manifest_payload = {
         **payload,
         "schema_version": str(payload.get("schema_version", "unspecified")),
+        "compiled_manifest_schema_version": COMPILED_MANIFEST_SCHEMA_VERSION,
         "source_registry_path": (
             str(source_registry_path.resolve()) if source_registry_path else None
         ),

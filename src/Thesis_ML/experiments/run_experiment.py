@@ -27,6 +27,10 @@ from Thesis_ML.artifacts.registry import (
 )
 from Thesis_ML.config.paths import DEFAULT_EXPERIMENT_REPORTS_ROOT
 from Thesis_ML.experiments.cache_loading import load_features_from_cache
+from Thesis_ML.experiments.execution_policy import (
+    prepare_report_dir,
+    write_run_status,
+)
 from Thesis_ML.experiments.metrics import (
     compute_interpretability_stability,
     evaluate_permutations,
@@ -63,7 +67,6 @@ def _current_git_commit() -> str | None:
     except Exception:
         return None
     return process.stdout.strip() or None
-
 
 
 def _make_model(name: str, seed: int) -> Any:
@@ -143,6 +146,8 @@ def _extract_linear_coefficients(estimator) -> tuple[np.ndarray, np.ndarray, lis
 
 def _compute_interpretability_stability(coef_vectors: list[np.ndarray]) -> dict[str, Any]:
     return compute_interpretability_stability(coef_vectors=coef_vectors)
+
+
 def run_experiment(
     index_csv: Path,
     data_root: Path,
@@ -163,6 +168,9 @@ def run_experiment(
     end_section: str | None = None,
     base_artifact_id: str | None = None,
     reuse_policy: str | None = None,
+    force: bool = False,
+    resume: bool = False,
+    reuse_completed_artifacts: bool = False,
 ) -> dict[str, Any]:
     """Run one leakage-safe grouped-CV experiment and write standardized artifacts."""
     index_csv = Path(index_csv)
@@ -173,8 +181,7 @@ def run_experiment(
     if cv is None or not str(cv).strip():
         allowed = ", ".join(_CV_MODES)
         raise ValueError(
-            "run_experiment requires explicit cv mode selection. "
-            f"Provide one of: {allowed}"
+            f"run_experiment requires explicit cv mode selection. Provide one of: {allowed}"
         )
     cv_mode = _resolve_cv_mode(str(cv).strip())
     if cv_mode == "within_subject_loso_session":
@@ -187,9 +194,7 @@ def run_experiment(
                 "cv='frozen_cross_person_transfer' requires a non-empty train_subject."
             )
         if test_subject is None or not str(test_subject).strip():
-            raise ValueError(
-                "cv='frozen_cross_person_transfer' requires a non-empty test_subject."
-            )
+            raise ValueError("cv='frozen_cross_person_transfer' requires a non-empty test_subject.")
         train_subject = str(train_subject).strip()
         test_subject = str(test_subject).strip()
         if train_subject == test_subject:
@@ -200,7 +205,13 @@ def run_experiment(
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     resolved_run_id = run_id or f"{timestamp}_{model}_{target_column}"
     report_dir = reports_root / resolved_run_id
-    report_dir.mkdir(parents=True, exist_ok=True)
+    run_mode = prepare_report_dir(
+        report_dir,
+        run_id=resolved_run_id,
+        force=bool(force),
+        resume=bool(resume),
+    )
+    should_reuse_completed_artifacts = bool(resume or reuse_completed_artifacts)
     artifact_registry_path = reports_root / "artifact_registry.sqlite3"
     code_ref = _current_git_commit()
 
@@ -213,46 +224,62 @@ def run_experiment(
     interpretability_summary_path = report_dir / "interpretability_summary.json"
     interpretability_fold_artifacts_path = report_dir / "interpretability_fold_explanations.csv"
 
-    segment_result = execute_section_segment(
-        SegmentExecutionRequest(
-            index_csv=index_csv,
-            data_root=data_root,
-            cache_dir=cache_dir,
-            target_column=target_column,
-            cv_mode=cv_mode,
-            model=model,
-            subject=subject,
-            train_subject=train_subject,
-            test_subject=test_subject,
-            filter_task=filter_task,
-            filter_modality=filter_modality,
-            seed=seed,
-            n_permutations=n_permutations,
-            run_id=resolved_run_id,
-            config_filename=config_path.name,
-            report_dir=report_dir,
-            artifact_registry_path=artifact_registry_path,
-            code_ref=code_ref,
-            affine_atol=SPATIAL_AFFINE_ATOL,
-            fold_metrics_path=fold_metrics_path,
-            fold_splits_path=fold_splits_path,
-            predictions_path=predictions_path,
-            metrics_path=metrics_path,
-            spatial_report_path=spatial_compatibility_report_path,
-            interpretability_summary_path=interpretability_summary_path,
-            interpretability_fold_artifacts_path=interpretability_fold_artifacts_path,
-            start_section=start_section,
-            end_section=end_section,
-            base_artifact_id=base_artifact_id,
-            reuse_policy=reuse_policy,
-            build_pipeline_fn=_build_pipeline,
-            load_features_from_cache_fn=_load_features_from_cache,
-            scores_for_predictions_fn=_scores_for_predictions,
-            extract_linear_coefficients_fn=_extract_linear_coefficients,
-            compute_interpretability_stability_fn=_compute_interpretability_stability,
-            evaluate_permutations_fn=_evaluate_permutations,
-        )
+    write_run_status(
+        report_dir,
+        run_id=resolved_run_id,
+        status="running",
+        message=f"run_mode={run_mode}",
     )
+    try:
+        segment_result = execute_section_segment(
+            SegmentExecutionRequest(
+                index_csv=index_csv,
+                data_root=data_root,
+                cache_dir=cache_dir,
+                target_column=target_column,
+                cv_mode=cv_mode,
+                model=model,
+                subject=subject,
+                train_subject=train_subject,
+                test_subject=test_subject,
+                filter_task=filter_task,
+                filter_modality=filter_modality,
+                seed=seed,
+                n_permutations=n_permutations,
+                run_id=resolved_run_id,
+                config_filename=config_path.name,
+                report_dir=report_dir,
+                artifact_registry_path=artifact_registry_path,
+                code_ref=code_ref,
+                affine_atol=SPATIAL_AFFINE_ATOL,
+                fold_metrics_path=fold_metrics_path,
+                fold_splits_path=fold_splits_path,
+                predictions_path=predictions_path,
+                metrics_path=metrics_path,
+                spatial_report_path=spatial_compatibility_report_path,
+                interpretability_summary_path=interpretability_summary_path,
+                interpretability_fold_artifacts_path=interpretability_fold_artifacts_path,
+                start_section=start_section,
+                end_section=end_section,
+                base_artifact_id=base_artifact_id,
+                reuse_policy=reuse_policy,
+                reuse_completed_artifacts=should_reuse_completed_artifacts,
+                build_pipeline_fn=_build_pipeline,
+                load_features_from_cache_fn=_load_features_from_cache,
+                scores_for_predictions_fn=_scores_for_predictions,
+                extract_linear_coefficients_fn=_extract_linear_coefficients,
+                compute_interpretability_stability_fn=_compute_interpretability_stability,
+                evaluate_permutations_fn=_evaluate_permutations,
+            )
+        )
+    except Exception as exc:
+        write_run_status(
+            report_dir,
+            run_id=resolved_run_id,
+            status="failed",
+            error=str(exc),
+        )
+        raise
     artifact_ids = dict(segment_result.artifact_ids)
     metrics = dict(segment_result.metrics or {})
     spatial_compatibility = segment_result.spatial_compatibility
@@ -280,9 +307,7 @@ def run_experiment(
         str(interpretability_summary["status"]) if interpretability_summary else None
     )
     interpretability_fold_artifacts = (
-        interpretability_summary.get("fold_artifacts_path")
-        if interpretability_summary
-        else None
+        interpretability_summary.get("fold_artifacts_path") if interpretability_summary else None
     )
 
     config = {
@@ -308,8 +333,13 @@ def run_experiment(
         "end_section": end_section,
         "base_artifact_id": base_artifact_id,
         "reuse_policy": reuse_policy,
+        "force": bool(force),
+        "resume": bool(resume),
+        "reuse_completed_artifacts": bool(should_reuse_completed_artifacts),
+        "run_mode": run_mode,
         "planned_sections": segment_result.planned_sections,
         "executed_sections": segment_result.executed_sections,
+        "reused_sections": segment_result.reused_sections,
         "fold_splits_path": str(fold_splits_path.resolve()),
         "spatial_compatibility_status": spatial_status,
         "spatial_compatibility_passed": spatial_passed,
@@ -347,6 +377,13 @@ def run_experiment(
         status="created",
     )
     artifact_ids[ARTIFACT_TYPE_EXPERIMENT_REPORT] = experiment_report_artifact.artifact_id
+    run_status = write_run_status(
+        report_dir,
+        run_id=resolved_run_id,
+        status="completed",
+        executed_sections=segment_result.executed_sections,
+        reused_sections=segment_result.reused_sections,
+    )
 
     return {
         "run_id": resolved_run_id,
@@ -362,8 +399,11 @@ def run_experiment(
         "artifact_registry_path": str(artifact_registry_path.resolve()),
         "planned_sections": segment_result.planned_sections,
         "executed_sections": segment_result.executed_sections,
+        "reused_sections": segment_result.reused_sections,
         "artifact_ids": artifact_ids,
         "metrics": metrics,
+        "run_status_path": str(run_status.resolve()),
+        "run_mode": run_mode,
     }
 
 
@@ -395,24 +435,18 @@ def _build_parser() -> argparse.ArgumentParser:
         "--subject",
         default=None,
         help=(
-            "Subject identifier (required for cv=within_subject_loso_session; "
-            "for example sub-001)."
+            "Subject identifier (required for cv=within_subject_loso_session; for example sub-001)."
         ),
     )
     parser.add_argument(
         "--train-subject",
         default=None,
-        help=(
-            "Training subject identifier (required for "
-            "cv=frozen_cross_person_transfer)."
-        ),
+        help=("Training subject identifier (required for cv=frozen_cross_person_transfer)."),
     )
     parser.add_argument(
         "--test-subject",
         default=None,
-        help=(
-            "Test subject identifier (required for cv=frozen_cross_person_transfer)."
-        ),
+        help=("Test subject identifier (required for cv=frozen_cross_person_transfer)."),
     )
     parser.add_argument("--seed", type=int, default=42, help="Random seed.")
     parser.add_argument("--filter-task", default=None, help="Optional task filter.")
@@ -456,6 +490,21 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Optional reuse policy for segmented runs (auto, require_explicit_base, disallow).",
     )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Force rerun: clear existing run output directory before execution.",
+    )
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="Resume a partial run from existing output directory.",
+    )
+    parser.add_argument(
+        "--reuse-completed-artifacts",
+        action="store_true",
+        help="Allow reusing completed same-run section artifacts when available.",
+    )
     return parser
 
 
@@ -493,6 +542,9 @@ def main(argv: list[str] | None = None) -> int:
             end_section=args.end_section,
             base_artifact_id=args.base_artifact_id,
             reuse_policy=args.reuse_policy,
+            force=bool(args.force),
+            resume=bool(args.resume),
+            reuse_completed_artifacts=bool(args.reuse_completed_artifacts),
         )
         results.append(
             {

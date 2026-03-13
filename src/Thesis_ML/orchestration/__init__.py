@@ -64,12 +64,12 @@ if TYPE_CHECKING:
         TrialResultSummary,
         TrialSpec,
     )
-    from .workbook_compiler import compile_workbook_file, compile_workbook_workbook
-    from .workbook_writeback import write_workbook_results
     from .decision_support import (
         run_decision_support_campaign,
         run_workbook_decision_support_campaign,
     )
+    from .workbook_compiler import compile_workbook_file, compile_workbook_workbook
+    from .workbook_writeback import write_workbook_results
 
 
 def __getattr__(name: str) -> Any:

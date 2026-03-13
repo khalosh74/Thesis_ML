@@ -5,6 +5,13 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from Thesis_ML.config.schema_versions import (
+    COMPILED_MANIFEST_SCHEMA_VERSION,
+    SUMMARY_RESULT_SCHEMA_VERSION,
+    SUPPORTED_COMPILED_MANIFEST_SCHEMA_VERSIONS,
+    SUPPORTED_SUMMARY_RESULT_SCHEMA_VERSIONS,
+)
+
 
 class SectionName(StrEnum):
     DATASET_SELECTION = "dataset_selection"
@@ -27,8 +34,8 @@ class SearchMode(StrEnum):
     OPTUNA = "optuna"
 
 
-def supported_sections() -> list[str]:
-    return [section.value for section in SectionName]
+def supported_sections() -> list[SectionName]:
+    return list(SectionName)
 
 
 class _ContractModel(BaseModel):
@@ -72,8 +79,7 @@ class TrialSpec(_ContractModel):
             ]
             if missing:
                 raise ValueError(
-                    "Supported trial template must define params keys: "
-                    + ", ".join(missing)
+                    "Supported trial template must define params keys: " + ", ".join(missing)
                 )
         if self.base_artifact_id is not None and not self.base_artifact_id.strip():
             raise ValueError("base_artifact_id must be non-empty when provided.")
@@ -145,6 +151,7 @@ class ExperimentSpec(_ContractModel):
 
 class CompiledStudyManifest(_ContractModel):
     schema_version: str
+    compiled_manifest_schema_version: str = COMPILED_MANIFEST_SCHEMA_VERSION
     description: str | None = None
     source_registry_path: str | None = None
     compiled_at_utc: str
@@ -155,6 +162,12 @@ class CompiledStudyManifest(_ContractModel):
 
     @model_validator(mode="after")
     def _validate_trial_coverage(self) -> CompiledStudyManifest:
+        if self.compiled_manifest_schema_version not in SUPPORTED_COMPILED_MANIFEST_SCHEMA_VERSIONS:
+            supported = ", ".join(sorted(SUPPORTED_COMPILED_MANIFEST_SCHEMA_VERSIONS))
+            raise ValueError(
+                "Unsupported compiled manifest schema version "
+                f"'{self.compiled_manifest_schema_version}'. Supported versions: {supported}"
+            )
         known_experiments = {experiment.experiment_id for experiment in self.experiments}
         unknown_trials = sorted(
             {
@@ -185,6 +198,7 @@ class CompiledStudyManifest(_ContractModel):
 
 
 class TrialResultSummary(_ContractModel):
+    summary_result_schema_version: str = SUMMARY_RESULT_SCHEMA_VERSION
     experiment_id: str = Field(min_length=1)
     trial_id: str = Field(min_length=1)
     status: Literal["planned", "dry_run", "completed", "failed", "blocked"]
@@ -193,3 +207,13 @@ class TrialResultSummary(_ContractModel):
     artifact_refs: list[ArtifactRef] = Field(default_factory=list)
     error: str | None = None
     notes: str | None = None
+
+    @model_validator(mode="after")
+    def _validate_summary_schema(self) -> TrialResultSummary:
+        if self.summary_result_schema_version not in SUPPORTED_SUMMARY_RESULT_SCHEMA_VERSIONS:
+            supported = ", ".join(sorted(SUPPORTED_SUMMARY_RESULT_SCHEMA_VERSIONS))
+            raise ValueError(
+                "Unsupported trial result summary schema version "
+                f"'{self.summary_result_schema_version}'. Supported versions: {supported}"
+            )
+        return self

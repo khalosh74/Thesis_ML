@@ -5,8 +5,12 @@ from pathlib import Path
 import pytest
 from openpyxl import load_workbook
 
-from Thesis_ML.workbook.builder import build_workbook
+from Thesis_ML.config.schema_versions import (
+    COMPILED_MANIFEST_SCHEMA_VERSION,
+    WORKBOOK_SCHEMA_VERSION,
+)
 from Thesis_ML.orchestration.workbook_compiler import compile_workbook_file
+from Thesis_ML.workbook.builder import build_workbook
 
 
 def _make_workbook(path: Path) -> None:
@@ -44,7 +48,8 @@ def test_compile_workbook_file_success(tmp_path: Path) -> None:
 
     manifest = compile_workbook_file(workbook_path)
 
-    assert manifest.schema_version == "workbook-v1"
+    assert manifest.schema_version == WORKBOOK_SCHEMA_VERSION
+    assert manifest.compiled_manifest_schema_version == COMPILED_MANIFEST_SCHEMA_VERSION
     assert len(manifest.experiments) == 1
     assert manifest.experiments[0].experiment_id == "E16"
     assert len(manifest.trial_specs) == 1
@@ -116,3 +121,17 @@ def test_compile_workbook_with_search_space_rows(tmp_path: Path) -> None:
     assert len(manifest.search_spaces) == 1
     assert manifest.search_spaces[0].search_space_id == "SS01"
     assert manifest.trial_specs[0].search_space_id == "SS01"
+
+
+def test_compile_workbook_unsupported_schema_version_raises(tmp_path: Path) -> None:
+    workbook_path = tmp_path / "thesis_experiment_program.xlsx"
+    _make_workbook(workbook_path)
+    _set_executable_row(workbook_path)
+    workbook = load_workbook(workbook_path)
+    readme = workbook["README"]
+    readme["A46"] = "workbook_schema_version"
+    readme["B46"] = "workbook-v999"
+    workbook.save(workbook_path)
+
+    with pytest.raises(ValueError, match="Unsupported workbook schema version"):
+        compile_workbook_file(workbook_path)

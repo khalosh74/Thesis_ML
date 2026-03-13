@@ -7,9 +7,14 @@ import pandas as pd
 import pytest
 from openpyxl import load_workbook
 
-from Thesis_ML.workbook.builder import build_workbook
+from Thesis_ML.config.schema_versions import (
+    WORKBOOK_SCHEMA_VERSION,
+    WORKBOOK_WRITEBACK_SCHEMA_VERSION,
+)
 from Thesis_ML.orchestration.decision_support import run_workbook_decision_support_campaign
 from Thesis_ML.orchestration.workbook_compiler import compile_workbook_file
+from Thesis_ML.workbook.builder import build_workbook
+from Thesis_ML.workbook.schema_metadata import read_schema_metadata
 
 
 def _make_workbook(path: Path) -> None:
@@ -82,7 +87,9 @@ def _stub_run_experiment(**kwargs: object) -> dict[str, object]:
     fold_metrics_path.write_text("fold,score\n0,0.59\n", encoding="utf-8")
     fold_splits_path.write_text("fold,train,test\n0,a,b\n", encoding="utf-8")
     predictions_path.write_text("y_true,y_pred\nneg,neg\n", encoding="utf-8")
-    spatial_path.write_text('{"status":"passed","passed":true,"n_groups_checked":1}\n', encoding="utf-8")
+    spatial_path.write_text(
+        '{"status":"passed","passed":true,"n_groups_checked":1}\n', encoding="utf-8"
+    )
     interpretability_path.write_text('{"status":"not_applicable"}\n', encoding="utf-8")
 
     return {
@@ -165,9 +172,7 @@ def test_workbook_roundtrip_compile_execute_writeback(
         if str(machine_ws.cell(row, machine_cols["machine_id"]).value or "").startswith("campaign_")
     ]
     assert machine_rows
-    machine_status_value = machine_ws.cell(
-        machine_rows[-1], machine_cols["status"]
-    ).value
+    machine_status_value = machine_ws.cell(machine_rows[-1], machine_cols["status"]).value
     assert machine_status_value in {"Open", "Monitoring", "Closed"}
 
     trial_ws = output_wb["Trial_Results"]
@@ -192,8 +197,7 @@ def test_workbook_roundtrip_compile_execute_writeback(
     ]
     assert summary_rows
     summary_types = {
-        str(summary_ws.cell(row, summary_cols["summary_type"]).value)
-        for row in summary_rows
+        str(summary_ws.cell(row, summary_cols["summary_type"]).value) for row in summary_rows
     }
     assert "best_full_pipeline" in summary_types
 
@@ -210,6 +214,15 @@ def test_workbook_roundtrip_compile_execute_writeback(
     assert run_log_ws.cell(latest_run_log_row, run_log_cols["Artifact_Path"]).value
 
     source_wb = load_workbook(workbook_path)
+    source_schema_metadata = read_schema_metadata(source_wb["README"])
+    output_schema_metadata = read_schema_metadata(output_wb["README"])
+    assert source_schema_metadata["workbook_schema_version"] == WORKBOOK_SCHEMA_VERSION
+    assert output_schema_metadata["workbook_schema_version"] == WORKBOOK_SCHEMA_VERSION
+    assert (
+        output_schema_metadata["workbook_writeback_schema_version"]
+        == WORKBOOK_WRITEBACK_SCHEMA_VERSION
+    )
+
     source_trial_ws = source_wb["Trial_Results"]
     source_trial_cols = _sheet_header_map(source_trial_ws, 2)
     source_rows_with_e16 = [

@@ -1,5 +1,10 @@
 # Thesis Experiment Program Workbook (v2)
 
+> Compatibility note:
+> This file is retained for continuity. Canonical workbook docs are:
+> `docs/WORKBOOK_WORKFLOW.md`, `docs/EXTENDING.md`, and `docs/SCHEMA_MIGRATIONS.md`.
+> Canonical workbook CLI command is `thesisml-workbook`.
+
 ## Purpose
 `templates/thesis_experiment_program.xlsx` is the thesis experiment governance workbook for:
 - pre-interpretation experiment specification,

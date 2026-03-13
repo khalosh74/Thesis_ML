@@ -9,6 +9,11 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from Thesis_ML.config.schema_versions import (
+    ARTIFACT_SCHEMA_VERSION,
+    SUPPORTED_ARTIFACT_SCHEMA_VERSIONS,
+)
+
 ARTIFACT_TYPE_FEATURE_CACHE = "feature_cache"
 ARTIFACT_TYPE_FEATURE_MATRIX_BUNDLE = "feature_matrix_bundle"
 ARTIFACT_TYPE_EXPERIMENT_REPORT = "experiment_report"
@@ -36,6 +41,7 @@ class ArtifactRecord(BaseModel):
     path: str = Field(min_length=1)
     status: str = Field(min_length=1)
     created_at: str = Field(min_length=1)
+    artifact_schema_version: str = ARTIFACT_SCHEMA_VERSION
 
     @field_validator("artifact_type")
     @classmethod
@@ -43,6 +49,16 @@ class ArtifactRecord(BaseModel):
         if value not in SUPPORTED_ARTIFACT_TYPES:
             allowed = ", ".join(sorted(SUPPORTED_ARTIFACT_TYPES))
             raise ValueError(f"Unsupported artifact_type '{value}'. Allowed values: {allowed}")
+        return value
+
+    @field_validator("artifact_schema_version")
+    @classmethod
+    def _validate_artifact_schema_version(cls, value: str) -> str:
+        if value not in SUPPORTED_ARTIFACT_SCHEMA_VERSIONS:
+            allowed = ", ".join(sorted(SUPPORTED_ARTIFACT_SCHEMA_VERSIONS))
+            raise ValueError(
+                f"Unsupported artifact schema version '{value}'. Allowed values: {allowed}"
+            )
         return value
 
 
@@ -81,13 +97,19 @@ def _ensure_schema(connection: sqlite3.Connection) -> None:
             code_ref TEXT,
             path TEXT NOT NULL,
             status TEXT NOT NULL,
-            created_at TEXT NOT NULL
+            created_at TEXT NOT NULL,
+            artifact_schema_version TEXT NOT NULL
         )
         """
     )
-    connection.execute(
-        "CREATE INDEX IF NOT EXISTS idx_artifacts_run_id ON artifacts(run_id)"
-    )
+    columns = {str(row[1]) for row in connection.execute("PRAGMA table_info(artifacts)").fetchall()}
+    if "artifact_schema_version" not in columns:
+        escaped = ARTIFACT_SCHEMA_VERSION.replace("'", "''")
+        connection.execute(
+            "ALTER TABLE artifacts ADD COLUMN artifact_schema_version "
+            f"TEXT NOT NULL DEFAULT '{escaped}'"
+        )
+    connection.execute("CREATE INDEX IF NOT EXISTS idx_artifacts_run_id ON artifacts(run_id)")
     connection.execute(
         "CREATE INDEX IF NOT EXISTS idx_artifacts_type_hash "
         "ON artifacts(artifact_type, config_hash)"
@@ -120,6 +142,7 @@ def _row_to_record(row: sqlite3.Row) -> ArtifactRecord:
         path=str(row["path"]),
         status=str(row["status"]),
         created_at=str(row["created_at"]),
+        artifact_schema_version=str(row["artifact_schema_version"]),
     )
 
 
@@ -133,6 +156,7 @@ def register_artifact(
     code_ref: str | None,
     path: Path | str,
     status: str,
+    artifact_schema_version: str = ARTIFACT_SCHEMA_VERSION,
     artifact_id: str | None = None,
     created_at: str | None = None,
 ) -> ArtifactRecord:
@@ -157,6 +181,7 @@ def register_artifact(
         path=normalized_path,
         status=status,
         created_at=resolved_created_at,
+        artifact_schema_version=artifact_schema_version,
     )
 
     with _connect(Path(registry_path)) as connection:
@@ -171,8 +196,9 @@ def register_artifact(
                 code_ref,
                 path,
                 status,
-                created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                created_at,
+                artifact_schema_version
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 record.artifact_id,
@@ -184,6 +210,7 @@ def register_artifact(
                 record.path,
                 record.status,
                 record.created_at,
+                record.artifact_schema_version,
             ),
         )
         connection.commit()

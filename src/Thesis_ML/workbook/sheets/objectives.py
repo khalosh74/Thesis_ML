@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from openpyxl.worksheet.worksheet import Worksheet
 
-from Thesis_ML.workbook.builder import fill_objectives_sheet
+from Thesis_ML.workbook.template_builder import fill_objectives_sheet
 
 
 def fill_objectives(ws: Worksheet) -> int:

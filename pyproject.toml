@@ -8,6 +8,12 @@ version = "0.1.0"
 description = "Local-only ML investigation baseline for Thesis_ML."
 readme = "README.md"
 requires-python = ">=3.11,<3.14"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+]
 dependencies = [
     "numpy>=2.0",
     "pandas>=2.2",
@@ -25,6 +31,7 @@ dev = [
     "pre-commit>=3.7.0",
     "pytest>=8.0.0",
     "ruff>=0.9.0",
+    "mypy>=1.11.0",
 ]
 
 [project.scripts]
@@ -46,9 +53,11 @@ where = ["src"]
 target-version = "py311"
 line-length = 100
 src = ["scripts", "src", "tests"]
+extend-exclude = ["notebooks"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP"]
+ignore = ["E501"]
 
 [tool.ruff.format]
 indent-style = "space"
@@ -58,3 +67,21 @@ quote-style = "double"
 addopts = "-q"
 pythonpath = ["src"]
 testpaths = ["tests"]
+
+[tool.mypy]
+python_version = "3.11"
+pretty = true
+show_error_codes = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+warn_unreachable = true
+check_untyped_defs = true
+no_implicit_optional = true
+ignore_missing_imports = true
+files = [
+    "src/Thesis_ML/artifacts",
+    "src/Thesis_ML/orchestration",
+    "src/Thesis_ML/workbook",
+    "src/Thesis_ML/experiments/segment_execution.py",
+    "src/Thesis_ML/experiments/sections.py",
+]

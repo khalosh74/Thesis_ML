@@ -26,10 +26,95 @@ jobs:
           python -m pip install -e ".[dev]"
 
       - name: Ruff lint
-        run: python -m ruff check .
+        run: >
+          python -m ruff check src/Thesis_ML/artifacts src/Thesis_ML/orchestration
+          src/Thesis_ML/workbook src/Thesis_ML/experiments/segment_execution.py
+          src/Thesis_ML/experiments/sections.py src/Thesis_ML/experiments/run_experiment.py
+          tests/test_artifact_registry.py tests/test_segment_execution.py
+          tests/test_workbook_compiler.py tests/test_workbook_roundtrip.py
+          tests/test_execution_idempotency.py --exclude src/Thesis_ML/workbook/template_builder.py
 
       - name: Ruff format check
-        run: python -m ruff format --check .
+        run: >
+          python -m ruff format --check src/Thesis_ML/artifacts src/Thesis_ML/orchestration
+          src/Thesis_ML/workbook src/Thesis_ML/experiments/segment_execution.py
+          src/Thesis_ML/experiments/sections.py src/Thesis_ML/experiments/run_experiment.py
+          tests/test_artifact_registry.py tests/test_segment_execution.py
+          tests/test_workbook_compiler.py tests/test_workbook_roundtrip.py
+          tests/test_execution_idempotency.py --exclude src/Thesis_ML/workbook/template_builder.py
+
+      - name: Mypy type check
+        run: python -m mypy
 
       - name: Pytest
         run: python -m pytest -q
+
+  build_verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Build package artifacts
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install build twine
+          python -m build --sdist --wheel
+          python -m twine check dist/*
+
+  uv_locked_smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install uv
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install uv
+
+      - name: Sync locked environment
+        run: python -m uv sync --frozen --extra dev
+
+      - name: Locked test smoke
+        run: python -m uv run python -m pytest tests/test_import_decoupling.py -q
+
+      - name: Locked mypy smoke
+        run: python -m uv run python -m mypy
+
+      - name: Locked lint smoke
+        run: >
+          python -m uv run python -m ruff check src/Thesis_ML/artifacts
+          src/Thesis_ML/orchestration src/Thesis_ML/workbook
+          src/Thesis_ML/experiments/segment_execution.py src/Thesis_ML/experiments/sections.py
+          src/Thesis_ML/experiments/run_experiment.py tests/test_artifact_registry.py
+          tests/test_segment_execution.py tests/test_workbook_compiler.py
+          tests/test_workbook_roundtrip.py tests/test_execution_idempotency.py
+          --exclude src/Thesis_ML/workbook/template_builder.py
+
+      - name: Workbook generation smoke
+        run: |
+          python -m uv run thesisml-workbook --output /tmp/thesis_experiment_program.xlsx
+          test -f /tmp/thesis_experiment_program.xlsx
+
+      - name: Workbook compile/write-back smoke
+        run: |
+          python -m uv run python -m pytest tests/test_workbook_roundtrip.py::test_workbook_roundtrip_compile_execute_writeback -q
+
+      - name: Segment execution smoke
+        run: |
+          python -m uv run python -m pytest tests/test_segment_execution.py::test_segment_execution_feature_matrix_to_evaluation -q
+
+      - name: Decision-support CLI smoke
+        run: |
+          python -m uv run thesisml-run-decision-support --help

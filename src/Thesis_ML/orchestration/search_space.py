@@ -25,7 +25,9 @@ def _apply_assignment(base_variant: dict[str, Any], assignment: dict[str, Any]) 
     return updated
 
 
-def _expand_deterministic(base_variant: dict[str, Any], search_space: SearchSpaceSpec) -> list[dict[str, Any]]:
+def _expand_deterministic(
+    base_variant: dict[str, Any], search_space: SearchSpaceSpec
+) -> list[dict[str, Any]]:
     dimensions = list(search_space.dimensions)
     if not dimensions:
         return [dict(base_variant)]
@@ -46,7 +48,7 @@ def _expand_optuna(
     optuna_trials: int | None,
 ) -> list[dict[str, Any]]:
     try:
-        import optuna  # type: ignore[import-not-found]
+        import optuna
     except Exception as exc:  # pragma: no cover - environment-dependent
         raise ValueError(
             "Search space requires optimization_mode='optuna' but 'optuna' is not installed."
@@ -101,4 +103,3 @@ def expand_variant_search_space(
         seed=seed,
         optuna_trials=optuna_trials,
     )
-

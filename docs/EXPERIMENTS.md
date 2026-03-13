@@ -146,3 +146,17 @@ Audit notes:
 - `predictions.csv` includes row-level metadata (`subject`, `session`, labels) and prediction outputs.
 - `metrics.json` contains aggregate metrics plus interpretability and spatial-compatibility linkage.
 - `spatial_compatibility_report.json` records checked groups, reference signature, tolerance, and pass/fail details.
+
+## Segment and rerun controls
+
+`thesisml-run-experiment` also supports segment-oriented execution and explicit rerun policy flags:
+
+- `--start-section`
+- `--end-section`
+- `--base-artifact-id`
+- `--reuse-policy`
+- `--force`
+- `--resume`
+- `--reuse-completed-artifacts`
+
+See `docs/SEGMENT_EXECUTION.md` for exact section-order, base-artifact, and resume rules.

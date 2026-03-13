@@ -1,5 +1,10 @@
 # Decision-Support Experiment Automation
 
+> Compatibility note:
+> This file is kept for continuity. Canonical documentation now lives in:
+> `docs/DECISION_SUPPORT_AUTOMATION.md`, `docs/RUNBOOK.md`, and `docs/ARCHITECTURE.md`.
+> Canonical CLI command is `thesisml-run-decision-support`.
+
 `run_decision_support_experiments.py` automates thesis decision-support experiments E01-E11
 from `configs/decision_support_registry.json` using the existing `run_experiment` pipeline.
 

@@ -6,9 +6,10 @@ This repo now includes a registry-driven orchestrator to run thesis decision-sup
 ## Files
 
 - `configs/decision_support_registry.json`: machine-readable experiment definitions for E01-E11.
-- `src/Thesis_ML/orchestration/campaign_runner.py`: primary orchestrator implementation.
-- `src/Thesis_ML/orchestration/decision_support.py`: backward-compatible facade.
-- `run_decision_support_experiments.py`: backward-compatible CLI shim.
+- `src/Thesis_ML/orchestration/campaign_engine.py`: campaign execution core.
+- `src/Thesis_ML/orchestration/campaign_cli.py`: CLI parsing and terminal output layer.
+- `src/Thesis_ML/orchestration/decision_support.py`: compatibility facade used by legacy imports.
+- `run_decision_support_experiments.py`: deprecated compatibility CLI shim.
 - Output root (default): `outputs/artifacts/decision_support/`.
 
 ## What it does
@@ -33,17 +34,17 @@ For each selected experiment/stage:
 Run one stage (recommended first run):
 
 ```powershell
-python run_decision_support_experiments.py `
+thesisml-run-decision-support `
   --stage "Stage 1 - Target lock" `
   --index-csv Data/processed/dataset_index.csv `
   --data-root Data `
   --cache-dir Data/processed/feature_cache
 ```
 
-Equivalent installed entry point:
+Compatibility shim (deprecated, still supported):
 
 ```powershell
-thesisml-run-decision-support `
+python run_decision_support_experiments.py `
   --stage "Stage 1 - Target lock" `
   --index-csv Data/processed/dataset_index.csv `
   --data-root Data `
@@ -53,19 +54,19 @@ thesisml-run-decision-support `
 Run one experiment:
 
 ```powershell
-python run_decision_support_experiments.py --experiment-id E06
+thesisml-run-decision-support --experiment-id E06
 ```
 
 Run all registry experiments:
 
 ```powershell
-python run_decision_support_experiments.py --all
+thesisml-run-decision-support --all
 ```
 
 Dry-run (expand + manifest only, no model fitting):
 
 ```powershell
-python run_decision_support_experiments.py --all --dry-run
+thesisml-run-decision-support --all --dry-run
 ```
 
 ## Notes
@@ -73,3 +74,4 @@ python run_decision_support_experiments.py --all --dry-run
 - Unsupported variants are not silently skipped; they are recorded as `blocked` with reasons.
 - Stage ordering follows the thesis governance sequence in the registry.
 - This automation is decision-support only; it does not run confirmatory experiments.
+- Campaign IDs include microseconds to avoid output-path collisions on rapid reruns.

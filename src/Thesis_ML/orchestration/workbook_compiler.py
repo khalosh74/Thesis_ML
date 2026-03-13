@@ -6,8 +6,13 @@ from typing import Any
 from openpyxl import load_workbook
 from openpyxl.workbook.workbook import Workbook
 
+from Thesis_ML.config.schema_versions import (
+    SUPPORTED_WORKBOOK_SCHEMA_VERSIONS,
+    WORKBOOK_SCHEMA_VERSION,
+)
 from Thesis_ML.orchestration.compiler import compile_registry_payload
 from Thesis_ML.orchestration.contracts import CompiledStudyManifest, ReusePolicy, SectionName
+from Thesis_ML.workbook.schema_metadata import read_schema_metadata
 
 _REQUIRED_SHEETS = {"Master_Experiments", "Experiment_Definitions"}
 
@@ -60,6 +65,23 @@ _SECTION_TO_INDEX = {name: idx for idx, name in enumerate(_SECTION_ORDER)}
 _FEATURE_MATRIX_LOAD_INDEX = _SECTION_TO_INDEX[SectionName.FEATURE_MATRIX_LOAD.value]
 
 
+def _resolve_workbook_schema_version(workbook: Workbook) -> str:
+    if "README" not in workbook.sheetnames:
+        return WORKBOOK_SCHEMA_VERSION
+
+    metadata = read_schema_metadata(workbook["README"])
+    schema_version = metadata.get("workbook_schema_version", "").strip()
+    if not schema_version:
+        schema_version = WORKBOOK_SCHEMA_VERSION
+    if schema_version not in SUPPORTED_WORKBOOK_SCHEMA_VERSIONS:
+        supported = ", ".join(sorted(SUPPORTED_WORKBOOK_SCHEMA_VERSIONS))
+        raise ValueError(
+            f"Unsupported workbook schema version '{schema_version}'. "
+            f"Supported versions: {supported}"
+        )
+    return schema_version
+
+
 def _normalize_text(value: Any) -> str:
     if value is None:
         return ""
@@ -89,8 +111,7 @@ def _parse_enabled(value: Any, *, row_index: int) -> bool:
     if text in {"yes", "y", "true", "1"}:
         return True
     raise ValueError(
-        "Invalid enabled value in Experiment_Definitions row "
-        f"{row_index}: '{value}'. Use Yes/No."
+        f"Invalid enabled value in Experiment_Definitions row {row_index}: '{value}'. Use Yes/No."
     )
 
 
@@ -134,7 +155,11 @@ def _assert_base_artifact_usage(
             f"'{start_section}'."
         )
 
-    if reuse_policy == ReusePolicy.REQUIRE_EXPLICIT_BASE.value and requires_base and not base_artifact_id:
+    if (
+        reuse_policy == ReusePolicy.REQUIRE_EXPLICIT_BASE.value
+        and requires_base
+        and not base_artifact_id
+    ):
         raise ValueError(
             "Invalid base artifact usage in Experiment_Definitions row "
             f"{row_index}: reuse_policy='require_explicit_base' requires base_artifact_id "
@@ -166,9 +191,7 @@ def _parse_master_experiment_rows(ws) -> dict[str, dict[str, Any]]:
             "experiment_id": experiment_id,
             "title": _normalize_text(_read_cell(row, header_map, "Short_Title")) or experiment_id,
             "stage": _normalize_text(_read_cell(row, header_map, "Stage")) or "Unspecified stage",
-            "manipulated_factor": _normalize_text(
-                _read_cell(row, header_map, "Manipulated_Factor")
-            )
+            "manipulated_factor": _normalize_text(_read_cell(row, header_map, "Manipulated_Factor"))
             or None,
             "primary_metric": _normalize_text(_read_cell(row, header_map, "Primary_Metric"))
             or "balanced_accuracy",
@@ -183,8 +206,7 @@ def _parse_experiment_definitions_rows(ws) -> list[dict[str, Any]]:
     ]
     if missing_columns:
         raise ValueError(
-            "Experiment_Definitions is missing required columns: "
-            + ", ".join(missing_columns)
+            "Experiment_Definitions is missing required columns: " + ", ".join(missing_columns)
         )
 
     compiled_trials: list[dict[str, Any]] = []
@@ -199,7 +221,9 @@ def _parse_experiment_definitions_rows(ws) -> list[dict[str, Any]]:
         target = _normalize_text(_read_cell(row, header_map, "target"))
         cv = _normalize_text(_read_cell(row, header_map, "cv"))
         model = _normalize_text(_read_cell(row, header_map, "model"))
-        missing_required = [name for name, value in (("target", target), ("cv", cv), ("model", model)) if not value]
+        missing_required = [
+            name for name, value in (("target", target), ("cv", cv), ("model", model)) if not value
+        ]
         if missing_required:
             raise ValueError(
                 "Experiment_Definitions row "
@@ -338,9 +362,7 @@ def _parse_search_spaces_rows(workbook: Workbook) -> list[dict[str, Any]]:
                     _read_cell(row, header_map, "optimization_mode")
                 )
                 or "deterministic_grid",
-                "objective_metric": _normalize_text(
-                    _read_cell(row, header_map, "objective_metric")
-                )
+                "objective_metric": _normalize_text(_read_cell(row, header_map, "objective_metric"))
                 or "balanced_accuracy",
                 "max_trials": (
                     int(_read_cell(row, header_map, "max_trials"))
@@ -368,6 +390,7 @@ def compile_workbook_workbook(
     *,
     source_workbook_path: Path | None = None,
 ) -> CompiledStudyManifest:
+    workbook_schema_version = _resolve_workbook_schema_version(workbook)
     sheet_names = set(workbook.sheetnames)
     missing_sheets = sorted(_REQUIRED_SHEETS - sheet_names)
     if missing_sheets:
@@ -380,7 +403,9 @@ def compile_workbook_workbook(
         raise ValueError("No enabled executable rows were found in Experiment_Definitions.")
 
     experiment_ids = sorted({trial["experiment_id"] for trial in trial_specs})
-    unknown_experiments = [experiment_id for experiment_id in experiment_ids if experiment_id not in master_map]
+    unknown_experiments = [
+        experiment_id for experiment_id in experiment_ids if experiment_id not in master_map
+    ]
     if unknown_experiments:
         raise ValueError(
             "Experiment_Definitions references unknown experiment_id values: "
@@ -403,7 +428,7 @@ def compile_workbook_workbook(
         )
 
     payload = {
-        "schema_version": "workbook-v1",
+        "schema_version": workbook_schema_version,
         "description": "Compiled from thesis_experiment_program.xlsx",
         "experiments": experiments_payload,
         "search_spaces": search_spaces,

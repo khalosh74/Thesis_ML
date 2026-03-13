@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import json
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -16,6 +18,7 @@ from Thesis_ML.artifacts.registry import (
     compute_config_hash,
     find_latest_compatible_artifact,
     get_artifact,
+    list_artifacts_for_run,
 )
 from Thesis_ML.experiments.sections import (
     DatasetSelectionInput,
@@ -82,11 +85,18 @@ class SegmentExecutionRequest:
     end_section: str | SectionName | None = None
     base_artifact_id: str | None = None
     reuse_policy: str | ReusePolicy | None = None
+    reuse_completed_artifacts: bool = False
     build_pipeline_fn: Callable[..., Any] | None = None
-    load_features_from_cache_fn: Callable[..., tuple[np.ndarray, pd.DataFrame, dict[str, Any]]] | None = None
+    load_features_from_cache_fn: (
+        Callable[..., tuple[np.ndarray, pd.DataFrame, dict[str, Any]]] | None
+    ) = None
     scores_for_predictions_fn: Callable[..., dict[str, list[Any]]] | None = None
-    extract_linear_coefficients_fn: Callable[..., tuple[np.ndarray, np.ndarray, list[str]]] | None = None
-    compute_interpretability_stability_fn: Callable[[list[np.ndarray]], dict[str, Any]] | None = None
+    extract_linear_coefficients_fn: (
+        Callable[..., tuple[np.ndarray, np.ndarray, list[str]]] | None
+    ) = None
+    compute_interpretability_stability_fn: Callable[[list[np.ndarray]], dict[str, Any]] | None = (
+        None
+    )
     evaluate_permutations_fn: Callable[..., dict[str, Any]] | None = None
 
 
@@ -94,6 +104,7 @@ class SegmentExecutionRequest:
 class SegmentExecutionResult:
     planned_sections: list[str]
     executed_sections: list[str]
+    reused_sections: list[str]
     artifact_ids: dict[str, str]
     metrics: dict[str, Any] | None
     spatial_compatibility: dict[str, Any] | None
@@ -114,9 +125,7 @@ def _normalize_section_name(
         return SectionName(str(value))
     except ValueError as exc:
         allowed = ", ".join(section.value for section in EXECUTION_SECTION_ORDER)
-        raise ValueError(
-            f"Invalid {field_name}='{value}'. Allowed values: {allowed}"
-        ) from exc
+        raise ValueError(f"Invalid {field_name}='{value}'. Allowed values: {allowed}") from exc
 
 
 def _normalize_reuse_policy(value: str | ReusePolicy | None) -> ReusePolicy:
@@ -239,6 +248,33 @@ def _require_callable(name: str, value: Callable[..., Any] | None) -> Callable[.
     return value
 
 
+def _is_reusable_status(status: str) -> bool:
+    lowered = str(status).strip().lower()
+    return lowered not in {"failed", "error", "blocked", "running", "planned"}
+
+
+def _find_reusable_run_artifact(
+    request: SegmentExecutionRequest,
+    *,
+    artifact_type: str,
+    expected_config_hash: str | None,
+) -> ArtifactRecord | None:
+    for record in list_artifacts_for_run(
+        registry_path=request.artifact_registry_path,
+        run_id=request.run_id,
+    ):
+        if record.artifact_type != artifact_type:
+            continue
+        if expected_config_hash is not None and record.config_hash != expected_config_hash:
+            continue
+        if not _is_reusable_status(record.status):
+            continue
+        if not Path(record.path).exists():
+            continue
+        return record
+    return None
+
+
 def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutionResult:
     planned_sections = plan_section_path(request.start_section, request.end_section)
     start_section = planned_sections[0]
@@ -268,6 +304,7 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
     )
 
     executed_sections: list[str] = []
+    reused_sections: list[str] = []
     artifact_ids: dict[str, str] = {}
 
     selected_index_df: pd.DataFrame | None = None
@@ -281,9 +318,8 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
     interpretability_summary: dict[str, Any] | None = None
     metrics: dict[str, Any] | None = None
 
-    if (
-        SectionName.DATASET_SELECTION not in planned_sections
-        and _is_after_or_equal(planned_sections[-1], SectionName.FEATURE_MATRIX_LOAD)
+    if SectionName.DATASET_SELECTION not in planned_sections and _is_after_or_equal(
+        planned_sections[-1], SectionName.FEATURE_MATRIX_LOAD
     ):
         selected_index_df = dataset_selection(
             DatasetSelectionInput(
@@ -308,9 +344,7 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
             feature_matrix_artifact_id = base_artifact.artifact_id
             artifact_ids["feature_matrix_bundle"] = base_artifact.artifact_id
             if selected_index_df is None:
-                raise ValueError(
-                    "Segment state error: selected dataset rows were not initialized."
-                )
+                raise ValueError("Segment state error: selected dataset rows were not initialized.")
             if not base_artifact.upstream_artifact_ids:
                 raise ValueError(
                     f"Incompatible base artifact '{base_artifact.artifact_id}': missing upstream "
@@ -357,6 +391,28 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
             )
             selected_index_df = selection_output.selected_index_df
         elif section == SectionName.FEATURE_CACHE_BUILD:
+            if request.reuse_completed_artifacts:
+                reusable_feature_cache = _find_reusable_run_artifact(
+                    request,
+                    artifact_type=ARTIFACT_TYPE_FEATURE_CACHE,
+                    expected_config_hash=compute_config_hash(
+                        {
+                            "index_csv": str(request.index_csv.resolve()),
+                            "data_root": str(request.data_root.resolve()),
+                            "cache_dir": str(request.cache_dir.resolve()),
+                            "group_key": "subject_session_bas",
+                            "force": False,
+                        }
+                    ),
+                )
+                if reusable_feature_cache is not None:
+                    cache_manifest_path = Path(reusable_feature_cache.path)
+                    feature_cache_artifact_id = reusable_feature_cache.artifact_id
+                    artifact_ids["feature_cache"] = reusable_feature_cache.artifact_id
+                    reused_sections.append(section.value)
+                    executed_sections.append(section.value)
+                    continue
+
             cache_output = feature_cache_build(
                 FeatureCacheBuildInput(
                     index_csv=request.index_csv,
@@ -382,6 +438,35 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
                     "feature_matrix_load requires a feature_cache artifact. "
                     "Run feature_cache_build or provide a compatible base_artifact_id."
                 )
+            if request.reuse_completed_artifacts:
+                reusable_feature_matrix = _find_reusable_run_artifact(
+                    request,
+                    artifact_type=ARTIFACT_TYPE_FEATURE_MATRIX_BUNDLE,
+                    expected_config_hash=compute_config_hash(
+                        {
+                            "target": request.target_column,
+                            "cv_mode": request.cv_mode,
+                            "subject": request.subject,
+                            "train_subject": request.train_subject,
+                            "test_subject": request.test_subject,
+                            "filter_task": request.filter_task,
+                            "filter_modality": request.filter_modality,
+                            "cache_manifest_path": str(cache_manifest_path.resolve()),
+                        }
+                    ),
+                )
+                if reusable_feature_matrix is not None:
+                    x_matrix, metadata_df, spatial_compatibility = load_features_from_cache_fn(
+                        index_df=selected_index_df,
+                        cache_manifest_path=cache_manifest_path,
+                        spatial_report_path=request.spatial_report_path,
+                        affine_atol=request.affine_atol,
+                    )
+                    feature_matrix_artifact_id = reusable_feature_matrix.artifact_id
+                    artifact_ids["feature_matrix_bundle"] = reusable_feature_matrix.artifact_id
+                    reused_sections.append(section.value)
+                    executed_sections.append(section.value)
+                    continue
             matrix_output = feature_matrix_load(
                 FeatureMatrixLoadInput(
                     selected_index_df=selected_index_df,
@@ -446,9 +531,23 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
                     "requested section path."
                 )
             if feature_matrix_artifact_id is None:
-                raise ValueError(
-                    "interpretability requires a feature_matrix artifact reference."
+                raise ValueError("interpretability requires a feature_matrix artifact reference.")
+            if request.reuse_completed_artifacts and request.interpretability_summary_path.exists():
+                reusable_interpretability = _find_reusable_run_artifact(
+                    request,
+                    artifact_type=ARTIFACT_TYPE_INTERPRETABILITY_BUNDLE,
+                    expected_config_hash=None,
                 )
+                if reusable_interpretability is not None:
+                    interpretability_summary = json.loads(
+                        request.interpretability_summary_path.read_text(encoding="utf-8")
+                    )
+                    artifact_ids[ARTIFACT_TYPE_INTERPRETABILITY_BUNDLE] = (
+                        reusable_interpretability.artifact_id
+                    )
+                    reused_sections.append(section.value)
+                    executed_sections.append(section.value)
+                    continue
             interpretability_output = interpretability(
                 InterpretabilityInput(
                     interpretability_enabled=fit_output.interpretability_enabled,
@@ -490,6 +589,26 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
                     "evaluation requires interpretability summary. Include interpretability in "
                     "the section path."
                 )
+            if request.reuse_completed_artifacts and request.metrics_path.exists():
+                reusable_metrics = _find_reusable_run_artifact(
+                    request,
+                    artifact_type=ARTIFACT_TYPE_METRICS_BUNDLE,
+                    expected_config_hash=compute_config_hash(
+                        {
+                            "run_id": request.run_id,
+                            "target": request.target_column,
+                            "model": request.model,
+                            "cv": request.cv_mode,
+                            "seed": int(request.seed),
+                        }
+                    ),
+                )
+                if reusable_metrics is not None:
+                    metrics = json.loads(request.metrics_path.read_text(encoding="utf-8"))
+                    artifact_ids[ARTIFACT_TYPE_METRICS_BUNDLE] = reusable_metrics.artifact_id
+                    reused_sections.append(section.value)
+                    executed_sections.append(section.value)
+                    continue
             evaluation_output = evaluation(
                 EvaluationInput(
                     x_matrix=x_matrix,
@@ -535,6 +654,7 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
     return SegmentExecutionResult(
         planned_sections=[section.value for section in planned_sections],
         executed_sections=executed_sections,
+        reused_sections=reused_sections,
         artifact_ids=artifact_ids,
         metrics=metrics,
         spatial_compatibility=spatial_compatibility,

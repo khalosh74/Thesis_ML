@@ -4,6 +4,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+from Thesis_ML.config.schema_versions import SUMMARY_RESULT_SCHEMA_VERSION
+
 SECTION_DEFAULT_START = "dataset_selection"
 SECTION_DEFAULT_END = "evaluation"
 SUMMARY_COLUMNS = [
@@ -65,17 +67,19 @@ def _normalize_section(value: Any, *, default: str) -> str:
 
 
 def _is_full_pipeline(start_section: str, end_section: str) -> bool:
-    return (
-        start_section == SECTION_DEFAULT_START
-        and end_section == SECTION_DEFAULT_END
-    )
+    return start_section == SECTION_DEFAULT_START and end_section == SECTION_DEFAULT_END
 
 
 def _model_family(model_name: Any) -> str:
     model = str(model_name or "").strip().lower()
     if model in {"ridge", "logreg", "linearsvc", "linear_svc", "lasso", "elasticnet"}:
         return "linear"
-    if "forest" in model or model.startswith("rf") or model.startswith("xgb") or model.startswith("lgbm"):
+    if (
+        "forest" in model
+        or model.startswith("rf")
+        or model.startswith("xgb")
+        or model.startswith("lgbm")
+    ):
         return "tree_ensemble"
     if "svm" in model or "svc" in model:
         return "kernel"
@@ -176,7 +180,9 @@ def _aggregate_by_key(rows: list[dict[str, Any]], key_name: str) -> list[dict[st
     for key in sorted(grouped):
         group_rows = grouped[key]
         best_row = max(group_rows, key=lambda item: float(item["primary_metric_value_float"]))
-        mean_metric = sum(float(item["primary_metric_value_float"]) for item in group_rows) / len(group_rows)
+        mean_metric = sum(float(item["primary_metric_value_float"]) for item in group_rows) / len(
+            group_rows
+        )
         summary.append(
             {
                 "key": key,
@@ -200,7 +206,9 @@ def _aggregate_by_section(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     for key in sorted(grouped):
         group_rows = grouped[key]
         best_row = max(group_rows, key=lambda item: float(item["primary_metric_value_float"]))
-        mean_metric = sum(float(item["primary_metric_value_float"]) for item in group_rows) / len(group_rows)
+        mean_metric = sum(float(item["primary_metric_value_float"]) for item in group_rows) / len(
+            group_rows
+        )
         summary.append(
             {
                 "section_key": key,
@@ -230,7 +238,9 @@ def _aggregate_xai_methods(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     for method in sorted(grouped):
         group_rows = grouped[method]
         best_row = max(group_rows, key=lambda item: float(item["primary_metric_value_float"]))
-        mean_metric = sum(float(item["primary_metric_value_float"]) for item in group_rows) / len(group_rows)
+        mean_metric = sum(float(item["primary_metric_value_float"]) for item in group_rows) / len(
+            group_rows
+        )
         performed_count = sum(1 for item in group_rows if item.get("xai_performed") is True)
         not_performed_count = sum(1 for item in group_rows if item.get("xai_performed") is False)
         unknown_count = sum(1 for item in group_rows if item.get("xai_performed") is None)
@@ -260,6 +270,7 @@ def aggregate_variant_records(
     segmented = [row for row in completed if not bool(row["is_full_pipeline"])]
 
     return {
+        "summary_result_schema_version": SUMMARY_RESULT_SCHEMA_VERSION,
         "top_k": int(top_k),
         "total_variant_records": int(len(variant_records)),
         "completed_with_metric_count": int(len(completed)),

@@ -5,8 +5,9 @@ from pathlib import Path
 
 import pytest
 
+from Thesis_ML.config.schema_versions import COMPILED_MANIFEST_SCHEMA_VERSION
 from Thesis_ML.orchestration.compiler import compile_registry_file, compile_registry_payload
-from Thesis_ML.orchestration.contracts import SectionName
+from Thesis_ML.orchestration.contracts import CompiledStudyManifest, SectionName
 
 
 def _minimal_registry_payload() -> dict[str, object]:
@@ -46,6 +47,7 @@ def _minimal_registry_payload() -> dict[str, object]:
 def test_compile_registry_payload_success() -> None:
     manifest = compile_registry_payload(_minimal_registry_payload())
     assert manifest.schema_version == "test"
+    assert manifest.compiled_manifest_schema_version == COMPILED_MANIFEST_SCHEMA_VERSION
     assert len(manifest.experiments) == 1
     assert len(manifest.trial_specs) == 2
     expected_sections = [section.value for section in SectionName]
@@ -132,3 +134,12 @@ def test_compile_registry_payload_invalid_reuse_policy_raises() -> None:
 
     with pytest.raises(ValueError, match="reuse_policy"):
         compile_registry_payload(payload)
+
+
+def test_compiled_manifest_rejects_unsupported_schema_version() -> None:
+    manifest = compile_registry_payload(_minimal_registry_payload())
+    raw = manifest.model_dump()
+    raw["compiled_manifest_schema_version"] = "compiled-manifest-v999"
+
+    with pytest.raises(ValueError, match="Unsupported compiled manifest schema version"):
+        CompiledStudyManifest.model_validate(raw)

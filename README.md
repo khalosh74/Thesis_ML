@@ -28,15 +28,99 @@ Data/
 
 `regressor_labels.csv` must map 1:1 by row index (1-based) to `beta_0001.nii ... beta_NNNN.nii`.
 
-## Install (PowerShell)
+## Supported Python
+
+- Canonical and CI-tested: `Python 3.13`
+- Package constraint: `>=3.11,<3.14` (from `pyproject.toml`)
+
+The repository includes `.python-version` pinned to `3.13`.
+
+## Reproducible setup (canonical: uv lockfile)
+
+`uv.lock` is the primary reproducible dependency path for this project.
+
+### PowerShell
 
 ```powershell
-.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+python -m pip install uv
+python -m uv sync --frozen --extra dev
+```
+
+### Bash
+
+```bash
+python -m pip install --upgrade pip
+python -m pip install uv
+python -m uv sync --frozen --extra dev
+```
+
+## Bootstrap commands (clean machine)
+
+You can run the scripts:
+- PowerShell: `./scripts/bootstrap_env.ps1`
+- Bash: `./scripts/bootstrap_env.sh`
+
+Or run the commands directly:
+
+```powershell
+python -m uv sync --frozen --extra dev
+python -m uv run python -m pytest -q
+python -m uv run thesisml-run-decision-support --help
+python -m uv run thesisml-workbook --output outputs/workbooks/bootstrap_thesis_experiment_program.xlsx
+```
+
+Decision-support campaign command (requires index/cache/data paths to exist):
+
+```powershell
+python -m uv run thesisml-run-decision-support `
+  --registry configs/decision_support_registry.json `
+  --index-csv Data/processed/dataset_index.csv `
+  --data-root Data `
+  --cache-dir Data/processed/feature_cache `
+  --output-root outputs/artifacts/decision_support `
+  --all
+```
+
+## Compatibility install path (kept)
+
+The editable `pip` flow remains supported:
+
+```powershell
 python -m pip install --upgrade pip
 python -m pip install -e ".[dev,spm]"
 ```
 
-If you do not need `SPM.mat` parsing, `.[dev]` is enough.
+If you do not need `SPM.mat` parsing, `.[dev]` is sufficient.
+
+## Docker / devcontainer
+
+- Docker image: `Dockerfile` (Python `3.13`, `uv sync --frozen --extra dev`)
+- VS Code devcontainer: `.devcontainer/devcontainer.json`
+
+Build and run tests in Docker:
+
+```bash
+docker build -t thesis-ml:dev .
+docker run --rm thesis-ml:dev
+```
+
+## CI and release gate
+
+- CI workflow: `.github/workflows/ci.yml` (push/PR)
+- Release validation workflow: `.github/workflows/release_gate.yml` (tags `v*`)
+- Release details: `docs/RELEASE.md`
+
+## Operator documentation
+
+- Architecture: `docs/ARCHITECTURE.md`
+- Runbook: `docs/RUNBOOK.md`
+- Workbook workflow: `docs/WORKBOOK_WORKFLOW.md`
+- Segment execution: `docs/SEGMENT_EXECUTION.md`
+- Extension guide: `docs/EXTENDING.md`
+- Schema/version migration notes: `docs/SCHEMA_MIGRATIONS.md`
+- Decision-support specifics: `docs/DECISION_SUPPORT_AUTOMATION.md`
+- Experiment semantics: `docs/EXPERIMENTS.md`
 
 ## Quickstart (end-to-end)
 
@@ -169,17 +253,27 @@ Edit `src/Thesis_ML/experiments/model_factory.py`:
 ## Quality checks
 
 ```powershell
-python -m ruff check .
-python -m ruff format --check .
-python -m pytest -q
+python -m uv run python -m mypy
+python -m uv run python -m ruff check src/Thesis_ML/artifacts src/Thesis_ML/orchestration src/Thesis_ML/workbook src/Thesis_ML/experiments/segment_execution.py src/Thesis_ML/experiments/sections.py src/Thesis_ML/experiments/run_experiment.py --exclude src/Thesis_ML/workbook/template_builder.py
+python -m uv run python -m ruff format --check src/Thesis_ML/artifacts src/Thesis_ML/orchestration src/Thesis_ML/workbook src/Thesis_ML/experiments/segment_execution.py src/Thesis_ML/experiments/sections.py src/Thesis_ML/experiments/run_experiment.py --exclude src/Thesis_ML/workbook/template_builder.py
+python -m uv run python -m pytest -q
 ```
+
+## Compatibility wrappers (deprecated)
+
+The following script paths are still supported but deprecated:
+
+- `run_decision_support_experiments.py` -> use `thesisml-run-decision-support`
+- `create_thesis_experiment_workbook.py` -> use `thesisml-workbook`
+- `scripts/create_thesis_experiment_workbook.py` -> use `thesisml-workbook`
+- `scripts/run_baseline.py` -> use `thesisml-run-baseline`
 
 ## Existing synthetic baseline
 
 The original synthetic baseline remains available and unchanged:
 
 ```powershell
-python scripts/run_baseline.py
+thesisml-run-baseline
 ```
 
 Outputs:

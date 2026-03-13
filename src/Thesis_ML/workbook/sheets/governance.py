@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from openpyxl.workbook.workbook import Workbook
 
-from Thesis_ML.workbook.builder import (
+from Thesis_ML.workbook.template_builder import (
     fill_ai_usage_sheet,
     fill_claim_ledger_sheet,
     fill_confirmatory_sheet,

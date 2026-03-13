@@ -9,10 +9,13 @@ from openpyxl.utils import range_boundaries
 from openpyxl.workbook.workbook import Workbook
 from openpyxl.worksheet.worksheet import Worksheet
 
+from Thesis_ML.workbook.schema_metadata import write_schema_metadata
+
 _MACHINE_STATUS_SHEET = "Machine_Status"
 _TRIAL_RESULTS_SHEET = "Trial_Results"
 _SUMMARY_OUTPUTS_SHEET = "Summary_Outputs"
 _RUN_LOG_SHEET = "Run_Log"
+_README_SHEET = "README"
 
 _MACHINE_STATUS_COLUMNS = [
     "machine_id",
@@ -118,9 +121,7 @@ def _assert_required_columns(
     mapping = _header_map(ws, header_row)
     missing = [name for name in required_columns if name not in mapping]
     if missing:
-        raise ValueError(
-            f"Sheet '{ws.title}' missing required columns: {', '.join(missing)}"
-        )
+        raise ValueError(f"Sheet '{ws.title}' missing required columns: {', '.join(missing)}")
     return mapping
 
 
@@ -148,7 +149,7 @@ def _copy_row_style(ws: Worksheet, src_row: int, dst_row: int, max_column: int) 
     for col in range(1, max_column + 1):
         src = ws.cell(row=src_row, column=col)
         dst = ws.cell(row=dst_row, column=col)
-        dst._style = src._style  # type: ignore[attr-defined]
+        dst._style = src._style
 
 
 def _update_table_refs(ws: Worksheet, required_row: int) -> None:
@@ -205,13 +206,20 @@ def _save_versioned_workbook(
     source_workbook_path: Path,
     version_tag: str,
     output_dir: Path | None,
+    overwrite_existing: bool,
 ) -> Path:
     safe_tag = _sanitize_version_tag(version_tag)
     resolved_output_dir = output_dir if output_dir is not None else source_workbook_path.parent
     resolved_output_dir.mkdir(parents=True, exist_ok=True)
-    output_path = resolved_output_dir / f"{source_workbook_path.stem}__results_{safe_tag}{source_workbook_path.suffix}"
-    if output_path.exists():
-        raise ValueError(f"Refusing to overwrite existing workbook write-back target: {output_path}")
+    output_path = (
+        resolved_output_dir
+        / f"{source_workbook_path.stem}__results_{safe_tag}{source_workbook_path.suffix}"
+    )
+    if output_path.exists() and not overwrite_existing:
+        raise ValueError(
+            "Refusing to overwrite existing workbook write-back target: "
+            f"{output_path}. Use overwrite_existing=True to replace it explicitly."
+        )
     wb.save(output_path)
     return output_path
 
@@ -226,9 +234,12 @@ def write_workbook_results(
     run_log_rows: list[dict[str, Any]] | None = None,
     append_run_log: bool = True,
     output_dir: Path | None = None,
+    overwrite_existing: bool = False,
 ) -> Path:
     workbook_path = Path(source_workbook_path)
     wb = load_workbook(workbook_path, data_only=False)
+    if _README_SHEET in wb.sheetnames:
+        write_schema_metadata(wb[_README_SHEET])
 
     if _MACHINE_STATUS_SHEET not in wb.sheetnames:
         raise ValueError(f"Workbook missing required write-back sheet: '{_MACHINE_STATUS_SHEET}'")
@@ -316,4 +327,5 @@ def write_workbook_results(
         source_workbook_path=workbook_path,
         version_tag=version_tag,
         output_dir=output_dir,
+        overwrite_existing=bool(overwrite_existing),
     )

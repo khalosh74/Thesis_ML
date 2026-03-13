@@ -1,6 +1,7 @@
 """Artifact registry utilities for experiment outputs."""
 
 from .registry import (
+    ARTIFACT_SCHEMA_VERSION,
     ARTIFACT_TYPE_EXPERIMENT_REPORT,
     ARTIFACT_TYPE_FEATURE_CACHE,
     ARTIFACT_TYPE_FEATURE_MATRIX_BUNDLE,
@@ -15,6 +16,7 @@ from .registry import (
 )
 
 __all__ = [
+    "ARTIFACT_SCHEMA_VERSION",
     "ARTIFACT_TYPE_EXPERIMENT_REPORT",
     "ARTIFACT_TYPE_FEATURE_CACHE",
     "ARTIFACT_TYPE_FEATURE_MATRIX_BUNDLE",
