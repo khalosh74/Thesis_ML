@@ -48,6 +48,8 @@ def _validate_shipped_workbook_assets(repo_root: Path) -> None:
         raise RuntimeError(f"Workbook named-list validation failed: {summary}")
     if not _is_true(summary.get("workbook_schema_supported")):
         raise RuntimeError(f"Workbook schema version is not supported: {summary}")
+    if not _is_true(summary.get("schema_metadata_keys_present")):
+        raise RuntimeError(f"Workbook schema metadata block is incomplete: {summary}")
 
     try:
         template_manifest = compile_workbook_file(template_path)
@@ -69,7 +71,9 @@ def _validate_shipped_workbook_assets(repo_root: Path) -> None:
         sample_manifest = compile_workbook_file(sample_path)
         if len(sample_manifest.trial_specs) == 0:
             raise RuntimeError(f"Workbook asset compiled with zero trial specs: {sample_path}")
-        print(f"Compiled workbook sample: {sample_path} ({len(sample_manifest.trial_specs)} trial specs).")
+        print(
+            f"Compiled workbook sample: {sample_path} ({len(sample_manifest.trial_specs)} trial specs)."
+        )
 
     if not sample_paths:
         print("No additional workbook sample assets detected in templates/.")
@@ -103,13 +107,19 @@ def main(argv: list[str] | None = None) -> int:
 
     _validate_shipped_workbook_assets(repo_root)
 
-    temp_root = Path(args.tmp_root) if args.tmp_root else Path(tempfile.mkdtemp(prefix="thesisml-acceptance-"))
+    temp_root = (
+        Path(args.tmp_root)
+        if args.tmp_root
+        else Path(tempfile.mkdtemp(prefix="thesisml-acceptance-"))
+    )
     temp_root.mkdir(parents=True, exist_ok=True)
 
     generated_workbook = temp_root / "generated_workbook.xlsx"
     _run(["thesisml-workbook", "--output", str(generated_workbook)], cwd=repo_root)
     if not generated_workbook.exists():
-        raise RuntimeError(f"Workbook generation failed; expected file was not created: {generated_workbook}")
+        raise RuntimeError(
+            f"Workbook generation failed; expected file was not created: {generated_workbook}"
+        )
 
     generated_summary = validate_workbook(generated_workbook)
     if not _is_true(generated_summary.get("sheet_order_ok")):

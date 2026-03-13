@@ -15,9 +15,7 @@ def normalize_spatial_signature(raw_signature: Any, cache_path: Path) -> dict[st
     required = ("image_shape", "affine", "mask_voxel_count", "feature_count", "mask_sha256")
     missing = [key for key in required if key not in raw_signature]
     if missing:
-        raise ValueError(
-            f"missing required spatial signature field(s) {missing} in {cache_path}"
-        )
+        raise ValueError(f"missing required spatial signature field(s) {missing} in {cache_path}")
 
     image_shape = [int(value) for value in list(raw_signature["image_shape"])]
     affine_array = np.asarray(raw_signature["affine"], dtype=np.float64)

@@ -6,6 +6,7 @@ from openpyxl.worksheet.worksheet import Worksheet
 
 from Thesis_ML.workbook.template_primitives import (
     COL,
+    add_dynamic_named_list,
     add_list_validation,
     add_table,
     col_idx,
@@ -260,11 +261,203 @@ def fill_summary_outputs(ws: Worksheet, *, summary_outputs_columns: list[str]) -
     )
 
 
+def fill_experiment_definitions(ws: Worksheet, *, experiment_definitions_columns: list[str]) -> int:
+    for idx, header in enumerate(experiment_definitions_columns, start=1):
+        ws.cell(1, idx, header)
+    style_header(ws, 1, len(experiment_definitions_columns))
+
+    seed_rows = [
+        {
+            "experiment_id": "E16",
+            "enabled": "No",
+            "start_section": "dataset_selection",
+            "end_section": "evaluation",
+            "base_artifact_id": "",
+            "target": "coarse_affect",
+            "cv": "within_subject_loso_session",
+            "model": "ridge",
+            "subject": "sub-001",
+            "train_subject": "",
+            "test_subject": "",
+            "filter_task": "",
+            "filter_modality": "",
+            "reuse_policy": "auto",
+            "search_space_id": "",
+        },
+        {
+            "experiment_id": "E17",
+            "enabled": "No",
+            "start_section": "dataset_selection",
+            "end_section": "evaluation",
+            "base_artifact_id": "",
+            "target": "coarse_affect",
+            "cv": "frozen_cross_person_transfer",
+            "model": "ridge",
+            "subject": "",
+            "train_subject": "sub-001",
+            "test_subject": "sub-002",
+            "filter_task": "",
+            "filter_modality": "",
+            "reuse_policy": "auto",
+            "search_space_id": "",
+        },
+    ]
+    for row_idx, row in enumerate(seed_rows, start=2):
+        for col_idx_value, name in enumerate(experiment_definitions_columns, start=1):
+            ws.cell(row_idx, col_idx_value, row.get(name, ""))
+
+    last = 81
+    style_body(ws, 2, last, 1, len(experiment_definitions_columns))
+    add_table(ws, "ExperimentDefinitionsTable", f"A1:O{last}", style="TableStyleMedium2")
+    ws.freeze_panes = "A2"
+    ws.auto_filter.ref = f"A1:O{last}"
+
+    add_list_validation(
+        ws,
+        "=List_Experiment_ID",
+        col_idx(experiment_definitions_columns, "experiment_id"),
+        2,
+        1000,
+    )
+    add_list_validation(
+        ws,
+        "=List_YesNo",
+        col_idx(experiment_definitions_columns, "enabled"),
+        2,
+        1000,
+    )
+    add_list_validation(
+        ws,
+        "=List_Execution_Section",
+        col_idx(experiment_definitions_columns, "start_section"),
+        2,
+        1000,
+    )
+    add_list_validation(
+        ws,
+        "=List_Execution_Section",
+        col_idx(experiment_definitions_columns, "end_section"),
+        2,
+        1000,
+    )
+    add_list_validation(
+        ws,
+        "=List_Reuse_Policy",
+        col_idx(experiment_definitions_columns, "reuse_policy"),
+        2,
+        1000,
+    )
+    add_list_validation(
+        ws,
+        "=List_Search_Space_ID",
+        col_idx(experiment_definitions_columns, "search_space_id"),
+        2,
+        1000,
+    )
+
+    set_widths(
+        ws,
+        {
+            "A": 14,
+            "B": 10,
+            "C": 20,
+            "D": 20,
+            "E": 28,
+            "F": 18,
+            "G": 28,
+            "H": 14,
+            "I": 12,
+            "J": 14,
+            "K": 14,
+            "L": 16,
+            "M": 18,
+            "N": 18,
+            "O": 16,
+        },
+    )
+    return last
+
+
+def fill_search_spaces(
+    ws: Worksheet,
+    wb,
+    *,
+    search_spaces_columns: list[str],
+) -> int:
+    seed_rows = [
+        {
+            "search_space_id": "SS01",
+            "enabled": "No",
+            "optimization_mode": "deterministic_grid",
+            "parameter_name": "model",
+            "parameter_values": "ridge|logreg|linearsvc",
+            "parameter_scope": "parameter",
+            "objective_metric": "balanced_accuracy",
+            "max_trials": "",
+            "notes": "Example model-family search.",
+        },
+        {
+            "search_space_id": "SS01",
+            "enabled": "No",
+            "optimization_mode": "deterministic_grid",
+            "parameter_name": "start_section",
+            "parameter_values": "dataset_selection|feature_matrix_load",
+            "parameter_scope": "segment",
+            "objective_metric": "balanced_accuracy",
+            "max_trials": "",
+            "notes": "Example section-start search.",
+        },
+    ]
+    last = fill_simple_structured_sheet(
+        ws=ws,
+        columns=search_spaces_columns,
+        table_name="SearchSpacesTable",
+        title="Search Space Definitions",
+        width_map={
+            "A": 16,
+            "B": 10,
+            "C": 20,
+            "D": 24,
+            "E": 34,
+            "F": 14,
+            "G": 20,
+            "H": 12,
+            "I": 32,
+        },
+        starter_rows=seed_rows,
+    )
+    add_list_validation(ws, "=List_YesNo", col_idx(search_spaces_columns, "enabled"), 3, 1000)
+    add_list_validation(
+        ws,
+        "=List_Search_Optimization_Mode",
+        col_idx(search_spaces_columns, "optimization_mode"),
+        3,
+        1000,
+    )
+    add_list_validation(
+        ws,
+        "=List_Search_Parameter_Scope",
+        col_idx(search_spaces_columns, "parameter_scope"),
+        3,
+        1000,
+    )
+    add_dynamic_named_list(
+        wb,
+        "List_Search_Space_ID",
+        ws.title,
+        col_idx(search_spaces_columns, "search_space_id"),
+        3,
+    )
+    return last
+
+
 __all__ = [
     "fill_artifact_registry",
+    "fill_experiment_definitions",
     "fill_fixed_configs",
     "fill_machine_status",
     "fill_objectives",
+    "fill_search_spaces",
     "fill_summary_outputs",
     "fill_trial_results",
 ]

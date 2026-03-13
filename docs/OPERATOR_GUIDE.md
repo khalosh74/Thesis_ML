@@ -4,6 +4,8 @@ Use these commands as the supported operator path.
 
 ## 1) Environment
 
+Canonical operator path is source checkout + `uv.lock`.
+
 ```bash
 python -m pip install --upgrade pip
 python -m pip install uv
@@ -15,6 +17,8 @@ Optional Optuna support:
 ```bash
 python -m uv sync --frozen --extra dev --extra optuna
 ```
+
+Installed wheel path is also supported; default decision-support registry is packaged in the wheel.
 
 ## 2) Canonical CLIs
 
@@ -33,6 +37,10 @@ Generate workbook template:
 thesisml-workbook --output templates/thesis_experiment_program.xlsx
 ```
 
+Template note:
+- `templates/thesis_experiment_program.xlsx` is non-runnable by default
+- enable/populate executable rows in `Experiment_Definitions` before using `--workbook`
+
 Registry dry-run:
 
 ```bash
@@ -45,6 +53,10 @@ thesisml-run-decision-support \
   --all \
   --dry-run
 ```
+
+Installed-wheel note:
+- the default registry path is packaged in the wheel, so `--registry` is optional
+- passing explicit `--registry` remains supported and recommended for controlled campaigns
 
 ## 4) Gold acceptance command
 

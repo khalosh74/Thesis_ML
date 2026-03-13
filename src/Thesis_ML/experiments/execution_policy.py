@@ -86,9 +86,7 @@ def prepare_report_dir(
     status_payload = read_run_status(report_dir)
     status_value = str(status_payload.get("status", "unknown")) if status_payload else "unknown"
     updated_at = (
-        str(status_payload.get("updated_at_utc", "unknown"))
-        if status_payload
-        else "unknown"
+        str(status_payload.get("updated_at_utc", "unknown")) if status_payload else "unknown"
     )
 
     if force:

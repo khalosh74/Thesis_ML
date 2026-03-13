@@ -43,6 +43,66 @@ jobs:
         run: |
           python scripts/acceptance_smoke.py
 
+      - name: Installed default registry smoke
+        run: |
+          python - <<'PY'
+          from Thesis_ML.config.paths import (
+              DEFAULT_DECISION_SUPPORT_REGISTRY,
+              SHIPPED_WORKBOOK_TEMPLATE,
+          )
+          from Thesis_ML.orchestration.workbook_compiler import compile_workbook_file
+          from Thesis_ML.workbook.validation import validate_workbook
+
+          print(DEFAULT_DECISION_SUPPORT_REGISTRY)
+          if not DEFAULT_DECISION_SUPPORT_REGISTRY.exists():
+              raise SystemExit(
+                  f"Expected installed default registry to exist: {DEFAULT_DECISION_SUPPORT_REGISTRY}"
+              )
+          print(SHIPPED_WORKBOOK_TEMPLATE)
+          if not SHIPPED_WORKBOOK_TEMPLATE.exists():
+              raise SystemExit(
+                  f"Expected installed shipped workbook template to exist: {SHIPPED_WORKBOOK_TEMPLATE}"
+              )
+
+          summary = validate_workbook(SHIPPED_WORKBOOK_TEMPLATE)
+          if summary.get("sheet_order_ok") != "True":
+              raise SystemExit(f"Shipped workbook template sheet-order validation failed: {summary}")
+          if summary.get("required_named_lists_present") != "True":
+              raise SystemExit(f"Shipped workbook template named-list validation failed: {summary}")
+          if summary.get("schema_metadata_keys_present") != "True":
+              raise SystemExit(f"Shipped workbook template schema metadata validation failed: {summary}")
+
+          try:
+              manifest = compile_workbook_file(SHIPPED_WORKBOOK_TEMPLATE)
+          except ValueError as exc:
+              if "No enabled executable rows were found in Experiment_Definitions." not in str(exc):
+                  raise
+          else:
+              if len(manifest.trial_specs) == 0:
+                  raise SystemExit(
+                      "Shipped workbook compiled successfully but produced zero trial specs."
+                  )
+          PY
+
+          python - <<'PY'
+          from pathlib import Path
+          import pandas as pd
+
+          temp_root = Path("/tmp/thesisml_release_gate")
+          temp_root.mkdir(parents=True, exist_ok=True)
+          pd.DataFrame(
+              [{"subject": "sub-001", "task": "passive", "modality": "audio"}]
+          ).to_csv(temp_root / "dataset_index.csv", index=False)
+          PY
+
+          thesisml-run-decision-support \
+            --index-csv /tmp/thesisml_release_gate/dataset_index.csv \
+            --data-root /tmp/thesisml_release_gate/Data \
+            --cache-dir /tmp/thesisml_release_gate/cache \
+            --output-root /tmp/thesisml_release_gate/outputs \
+            --all \
+            --dry-run
+
       - name: Lightweight runtime test
         run: |
           python -m pytest tests/test_import_decoupling.py -q

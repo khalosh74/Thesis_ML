@@ -12,6 +12,11 @@ This framework supports a full round trip:
 - Template: `templates/thesis_experiment_program.xlsx`
 - Versioned write-back outputs: `outputs/workbooks/`
 
+Template policy:
+- `templates/thesis_experiment_program.xlsx` is a governed planning template
+- it is intentionally non-runnable until executable rows are enabled/populated in
+  `Experiment_Definitions`
+
 ## Generate template
 
 ```bash
@@ -42,9 +47,20 @@ Validation includes:
 
 ## Execute from workbook
 
+Prepare a runnable workbook first (recommended):
+
+```bash
+thesisml-workbook --output outputs/workbooks/my_campaign.xlsx
+# edit outputs/workbooks/my_campaign.xlsx:
+# - set enabled=Yes for executable rows
+# - fill target/cv/model and any optional segment/search columns
+```
+
+Run workbook campaign:
+
 ```bash
 thesisml-run-decision-support \
-  --workbook templates/thesis_experiment_program.xlsx \
+  --workbook outputs/workbooks/my_campaign.xlsx \
   --index-csv Data/processed/dataset_index.csv \
   --data-root Data \
   --cache-dir Data/processed/feature_cache \
@@ -74,4 +90,3 @@ Machine-owned write-back targets:
 - optional append to `Run_Log`
 
 Human-authored governance sheets are preserved.
-

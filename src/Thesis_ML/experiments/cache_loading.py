@@ -80,7 +80,9 @@ def load_features_from_cache(
         affine_atol=affine_atol,
     )
     if spatial_report_path is not None:
-        spatial_report_path.write_text(f"{json.dumps(spatial_report, indent=2)}\n", encoding="utf-8")
+        spatial_report_path.write_text(
+            f"{json.dumps(spatial_report, indent=2)}\n", encoding="utf-8"
+        )
     if not spatial_report["passed"]:
         raise_spatial_compatibility_error(spatial_report)
 

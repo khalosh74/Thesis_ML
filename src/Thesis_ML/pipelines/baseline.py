@@ -9,6 +9,7 @@ import numpy as np
 
 from Thesis_ML.config.paths import DEFAULT_BASELINE_MODELS_DIR, DEFAULT_BASELINE_REPORTS_DIR
 
+
 def _validate_config(
     n_samples: int,
     n_features: int,

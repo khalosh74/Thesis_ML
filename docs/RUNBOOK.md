@@ -34,8 +34,13 @@ python -m pip install -e ".[dev,optuna]"
 
 Configured in `src/Thesis_ML/config/paths.py`.
 
-- Registry default: `configs/decision_support_registry.json`
-- Workbook template default: `templates/thesis_experiment_program.xlsx`
+- Decision-support registry default:
+  - source checkout: `configs/decision_support_registry.json`
+  - installed wheel: packaged asset under `Thesis_ML/assets/configs/decision_support_registry.json`
+- Workbook generation default output: `templates/thesis_experiment_program.xlsx` under current project/cwd
+- Shipped workbook template asset:
+  - source checkout: `templates/thesis_experiment_program.xlsx`
+  - installed wheel: packaged asset under `Thesis_ML/assets/templates/thesis_experiment_program.xlsx`
 - Output root: `outputs/`
   - experiment reports: `outputs/reports/experiments/`
   - decision-support campaign artifacts: `outputs/artifacts/decision_support/`
@@ -99,9 +104,21 @@ thesisml-run-decision-support \
 
 ## 6) Decision-support campaign (workbook-driven)
 
+`templates/thesis_experiment_program.xlsx` is a **planning template** by default.
+It validates structurally but is intentionally non-runnable until at least one row in
+`Experiment_Definitions` is enabled (`enabled=Yes`) and populated with required fields
+(`target`, `cv`, `model`).
+
+Prepare a runnable workbook by generating a copy and editing executable rows first:
+
+```bash
+thesisml-workbook --output outputs/workbooks/my_campaign.xlsx
+# edit outputs/workbooks/my_campaign.xlsx: set enabled=Yes and fill required columns
+```
+
 ```bash
 thesisml-run-decision-support \
-  --workbook templates/thesis_experiment_program.xlsx \
+  --workbook outputs/workbooks/my_campaign.xlsx \
   --index-csv Data/processed/dataset_index.csv \
   --data-root Data \
   --cache-dir Data/processed/feature_cache \
@@ -119,6 +136,10 @@ Write-back safety:
 ```bash
 thesisml-workbook --output templates/thesis_experiment_program.xlsx
 ```
+
+Template policy:
+- generated/shipped template is governance-first and non-runnable by default
+- workbook compiler will fail until executable rows are explicitly enabled/populated
 
 ## 8) Health checks
 

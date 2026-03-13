@@ -34,4 +34,3 @@ def test_campaign_runner_uses_facade_runner_by_default(
 
     assert result == {"ok": True}
     assert captured["run_experiment_fn"] is campaign_runner.run_experiment
-

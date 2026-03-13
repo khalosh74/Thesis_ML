@@ -11,6 +11,8 @@ from .paths import (
     DEFAULT_WORKBOOK_TEMPLATE,
     OUTPUTS_ROOT,
     PROJECT_ROOT,
+    SHIPPED_WORKBOOK_TEMPLATE,
+    SOURCE_REPO_ROOT,
     ensure_default_output_dirs,
 )
 from .schema_versions import (
@@ -36,8 +38,10 @@ from .schema_versions import (
 
 __all__ = [
     "PROJECT_ROOT",
+    "SOURCE_REPO_ROOT",
     "OUTPUTS_ROOT",
     "DEFAULT_DECISION_SUPPORT_REGISTRY",
+    "SHIPPED_WORKBOOK_TEMPLATE",
     "DEFAULT_WORKBOOK_TEMPLATE",
     "DEFAULT_DECISION_SUPPORT_OUTPUT_ROOT",
     "DEFAULT_EXPERIMENT_REPORTS_ROOT",

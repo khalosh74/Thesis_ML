@@ -38,6 +38,11 @@ python scripts/acceptance_smoke.py
 
 Used in CI/release gate to validate shipped assets and canonical CLI flow.
 
+Shipped-asset drift protection:
+- `tests/test_shipped_assets.py` asserts packaged assets match committed
+  `configs/` and `templates/` copies
+- template metadata and non-runnable template policy are regression-tested
+
 ## Core verification commands
 
 ```bash

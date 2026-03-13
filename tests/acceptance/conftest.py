@@ -117,4 +117,3 @@ def acceptance_expected_output_shape() -> dict[str, str]:
         "summary_type": "best_full_pipeline",
         "run_log_result": "completed",
     }
-

@@ -16,11 +16,26 @@ from Thesis_ML.config.schema_versions import (
 from Thesis_ML.workbook.schema_metadata import write_schema_metadata
 from Thesis_ML.workbook.structured_execution_sheets import (
     fill_artifact_registry as _fill_artifact_registry_sheet,
+)
+from Thesis_ML.workbook.structured_execution_sheets import (
+    fill_experiment_definitions as _fill_experiment_definitions_sheet,
+)
+from Thesis_ML.workbook.structured_execution_sheets import (
     fill_fixed_configs as _fill_fixed_configs_sheet,
+)
+from Thesis_ML.workbook.structured_execution_sheets import (
     fill_machine_status as _fill_machine_status_sheet,
+)
+from Thesis_ML.workbook.structured_execution_sheets import (
     fill_objectives as _fill_objectives_sheet,
-    fill_simple_structured_sheet as _fill_simple_structured_sheet_impl,
+)
+from Thesis_ML.workbook.structured_execution_sheets import (
+    fill_search_spaces as _fill_search_spaces_sheet,
+)
+from Thesis_ML.workbook.structured_execution_sheets import (
     fill_summary_outputs as _fill_summary_outputs_sheet,
+)
+from Thesis_ML.workbook.structured_execution_sheets import (
     fill_trial_results as _fill_trial_results_sheet,
 )
 from Thesis_ML.workbook.template_primitives import (
@@ -404,18 +419,42 @@ VOCABS = {
     "Run_Type": ["Pilot", "Decision-support", "Confirmatory", "Robustness", "Exploratory"],
     "Affects_Frozen_Pipeline": ["No", "Yes"],
     "Eligible_for_Method_Decision": ["No", "Yes"],
-    "Claim_Type": ["Method-choice", "Confirmatory finding", "Robustness support", "Exploratory observation"],
+    "Claim_Type": [
+        "Method-choice",
+        "Confirmatory finding",
+        "Robustness support",
+        "Exploratory observation",
+    ],
     "Evidence_Status": ["open", "partial", "supported"],
     "Writing_Location": ["Chapter 3", "Chapter 4", "Chapter 5", "Appendix"],
     "Human_Verification_Status": ["Not reviewed", "Partially verified", "Verified"],
     "Ethics_Status": ["Open", "Monitoring", "Closed"],
-    "Ethics_Topic": ["Data governance", "Bias/fairness", "Interpretation limits", "AI/tool transparency", "Reproducibility", "Other"],
+    "Ethics_Topic": [
+        "Data governance",
+        "Bias/fairness",
+        "Interpretation limits",
+        "AI/tool transparency",
+        "Reproducibility",
+        "Other",
+    ],
     "Required_for_Main_Claim": ["No", "Yes"],
     "Ready_for_Chapter_4": ["No", "Yes"],
     "YesNo": ["No", "Yes"],
     "Subject_Scope": ["all_subjects", "single_subject", "cross_person_transfer"],
-    "Session_Scope": ["all_sessions", "early_only", "late_only", "held_out_session", "custom_window"],
-    "Task_Scope": ["pooled_all_tasks", "passive_only", "emo_only", "rating_only", "task_specific_other"],
+    "Session_Scope": [
+        "all_sessions",
+        "early_only",
+        "late_only",
+        "held_out_session",
+        "custom_window",
+    ],
+    "Task_Scope": [
+        "pooled_all_tasks",
+        "passive_only",
+        "emo_only",
+        "rating_only",
+        "task_specific_other",
+    ],
     "Modality_Scope": ["pooled_all_modalities", "audio_only", "video_only", "audiovisual_only"],
     "Class_Balance_Policy": ["as_is", "balanced_subset", "weighted_only", "min_count_threshold"],
     "Split_Family": ["within_subject", "cross_person", "temporal", "weak_split_demo", "diagnostic"],
@@ -473,20 +512,36 @@ VOCABS = {
 }
 
 DEFINITIONS = [
-    ("confirmatory", "Pre-specified, locked-pipeline evidence analysis supporting main thesis claims."),
+    (
+        "confirmatory",
+        "Pre-specified, locked-pipeline evidence analysis supporting main thesis claims.",
+    ),
     ("decision-support", "Method-choice analysis performed before locking confirmatory settings."),
     ("exploratory", "Hypothesis-generating extension outside confirmatory core."),
-    ("data slice", "Explicit subset policy over subjects/sessions/tasks/modalities/labels used by runs."),
-    ("grouping strategy", "Explicit train/test grouping logic and split family for claim-matched evaluation."),
-    ("weak split demo", "Intentionally weak split used only to demonstrate inflation risk; not confirmatory evidence."),
+    (
+        "data slice",
+        "Explicit subset policy over subjects/sessions/tasks/modalities/labels used by runs.",
+    ),
+    (
+        "grouping strategy",
+        "Explicit train/test grouping logic and split family for claim-matched evaluation.",
+    ),
+    (
+        "weak split demo",
+        "Intentionally weak split used only to demonstrate inflation risk; not confirmatory evidence.",
+    ),
     ("construct validity", "How well labels/features operationalize intended constructs."),
     ("internal validity", "Protection against confounds and leakage in design and execution."),
     ("statistical conclusion validity", "Reliability of metric-based inference."),
     ("external validity", "Extent findings transfer to other data contexts."),
     ("leakage", "Train-test information contamination that inflates apparent performance."),
     ("domain shift", "Distribution shift between train and test domains."),
-    ("interpretability stability", "Consistency of model-behavior explanation signals across folds."),
+    (
+        "interpretability stability",
+        "Consistency of model-behavior explanation signals across folds.",
+    ),
 ]
+
 
 def build_experiments() -> list[dict[str, str]]:
     base = {
@@ -516,25 +571,247 @@ def build_experiments() -> list[dict[str, str]]:
         "Notes": "",
     }
     rows = [
-        {"Experiment_ID": "E01", "Short_Title": "Target granularity experiment", "Category": "Target-definition", "Evidential_Role": "Secondary decision-support", "Stage": "Stage 1 - Target lock", "Priority": "High", "Decision_Supported": "Final target lock", "Exact_Question": "Should the thesis use fine-grained emotion labels, three-class coarse affect, or binary valence-like labels?", "Hypothesis_or_Expectation": "coarse_affect likely balances construct validity, class balance, and learnability.", "Manipulated_Factor": "Target definition", "Target_Definition": "fine emotion vs coarse_affect vs binary valence-like", "Split_Logic": "within_subject_loso_session for primary comparison; frozen transfer as secondary check", "Decision_Criterion": "Prefer target balancing construct validity, class balance, sample sufficiency, and learnability under claim-matched evaluation."},
-        {"Experiment_ID": "E02", "Short_Title": "Task pooling experiment", "Category": "Target-definition", "Evidential_Role": "Secondary decision-support", "Stage": "Stage 1 - Target lock", "Decision_Supported": "Task pooling policy", "Exact_Question": "Should the main target be learned across all tasks together, or separately by task?", "Manipulated_Factor": "Pooling strategy by task"},
-        {"Experiment_ID": "E03", "Short_Title": "Modality pooling experiment", "Category": "Target-definition", "Evidential_Role": "Secondary decision-support", "Stage": "Stage 1 - Target lock", "Decision_Supported": "Modality pooling policy", "Exact_Question": "Should audio, video, and audiovisual conditions be pooled or modeled separately?", "Manipulated_Factor": "Pooling strategy by modality"},
-        {"Experiment_ID": "E04", "Short_Title": "Split-strength stress test", "Category": "Split-design", "Evidential_Role": "Secondary decision-support", "Stage": "Stage 2 - Split lock", "Priority": "High", "Decision_Supported": "Primary split policy", "Exact_Question": "How much do conclusions change under weaker split strategies compared with session-held-out evaluation?", "Manipulated_Factor": "Split logic", "Split_Logic": "record-wise random split vs weaker grouped split vs within-person leave-one-session-out", "Leakage_Risk": "High under weak splits", "Decision_Criterion": "Retain strictest split matching claim; weaker splits only as inflation/leakage demonstrations."},
-        {"Experiment_ID": "E05", "Short_Title": "Cross-person transfer design", "Category": "Split-design", "Evidential_Role": "Secondary decision-support", "Stage": "Stage 2 - Split lock", "Priority": "High", "Decision_Supported": "Cross-person transfer framing", "Exact_Question": "How should cross-person generalization be framed and evaluated?", "Manipulated_Factor": "Transfer protocol", "Split_Logic": "frozen train-on-A/test-on-B and reverse direction", "Leakage_Control": "Fit only on train subject; no test subject re-fit/re-tune", "Decision_Criterion": "Keep frozen directional transfer as clean cross-case test.", "Interpretation_Boundary": "Transfer evidence under domain shift, not population-level generalization."},
-        {"Experiment_ID": "E06", "Short_Title": "Linear model family comparison", "Category": "Model-comparison", "Evidential_Role": "Secondary decision-support", "Stage": "Stage 3 - Model lock", "Priority": "High", "Decision_Supported": "Model family lock", "Exact_Question": "Which linear model is the most appropriate default: ridge, logistic regression, or linear SVM?", "Manipulated_Factor": "Model family", "Models_Compared": "ridge vs logreg vs linearsvc", "Decision_Criterion": "Prefer simplest model with comparable predictive performance and better robustness/stability."},
-        {"Experiment_ID": "E07", "Short_Title": "Class weighting experiment", "Category": "Model-comparison", "Evidential_Role": "Secondary decision-support", "Stage": "Stage 3 - Model lock", "Decision_Supported": "Weighting policy", "Exact_Question": "Does class weighting improve fairness across classes without creating instability?", "Manipulated_Factor": "Weighting strategy"},
-        {"Experiment_ID": "E08", "Short_Title": "Hyperparameter strategy experiment", "Category": "Model-comparison", "Evidential_Role": "Secondary decision-support", "Stage": "Stage 3 - Model lock", "Decision_Supported": "Tuning policy", "Exact_Question": "Are fixed conservative hyperparameters sufficient, or does light nested tuning materially improve results?", "Manipulated_Factor": "Tuning strategy", "Decision_Criterion": "Keep fixed settings unless nested tuning yields a clear and stable gain."},
-        {"Experiment_ID": "E09", "Short_Title": "Whole-brain versus ROI experiment", "Category": "Preprocessing-feature", "Evidential_Role": "Secondary decision-support", "Stage": "Stage 4 - Feature/preprocessing lock", "Decision_Supported": "Feature representation lock", "Exact_Question": "Should the primary representation remain whole-brain masked voxels or use theory-justified ROIs?", "Manipulated_Factor": "Feature space"},
-        {"Experiment_ID": "E10", "Short_Title": "Dimensionality reduction experiment", "Category": "Preprocessing-feature", "Evidential_Role": "Secondary decision-support", "Stage": "Stage 4 - Feature/preprocessing lock", "Decision_Supported": "Feature reduction policy", "Exact_Question": "Does unsupervised dimensionality reduction improve performance or stability enough to justify added complexity?", "Manipulated_Factor": "Feature reduction strategy"},
-        {"Experiment_ID": "E11", "Short_Title": "Scaling and normalization experiment", "Category": "Preprocessing-feature", "Evidential_Role": "Secondary decision-support", "Stage": "Stage 4 - Feature/preprocessing lock", "Decision_Supported": "Scaling policy lock", "Exact_Question": "How sensitive are the results to scaling strategy?", "Manipulated_Factor": "Scaling policy"},
-        {"Experiment_ID": "E12", "Short_Title": "Permutation test experiment", "Category": "Robustness", "Evidential_Role": "Primary-supporting robustness", "Stage": "Stage 6 - Robustness analysis", "Priority": "High", "Decision_Supported": "Chance-level distinguishability support", "Exact_Question": "Are the main predictive results distinguishable from chance under the exact same split logic?", "Manipulated_Factor": "Label structure (true vs permuted)", "Split_Logic": "exact confirmatory split logic with train-only permutation", "Secondary_Metrics": "Empirical p-value; null distribution summary", "Reporting_Destination": "Chapter 4 Supporting robustness"},
-        {"Experiment_ID": "E13", "Short_Title": "Trivial baseline experiment", "Category": "Robustness", "Evidential_Role": "Primary-supporting robustness", "Stage": "Stage 6 - Robustness analysis", "Priority": "High", "Decision_Supported": "Non-trivial predictive value support", "Exact_Question": "Does the final model clearly outperform trivial baselines?", "Manipulated_Factor": "Baseline type", "Models_Compared": "Final locked model vs trivial baselines", "Reporting_Destination": "Chapter 4 Supporting robustness"},
-        {"Experiment_ID": "E14", "Short_Title": "Stability of explanation experiment", "Category": "Robustness", "Evidential_Role": "Primary-supporting robustness", "Stage": "Stage 6 - Robustness analysis", "Priority": "High", "Decision_Supported": "Interpretability stability support", "Exact_Question": "Are linear coefficients or importance patterns stable across held-out-session folds?", "Manipulated_Factor": "Fold identity", "Primary_Metric": "Mean pairwise coefficient correlation", "Secondary_Metrics": "Sign consistency; top-k overlap", "Reporting_Destination": "Chapter 4 Supporting robustness", "Interpretation_Boundary": "Model-behavior evidence only; not direct neural localization."},
-        {"Experiment_ID": "E15", "Short_Title": "Sensitivity to subset exclusion", "Category": "Robustness", "Evidential_Role": "Secondary decision-support / robustness", "Stage": "Stage 6 - Robustness analysis", "Decision_Supported": "Sensitivity framing", "Exact_Question": "Do the main conclusions depend excessively on one subset, such as one task or modality?", "Manipulated_Factor": "Subset inclusion", "Reporting_Destination": "Chapter 5 Discussion"},
-        {"Experiment_ID": "E16", "Short_Title": "Final within-person confirmatory analysis", "Category": "Confirmatory core", "Evidential_Role": "Primary confirmatory", "Stage": "Stage 5 - Confirmatory analysis", "Priority": "Critical", "Decision_Supported": "Primary confirmatory claim", "Exact_Question": "Does the final locked pipeline show meaningful within-person held-out-session generalization?", "Manipulated_Factor": "None; final frozen pipeline", "Target_Definition": "Locked target after Stage 1 target lock", "Split_Logic": "within_subject_loso_session", "Models_Compared": "Final locked model", "Decision_Criterion": "Primary evidential core of thesis.", "Reporting_Destination": "Chapter 4 Main results"},
-        {"Experiment_ID": "E17", "Short_Title": "Final cross-person transfer analysis", "Category": "Confirmatory core", "Evidential_Role": "Primary confirmatory", "Stage": "Stage 5 - Confirmatory analysis", "Priority": "Critical", "Decision_Supported": "Secondary confirmatory transfer claim", "Exact_Question": "Does the final locked pipeline transfer meaningfully across individuals under frozen directional transfer?", "Manipulated_Factor": "None; final frozen pipeline", "Target_Definition": "Locked target after Stage 1 target lock", "Split_Logic": "frozen_cross_person_transfer both directions", "Models_Compared": "Final locked model", "Decision_Criterion": "Interpret as cross-case transfer evidence under domain shift.", "Reporting_Destination": "Chapter 4 Main results", "Interpretation_Boundary": "Directional transfer evidence only; not population-level generalization."},
-        {"Experiment_ID": "E18", "Short_Title": "External open-source split replication", "Category": "External exploratory", "Evidential_Role": "Exploratory extension", "Stage": "Stage 7 - Exploratory extension", "Priority": "Low", "Decision_Supported": "External split-consistency exploration", "Exact_Question": "Does the same leakage-aware split logic materially affect conclusions on a compatible external open-source dataset?", "Manipulated_Factor": "Dataset source", "Dataset_Scope": "External open-source dataset if available and approved", "Reporting_Destination": "Appendix"},
-        {"Experiment_ID": "E19", "Short_Title": "External open-source model portability", "Category": "External exploratory", "Evidential_Role": "Exploratory extension", "Stage": "Stage 7 - Exploratory extension", "Priority": "Low", "Decision_Supported": "External model portability exploration", "Exact_Question": "Does the relative ranking of reasonable model choices remain similar on external data?", "Manipulated_Factor": "Dataset source with same small model set", "Dataset_Scope": "External open-source dataset if available and approved", "Models_Compared": "ridge vs logreg vs linearsvc", "Reporting_Destination": "Appendix"},
+        {
+            "Experiment_ID": "E01",
+            "Short_Title": "Target granularity experiment",
+            "Category": "Target-definition",
+            "Evidential_Role": "Secondary decision-support",
+            "Stage": "Stage 1 - Target lock",
+            "Priority": "High",
+            "Decision_Supported": "Final target lock",
+            "Exact_Question": "Should the thesis use fine-grained emotion labels, three-class coarse affect, or binary valence-like labels?",
+            "Hypothesis_or_Expectation": "coarse_affect likely balances construct validity, class balance, and learnability.",
+            "Manipulated_Factor": "Target definition",
+            "Target_Definition": "fine emotion vs coarse_affect vs binary valence-like",
+            "Split_Logic": "within_subject_loso_session for primary comparison; frozen transfer as secondary check",
+            "Decision_Criterion": "Prefer target balancing construct validity, class balance, sample sufficiency, and learnability under claim-matched evaluation.",
+        },
+        {
+            "Experiment_ID": "E02",
+            "Short_Title": "Task pooling experiment",
+            "Category": "Target-definition",
+            "Evidential_Role": "Secondary decision-support",
+            "Stage": "Stage 1 - Target lock",
+            "Decision_Supported": "Task pooling policy",
+            "Exact_Question": "Should the main target be learned across all tasks together, or separately by task?",
+            "Manipulated_Factor": "Pooling strategy by task",
+        },
+        {
+            "Experiment_ID": "E03",
+            "Short_Title": "Modality pooling experiment",
+            "Category": "Target-definition",
+            "Evidential_Role": "Secondary decision-support",
+            "Stage": "Stage 1 - Target lock",
+            "Decision_Supported": "Modality pooling policy",
+            "Exact_Question": "Should audio, video, and audiovisual conditions be pooled or modeled separately?",
+            "Manipulated_Factor": "Pooling strategy by modality",
+        },
+        {
+            "Experiment_ID": "E04",
+            "Short_Title": "Split-strength stress test",
+            "Category": "Split-design",
+            "Evidential_Role": "Secondary decision-support",
+            "Stage": "Stage 2 - Split lock",
+            "Priority": "High",
+            "Decision_Supported": "Primary split policy",
+            "Exact_Question": "How much do conclusions change under weaker split strategies compared with session-held-out evaluation?",
+            "Manipulated_Factor": "Split logic",
+            "Split_Logic": "record-wise random split vs weaker grouped split vs within-person leave-one-session-out",
+            "Leakage_Risk": "High under weak splits",
+            "Decision_Criterion": "Retain strictest split matching claim; weaker splits only as inflation/leakage demonstrations.",
+        },
+        {
+            "Experiment_ID": "E05",
+            "Short_Title": "Cross-person transfer design",
+            "Category": "Split-design",
+            "Evidential_Role": "Secondary decision-support",
+            "Stage": "Stage 2 - Split lock",
+            "Priority": "High",
+            "Decision_Supported": "Cross-person transfer framing",
+            "Exact_Question": "How should cross-person generalization be framed and evaluated?",
+            "Manipulated_Factor": "Transfer protocol",
+            "Split_Logic": "frozen train-on-A/test-on-B and reverse direction",
+            "Leakage_Control": "Fit only on train subject; no test subject re-fit/re-tune",
+            "Decision_Criterion": "Keep frozen directional transfer as clean cross-case test.",
+            "Interpretation_Boundary": "Transfer evidence under domain shift, not population-level generalization.",
+        },
+        {
+            "Experiment_ID": "E06",
+            "Short_Title": "Linear model family comparison",
+            "Category": "Model-comparison",
+            "Evidential_Role": "Secondary decision-support",
+            "Stage": "Stage 3 - Model lock",
+            "Priority": "High",
+            "Decision_Supported": "Model family lock",
+            "Exact_Question": "Which linear model is the most appropriate default: ridge, logistic regression, or linear SVM?",
+            "Manipulated_Factor": "Model family",
+            "Models_Compared": "ridge vs logreg vs linearsvc",
+            "Decision_Criterion": "Prefer simplest model with comparable predictive performance and better robustness/stability.",
+        },
+        {
+            "Experiment_ID": "E07",
+            "Short_Title": "Class weighting experiment",
+            "Category": "Model-comparison",
+            "Evidential_Role": "Secondary decision-support",
+            "Stage": "Stage 3 - Model lock",
+            "Decision_Supported": "Weighting policy",
+            "Exact_Question": "Does class weighting improve fairness across classes without creating instability?",
+            "Manipulated_Factor": "Weighting strategy",
+        },
+        {
+            "Experiment_ID": "E08",
+            "Short_Title": "Hyperparameter strategy experiment",
+            "Category": "Model-comparison",
+            "Evidential_Role": "Secondary decision-support",
+            "Stage": "Stage 3 - Model lock",
+            "Decision_Supported": "Tuning policy",
+            "Exact_Question": "Are fixed conservative hyperparameters sufficient, or does light nested tuning materially improve results?",
+            "Manipulated_Factor": "Tuning strategy",
+            "Decision_Criterion": "Keep fixed settings unless nested tuning yields a clear and stable gain.",
+        },
+        {
+            "Experiment_ID": "E09",
+            "Short_Title": "Whole-brain versus ROI experiment",
+            "Category": "Preprocessing-feature",
+            "Evidential_Role": "Secondary decision-support",
+            "Stage": "Stage 4 - Feature/preprocessing lock",
+            "Decision_Supported": "Feature representation lock",
+            "Exact_Question": "Should the primary representation remain whole-brain masked voxels or use theory-justified ROIs?",
+            "Manipulated_Factor": "Feature space",
+        },
+        {
+            "Experiment_ID": "E10",
+            "Short_Title": "Dimensionality reduction experiment",
+            "Category": "Preprocessing-feature",
+            "Evidential_Role": "Secondary decision-support",
+            "Stage": "Stage 4 - Feature/preprocessing lock",
+            "Decision_Supported": "Feature reduction policy",
+            "Exact_Question": "Does unsupervised dimensionality reduction improve performance or stability enough to justify added complexity?",
+            "Manipulated_Factor": "Feature reduction strategy",
+        },
+        {
+            "Experiment_ID": "E11",
+            "Short_Title": "Scaling and normalization experiment",
+            "Category": "Preprocessing-feature",
+            "Evidential_Role": "Secondary decision-support",
+            "Stage": "Stage 4 - Feature/preprocessing lock",
+            "Decision_Supported": "Scaling policy lock",
+            "Exact_Question": "How sensitive are the results to scaling strategy?",
+            "Manipulated_Factor": "Scaling policy",
+        },
+        {
+            "Experiment_ID": "E12",
+            "Short_Title": "Permutation test experiment",
+            "Category": "Robustness",
+            "Evidential_Role": "Primary-supporting robustness",
+            "Stage": "Stage 6 - Robustness analysis",
+            "Priority": "High",
+            "Decision_Supported": "Chance-level distinguishability support",
+            "Exact_Question": "Are the main predictive results distinguishable from chance under the exact same split logic?",
+            "Manipulated_Factor": "Label structure (true vs permuted)",
+            "Split_Logic": "exact confirmatory split logic with train-only permutation",
+            "Secondary_Metrics": "Empirical p-value; null distribution summary",
+            "Reporting_Destination": "Chapter 4 Supporting robustness",
+        },
+        {
+            "Experiment_ID": "E13",
+            "Short_Title": "Trivial baseline experiment",
+            "Category": "Robustness",
+            "Evidential_Role": "Primary-supporting robustness",
+            "Stage": "Stage 6 - Robustness analysis",
+            "Priority": "High",
+            "Decision_Supported": "Non-trivial predictive value support",
+            "Exact_Question": "Does the final model clearly outperform trivial baselines?",
+            "Manipulated_Factor": "Baseline type",
+            "Models_Compared": "Final locked model vs trivial baselines",
+            "Reporting_Destination": "Chapter 4 Supporting robustness",
+        },
+        {
+            "Experiment_ID": "E14",
+            "Short_Title": "Stability of explanation experiment",
+            "Category": "Robustness",
+            "Evidential_Role": "Primary-supporting robustness",
+            "Stage": "Stage 6 - Robustness analysis",
+            "Priority": "High",
+            "Decision_Supported": "Interpretability stability support",
+            "Exact_Question": "Are linear coefficients or importance patterns stable across held-out-session folds?",
+            "Manipulated_Factor": "Fold identity",
+            "Primary_Metric": "Mean pairwise coefficient correlation",
+            "Secondary_Metrics": "Sign consistency; top-k overlap",
+            "Reporting_Destination": "Chapter 4 Supporting robustness",
+            "Interpretation_Boundary": "Model-behavior evidence only; not direct neural localization.",
+        },
+        {
+            "Experiment_ID": "E15",
+            "Short_Title": "Sensitivity to subset exclusion",
+            "Category": "Robustness",
+            "Evidential_Role": "Secondary decision-support / robustness",
+            "Stage": "Stage 6 - Robustness analysis",
+            "Decision_Supported": "Sensitivity framing",
+            "Exact_Question": "Do the main conclusions depend excessively on one subset, such as one task or modality?",
+            "Manipulated_Factor": "Subset inclusion",
+            "Reporting_Destination": "Chapter 5 Discussion",
+        },
+        {
+            "Experiment_ID": "E16",
+            "Short_Title": "Final within-person confirmatory analysis",
+            "Category": "Confirmatory core",
+            "Evidential_Role": "Primary confirmatory",
+            "Stage": "Stage 5 - Confirmatory analysis",
+            "Priority": "Critical",
+            "Decision_Supported": "Primary confirmatory claim",
+            "Exact_Question": "Does the final locked pipeline show meaningful within-person held-out-session generalization?",
+            "Manipulated_Factor": "None; final frozen pipeline",
+            "Target_Definition": "Locked target after Stage 1 target lock",
+            "Split_Logic": "within_subject_loso_session",
+            "Models_Compared": "Final locked model",
+            "Decision_Criterion": "Primary evidential core of thesis.",
+            "Reporting_Destination": "Chapter 4 Main results",
+        },
+        {
+            "Experiment_ID": "E17",
+            "Short_Title": "Final cross-person transfer analysis",
+            "Category": "Confirmatory core",
+            "Evidential_Role": "Primary confirmatory",
+            "Stage": "Stage 5 - Confirmatory analysis",
+            "Priority": "Critical",
+            "Decision_Supported": "Secondary confirmatory transfer claim",
+            "Exact_Question": "Does the final locked pipeline transfer meaningfully across individuals under frozen directional transfer?",
+            "Manipulated_Factor": "None; final frozen pipeline",
+            "Target_Definition": "Locked target after Stage 1 target lock",
+            "Split_Logic": "frozen_cross_person_transfer both directions",
+            "Models_Compared": "Final locked model",
+            "Decision_Criterion": "Interpret as cross-case transfer evidence under domain shift.",
+            "Reporting_Destination": "Chapter 4 Main results",
+            "Interpretation_Boundary": "Directional transfer evidence only; not population-level generalization.",
+        },
+        {
+            "Experiment_ID": "E18",
+            "Short_Title": "External open-source split replication",
+            "Category": "External exploratory",
+            "Evidential_Role": "Exploratory extension",
+            "Stage": "Stage 7 - Exploratory extension",
+            "Priority": "Low",
+            "Decision_Supported": "External split-consistency exploration",
+            "Exact_Question": "Does the same leakage-aware split logic materially affect conclusions on a compatible external open-source dataset?",
+            "Manipulated_Factor": "Dataset source",
+            "Dataset_Scope": "External open-source dataset if available and approved",
+            "Reporting_Destination": "Appendix",
+        },
+        {
+            "Experiment_ID": "E19",
+            "Short_Title": "External open-source model portability",
+            "Category": "External exploratory",
+            "Evidential_Role": "Exploratory extension",
+            "Stage": "Stage 7 - Exploratory extension",
+            "Priority": "Low",
+            "Decision_Supported": "External model portability exploration",
+            "Exact_Question": "Does the relative ranking of reasonable model choices remain similar on external data?",
+            "Manipulated_Factor": "Dataset source with same small model set",
+            "Dataset_Scope": "External open-source dataset if available and approved",
+            "Models_Compared": "ridge vs logreg vs linearsvc",
+            "Reporting_Destination": "Appendix",
+        },
     ]
     out: list[dict[str, str]] = []
     for row in rows:
@@ -552,18 +829,54 @@ def fill_readme_sheet(ws) -> None:
     ws["A1"].alignment = Alignment(horizontal="left")
 
     blocks = [
-        ("Purpose", "Scientific control system for thesis experiment governance: pre-interpretation design, lock tracking, leakage-aware execution traceability, and chapter-ready evidence mapping."),
-        ("Governance layers", "Experiment governance documents what each experiment is allowed to conclude. Data-slice governance documents what subset policy and grouping strategy were used in each run and what claims they can support."),
-        ("Evidence tiers", "Primary confirmatory; Primary-supporting robustness; Secondary decision-support; Exploratory extension. Each tier has explicit interpretation boundaries."),
-        ("Stage system", "Stage 1 Target lock -> Stage 2 Split lock -> Stage 3 Model lock -> Stage 4 Feature/preprocessing lock -> Stage 5 Confirmatory analysis -> Stage 6 Robustness analysis -> Stage 7 Exploratory extension."),
-        ("Freeze policy", "Confirmatory eligibility requires D01-D07 locked in Decision_Log. Chapter 4 readiness additionally requires required confirmatory/supporting items completed and marked Ready_for_Chapter_4=YES."),
-        ("Data_Selection_Design", "Defines allowed data slices (subject/session/task/modality/target scope, inclusion/exclusion, class-balance policy, leakage risk, and thesis-use boundary)."),
-        ("Grouping_Strategy_Map", "Defines split family, train/test grouping units, leakage safeguards, and interpretation boundaries for each grouping strategy identifier."),
-        ("Data_Profile", "Structured worksheet for manual or imported descriptive counts by subject/session/task/modality/target/class and by Data_Slice_ID, with formula-based sparsity/imbalance flags."),
-        ("Claim boundaries", "Within-person held-out-session claims and cross-person transfer claims are different scientific claims and must not be interpreted interchangeably."),
-        ("Weak-split policy", "Weak split results are allowed only as inflation demonstrations and diagnostic contrast. They are not confirmatory evidence."),
-        ("Governance additions", "Claim_Ledger enforces claim discipline. AI_Usage_Log supports tool transparency and human verification traceability. Ethics_Governance_Notes supports risk/mitigation accountability."),
-        ("Workflow", "Master_Experiments + Data_Selection_Design + Grouping_Strategy_Map -> Run_Log -> Decision_Log -> Confirmatory_Set -> Claim_Ledger/AI_Usage_Log/Ethics_Governance_Notes -> Thesis_Map -> Dashboard."),
+        (
+            "Purpose",
+            "Scientific control system for thesis experiment governance: pre-interpretation design, lock tracking, leakage-aware execution traceability, and chapter-ready evidence mapping.",
+        ),
+        (
+            "Governance layers",
+            "Experiment governance documents what each experiment is allowed to conclude. Data-slice governance documents what subset policy and grouping strategy were used in each run and what claims they can support.",
+        ),
+        (
+            "Evidence tiers",
+            "Primary confirmatory; Primary-supporting robustness; Secondary decision-support; Exploratory extension. Each tier has explicit interpretation boundaries.",
+        ),
+        (
+            "Stage system",
+            "Stage 1 Target lock -> Stage 2 Split lock -> Stage 3 Model lock -> Stage 4 Feature/preprocessing lock -> Stage 5 Confirmatory analysis -> Stage 6 Robustness analysis -> Stage 7 Exploratory extension.",
+        ),
+        (
+            "Freeze policy",
+            "Confirmatory eligibility requires D01-D07 locked in Decision_Log. Chapter 4 readiness additionally requires required confirmatory/supporting items completed and marked Ready_for_Chapter_4=YES.",
+        ),
+        (
+            "Data_Selection_Design",
+            "Defines allowed data slices (subject/session/task/modality/target scope, inclusion/exclusion, class-balance policy, leakage risk, and thesis-use boundary).",
+        ),
+        (
+            "Grouping_Strategy_Map",
+            "Defines split family, train/test grouping units, leakage safeguards, and interpretation boundaries for each grouping strategy identifier.",
+        ),
+        (
+            "Data_Profile",
+            "Structured worksheet for manual or imported descriptive counts by subject/session/task/modality/target/class and by Data_Slice_ID, with formula-based sparsity/imbalance flags.",
+        ),
+        (
+            "Claim boundaries",
+            "Within-person held-out-session claims and cross-person transfer claims are different scientific claims and must not be interpreted interchangeably.",
+        ),
+        (
+            "Weak-split policy",
+            "Weak split results are allowed only as inflation demonstrations and diagnostic contrast. They are not confirmatory evidence.",
+        ),
+        (
+            "Governance additions",
+            "Claim_Ledger enforces claim discipline. AI_Usage_Log supports tool transparency and human verification traceability. Ethics_Governance_Notes supports risk/mitigation accountability.",
+        ),
+        (
+            "Workflow",
+            "Master_Experiments + Data_Selection_Design + Grouping_Strategy_Map -> Run_Log -> Decision_Log -> Confirmatory_Set -> Claim_Ledger/AI_Usage_Log/Ethics_Governance_Notes -> Thesis_Map -> Dashboard.",
+        ),
     ]
     row = 3
     for title, text in blocks:
@@ -589,7 +902,9 @@ def fill_readme_sheet(ws) -> None:
     for cc in range(1, 10):
         ws.cell(summary_row + 1, cc).border = THIN
 
-    set_widths(ws, {"A": 22, "B": 24, "C": 24, "D": 24, "E": 24, "F": 24, "G": 24, "H": 24, "I": 24})
+    set_widths(
+        ws, {"A": 22, "B": 24, "C": 24, "D": 24, "E": 24, "F": 24, "G": 24, "H": 24, "I": 24}
+    )
     ws.freeze_panes = "A2"
 
 
@@ -616,10 +931,38 @@ def fill_master_sheet(ws) -> int:
     set_widths(
         ws,
         {
-            "A": 13, "B": 30, "C": 20, "D": 32, "E": 28, "F": 10, "G": 24, "H": 46, "I": 34, "J": 24,
-            "K": 42, "L": 30, "M": 30, "N": 34, "O": 24, "P": 36, "Q": 24, "R": 18, "S": 26, "T": 36,
-            "U": 36, "V": 34, "W": 36, "X": 34, "Y": 30, "Z": 36, "AA": 14, "AB": 18, "AC": 32,
-            "AD": 28, "AE": 32, "AF": 16,
+            "A": 13,
+            "B": 30,
+            "C": 20,
+            "D": 32,
+            "E": 28,
+            "F": 10,
+            "G": 24,
+            "H": 46,
+            "I": 34,
+            "J": 24,
+            "K": 42,
+            "L": 30,
+            "M": 30,
+            "N": 34,
+            "O": 24,
+            "P": 36,
+            "Q": 24,
+            "R": 18,
+            "S": 26,
+            "T": 36,
+            "U": 36,
+            "V": 34,
+            "W": 36,
+            "X": 34,
+            "Y": 30,
+            "Z": 36,
+            "AA": 14,
+            "AB": 18,
+            "AC": 32,
+            "AD": 28,
+            "AE": 32,
+            "AF": 16,
         },
     )
 
@@ -631,14 +974,38 @@ def fill_master_sheet(ws) -> int:
     add_list_validation(ws, "=List_Status", 27, 2, 500, allow_blank=False)
 
     rng = f"A2:AF{max(last, 200)}"
-    ws.conditional_formatting.add(rng, FormulaRule(formula=['$D2="Primary confirmatory"'], fill=PatternFill("solid", fgColor=COL["confirmatory"])))
-    ws.conditional_formatting.add(rng, FormulaRule(formula=['ISNUMBER(SEARCH("Exploratory",$D2))'], fill=PatternFill("solid", fgColor=COL["exploratory"])))
-    ws.conditional_formatting.add(rng, FormulaRule(formula=['$F2="Critical"'], fill=PatternFill("solid", fgColor=COL["critical"])))
-    ws.conditional_formatting.add(rng, FormulaRule(formula=['$AA2="Dropped"'], fill=PatternFill("solid", fgColor=COL["dropped"]), font=Font(color="6E6E6E", italic=True)))
     ws.conditional_formatting.add(
         rng,
         FormulaRule(
-            formula=['OR($H2="",$J2="",$K2="",$M2="",$N2="",$P2="",$R2="",$U2="",$V2="",$W2="",$Z2="",$Y2="")'],
+            formula=['$D2="Primary confirmatory"'],
+            fill=PatternFill("solid", fgColor=COL["confirmatory"]),
+        ),
+    )
+    ws.conditional_formatting.add(
+        rng,
+        FormulaRule(
+            formula=['ISNUMBER(SEARCH("Exploratory",$D2))'],
+            fill=PatternFill("solid", fgColor=COL["exploratory"]),
+        ),
+    )
+    ws.conditional_formatting.add(
+        rng,
+        FormulaRule(formula=['$F2="Critical"'], fill=PatternFill("solid", fgColor=COL["critical"])),
+    )
+    ws.conditional_formatting.add(
+        rng,
+        FormulaRule(
+            formula=['$AA2="Dropped"'],
+            fill=PatternFill("solid", fgColor=COL["dropped"]),
+            font=Font(color="6E6E6E", italic=True),
+        ),
+    )
+    ws.conditional_formatting.add(
+        rng,
+        FormulaRule(
+            formula=[
+                'OR($H2="",$J2="",$K2="",$M2="",$N2="",$P2="",$R2="",$U2="",$V2="",$W2="",$Z2="",$Y2="")'
+            ],
             fill=PatternFill("solid", fgColor=COL["missing"]),
         ),
     )
@@ -646,169 +1013,17 @@ def fill_master_sheet(ws) -> int:
 
 
 def fill_experiment_definitions_sheet(ws) -> int:
-    for i, h in enumerate(EXPERIMENT_DEFINITIONS_COLUMNS, start=1):
-        ws.cell(1, i, h)
-    style_header(ws, 1, len(EXPERIMENT_DEFINITIONS_COLUMNS))
-
-    seed_rows = [
-        {
-            "experiment_id": "E16",
-            "enabled": "No",
-            "start_section": "dataset_selection",
-            "end_section": "evaluation",
-            "base_artifact_id": "",
-            "target": "coarse_affect",
-            "cv": "within_subject_loso_session",
-            "model": "ridge",
-            "subject": "sub-001",
-            "train_subject": "",
-            "test_subject": "",
-            "filter_task": "",
-            "filter_modality": "",
-            "reuse_policy": "auto",
-            "search_space_id": "",
-        },
-        {
-            "experiment_id": "E17",
-            "enabled": "No",
-            "start_section": "dataset_selection",
-            "end_section": "evaluation",
-            "base_artifact_id": "",
-            "target": "coarse_affect",
-            "cv": "frozen_cross_person_transfer",
-            "model": "ridge",
-            "subject": "",
-            "train_subject": "sub-001",
-            "test_subject": "sub-002",
-            "filter_task": "",
-            "filter_modality": "",
-            "reuse_policy": "auto",
-            "search_space_id": "",
-        },
-    ]
-    for r, row in enumerate(seed_rows, start=2):
-        for c, name in enumerate(EXPERIMENT_DEFINITIONS_COLUMNS, start=1):
-            ws.cell(r, c, row.get(name, ""))
-
-    last = 81
-    style_body(ws, 2, last, 1, len(EXPERIMENT_DEFINITIONS_COLUMNS))
-    add_table(ws, "ExperimentDefinitionsTable", f"A1:O{last}", style="TableStyleMedium2")
-    ws.freeze_panes = "A2"
-    ws.auto_filter.ref = f"A1:O{last}"
-
-    add_list_validation(ws, "=List_Experiment_ID", col_idx(EXPERIMENT_DEFINITIONS_COLUMNS, "experiment_id"), 2, 1000)
-    add_list_validation(ws, "=List_YesNo", col_idx(EXPERIMENT_DEFINITIONS_COLUMNS, "enabled"), 2, 1000)
-    add_list_validation(ws, "=List_Execution_Section", col_idx(EXPERIMENT_DEFINITIONS_COLUMNS, "start_section"), 2, 1000)
-    add_list_validation(ws, "=List_Execution_Section", col_idx(EXPERIMENT_DEFINITIONS_COLUMNS, "end_section"), 2, 1000)
-    add_list_validation(ws, "=List_Reuse_Policy", col_idx(EXPERIMENT_DEFINITIONS_COLUMNS, "reuse_policy"), 2, 1000)
-    add_list_validation(ws, "=List_Search_Space_ID", col_idx(EXPERIMENT_DEFINITIONS_COLUMNS, "search_space_id"), 2, 1000)
-
-    set_widths(
-        ws,
-        {
-            "A": 14,
-            "B": 10,
-            "C": 20,
-            "D": 20,
-            "E": 28,
-            "F": 18,
-            "G": 28,
-            "H": 14,
-            "I": 12,
-            "J": 14,
-            "K": 14,
-            "L": 16,
-            "M": 18,
-            "N": 18,
-            "O": 16,
-        },
+    return _fill_experiment_definitions_sheet(
+        ws=ws,
+        experiment_definitions_columns=EXPERIMENT_DEFINITIONS_COLUMNS,
     )
-    return last
 
 
 def fill_search_spaces_sheet(ws, wb: Workbook) -> int:
-    seed_rows = [
-        {
-            "search_space_id": "SS01",
-            "enabled": "No",
-            "optimization_mode": "deterministic_grid",
-            "parameter_name": "model",
-            "parameter_values": "ridge|logreg|linearsvc",
-            "parameter_scope": "parameter",
-            "objective_metric": "balanced_accuracy",
-            "max_trials": "",
-            "notes": "Example model-family search.",
-        },
-        {
-            "search_space_id": "SS01",
-            "enabled": "No",
-            "optimization_mode": "deterministic_grid",
-            "parameter_name": "start_section",
-            "parameter_values": "dataset_selection|feature_matrix_load",
-            "parameter_scope": "segment",
-            "objective_metric": "balanced_accuracy",
-            "max_trials": "",
-            "notes": "Example section-start search.",
-        },
-    ]
-    last = _fill_simple_structured_sheet(
+    return _fill_search_spaces_sheet(
         ws=ws,
-        columns=SEARCH_SPACES_COLUMNS,
-        table_name="SearchSpacesTable",
-        title="Search Space Definitions",
-        width_map={
-            "A": 16,
-            "B": 10,
-            "C": 20,
-            "D": 24,
-            "E": 34,
-            "F": 14,
-            "G": 20,
-            "H": 12,
-            "I": 32,
-        },
-        starter_rows=seed_rows,
-    )
-    add_list_validation(ws, "=List_YesNo", col_idx(SEARCH_SPACES_COLUMNS, "enabled"), 3, 1000)
-    add_list_validation(
-        ws,
-        "=List_Search_Optimization_Mode",
-        col_idx(SEARCH_SPACES_COLUMNS, "optimization_mode"),
-        3,
-        1000,
-    )
-    add_list_validation(
-        ws,
-        "=List_Search_Parameter_Scope",
-        col_idx(SEARCH_SPACES_COLUMNS, "parameter_scope"),
-        3,
-        1000,
-    )
-    add_dynamic_named_list(
-        wb,
-        "List_Search_Space_ID",
-        ws.title,
-        col_idx(SEARCH_SPACES_COLUMNS, "search_space_id"),
-        3,
-    )
-    return last
-
-
-def _fill_simple_structured_sheet(
-    ws,
-    columns: list[str],
-    table_name: str,
-    title: str,
-    width_map: dict[str, float],
-    starter_rows: list[dict[str, str]] | None = None,
-) -> int:
-    return _fill_simple_structured_sheet_impl(
-        ws=ws,
-        columns=columns,
-        table_name=table_name,
-        title=title,
-        width_map=width_map,
-        starter_rows=starter_rows,
+        wb=wb,
+        search_spaces_columns=SEARCH_SPACES_COLUMNS,
     )
 
 
@@ -1032,15 +1247,37 @@ def fill_data_selection_design_sheet(ws, wb: Workbook) -> int:
     ws.freeze_panes = "A2"
     ws.auto_filter.ref = f"A1:R{last}"
 
-    add_list_validation(ws, "=List_Subject_Scope", col_idx(DATA_SELECTION_COLUMNS, "Subject_Scope"), 2, 1000)
-    add_list_validation(ws, "=List_Session_Scope", col_idx(DATA_SELECTION_COLUMNS, "Session_Scope"), 2, 1000)
-    add_list_validation(ws, "=List_Task_Scope", col_idx(DATA_SELECTION_COLUMNS, "Task_Scope"), 2, 1000)
-    add_list_validation(ws, "=List_Modality_Scope", col_idx(DATA_SELECTION_COLUMNS, "Modality_Scope"), 2, 1000)
-    add_list_validation(ws, "=List_Target_Type", col_idx(DATA_SELECTION_COLUMNS, "Target_Type"), 2, 1000)
-    add_list_validation(ws, "=List_Class_Balance_Policy", col_idx(DATA_SELECTION_COLUMNS, "Class_Balance_Policy"), 2, 1000)
-    add_list_validation(ws, "=List_Leakage_Risk_Level", col_idx(DATA_SELECTION_COLUMNS, "Leakage_Risk"), 2, 1000)
-    add_list_validation(ws, "=List_Use_Case", col_idx(DATA_SELECTION_COLUMNS, "Valid_Use_Case"), 2, 1000)
-    add_list_validation(ws, "=List_Thesis_Use_Tag", col_idx(DATA_SELECTION_COLUMNS, "Thesis_Use"), 2, 1000)
+    add_list_validation(
+        ws, "=List_Subject_Scope", col_idx(DATA_SELECTION_COLUMNS, "Subject_Scope"), 2, 1000
+    )
+    add_list_validation(
+        ws, "=List_Session_Scope", col_idx(DATA_SELECTION_COLUMNS, "Session_Scope"), 2, 1000
+    )
+    add_list_validation(
+        ws, "=List_Task_Scope", col_idx(DATA_SELECTION_COLUMNS, "Task_Scope"), 2, 1000
+    )
+    add_list_validation(
+        ws, "=List_Modality_Scope", col_idx(DATA_SELECTION_COLUMNS, "Modality_Scope"), 2, 1000
+    )
+    add_list_validation(
+        ws, "=List_Target_Type", col_idx(DATA_SELECTION_COLUMNS, "Target_Type"), 2, 1000
+    )
+    add_list_validation(
+        ws,
+        "=List_Class_Balance_Policy",
+        col_idx(DATA_SELECTION_COLUMNS, "Class_Balance_Policy"),
+        2,
+        1000,
+    )
+    add_list_validation(
+        ws, "=List_Leakage_Risk_Level", col_idx(DATA_SELECTION_COLUMNS, "Leakage_Risk"), 2, 1000
+    )
+    add_list_validation(
+        ws, "=List_Use_Case", col_idx(DATA_SELECTION_COLUMNS, "Valid_Use_Case"), 2, 1000
+    )
+    add_list_validation(
+        ws, "=List_Thesis_Use_Tag", col_idx(DATA_SELECTION_COLUMNS, "Thesis_Use"), 2, 1000
+    )
 
     set_widths(
         ws,
@@ -1247,13 +1484,31 @@ def fill_grouping_strategy_map_sheet(ws, wb: Workbook) -> int:
     ws.freeze_panes = "A2"
     ws.auto_filter.ref = f"A1:O{last}"
 
-    add_list_validation(ws, "=List_Split_Family", col_idx(GROUPING_STRATEGY_COLUMNS, "Split_Family"), 2, 1000)
-    add_list_validation(ws, "=List_Group_Unit", col_idx(GROUPING_STRATEGY_COLUMNS, "Train_Group_Unit"), 2, 1000)
-    add_list_validation(ws, "=List_Group_Unit", col_idx(GROUPING_STRATEGY_COLUMNS, "Test_Group_Unit"), 2, 1000)
-    add_list_validation(ws, "=List_Grouping_Level", col_idx(GROUPING_STRATEGY_COLUMNS, "Grouping_Level"), 2, 1000)
-    add_list_validation(ws, "=List_Use_Case", col_idx(GROUPING_STRATEGY_COLUMNS, "Suitable_For"), 2, 1000)
-    add_list_validation(ws, "=List_Use_Case", col_idx(GROUPING_STRATEGY_COLUMNS, "Not_Suitable_For"), 2, 1000)
-    add_list_validation(ws, "=List_Reporting_Destination", col_idx(GROUPING_STRATEGY_COLUMNS, "Thesis_Section"), 2, 1000)
+    add_list_validation(
+        ws, "=List_Split_Family", col_idx(GROUPING_STRATEGY_COLUMNS, "Split_Family"), 2, 1000
+    )
+    add_list_validation(
+        ws, "=List_Group_Unit", col_idx(GROUPING_STRATEGY_COLUMNS, "Train_Group_Unit"), 2, 1000
+    )
+    add_list_validation(
+        ws, "=List_Group_Unit", col_idx(GROUPING_STRATEGY_COLUMNS, "Test_Group_Unit"), 2, 1000
+    )
+    add_list_validation(
+        ws, "=List_Grouping_Level", col_idx(GROUPING_STRATEGY_COLUMNS, "Grouping_Level"), 2, 1000
+    )
+    add_list_validation(
+        ws, "=List_Use_Case", col_idx(GROUPING_STRATEGY_COLUMNS, "Suitable_For"), 2, 1000
+    )
+    add_list_validation(
+        ws, "=List_Use_Case", col_idx(GROUPING_STRATEGY_COLUMNS, "Not_Suitable_For"), 2, 1000
+    )
+    add_list_validation(
+        ws,
+        "=List_Reporting_Destination",
+        col_idx(GROUPING_STRATEGY_COLUMNS, "Thesis_Section"),
+        2,
+        1000,
+    )
 
     set_widths(
         ws,
@@ -1326,11 +1581,11 @@ def fill_data_profile_sheet(ws) -> int:
     ws["D6"].font = Font(bold=True)
     ws["D6"].fill = PatternFill("solid", fgColor="EEF3FB")
     summary_labels = [
-        ("Total_subject_samples", '=SUM(B13:B20)'),
-        ("Total_session_samples", '=SUM(B25:B34)'),
-        ("Total_task_samples", '=SUM(B39:B45)'),
-        ("Total_modality_samples", '=SUM(B50:B55)'),
-        ("Total_class_samples", '=SUM(B60:B65)'),
+        ("Total_subject_samples", "=SUM(B13:B20)"),
+        ("Total_session_samples", "=SUM(B25:B34)"),
+        ("Total_task_samples", "=SUM(B39:B45)"),
+        ("Total_modality_samples", "=SUM(B50:B55)"),
+        ("Total_class_samples", "=SUM(B60:B65)"),
         ("Class_imbalance_ratio_max_min", '=IFERROR(MAX(B60:B65)/MIN(B60:B65),"")'),
         (
             "Class_imbalance_flag",
@@ -1369,7 +1624,7 @@ def fill_data_profile_sheet(ws) -> int:
         data_end = data_start + len(keys) - 1
         for r, key in enumerate(keys, start=data_start):
             ws.cell(r, 1, key)
-            ws.cell(r, 3, f'=IFERROR(B{r}/SUM($B${data_start}:$B${data_end}),0)')
+            ws.cell(r, 3, f"=IFERROR(B{r}/SUM($B${data_start}:$B${data_end}),0)")
             ws.cell(r, 4, f'=IF(B{r}="","",IF(B{r}<$B$7,"SPARSE","OK"))')
         style_body(ws, data_start, data_end, 1, 5)
         add_table(ws, table_name, f"A{header_row}:E{data_end}", style="TableStyleMedium6")
@@ -1386,28 +1641,61 @@ def fill_data_profile_sheet(ws) -> int:
         23,
         "Counts by session",
         "Session_ID",
-        ["ses-01", "ses-02", "ses-03", "ses-04", "ses-05", "ses-06", "ses-07", "ses-08", "ses-09", "ses-10"],
+        [
+            "ses-01",
+            "ses-02",
+            "ses-03",
+            "ses-04",
+            "ses-05",
+            "ses-06",
+            "ses-07",
+            "ses-08",
+            "ses-09",
+            "ses-10",
+        ],
         "ProfileSessionTable",
     )
     write_count_block(
         37,
         "Counts by task",
         "Task_ID",
-        ["pooled_all_tasks", "passive_only", "emo_only", "rating_only", "task_specific_other", "custom_task_1", "custom_task_2"],
+        [
+            "pooled_all_tasks",
+            "passive_only",
+            "emo_only",
+            "rating_only",
+            "task_specific_other",
+            "custom_task_1",
+            "custom_task_2",
+        ],
         "ProfileTaskTable",
     )
     write_count_block(
         48,
         "Counts by modality",
         "Modality_ID",
-        ["pooled_all_modalities", "audio_only", "video_only", "audiovisual_only", "custom_modality_1", "custom_modality_2"],
+        [
+            "pooled_all_modalities",
+            "audio_only",
+            "video_only",
+            "audiovisual_only",
+            "custom_modality_1",
+            "custom_modality_2",
+        ],
         "ProfileModalityTable",
     )
     write_count_block(
         58,
         "Counts by target/class",
         "Target_or_Class_ID",
-        ["coarse_affect_neg", "coarse_affect_neu", "coarse_affect_pos", "binary_neg", "binary_pos", "custom_class_1"],
+        [
+            "coarse_affect_neg",
+            "coarse_affect_neu",
+            "coarse_affect_pos",
+            "binary_neg",
+            "binary_pos",
+            "custom_class_1",
+        ],
         "ProfileTargetClassTable",
     )
 
@@ -1426,10 +1714,12 @@ def fill_data_profile_sheet(ws) -> int:
     for r in range(data_start, data_end + 1):
         source_row = r - data_start + 2
         ws.cell(r, 1, f'=IFERROR(Data_Selection_Design!$A{source_row},"")')
-        ws.cell(r, 3, f'=IFERROR(B{r}/SUM($B${data_start}:$B${data_end}),0)')
+        ws.cell(r, 3, f"=IFERROR(B{r}/SUM($B${data_start}:$B${data_end}),0)")
         ws.cell(r, 4, f'=IF(B{r}="","",IF(B{r}<$B$7,"SPARSE","OK"))')
     style_body(ws, data_start, data_end, 1, 5)
-    add_table(ws, "ProfileDataSliceTable", f"A{slice_start + 1}:E{data_end}", style="TableStyleMedium6")
+    add_table(
+        ws, "ProfileDataSliceTable", f"A{slice_start + 1}:E{data_end}", style="TableStyleMedium6"
+    )
 
     class_flag_range = "$B$60:$B$65"
     for r in range(60, 66):
@@ -1440,7 +1730,10 @@ def fill_data_profile_sheet(ws) -> int:
             f'"SEVERE_IMBALANCE",IF(MAX({class_flag_range})/MIN({class_flag_range})>$B$8,"MILD_IMBALANCE","BALANCED")))',
         )
 
-    set_widths(ws, {"A": 26, "B": 14, "C": 16, "D": 20, "E": 38, "F": 4, "G": 24, "H": 14, "I": 12, "J": 12})
+    set_widths(
+        ws,
+        {"A": 26, "B": 14, "C": 16, "D": 20, "E": 38, "F": 4, "G": 24, "H": 14, "I": 12, "J": 12},
+    )
     ws.freeze_panes = "A12"
     return data_end
 
@@ -1456,19 +1749,47 @@ def fill_run_log_sheet(ws) -> int:
     ws.freeze_panes = "A2"
     ws.auto_filter.ref = f"A1:{end_col}{last}"
 
-    add_list_validation(ws, "=List_Data_Slice_ID", col_idx(RUN_LOG_COLUMNS, "Data_Slice_ID"), 2, 1000)
-    add_list_validation(ws, "=List_Grouping_Strategy_ID", col_idx(RUN_LOG_COLUMNS, "Grouping_Strategy_ID"), 2, 1000)
-    add_list_validation(ws, "=List_Transfer_Direction", col_idx(RUN_LOG_COLUMNS, "Transfer_Direction"), 2, 1000)
-    add_list_validation(ws, "=List_Session_Scope", col_idx(RUN_LOG_COLUMNS, "Session_Coverage"), 2, 1000)
+    add_list_validation(
+        ws, "=List_Data_Slice_ID", col_idx(RUN_LOG_COLUMNS, "Data_Slice_ID"), 2, 1000
+    )
+    add_list_validation(
+        ws, "=List_Grouping_Strategy_ID", col_idx(RUN_LOG_COLUMNS, "Grouping_Strategy_ID"), 2, 1000
+    )
+    add_list_validation(
+        ws, "=List_Transfer_Direction", col_idx(RUN_LOG_COLUMNS, "Transfer_Direction"), 2, 1000
+    )
+    add_list_validation(
+        ws, "=List_Session_Scope", col_idx(RUN_LOG_COLUMNS, "Session_Coverage"), 2, 1000
+    )
     add_list_validation(ws, "=List_Task_Scope", col_idx(RUN_LOG_COLUMNS, "Task_Coverage"), 2, 1000)
-    add_list_validation(ws, "=List_Modality_Scope", col_idx(RUN_LOG_COLUMNS, "Modality_Coverage"), 2, 1000)
+    add_list_validation(
+        ws, "=List_Modality_Scope", col_idx(RUN_LOG_COLUMNS, "Modality_Coverage"), 2, 1000
+    )
     add_list_validation(ws, "=List_Run_Type", col_idx(RUN_LOG_COLUMNS, "Run_Type"), 2, 1000)
-    add_list_validation(ws, "=List_Affects_Frozen_Pipeline", col_idx(RUN_LOG_COLUMNS, "Affects_Frozen_Pipeline"), 2, 1000)
-    add_list_validation(ws, "=List_Eligible_for_Method_Decision", col_idx(RUN_LOG_COLUMNS, "Eligible_for_Method_Decision"), 2, 1000)
-    add_list_validation(ws, "=List_Imbalance_Status", col_idx(RUN_LOG_COLUMNS, "Imbalance_Status"), 2, 1000)
-    add_list_validation(ws, "=List_Leakage_Check_Status", col_idx(RUN_LOG_COLUMNS, "Leakage_Check_Status"), 2, 1000)
+    add_list_validation(
+        ws,
+        "=List_Affects_Frozen_Pipeline",
+        col_idx(RUN_LOG_COLUMNS, "Affects_Frozen_Pipeline"),
+        2,
+        1000,
+    )
+    add_list_validation(
+        ws,
+        "=List_Eligible_for_Method_Decision",
+        col_idx(RUN_LOG_COLUMNS, "Eligible_for_Method_Decision"),
+        2,
+        1000,
+    )
+    add_list_validation(
+        ws, "=List_Imbalance_Status", col_idx(RUN_LOG_COLUMNS, "Imbalance_Status"), 2, 1000
+    )
+    add_list_validation(
+        ws, "=List_Leakage_Check_Status", col_idx(RUN_LOG_COLUMNS, "Leakage_Check_Status"), 2, 1000
+    )
     add_list_validation(ws, "=List_Reviewed", col_idx(RUN_LOG_COLUMNS, "Reviewed"), 2, 1000)
-    add_list_validation(ws, "=List_Used_in_Thesis", col_idx(RUN_LOG_COLUMNS, "Used_in_Thesis"), 2, 1000)
+    add_list_validation(
+        ws, "=List_Used_in_Thesis", col_idx(RUN_LOG_COLUMNS, "Used_in_Thesis"), 2, 1000
+    )
 
     set_widths(
         ws,
@@ -1510,7 +1831,7 @@ def fill_run_log_sheet(ws) -> int:
             "AI": 14,
             "AJ": 36,
             "AK": 28,
-        }
+        },
     )
     return last
 
@@ -1521,14 +1842,134 @@ def fill_decision_log_sheet(ws) -> int:
     style_header(ws, 1, len(DECISION_COLUMNS))
 
     rows = [
-        ("D01", "Final target choice", "Stage 1 - Target lock", "fine emotion; coarse_affect; binary valence-like", "E01,E02,E03", "Construct validity + class balance + learnability under strict split", "To be locked after method-choice evidence review", "", "", "Tradeoff between construct validity and learnability", "To be linked after background/method revision", "", "Open", "Chapter 3 method lock feeding Chapter 4 confirmatory analyses"),
-        ("D02", "Final split design", "Stage 2 - Split lock", "within_subject_loso_session; weaker alternatives for stress testing", "E04,E05", "Prefer strictest split matching claim while documenting weak-split inflation", "To be locked after split-strength evidence review", "", "", "Weak split inflation risk", "To be linked after method section split rationale update", "", "Open", "Defines primary inference logic and leakage controls"),
-        ("D03", "Final model family", "Stage 3 - Model lock", "ridge; logreg; linearsvc", "E06", "Simplicity + robustness + comparable performance", "To be locked after model comparison", "", "", "Complexity vs stability tradeoff", "To be linked after model-choice subsection revision", "", "Open", "Sets final confirmatory model family"),
-        ("D04", "Final weighting policy", "Stage 3 - Model lock", "No class weighting; balanced weighting", "E07", "Minority-class fairness gain without instability", "To be locked after weighting sensitivity", "", "", "Fairness-stability tension", "To be linked after class-imbalance discussion draft", "", "Open", "Controls fairness assumptions in final pipeline"),
-        ("D05", "Final tuning policy", "Stage 3 - Model lock", "Fixed explicit settings; light nested tuning", "E08", "Keep fixed unless clear stable gain from tuning", "To be locked after tuning strategy review", "", "", "Overfitting and complexity risk with tuning", "To be linked after reproducibility subsection update", "", "Open", "Determines model configuration policy"),
-        ("D06", "Final feature representation", "Stage 4 - Feature/preprocessing lock", "Whole-brain masked voxels; theory-justified ROI", "E09,E10", "Validity + stability + complexity tradeoff", "To be locked after feature-space evidence review", "", "", "Representation choice impacts validity and interpretability", "To be linked after feature-method section update", "", "Open", "Locks final feature representation"),
-        ("D07", "Final scaling policy", "Stage 4 - Feature/preprocessing lock", "No scaling; standard/robust scaling (train-only)", "E11", "Train-only scaling with best stability and simplicity", "To be locked after scaling sensitivity", "", "", "Scaling can alter class boundaries", "To be linked after preprocessing subsection revision", "", "Open", "Locks preprocessing policy"),
-        ("D08", "Use of external data", "Stage 7 - Exploratory extension", "No external data; external replication/portability", "E18,E19", "External work remains exploratory and non-core", "To be decided after confirmatory core completion", "", "", "Comparability and external validity limits", "To be linked after discussion/limitations revision", "", "Open", "Controls exploratory external scope and appendix use"),
+        (
+            "D01",
+            "Final target choice",
+            "Stage 1 - Target lock",
+            "fine emotion; coarse_affect; binary valence-like",
+            "E01,E02,E03",
+            "Construct validity + class balance + learnability under strict split",
+            "To be locked after method-choice evidence review",
+            "",
+            "",
+            "Tradeoff between construct validity and learnability",
+            "To be linked after background/method revision",
+            "",
+            "Open",
+            "Chapter 3 method lock feeding Chapter 4 confirmatory analyses",
+        ),
+        (
+            "D02",
+            "Final split design",
+            "Stage 2 - Split lock",
+            "within_subject_loso_session; weaker alternatives for stress testing",
+            "E04,E05",
+            "Prefer strictest split matching claim while documenting weak-split inflation",
+            "To be locked after split-strength evidence review",
+            "",
+            "",
+            "Weak split inflation risk",
+            "To be linked after method section split rationale update",
+            "",
+            "Open",
+            "Defines primary inference logic and leakage controls",
+        ),
+        (
+            "D03",
+            "Final model family",
+            "Stage 3 - Model lock",
+            "ridge; logreg; linearsvc",
+            "E06",
+            "Simplicity + robustness + comparable performance",
+            "To be locked after model comparison",
+            "",
+            "",
+            "Complexity vs stability tradeoff",
+            "To be linked after model-choice subsection revision",
+            "",
+            "Open",
+            "Sets final confirmatory model family",
+        ),
+        (
+            "D04",
+            "Final weighting policy",
+            "Stage 3 - Model lock",
+            "No class weighting; balanced weighting",
+            "E07",
+            "Minority-class fairness gain without instability",
+            "To be locked after weighting sensitivity",
+            "",
+            "",
+            "Fairness-stability tension",
+            "To be linked after class-imbalance discussion draft",
+            "",
+            "Open",
+            "Controls fairness assumptions in final pipeline",
+        ),
+        (
+            "D05",
+            "Final tuning policy",
+            "Stage 3 - Model lock",
+            "Fixed explicit settings; light nested tuning",
+            "E08",
+            "Keep fixed unless clear stable gain from tuning",
+            "To be locked after tuning strategy review",
+            "",
+            "",
+            "Overfitting and complexity risk with tuning",
+            "To be linked after reproducibility subsection update",
+            "",
+            "Open",
+            "Determines model configuration policy",
+        ),
+        (
+            "D06",
+            "Final feature representation",
+            "Stage 4 - Feature/preprocessing lock",
+            "Whole-brain masked voxels; theory-justified ROI",
+            "E09,E10",
+            "Validity + stability + complexity tradeoff",
+            "To be locked after feature-space evidence review",
+            "",
+            "",
+            "Representation choice impacts validity and interpretability",
+            "To be linked after feature-method section update",
+            "",
+            "Open",
+            "Locks final feature representation",
+        ),
+        (
+            "D07",
+            "Final scaling policy",
+            "Stage 4 - Feature/preprocessing lock",
+            "No scaling; standard/robust scaling (train-only)",
+            "E11",
+            "Train-only scaling with best stability and simplicity",
+            "To be locked after scaling sensitivity",
+            "",
+            "",
+            "Scaling can alter class boundaries",
+            "To be linked after preprocessing subsection revision",
+            "",
+            "Open",
+            "Locks preprocessing policy",
+        ),
+        (
+            "D08",
+            "Use of external data",
+            "Stage 7 - Exploratory extension",
+            "No external data; external replication/portability",
+            "E18,E19",
+            "External work remains exploratory and non-core",
+            "To be decided after confirmatory core completion",
+            "",
+            "",
+            "Comparability and external validity limits",
+            "To be linked after discussion/limitations revision",
+            "",
+            "Open",
+            "Controls exploratory external scope and appendix use",
+        ),
     ]
 
     for r, row in enumerate(rows, start=2):
@@ -1541,11 +1982,32 @@ def fill_decision_log_sheet(ws) -> int:
     ws.freeze_panes = "A2"
     ws.auto_filter.ref = f"A1:N{last}"
     add_list_validation(ws, "=List_Freeze_Status", 13, 2, 500, allow_blank=False)
-    ws.conditional_formatting.add(f"M2:M{max(last,200)}", FormulaRule(formula=['$M2="Locked"'], fill=PatternFill("solid", fgColor=COL["ok"])))
-    ws.conditional_formatting.add(f"M2:M{max(last,200)}", FormulaRule(formula=['$M2="Open"'], fill=PatternFill("solid", fgColor=COL["open"])))
+    ws.conditional_formatting.add(
+        f"M2:M{max(last, 200)}",
+        FormulaRule(formula=['$M2="Locked"'], fill=PatternFill("solid", fgColor=COL["ok"])),
+    )
+    ws.conditional_formatting.add(
+        f"M2:M{max(last, 200)}",
+        FormulaRule(formula=['$M2="Open"'], fill=PatternFill("solid", fgColor=COL["open"])),
+    )
     set_widths(
         ws,
-        {"A": 12, "B": 24, "C": 30, "D": 36, "E": 18, "F": 34, "G": 34, "H": 22, "I": 22, "J": 28, "K": 34, "L": 12, "M": 14, "N": 30},
+        {
+            "A": 12,
+            "B": 24,
+            "C": 30,
+            "D": 36,
+            "E": 18,
+            "F": 34,
+            "G": 34,
+            "H": 22,
+            "I": 22,
+            "J": 28,
+            "K": 34,
+            "L": 12,
+            "M": 14,
+            "N": 30,
+        },
     )
     return last
 
@@ -1556,28 +2018,74 @@ def fill_confirmatory_sheet(ws) -> int:
     style_header(ws, 1, len(CONFIRMATORY_COLUMNS))
 
     rows = [
-        ("E12", "Permutation test experiment", "To be fixed after freeze lock", "Chance-distinguishability support", "YES"),
-        ("E13", "Trivial baseline experiment", "To be fixed after freeze lock", "Non-trivial predictive value support", "YES"),
-        ("E14", "Stability of explanation experiment", "To be fixed after freeze lock", "Model-behavior robustness support", "YES"),
-        ("E16", "Final within-person confirmatory analysis", "To be fixed after freeze lock", "Primary within-person claim", "YES"),
-        ("E17", "Final cross-person transfer analysis", "To be fixed after freeze lock", "Secondary transfer claim", "YES"),
+        (
+            "E12",
+            "Permutation test experiment",
+            "To be fixed after freeze lock",
+            "Chance-distinguishability support",
+            "YES",
+        ),
+        (
+            "E13",
+            "Trivial baseline experiment",
+            "To be fixed after freeze lock",
+            "Non-trivial predictive value support",
+            "YES",
+        ),
+        (
+            "E14",
+            "Stability of explanation experiment",
+            "To be fixed after freeze lock",
+            "Model-behavior robustness support",
+            "YES",
+        ),
+        (
+            "E16",
+            "Final within-person confirmatory analysis",
+            "To be fixed after freeze lock",
+            "Primary within-person claim",
+            "YES",
+        ),
+        (
+            "E17",
+            "Final cross-person transfer analysis",
+            "To be fixed after freeze lock",
+            "Secondary transfer claim",
+            "YES",
+        ),
     ]
     for r, row in enumerate(rows, start=2):
         ws.cell(r, 1, row[0])
         ws.cell(r, 2, row[1])
         ws.cell(r, 3, row[2])
         ws.cell(r, 4, row[3])
-        ws.cell(r, 5, f'=IFERROR(INDEX(Master_Experiments!$AA:$AA,MATCH($A{r},Master_Experiments!$A:$A,0)),"Planned")')
+        ws.cell(
+            r,
+            5,
+            f'=IFERROR(INDEX(Master_Experiments!$AA:$AA,MATCH($A{r},Master_Experiments!$A:$A,0)),"Planned")',
+        )
         ws.cell(
             r,
             10,
             '=IF(AND(COUNTIFS(Decision_Log!$A:$A,"D01",Decision_Log!$M:$M,"Locked")>0,COUNTIFS(Decision_Log!$A:$A,"D02",Decision_Log!$M:$M,"Locked")>0,COUNTIFS(Decision_Log!$A:$A,"D03",Decision_Log!$M:$M,"Locked")>0,COUNTIFS(Decision_Log!$A:$A,"D04",Decision_Log!$M:$M,"Locked")>0,COUNTIFS(Decision_Log!$A:$A,"D05",Decision_Log!$M:$M,"Locked")>0,COUNTIFS(Decision_Log!$A:$A,"D06",Decision_Log!$M:$M,"Locked")>0,COUNTIFS(Decision_Log!$A:$A,"D07",Decision_Log!$M:$M,"Locked")>0),"YES","NO")',
         )
-        ws.cell(r, 6, f'=IF(AND($J{r}="YES",IFERROR(INDEX(Master_Experiments!$AF:$AF,MATCH($A{r},Master_Experiments!$A:$A,0)),"INCOMPLETE")="READY"),"YES","NO")')
-        ws.cell(r, 7, f'=IF(IFERROR(INDEX(Master_Experiments!$AA:$AA,MATCH($A{r},Master_Experiments!$A:$A,0)),"Planned")="Completed","YES","NO")')
+        ws.cell(
+            r,
+            6,
+            f'=IF(AND($J{r}="YES",IFERROR(INDEX(Master_Experiments!$AF:$AF,MATCH($A{r},Master_Experiments!$A:$A,0)),"INCOMPLETE")="READY"),"YES","NO")',
+        )
+        ws.cell(
+            r,
+            7,
+            f'=IF(IFERROR(INDEX(Master_Experiments!$AA:$AA,MATCH($A{r},Master_Experiments!$A:$A,0)),"Planned")="Completed","YES","NO")',
+        )
         ws.cell(r, 8, row[4])
         ws.cell(r, 9, "NO")
-        ws.cell(r, 11, f'=IFERROR(INDEX(Master_Experiments!$AC:$AC,MATCH($A{r},Master_Experiments!$A:$A,0)),"")')
+        ws.cell(
+            r,
+            11,
+            f'=IFERROR(INDEX(Master_Experiments!$AC:$AC,MATCH($A{r},Master_Experiments!$A:$A,0)),"")',
+        )
         ws.cell(r, 12, "Planned")
 
     last = 1 + len(rows)
@@ -1591,12 +2099,37 @@ def fill_confirmatory_sheet(ws) -> int:
     add_list_validation(ws, "=List_Status", 12, 2, 500)
     set_widths(
         ws,
-        {"A": 13, "B": 34, "C": 28, "D": 34, "E": 14, "F": 18, "G": 12, "H": 20, "I": 18, "J": 22, "K": 32, "L": 20},
+        {
+            "A": 13,
+            "B": 34,
+            "C": 28,
+            "D": 34,
+            "E": 14,
+            "F": 18,
+            "G": 12,
+            "H": 20,
+            "I": 18,
+            "J": 22,
+            "K": 32,
+            "L": 20,
+        },
     )
-    ws.conditional_formatting.add(f"J2:J{max(last,200)}", FormulaRule(formula=['$J2="YES"'], fill=PatternFill("solid", fgColor=COL["ok"])))
-    ws.conditional_formatting.add(f"F2:F{max(last,200)}", FormulaRule(formula=['$F2="YES"'], fill=PatternFill("solid", fgColor=COL["ok"])))
-    ws.conditional_formatting.add(f"G2:G{max(last,200)}", FormulaRule(formula=['$G2="YES"'], fill=PatternFill("solid", fgColor=COL["ok"])))
-    ws.conditional_formatting.add(f"I2:I{max(last,200)}", FormulaRule(formula=['$I2="YES"'], fill=PatternFill("solid", fgColor=COL["ok"])))
+    ws.conditional_formatting.add(
+        f"J2:J{max(last, 200)}",
+        FormulaRule(formula=['$J2="YES"'], fill=PatternFill("solid", fgColor=COL["ok"])),
+    )
+    ws.conditional_formatting.add(
+        f"F2:F{max(last, 200)}",
+        FormulaRule(formula=['$F2="YES"'], fill=PatternFill("solid", fgColor=COL["ok"])),
+    )
+    ws.conditional_formatting.add(
+        f"G2:G{max(last, 200)}",
+        FormulaRule(formula=['$G2="YES"'], fill=PatternFill("solid", fgColor=COL["ok"])),
+    )
+    ws.conditional_formatting.add(
+        f"I2:I{max(last, 200)}",
+        FormulaRule(formula=['$I2="YES"'], fill=PatternFill("solid", fgColor=COL["ok"])),
+    )
     return last
 
 
@@ -1605,25 +2138,196 @@ def fill_thesis_map_sheet(ws) -> int:
         ws.cell(1, i, h)
     style_header(ws, 1, len(THESIS_MAP_COLUMNS))
     rows = [
-        ("E01", "Chapter 3", "3.3 Target definition", "Target granularity method choice", "Supporting", "Method choice", "Locks target definition", "Reference Decision D01"),
-        ("E02", "Chapter 3", "3.3 Task strategy", "Task pooling method choice", "Supporting", "Method choice", "Task pooling policy", ""),
-        ("E03", "Chapter 3", "3.3 Modality strategy", "Modality pooling method choice", "Supporting", "Method choice", "Modality pooling policy", ""),
-        ("E04", "Chapter 3", "3.4 Split design", "Split-strength stress evidence", "Supporting", "Method choice", "Justifies strict split", ""),
-        ("E05", "Chapter 3", "3.4 Transfer protocol", "Cross-person framing", "Supporting", "Method choice", "Directional transfer design", ""),
-        ("E06", "Chapter 3", "3.5 Model family", "Model family selection", "Supporting", "Method choice", "Final model family lock", ""),
-        ("E07", "Chapter 3", "3.5 Weighting policy", "Class weighting decision", "Supporting", "Method choice", "Weighting policy lock", ""),
-        ("E08", "Chapter 3", "3.5 Tuning policy", "Hyperparameter policy", "Supporting", "Method choice", "Fixed vs tuning decision", ""),
-        ("E09", "Chapter 3", "3.2 Feature space", "Whole-brain vs ROI decision", "Supporting", "Method choice", "Feature representation lock", ""),
-        ("E10", "Chapter 3", "3.2 Dimensionality", "Reduction strategy decision", "Supporting", "Method choice", "Complexity/stability tradeoff", ""),
-        ("E11", "Chapter 3", "3.2 Scaling", "Scaling sensitivity decision", "Supporting", "Method choice", "Scaling policy lock", ""),
-        ("E12", "Chapter 4", "4.3 Robustness", "Permutation support", "Supporting", "Method application", "Beyond-chance support", ""),
-        ("E13", "Chapter 4", "4.3 Robustness", "Trivial baseline support", "Supporting", "Method application", "Non-trivial value support", ""),
-        ("E14", "Chapter 4", "4.3 Robustness", "Interpretability stability support", "Supporting", "Method application", "Model-behavior robustness", "No localization claim"),
-        ("E15", "Chapter 5", "5.2 Limitations", "Subset sensitivity discussion", "Supporting", "Discussion", "Sensitivity/limitations support", ""),
-        ("E16", "Chapter 4", "4.1 Main results", "Within-person confirmatory evidence", "Main", "Method application", "Primary thesis claim", ""),
-        ("E17", "Chapter 4", "4.2 Transfer results", "Cross-person transfer evidence", "Main", "Method application", "Secondary transfer claim", ""),
-        ("E18", "Appendix", "A. External exploratory", "External split replication", "Supporting", "Discussion", "Exploratory external consistency", ""),
-        ("E19", "Appendix", "A. External exploratory", "External model portability", "Supporting", "Discussion", "Exploratory portability", ""),
+        (
+            "E01",
+            "Chapter 3",
+            "3.3 Target definition",
+            "Target granularity method choice",
+            "Supporting",
+            "Method choice",
+            "Locks target definition",
+            "Reference Decision D01",
+        ),
+        (
+            "E02",
+            "Chapter 3",
+            "3.3 Task strategy",
+            "Task pooling method choice",
+            "Supporting",
+            "Method choice",
+            "Task pooling policy",
+            "",
+        ),
+        (
+            "E03",
+            "Chapter 3",
+            "3.3 Modality strategy",
+            "Modality pooling method choice",
+            "Supporting",
+            "Method choice",
+            "Modality pooling policy",
+            "",
+        ),
+        (
+            "E04",
+            "Chapter 3",
+            "3.4 Split design",
+            "Split-strength stress evidence",
+            "Supporting",
+            "Method choice",
+            "Justifies strict split",
+            "",
+        ),
+        (
+            "E05",
+            "Chapter 3",
+            "3.4 Transfer protocol",
+            "Cross-person framing",
+            "Supporting",
+            "Method choice",
+            "Directional transfer design",
+            "",
+        ),
+        (
+            "E06",
+            "Chapter 3",
+            "3.5 Model family",
+            "Model family selection",
+            "Supporting",
+            "Method choice",
+            "Final model family lock",
+            "",
+        ),
+        (
+            "E07",
+            "Chapter 3",
+            "3.5 Weighting policy",
+            "Class weighting decision",
+            "Supporting",
+            "Method choice",
+            "Weighting policy lock",
+            "",
+        ),
+        (
+            "E08",
+            "Chapter 3",
+            "3.5 Tuning policy",
+            "Hyperparameter policy",
+            "Supporting",
+            "Method choice",
+            "Fixed vs tuning decision",
+            "",
+        ),
+        (
+            "E09",
+            "Chapter 3",
+            "3.2 Feature space",
+            "Whole-brain vs ROI decision",
+            "Supporting",
+            "Method choice",
+            "Feature representation lock",
+            "",
+        ),
+        (
+            "E10",
+            "Chapter 3",
+            "3.2 Dimensionality",
+            "Reduction strategy decision",
+            "Supporting",
+            "Method choice",
+            "Complexity/stability tradeoff",
+            "",
+        ),
+        (
+            "E11",
+            "Chapter 3",
+            "3.2 Scaling",
+            "Scaling sensitivity decision",
+            "Supporting",
+            "Method choice",
+            "Scaling policy lock",
+            "",
+        ),
+        (
+            "E12",
+            "Chapter 4",
+            "4.3 Robustness",
+            "Permutation support",
+            "Supporting",
+            "Method application",
+            "Beyond-chance support",
+            "",
+        ),
+        (
+            "E13",
+            "Chapter 4",
+            "4.3 Robustness",
+            "Trivial baseline support",
+            "Supporting",
+            "Method application",
+            "Non-trivial value support",
+            "",
+        ),
+        (
+            "E14",
+            "Chapter 4",
+            "4.3 Robustness",
+            "Interpretability stability support",
+            "Supporting",
+            "Method application",
+            "Model-behavior robustness",
+            "No localization claim",
+        ),
+        (
+            "E15",
+            "Chapter 5",
+            "5.2 Limitations",
+            "Subset sensitivity discussion",
+            "Supporting",
+            "Discussion",
+            "Sensitivity/limitations support",
+            "",
+        ),
+        (
+            "E16",
+            "Chapter 4",
+            "4.1 Main results",
+            "Within-person confirmatory evidence",
+            "Main",
+            "Method application",
+            "Primary thesis claim",
+            "",
+        ),
+        (
+            "E17",
+            "Chapter 4",
+            "4.2 Transfer results",
+            "Cross-person transfer evidence",
+            "Main",
+            "Method application",
+            "Secondary transfer claim",
+            "",
+        ),
+        (
+            "E18",
+            "Appendix",
+            "A. External exploratory",
+            "External split replication",
+            "Supporting",
+            "Discussion",
+            "Exploratory external consistency",
+            "",
+        ),
+        (
+            "E19",
+            "Appendix",
+            "A. External exploratory",
+            "External model portability",
+            "Supporting",
+            "Discussion",
+            "Exploratory portability",
+            "",
+        ),
     ]
     for r, row in enumerate(rows, start=2):
         for c, val in enumerate(row, start=1):
@@ -1642,9 +2346,36 @@ def fill_claim_ledger_sheet(ws) -> int:
         ws.cell(1, i, h)
     style_header(ws, 1, len(CLAIM_LEDGER_COLUMNS))
     starter = [
-        ("C01", "Primary within-person held-out-session decoding demonstrates meaningful generalization under locked pipeline.", "Confirmatory finding", "E16,E12,E13,E14", "open", "Chapter 4", "Interpret only within claim-matched split and current dataset scope.", ""),
-        ("C02", "Frozen directional cross-person transfer indicates cross-case portability under domain shift.", "Confirmatory finding", "E17,E12,E13", "open", "Chapter 4", "Not a population-level generalization claim.", ""),
-        ("C03", "Method lock decisions reduce leakage risk and interpretation drift.", "Method-choice", "E01,E04,E05,E06,E09,E11", "partial", "Chapter 3", "Governance claim; not a performance claim.", ""),
+        (
+            "C01",
+            "Primary within-person held-out-session decoding demonstrates meaningful generalization under locked pipeline.",
+            "Confirmatory finding",
+            "E16,E12,E13,E14",
+            "open",
+            "Chapter 4",
+            "Interpret only within claim-matched split and current dataset scope.",
+            "",
+        ),
+        (
+            "C02",
+            "Frozen directional cross-person transfer indicates cross-case portability under domain shift.",
+            "Confirmatory finding",
+            "E17,E12,E13",
+            "open",
+            "Chapter 4",
+            "Not a population-level generalization claim.",
+            "",
+        ),
+        (
+            "C03",
+            "Method lock decisions reduce leakage risk and interpretation drift.",
+            "Method-choice",
+            "E01,E04,E05,E06,E09,E11",
+            "partial",
+            "Chapter 3",
+            "Governance claim; not a performance claim.",
+            "",
+        ),
     ]
     for r, row in enumerate(starter, start=2):
         for c, val in enumerate(row, start=1):
@@ -1677,7 +2408,10 @@ def fill_ai_usage_sheet(ws) -> int:
     ws.auto_filter.ref = f"A1:J{last}"
     add_list_validation(ws, "=List_Human_Verification_Status", 8, 2, 1000)
     add_list_validation(ws, "=List_Used_in_Thesis", 9, 2, 1000)
-    set_widths(ws, {"A": 12, "B": 12, "C": 24, "D": 18, "E": 32, "F": 32, "G": 30, "H": 24, "I": 14, "J": 28})
+    set_widths(
+        ws,
+        {"A": 12, "B": 12, "C": 24, "D": 18, "E": 32, "F": 32, "G": 30, "H": 24, "I": 14, "J": 28},
+    )
     return last
 
 
@@ -1686,8 +2420,26 @@ def fill_ethics_sheet(ws) -> int:
         ws.cell(1, i, h)
     style_header(ws, 1, len(ETHICS_COLUMNS))
     starter = [
-        ("EN01", "E16", "Interpretation limits", "Risk of over-claiming confirmatory evidence beyond split/domain scope", "Enforce interpretation boundaries in Claim_Ledger and Chapter 5 limitations", "Chapter 5", "Open", ""),
-        ("EN02", "D08", "AI/tool transparency", "Insufficient traceability of AI-assisted drafting decisions", "Maintain AI_Usage_Log with human verification status before thesis inclusion", "Chapter 2/Appendix", "Open", ""),
+        (
+            "EN01",
+            "E16",
+            "Interpretation limits",
+            "Risk of over-claiming confirmatory evidence beyond split/domain scope",
+            "Enforce interpretation boundaries in Claim_Ledger and Chapter 5 limitations",
+            "Chapter 5",
+            "Open",
+            "",
+        ),
+        (
+            "EN02",
+            "D08",
+            "AI/tool transparency",
+            "Insufficient traceability of AI-assisted drafting decisions",
+            "Maintain AI_Usage_Log with human verification status before thesis inclusion",
+            "Chapter 2/Appendix",
+            "Open",
+            "",
+        ),
     ]
     for r, row in enumerate(starter, start=2):
         for c, val in enumerate(row, start=1):
@@ -1830,7 +2582,7 @@ def fill_dashboard_sheet(ws) -> None:
         "Runs with Grouping_Strategy_ID recorded",
     ]
     formulas = [
-        '=COUNTA(Master_Experiments!$A$2:$A$500)',
+        "=COUNTA(Master_Experiments!$A$2:$A$500)",
         '=COUNTIF(Master_Experiments!$AA$2:$AA$500,"Completed")',
         '=COUNTIFS(Master_Experiments!$F$2:$F$500,"Critical",Master_Experiments!$AA$2:$AA$500,"Completed")',
         '=COUNTIF(Decision_Log!$M$2:$M$500,"Open")',
@@ -1846,7 +2598,7 @@ def fill_dashboard_sheet(ws) -> None:
         '=COUNTIF(Claim_Ledger!$E$2:$E$500,"supported")',
         '=COUNTIF(Claim_Ledger!$E$2:$E$500,"partial")',
         '=COUNTIF(Claim_Ledger!$E$2:$E$500,"open")',
-        '=COUNTA(AI_Usage_Log!$A$2:$A$500)',
+        "=COUNTA(AI_Usage_Log!$A$2:$A$500)",
         '=COUNTIF(Ethics_Governance_Notes!$G$2:$G$500,"Open")',
         '=COUNTIFS(Run_Log!$Z$2:$Z$2000,"mild_imbalance")+COUNTIFS(Run_Log!$Z$2:$Z$2000,"severe_imbalance")',
         '=COUNTIFS(Run_Log!$AA$2:$AA$2000,"warning")+COUNTIFS(Run_Log!$AA$2:$AA$2000,"failed")',
@@ -1870,7 +2622,7 @@ def fill_dashboard_sheet(ws) -> None:
     ws["D3"].fill = PatternFill("solid", fgColor="EEF3FB")
     ws.merge_cells("D3:E3")
     for i, _ in enumerate(VOCABS["Category"], start=4):
-        ws.cell(i, 4, f"=Dictionary_Validation!A{i-1}")
+        ws.cell(i, 4, f"=Dictionary_Validation!A{i - 1}")
         ws.cell(i, 5, f"=COUNTIF(Master_Experiments!$C:$C,D{i})")
         ws.cell(i, 4).border = THIN
         ws.cell(i, 5).border = THIN
@@ -1880,7 +2632,7 @@ def fill_dashboard_sheet(ws) -> None:
     ws["G3"].fill = PatternFill("solid", fgColor="EEF3FB")
     ws.merge_cells("G3:H3")
     for i, _ in enumerate(VOCABS["Evidential_Role"], start=4):
-        ws.cell(i, 7, f"=Dictionary_Validation!B{i-1}")
+        ws.cell(i, 7, f"=Dictionary_Validation!B{i - 1}")
         ws.cell(i, 8, f"=COUNTIF(Master_Experiments!$D:$D,G{i})")
         ws.cell(i, 7).border = THIN
         ws.cell(i, 8).border = THIN
@@ -1897,7 +2649,7 @@ def fill_dashboard_sheet(ws) -> None:
             i,
             11,
             f'=IF(J{i}="","",SUMPRODUCT((Run_Log!$F$2:$F$2000=J{i})*(Run_Log!$B$2:$B$2000<>"")/'
-            f'IFERROR(COUNTIFS(Run_Log!$F$2:$F$2000,J{i},Run_Log!$B$2:$B$2000,Run_Log!$B$2:$B$2000),1)))',
+            f"IFERROR(COUNTIFS(Run_Log!$F$2:$F$2000,J{i},Run_Log!$B$2:$B$2000,Run_Log!$B$2:$B$2000),1)))",
         )
         ws.cell(i, 10).border = THIN
         ws.cell(i, 11).border = THIN
@@ -1913,7 +2665,7 @@ def fill_dashboard_sheet(ws) -> None:
             i,
             14,
             f'=IF(M{i}="","",SUMPRODUCT((Run_Log!$G$2:$G$2000=M{i})*(Run_Log!$B$2:$B$2000<>"")/'
-            f'IFERROR(COUNTIFS(Run_Log!$G$2:$G$2000,M{i},Run_Log!$B$2:$B$2000,Run_Log!$B$2:$B$2000),1)))',
+            f"IFERROR(COUNTIFS(Run_Log!$G$2:$G$2000,M{i},Run_Log!$B$2:$B$2000,Run_Log!$B$2:$B$2000),1)))",
         )
         ws.cell(i, 13).border = THIN
         ws.cell(i, 14).border = THIN
@@ -1969,8 +2721,12 @@ def fill_dashboard_sheet(ws) -> None:
         },
     )
     ws.freeze_panes = "A4"
-    ws.conditional_formatting.add("B9:B14", FormulaRule(formula=['B9="YES"'], fill=PatternFill("solid", fgColor=COL["ok"])))
-    ws.conditional_formatting.add("B9:B14", FormulaRule(formula=['B9="NO"'], fill=PatternFill("solid", fgColor=COL["bad"])))
+    ws.conditional_formatting.add(
+        "B9:B14", FormulaRule(formula=['B9="YES"'], fill=PatternFill("solid", fgColor=COL["ok"]))
+    )
+    ws.conditional_formatting.add(
+        "B9:B14", FormulaRule(formula=['B9="NO"'], fill=PatternFill("solid", fgColor=COL["bad"]))
+    )
 
 
 def build_workbook() -> Workbook:
@@ -1981,7 +2737,9 @@ def build_workbook() -> Workbook:
 
     fill_readme_sheet(wb["README"])
     fill_master_sheet(wb["Master_Experiments"])
-    add_dynamic_named_list(wb, "List_Experiment_ID", "Master_Experiments", col_idx(MASTER_COLUMNS, "Experiment_ID"), 2)
+    add_dynamic_named_list(
+        wb, "List_Experiment_ID", "Master_Experiments", col_idx(MASTER_COLUMNS, "Experiment_ID"), 2
+    )
     fill_experiment_definitions_sheet(wb["Experiment_Definitions"])
     fill_search_spaces_sheet(wb["Search_Spaces"], wb)
     fill_artifact_registry_sheet(wb["Artifact_Registry"])

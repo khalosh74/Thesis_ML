@@ -88,6 +88,11 @@ python -m uv run thesisml-run-decision-support `
   --all
 ```
 
+Registry default behavior:
+- source checkout default resolves to `configs/decision_support_registry.json`
+- installed wheel default resolves to packaged asset `Thesis_ML/assets/configs/decision_support_registry.json`
+- explicit `--registry` remains supported and is recommended for controlled runs
+
 Optional Optuna-backed variant search:
 
 ```powershell
@@ -100,6 +105,28 @@ python -m uv run thesisml-run-decision-support `
   --all `
   --search-mode optuna `
   --optuna-trials 25
+```
+
+## Workbook template policy
+
+`templates/thesis_experiment_program.xlsx` is a **planning template** by default.
+It is structurally valid but intentionally non-runnable until at least one row in
+`Experiment_Definitions` is enabled (`enabled=Yes`) and includes required values
+(`target`, `cv`, `model`).
+
+Safe first-use pattern:
+
+```powershell
+python -m uv run thesisml-workbook --output outputs/workbooks/my_campaign.xlsx
+# edit outputs/workbooks/my_campaign.xlsx and enable/populate executable rows
+python -m uv run thesisml-run-decision-support `
+  --workbook outputs/workbooks/my_campaign.xlsx `
+  --index-csv Data/processed/dataset_index.csv `
+  --data-root Data `
+  --cache-dir Data/processed/feature_cache `
+  --output-root outputs/artifacts/decision_support `
+  --all `
+  --write-back-workbook
 ```
 
 ## Compatibility install path (kept)
@@ -131,6 +158,7 @@ docker run --rm thesis-ml:dev
 - CI workflow: `.github/workflows/ci.yml` (push/PR)
 - Release validation workflow: `.github/workflows/release_gate.yml` (tags `v*`)
 - Release details: `docs/RELEASE.md`
+- Gold acceptance path used by CI/release: `python scripts/acceptance_smoke.py`
 
 ## Operator documentation
 

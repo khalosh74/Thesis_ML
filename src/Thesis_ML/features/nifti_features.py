@@ -159,9 +159,7 @@ def _signature_manifest_fields(signature: dict[str, Any] | None) -> dict[str, ob
     image_shape = signature.get("image_shape")
     affine = signature.get("affine")
     voxel_size = signature.get("voxel_size")
-    signature_version = int(
-        signature.get("signature_version", _SPATIAL_SIGNATURE_VERSION)
-    )
+    signature_version = int(signature.get("signature_version", _SPATIAL_SIGNATURE_VERSION))
     return {
         "spatial_signature_version": signature_version,
         "image_shape_json": json.dumps(image_shape) if image_shape is not None else pd.NA,

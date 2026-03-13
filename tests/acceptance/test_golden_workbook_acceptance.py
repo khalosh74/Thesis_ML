@@ -21,7 +21,9 @@ def _header_map(ws, header_row: int) -> dict[str, int]:
     return mapping
 
 
-def _rows_with_value(ws, *, header_map: dict[str, int], key: str, expected: str, start_row: int) -> list[int]:
+def _rows_with_value(
+    ws, *, header_map: dict[str, int], key: str, expected: str, start_row: int
+) -> list[int]:
     return [
         row
         for row in range(start_row, ws.max_row + 1)
@@ -47,7 +49,9 @@ def test_golden_workbook_to_execution_writeback_acceptance(
         == acceptance_expected_manifest_shape["compiled_manifest_schema_version"]
     )
     assert len(manifest.experiments) == 1
-    assert manifest.experiments[0].experiment_id == acceptance_expected_manifest_shape["experiment_id"]
+    assert (
+        manifest.experiments[0].experiment_id == acceptance_expected_manifest_shape["experiment_id"]
+    )
     assert len(manifest.trial_specs) == acceptance_expected_manifest_shape["trial_count"]
     trial = manifest.trial_specs[0]
     for key, value in acceptance_expected_manifest_shape["required_trial_params"].items():
@@ -120,4 +124,6 @@ def test_golden_workbook_to_execution_writeback_acceptance(
         run_log_ws.cell(latest_run_log_row, run_log_cols["Result_Summary"]).value
         == acceptance_expected_output_shape["run_log_result"]
     )
-    assert str(run_log_ws.cell(latest_run_log_row, run_log_cols["Artifact_Path"]).value or "").strip()
+    assert str(
+        run_log_ws.cell(latest_run_log_row, run_log_cols["Artifact_Path"]).value or ""
+    ).strip()

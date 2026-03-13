@@ -5,8 +5,8 @@ Real workbook logic now lives in ``Thesis_ML.workbook``.
 
 from __future__ import annotations
 
-from pathlib import Path
 import warnings
+from pathlib import Path
 
 from Thesis_ML.cli.workbook import main as _main
 from Thesis_ML.config.paths import DEFAULT_WORKBOOK_TEMPLATE
