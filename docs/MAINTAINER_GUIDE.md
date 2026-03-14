@@ -53,6 +53,8 @@ Factorial-design guardrails:
 - keep effect summaries labeled descriptive unless inferential methods are added with tests/docs;
 - maintain backward compatibility for existing `Experiment_Definitions` flow.
 - keep scientific-rigor layer additive: metadata + validation only, no execution semantics changes.
+- maintain explicit study guardrail dispositions (`allowed`, `warning`, `blocked`) and
+  keep confirmatory blocking requirements strict/auditable.
 
 ## Core verification commands
 

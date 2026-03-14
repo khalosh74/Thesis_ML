@@ -63,6 +63,9 @@ from Thesis_ML.orchestration.workbook_bridge import (
     build_run_log_writeback_rows as _build_run_log_writeback_rows,
 )
 from Thesis_ML.orchestration.workbook_bridge import (
+    build_study_review_rows as _build_study_review_rows,
+)
+from Thesis_ML.orchestration.workbook_bridge import (
     build_trial_results_rows as _build_trial_results_rows,
 )
 from Thesis_ML.orchestration.workbook_writeback import write_workbook_results
@@ -88,6 +91,28 @@ def _git_commit() -> str | None:
         return None
     commit = process.stdout.strip()
     return commit or None
+
+
+_STUDY_GUARDRAIL_POLICY = {
+    "exploratory": {
+        "core_fields_required": ["question", "generalization_claim", "primary_metric", "cv_scheme"],
+        "non_core_gaps": "warnings",
+        "disposition_when_core_present": ["allowed", "warning"],
+    },
+    "confirmatory": {
+        "core_fields_required": ["question", "generalization_claim", "primary_metric", "cv_scheme"],
+        "strict_requirements": [
+            "leakage_risk_reviewed",
+            "unit_of_analysis_defined",
+            "data_hierarchy_defined",
+            "primary_contrast",
+            "interpretation_rules",
+            "confirmatory_lock_applied",
+            "multiplicity_handling",
+        ],
+        "non_compliance": "blocked",
+    },
+}
 
 
 def run_decision_support_campaign(
@@ -149,6 +174,18 @@ def run_decision_support_campaign(
     campaign_id = _now_timestamp()
     campaign_root = output_root / "campaigns" / campaign_id
     campaign_root.mkdir(parents=True, exist_ok=False)
+
+    study_review_summary_path = campaign_root / "study_review_summary.json"
+    study_reviews_payload = [review.model_dump(mode="python") for review in registry.study_reviews]
+    study_review_summary = {
+        "generated_at": _utc_timestamp(),
+        "guardrail_policy": _STUDY_GUARDRAIL_POLICY,
+        "studies": study_reviews_payload,
+    }
+    study_review_summary_path.write_text(
+        f"{json.dumps(study_review_summary, indent=2)}\n",
+        encoding="utf-8",
+    )
 
     commit = _git_commit()
     artifact_registry_path = output_root / "artifact_registry.sqlite3"
@@ -313,6 +350,10 @@ def run_decision_support_campaign(
             seed=seed,
             commit=commit,
         )
+        study_review_rows = _build_study_review_rows(
+            study_reviews=study_reviews_payload,
+            variant_records=all_variant_records,
+        )
         workbook_output_path = write_workbook_results(
             source_workbook_path=workbook_source_path,
             version_tag=campaign_id,
@@ -321,6 +362,7 @@ def run_decision_support_campaign(
             summary_output_rows=summary_rows,
             generated_design_rows=generated_design_rows,
             effect_summary_rows=effect_rows,
+            study_review_rows=study_review_rows,
             run_log_rows=run_log_rows,
             append_run_log=append_workbook_run_log,
             output_dir=workbook_output_dir,
@@ -344,6 +386,7 @@ def run_decision_support_campaign(
             "run_log_export": str(run_log_path.resolve()),
             "decision_support_summary": str(decision_summary_path.resolve()),
             "decision_recommendations": str(decision_report_path.resolve()),
+            "study_review_summary": str(study_review_summary_path.resolve()),
             "result_aggregation": str(aggregation_path.resolve()),
             "summary_outputs_export": str(summary_output_path.resolve()),
             "stage_summaries": [str(path.resolve()) for path in stage_summary_paths],
@@ -366,6 +409,7 @@ def run_decision_support_campaign(
         "run_log_export_path": str(run_log_path.resolve()),
         "decision_support_summary_path": str(decision_summary_path.resolve()),
         "decision_recommendations_path": str(decision_report_path.resolve()),
+        "study_review_summary_path": str(study_review_summary_path.resolve()),
         "result_aggregation_path": str(aggregation_path.resolve()),
         "summary_outputs_export_path": str(summary_output_path.resolve()),
         "selected_experiments": [str(exp["experiment_id"]) for exp in selected_experiments],

@@ -45,7 +45,7 @@ def _set_executable_row(path: Path) -> None:
     workbook.save(path)
 
 
-def _set_factorial_design(path: Path) -> None:
+def _set_factorial_design(path: Path, *, intent: str = "exploratory") -> None:
     workbook = load_workbook(path)
 
     study_ws = workbook["Study_Design"]
@@ -54,7 +54,7 @@ def _set_factorial_design(path: Path) -> None:
     study_ws.cell(3, study_cols["study_name"], "Roundtrip factorial study")
     study_ws.cell(3, study_cols["enabled"], "Yes")
     study_ws.cell(3, study_cols["study_type"], "full_factorial")
-    study_ws.cell(3, study_cols["intent"], "exploratory")
+    study_ws.cell(3, study_cols["intent"], intent)
     study_ws.cell(3, study_cols["start_section"], "dataset_selection")
     study_ws.cell(3, study_cols["end_section"], "evaluation")
     study_ws.cell(3, study_cols["primary_metric"], "balanced_accuracy")
@@ -207,6 +207,7 @@ def test_workbook_roundtrip_compile_execute_writeback(
     )
 
     output_workbook_path = Path(str(result["workbook_output_path"]))
+    assert Path(str(result["study_review_summary_path"])).exists()
     assert output_workbook_path.exists()
     assert output_workbook_path != workbook_path
     assert output_workbook_path.name.startswith("thesis_experiment_program__results_")
@@ -355,3 +356,70 @@ def test_workbook_roundtrip_factorial_writeback(
         str(effects_ws.cell(row, effects_cols["summary_type"]).value or "") for row in effect_rows
     }
     assert "best_by_study" in effect_types
+
+    review_ws = output_wb["Study_Review"]
+    review_cols = _sheet_header_map(review_ws, 2)
+    review_rows = [
+        row
+        for row in range(3, review_ws.max_row + 1)
+        if str(review_ws.cell(row, review_cols["study_id"]).value or "") == "S01"
+    ]
+    assert review_rows
+    latest_review_row = review_rows[-1]
+    assert review_ws.cell(latest_review_row, review_cols["execution_disposition"]).value in {
+        "allowed",
+        "warning",
+    }
+    assert review_ws.cell(latest_review_row, review_cols["expected_trials"]).value == 4
+
+
+def test_workbook_roundtrip_confirmatory_study_blocked_by_guardrails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workbook_path = tmp_path / "thesis_experiment_program.xlsx"
+    _make_workbook(workbook_path)
+    _set_factorial_design(workbook_path, intent="confirmatory")
+    index_csv = tmp_path / "dataset_index.csv"
+    _write_index_csv(index_csv)
+
+    manifest = compile_workbook_file(workbook_path)
+    assert [trial for trial in manifest.trial_specs if trial.study_id == "S01"] == []
+    review = next(item for item in manifest.study_reviews if item.study_id == "S01")
+    assert review.execution_disposition == "blocked"
+
+    from Thesis_ML.orchestration import decision_support as orchestrator
+
+    monkeypatch.setattr(orchestrator, "run_experiment", _stub_run_experiment)
+
+    result = run_workbook_decision_support_campaign(
+        workbook_path=workbook_path,
+        index_csv=index_csv,
+        data_root=tmp_path / "Data",
+        cache_dir=tmp_path / "cache",
+        output_root=tmp_path / "artifacts" / "decision_support",
+        experiment_id=None,
+        stage=None,
+        run_all=True,
+        seed=42,
+        n_permutations=0,
+        dry_run=False,
+        write_back_to_workbook=True,
+        append_workbook_run_log=True,
+        workbook_output_dir=tmp_path / "workbook_outputs",
+    )
+
+    output_workbook_path = Path(str(result["workbook_output_path"]))
+    output_wb = load_workbook(output_workbook_path)
+
+    review_ws = output_wb["Study_Review"]
+    review_cols = _sheet_header_map(review_ws, 2)
+    review_rows = [
+        row
+        for row in range(3, review_ws.max_row + 1)
+        if str(review_ws.cell(row, review_cols["study_id"]).value or "") == "S01"
+    ]
+    assert review_rows
+    latest_review_row = review_rows[-1]
+    assert review_ws.cell(latest_review_row, review_cols["execution_disposition"]).value == "blocked"
+    assert int(review_ws.cell(latest_review_row, review_cols["error_count"]).value or 0) >= 1
+    assert int(review_ws.cell(latest_review_row, review_cols["blocked_trials"]).value or 0) >= 1

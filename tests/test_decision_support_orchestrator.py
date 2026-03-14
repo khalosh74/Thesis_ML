@@ -183,6 +183,7 @@ def test_campaign_writes_exports_and_marks_blocked(
     assert (campaign_root / "run_log_export.csv").exists()
     assert (campaign_root / "decision_support_summary.csv").exists()
     assert (campaign_root / "decision_recommendations.md").exists()
+    assert (campaign_root / "study_review_summary.json").exists()
     assert (campaign_root / "stage1_target_lock_summary.csv").exists()
     assert (campaign_root / "stage3_model_lock_summary.csv").exists()
 

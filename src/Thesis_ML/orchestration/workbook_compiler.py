@@ -28,6 +28,7 @@ from Thesis_ML.orchestration.contracts import (
     SectionName,
     StudyDesignSpec,
     StudyIntent,
+    StudyReviewSummary,
     StudyRigorChecklistSpec,
     StudyType,
 )
@@ -933,68 +934,200 @@ def _append_warning(warnings: list[str], message: str) -> None:
         warnings.append(text)
 
 
-def _validate_study_rigor_policy(
+def _constraint_descriptions(study: StudyDesignSpec) -> list[str]:
+    descriptions: list[str] = []
+    for constraint in study.constraints:
+        reason = f" ({constraint.reason})" if constraint.reason else ""
+        descriptions.append(
+            "if "
+            f"{constraint.if_factor}={constraint.if_level} then disallow "
+            f"{constraint.disallow_factor}={constraint.disallow_level}{reason}"
+        )
+    return descriptions
+
+
+def _expected_design_counts(
+    *,
+    study: StudyDesignSpec,
+    raw_custom_rows: list[dict[str, Any]],
+) -> tuple[int, int, int]:
+    if study.study_type == StudyType.CUSTOM_MATRIX:
+        expected_cells = len(raw_custom_rows)
+        return expected_cells, expected_cells, 0
+
+    repeats = len(_repeat_plan_for_study(study))
+    factor_names = [factor.factor_name for factor in study.factors]
+    level_space = [factor.levels for factor in study.factors]
+    all_combinations = list(itertools.product(*level_space)) if level_space else [tuple()]
+    total_cells = len(all_combinations)
+    valid_cells = 0
+    for combo in all_combinations:
+        factor_settings = {name: combo[idx] for idx, name in enumerate(factor_names)}
+        if _is_disallowed_combination(factor_settings, study.constraints):
+            continue
+        valid_cells += 1
+    excluded = max(0, total_cells - valid_cells)
+    return valid_cells, valid_cells * repeats, excluded
+
+
+def _checklist_status(checklist: StudyRigorChecklistSpec | None) -> str:
+    if checklist is None:
+        return "missing"
+    missing_core = (
+        not bool(checklist.leakage_risk_reviewed)
+        or not bool(checklist.unit_of_analysis_defined)
+        or not bool(checklist.data_hierarchy_defined)
+    )
+    return "partial" if missing_core else "complete"
+
+
+def _analysis_status(analysis_plan: AnalysisPlanSpec | None) -> str:
+    if analysis_plan is None:
+        return "missing"
+    missing_core = (
+        not bool(str(analysis_plan.primary_contrast or "").strip())
+        or not bool(str(analysis_plan.interpretation_rules or "").strip())
+    )
+    return "partial" if missing_core else "complete"
+
+
+def _build_study_review(
     *,
     study: StudyDesignSpec,
     checklist: StudyRigorChecklistSpec | None,
     analysis_plan: AnalysisPlanSpec | None,
     field_presence: dict[str, bool] | None,
-    warnings: list[str],
-) -> None:
+    raw_custom_rows: list[dict[str, Any]],
+) -> StudyReviewSummary:
+    # Guardrail policy:
+    # - Core fields (question/generalization_claim/primary_metric/cv_scheme) are hard requirements
+    #   for all enabled studies.
+    # - Confirmatory studies treat rigor-plan gaps as hard errors.
+    # - Exploratory studies downgrade non-core rigor gaps to warnings.
     strict = study.intent == StudyIntent.CONFIRMATORY
-
-    required_core = {
+    core_presence = {
+        "question": bool(str(study.question or "").strip()),
         "generalization_claim": bool(str(study.generalization_claim or "").strip()),
         "primary_metric": bool(str(study.primary_metric or "").strip()),
         "cv_scheme": bool(str(study.cv_scheme or "").strip()),
     }
     if field_presence:
-        for key, is_present in field_presence.items():
-            if key in required_core:
-                required_core[key] = bool(is_present)
+        for key in ("question", "generalization_claim", "primary_metric", "cv_scheme"):
+            if key in field_presence:
+                core_presence[key] = bool(field_presence[key])
 
-    for field_name, is_present in required_core.items():
+    errors: list[str] = []
+    warnings: list[str] = []
+    missing_fields: list[str] = []
+
+    for key, is_present in core_presence.items():
         if is_present:
             continue
-        message = f"Study '{study.study_id}' is missing {field_name} in Study_Design."
-        if strict:
-            raise ValueError(message)
-        _append_warning(warnings, message)
+        missing_fields.append(key)
+        errors.append(f"Missing core field '{key}'.")
 
+    checklist_missing: list[str] = []
     if checklist is None:
-        message = f"Study '{study.study_id}' has no Study_Rigor_Checklist entry."
-        if strict:
-            raise ValueError(
-                message + " Confirmatory studies require a rigor checklist row."
-            )
-        _append_warning(warnings, message)
-    elif strict and not checklist.confirmatory_lock_applied:
-        raise ValueError(
-            "Confirmatory study "
-            f"'{study.study_id}' requires confirmatory_lock_applied=Yes in Study_Rigor_Checklist."
+        checklist_missing.extend(
+            [
+                "leakage_risk_reviewed",
+                "unit_of_analysis_defined",
+                "data_hierarchy_defined",
+                "confirmatory_lock_applied",
+            ]
         )
+    else:
+        if not checklist.leakage_risk_reviewed:
+            checklist_missing.append("leakage_risk_reviewed")
+        if not checklist.unit_of_analysis_defined:
+            checklist_missing.append("unit_of_analysis_defined")
+        if not checklist.data_hierarchy_defined:
+            checklist_missing.append("data_hierarchy_defined")
+        if not checklist.confirmatory_lock_applied:
+            checklist_missing.append("confirmatory_lock_applied")
 
+    analysis_missing: list[str] = []
     if analysis_plan is None:
-        message = f"Study '{study.study_id}' has no Analysis_Plan entry."
+        analysis_missing.extend(["primary_contrast", "interpretation_rules"])
+    else:
+        if not str(analysis_plan.primary_contrast or "").strip():
+            analysis_missing.append("primary_contrast")
+        if not str(analysis_plan.interpretation_rules or "").strip():
+            analysis_missing.append("interpretation_rules")
+        if strict and not str(analysis_plan.multiplicity_handling or "").strip():
+            analysis_missing.append("multiplicity_handling")
+
+    for field_name in checklist_missing:
+        if field_name not in missing_fields:
+            missing_fields.append(field_name)
         if strict:
-            raise ValueError(message + " Confirmatory studies require an analysis plan row.")
-        _append_warning(warnings, message)
-    elif strict:
-        missing_fields = [
-            field_name
-            for field_name, value in (
-                ("primary_contrast", analysis_plan.primary_contrast),
-                ("multiplicity_handling", analysis_plan.multiplicity_handling),
-                ("interpretation_rules", analysis_plan.interpretation_rules),
-            )
-            if not str(value or "").strip()
-        ]
-        if missing_fields:
-            raise ValueError(
-                f"Confirmatory study '{study.study_id}' is missing required Analysis_Plan "
-                "fields: "
-                + ", ".join(missing_fields)
-            )
+            errors.append(f"Missing required rigor checklist field '{field_name}'.")
+        else:
+            warnings.append(f"Incomplete rigor checklist field '{field_name}'.")
+
+    for field_name in analysis_missing:
+        if field_name not in missing_fields:
+            missing_fields.append(field_name)
+        if strict:
+            errors.append(f"Missing required analysis plan field '{field_name}'.")
+        else:
+            warnings.append(f"Incomplete analysis plan field '{field_name}'.")
+
+    expected_cells, expected_trials, excluded = _expected_design_counts(
+        study=study,
+        raw_custom_rows=raw_custom_rows,
+    )
+    disposition: str
+    eligibility_status: str
+    if errors:
+        disposition = "blocked"
+        eligibility_status = "blocked"
+    elif warnings:
+        disposition = "warning"
+        eligibility_status = "eligible_with_warnings"
+    else:
+        disposition = "allowed"
+        eligibility_status = "eligible"
+
+    factor_map = {factor.factor_name: list(factor.levels) for factor in study.factors}
+    fixed_controls = _fixed_controls_map(study)
+    return StudyReviewSummary.model_validate(
+        {
+            "study_id": study.study_id,
+            "study_name": study.study_name,
+            "intent": _enum_text(study.intent),
+            "question": study.question,
+            "generalization_claim": study.generalization_claim,
+            "start_section": _enum_text(study.start_section),
+            "end_section": _enum_text(study.end_section),
+            "factors": factor_map,
+            "fixed_controls": fixed_controls,
+            "blocked_constraints": _constraint_descriptions(study),
+            "excluded_combination_count": excluded,
+            "expected_design_cells": expected_cells,
+            "expected_trials": expected_trials,
+            "primary_metric": study.primary_metric,
+            "secondary_metrics": study.secondary_metrics,
+            "cv_scheme": study.cv_scheme,
+            "nested_cv": study.nested_cv,
+            "external_validation_planned": study.external_validation_planned,
+            "blocking_strategy": study.blocking_strategy,
+            "randomization_strategy": study.randomization_strategy,
+            "replication_strategy": study.replication_strategy,
+            "replication_mode": study.replication_mode,
+            "num_repeats": int(study.num_repeats),
+            "random_seed_policy": study.random_seed_policy,
+            "rigor_checklist_status": _checklist_status(checklist),
+            "analysis_plan_status": _analysis_status(analysis_plan),
+            "execution_eligibility_status": eligibility_status,
+            "execution_disposition": disposition,
+            "warning_count": len(warnings),
+            "error_count": len(errors),
+            "missing_fields": missing_fields,
+            "warnings": warnings,
+            "errors": errors,
+        }
+    )
 
 
 def _build_study_design_layer(
@@ -1003,13 +1136,14 @@ def _build_study_design_layer(
     list[StudyDesignSpec],
     list[StudyRigorChecklistSpec],
     list[AnalysisPlanSpec],
+    list[StudyReviewSummary],
     list[GeneratedDesignCell],
     list[dict[str, Any]],
     list[dict[str, Any]],
     list[str],
 ]:
     if "Study_Design" not in workbook.sheetnames:
-        return [], [], [], [], [], [], []
+        return [], [], [], [], [], [], [], []
 
     study_header, study_rows = _sheet_rows(
         workbook,
@@ -1041,10 +1175,12 @@ def _build_study_design_layer(
             )
         raw_primary_metric = _normalize_text(_read_cell(row, study_header, "primary_metric"))
         raw_cv_scheme = _normalize_text(_read_cell(row, study_header, "cv_scheme"))
+        raw_question = _normalize_text(_read_cell(row, study_header, "question"))
         raw_generalization_claim = _normalize_text(
             _read_cell(row, study_header, "generalization_claim")
         )
         field_presence_by_study[study_id] = {
+            "question": bool(raw_question),
             "generalization_claim": bool(raw_generalization_claim),
             "primary_metric": bool(raw_primary_metric),
             "cv_scheme": bool(raw_cv_scheme),
@@ -1056,7 +1192,7 @@ def _build_study_design_layer(
             "study_type": study_type,
             "intent": _normalize_text(_read_cell(row, study_header, "intent"))
             or StudyIntent.EXPLORATORY.value,
-            "question": _normalize_text(_read_cell(row, study_header, "question")) or None,
+            "question": raw_question or None,
             "generalization_claim": raw_generalization_claim or None,
             "start_section": _validated_section(
                 _read_cell(row, study_header, "start_section"),
@@ -1417,33 +1553,29 @@ def _build_study_design_layer(
     ]
     checklist_specs = [checklist_by_study[study_id] for study_id in sorted(checklist_by_study)]
     analysis_plan_specs = [analysis_by_study[study_id] for study_id in sorted(analysis_by_study)]
+    study_review_specs: list[StudyReviewSummary] = []
     generated_cells: list[GeneratedDesignCell] = []
     study_trials: list[dict[str, Any]] = []
     study_experiments: list[dict[str, Any]] = []
     validation_warnings: list[str] = []
 
     for study in study_specs:
-        if study.enabled:
-            _validate_study_rigor_policy(
-                study=study,
-                checklist=checklist_by_study.get(study.study_id),
-                analysis_plan=analysis_by_study.get(study.study_id),
-                field_presence=field_presence_by_study.get(study.study_id),
-                warnings=validation_warnings,
-            )
         if not study.enabled:
             continue
-        if study.study_type == StudyType.CUSTOM_MATRIX:
-            cells = _build_custom_matrix_cells(
-                study,
-                raw_rows=generated_by_study.get(study.study_id, []),
-            )
-        else:
-            cells = _build_factorial_cells(study)
-        for cell in cells:
-            generated_cells.append(cell)
-            study_trials.append(_trial_spec_from_cell(study, cell))
-        if cells:
+        review = _build_study_review(
+            study=study,
+            checklist=checklist_by_study.get(study.study_id),
+            analysis_plan=analysis_by_study.get(study.study_id),
+            field_presence=field_presence_by_study.get(study.study_id),
+            raw_custom_rows=generated_by_study.get(study.study_id, []),
+        )
+
+        for warning_text in review.warnings:
+            _append_warning(validation_warnings, f"Study '{study.study_id}': {warning_text}")
+
+        blocked_reasons = list(review.errors)
+        if review.execution_disposition == "blocked":
+            study_review_specs.append(review)
             study_experiments.append(
                 {
                     "experiment_id": study.study_id,
@@ -1452,21 +1584,98 @@ def _build_study_design_layer(
                     "manipulated_factor": ", ".join(factor.factor_name for factor in study.factors)
                     or None,
                     "primary_metric": study.primary_metric,
+                    "is_study_design": True,
+                    "executable_now": False,
+                    "blocked_reasons": blocked_reasons,
                     "notes": (
-                        "Factorial study design compiled from workbook."
+                        "Study blocked by scientific-rigor guardrails before execution."
                         + (f" Question: {study.question}" if study.question else "")
                         + (f" Notes: {study.notes}" if study.notes else "")
                     ),
-                    "variant_templates": [
-                        row for row in study_trials if row["experiment_id"] == study.study_id
-                    ],
+                    "variant_templates": [],
                 }
             )
+            continue
+
+        if study.study_type == StudyType.CUSTOM_MATRIX:
+            cells = _build_custom_matrix_cells(
+                study,
+                raw_rows=generated_by_study.get(study.study_id, []),
+            )
+        else:
+            cells = _build_factorial_cells(study)
+
+        study_variant_templates: list[dict[str, Any]] = []
+        for cell in cells:
+            generated_cells.append(cell)
+            trial_spec = _trial_spec_from_cell(study, cell)
+            study_trials.append(trial_spec)
+            study_variant_templates.append(trial_spec)
+
+        if not study_variant_templates:
+            no_cell_reason = (
+                "No executable design cells were produced after applying factors, "
+                "constraints, and replication rules."
+            )
+            blocked_reasons_with_cells = blocked_reasons + [no_cell_reason]
+            review = review.model_copy(
+                update={
+                    "execution_disposition": "blocked",
+                    "execution_eligibility_status": "blocked",
+                    "error_count": int(review.error_count) + 1,
+                    "errors": list(review.errors) + [no_cell_reason],
+                    "missing_fields": list(review.missing_fields),
+                }
+            )
+            study_review_specs.append(review)
+            study_experiments.append(
+                {
+                    "experiment_id": study.study_id,
+                    "title": study.study_name,
+                    "stage": _default_stage_for_study(study),
+                    "manipulated_factor": ", ".join(factor.factor_name for factor in study.factors)
+                    or None,
+                    "primary_metric": study.primary_metric,
+                    "is_study_design": True,
+                    "executable_now": False,
+                    "blocked_reasons": blocked_reasons_with_cells,
+                    "notes": (
+                        "Study blocked after design expansion produced zero executable cells."
+                        + (f" Question: {study.question}" if study.question else "")
+                        + (f" Notes: {study.notes}" if study.notes else "")
+                    ),
+                    "variant_templates": [],
+                }
+            )
+            continue
+
+        study_review_specs.append(review)
+        study_experiments.append(
+            {
+                "experiment_id": study.study_id,
+                "title": study.study_name,
+                "stage": _default_stage_for_study(study),
+                "manipulated_factor": ", ".join(factor.factor_name for factor in study.factors)
+                or None,
+                "primary_metric": study.primary_metric,
+                "is_study_design": True,
+                "executable_now": True,
+                "blocked_reasons": [],
+                "notes": (
+                    "Factorial study design compiled from workbook."
+                    + (" Guardrail disposition=warning." if review.execution_disposition == "warning" else "")
+                    + (f" Question: {study.question}" if study.question else "")
+                    + (f" Notes: {study.notes}" if study.notes else "")
+                ),
+                "variant_templates": study_variant_templates,
+            }
+        )
 
     return (
         study_specs,
         checklist_specs,
         analysis_plan_specs,
+        study_review_specs,
         generated_cells,
         study_trials,
         study_experiments,
@@ -1492,6 +1701,7 @@ def compile_workbook_workbook(
         study_specs,
         study_rigor_checklists,
         analysis_plans,
+        study_reviews,
         generated_cells,
         study_trials,
         study_experiments,
@@ -1500,9 +1710,14 @@ def compile_workbook_workbook(
     all_trials = list(trial_specs) + list(study_trials)
 
     if not all_trials:
-        raise ValueError(
-            "No enabled executable rows were found in Experiment_Definitions or Study_Design."
+        has_enabled_studies = any(study.enabled for study in study_specs)
+        has_blocked_enabled_study = any(
+            review.execution_disposition == "blocked" for review in study_reviews
         )
+        if not (has_enabled_studies and has_blocked_enabled_study):
+            raise ValueError(
+                "No enabled executable rows were found in Experiment_Definitions or Study_Design."
+            )
 
     legacy_experiment_ids = sorted({trial["experiment_id"] for trial in trial_specs})
     unknown_experiments = [
@@ -1561,6 +1776,7 @@ def compile_workbook_workbook(
             checklist.model_dump(mode="python") for checklist in study_rigor_checklists
         ],
         "analysis_plans": [plan.model_dump(mode="python") for plan in analysis_plans],
+        "study_reviews": [review.model_dump(mode="python") for review in study_reviews],
         "generated_design_matrix": [cell.model_dump(mode="python") for cell in generated_cells],
         "effect_summaries": [],
         "validation_warnings": validation_warnings,

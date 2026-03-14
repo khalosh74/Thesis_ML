@@ -89,6 +89,20 @@ This command validates:
   - writes descriptive grouped summaries to `Effect_Summaries`
 - Scientific-rigor metadata behavior:
   - records checklist and analysis-plan metadata per study
+  - writes pre-execution `Study_Review` disposition (`allowed` / `warning` / `blocked`)
   - validates confirmatory studies more strictly than exploratory studies
   - does not auto-design science or guarantee scientific validity
 - The framework does not auto-design study validity or perform automatic inferential statistics.
+
+Execution policy:
+- Exploratory studies:
+  - require core fields (`question`, `generalization_claim`, `primary_metric`, `cv_scheme`)
+  - can run with warnings when non-core rigor metadata is incomplete
+- Confirmatory studies:
+  - are blocked when required rigor fields are missing
+  - must include lock/analysis-plan completeness before execution
+
+Before trusting results:
+- review `Study_Review` in workbook outputs
+- check `study_review_summary.json` in campaign exports
+- verify why a study was allowed, warned, or blocked

@@ -122,7 +122,7 @@ def _set_rigor_metadata(
     path: Path,
     *,
     study_id: str = "S01",
-    confirmatory_lock_applied: str = "No",
+    confirmatory_lock_applied: str = "Yes",
     primary_contrast: str = "ridge - logreg",
     multiplicity_handling: str = "none",
     interpretation_rules: str = "Descriptive, non-causal interpretation only.",
@@ -189,6 +189,7 @@ def test_build_workbook_includes_factorial_design_sheets() -> None:
         "Blocking_and_Replication",
         "Generated_Design_Matrix",
         "Effect_Summaries",
+        "Study_Review",
     ]:
         assert sheet in workbook.sheetnames
 
@@ -324,7 +325,37 @@ def test_compile_workbook_exploratory_with_rigor_metadata_passes(tmp_path: Path)
 
     assert [spec.study_id for spec in manifest.study_rigor_checklists] == ["S01"]
     assert [spec.study_id for spec in manifest.analysis_plans] == ["S01"]
+    assert [spec.study_id for spec in manifest.study_reviews] == ["S01"]
+    review = manifest.study_reviews[0]
+    assert review.execution_disposition == "allowed"
+    assert review.error_count == 0
+    assert review.warning_count == 0
+    assert review.expected_design_cells == 4
+    assert review.expected_trials == 4
     assert manifest.validation_warnings == []
+
+
+def test_compile_workbook_generates_readable_study_review_summary(tmp_path: Path) -> None:
+    workbook_path = tmp_path / "thesis_experiment_program.xlsx"
+    _make_workbook(workbook_path)
+    _set_factorial_design(workbook_path, add_constraint=True)
+    _set_rigor_metadata(workbook_path)
+
+    manifest = compile_workbook_file(workbook_path)
+    review = next(item for item in manifest.study_reviews if item.study_id == "S01")
+
+    assert review.study_name
+    assert review.intent in {"exploratory", "confirmatory"}
+    assert review.question
+    assert review.generalization_claim
+    assert review.factors["model"] == ["ridge", "logreg"]
+    assert review.fixed_controls["target"] == "coarse_affect"
+    assert review.blocked_constraints
+    assert review.excluded_combination_count == 1
+    assert review.expected_design_cells == 3
+    assert review.expected_trials == 3
+    assert review.primary_metric == "balanced_accuracy"
+    assert review.cv_scheme == "within_subject_loso_session"
 
 
 def test_compile_workbook_malformed_rigor_checklist_fails(tmp_path: Path) -> None:
@@ -410,7 +441,7 @@ def test_compile_workbook_rigor_unknown_study_reference_fails(tmp_path: Path) ->
         compile_workbook_file(workbook_path)
 
 
-def test_compile_workbook_confirmatory_missing_key_rigor_fields_fails(tmp_path: Path) -> None:
+def test_compile_workbook_confirmatory_missing_key_rigor_fields_blocks_study(tmp_path: Path) -> None:
     workbook_path = tmp_path / "thesis_experiment_program.xlsx"
     _make_workbook(workbook_path)
     _set_factorial_design(workbook_path, add_constraint=False, intent="confirmatory")
@@ -427,29 +458,36 @@ def test_compile_workbook_confirmatory_missing_key_rigor_fields_fails(tmp_path: 
         interpretation_rules="",
     )
 
-    with pytest.raises(ValueError, match="confirmatory_lock_applied=Yes"):
-        compile_workbook_file(workbook_path)
+    manifest = compile_workbook_file(workbook_path)
+    review = next(item for item in manifest.study_reviews if item.study_id == "S01")
+    assert review.execution_disposition == "blocked"
+    assert review.error_count >= 1
+    assert "confirmatory_lock_applied" in set(review.missing_fields)
+    assert "primary_contrast" in set(review.missing_fields)
+    assert "interpretation_rules" in set(review.missing_fields)
+
+    study_trials = [trial for trial in manifest.trial_specs if trial.study_id == "S01"]
+    assert study_trials == []
+    study_experiment = next(exp for exp in manifest.experiments if exp.experiment_id == "S01")
+    assert study_experiment.executable_now is False
+    assert study_experiment.blocked_reasons
 
 
 def test_compile_workbook_exploratory_without_rigor_sheets_still_compiles(tmp_path: Path) -> None:
     workbook_path = tmp_path / "thesis_experiment_program.xlsx"
     _make_workbook(workbook_path)
     _set_factorial_design(workbook_path, add_constraint=False)
-    workbook = load_workbook(workbook_path)
-    study_ws = workbook["Study_Design"]
-    study_col = _header_map(study_ws, 2)
-    study_ws.cell(3, study_col["generalization_claim"], "")
-    study_ws.cell(3, study_col["primary_metric"], "")
-    study_ws.cell(3, study_col["cv_scheme"], "")
-    workbook.save(workbook_path)
 
     manifest = compile_workbook_file(workbook_path)
 
     study_trials = [trial for trial in manifest.trial_specs if trial.study_id == "S01"]
     assert len(study_trials) == 4
-    assert any("missing generalization_claim" in warning for warning in manifest.validation_warnings)
-    assert any("no Study_Rigor_Checklist entry" in warning for warning in manifest.validation_warnings)
-    assert any("no Analysis_Plan entry" in warning for warning in manifest.validation_warnings)
+    review = next(item for item in manifest.study_reviews if item.study_id == "S01")
+    assert review.execution_disposition == "warning"
+    assert review.warning_count >= 1
+    assert review.error_count == 0
+    assert any("Incomplete rigor checklist field" in warning for warning in manifest.validation_warnings)
+    assert any("Incomplete analysis plan field" in warning for warning in manifest.validation_warnings)
 
 
 def test_compile_workbook_fractional_factorial_raises_clear_error(tmp_path: Path) -> None:

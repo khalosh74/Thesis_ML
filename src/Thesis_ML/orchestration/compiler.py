@@ -16,6 +16,7 @@ from Thesis_ML.orchestration.contracts import (
     GeneratedDesignCell,
     SearchSpaceSpec,
     StudyDesignSpec,
+    StudyReviewSummary,
     StudyRigorChecklistSpec,
     TrialSpec,
     supported_sections,
@@ -61,6 +62,7 @@ def compile_registry_payload(
     compiled_study_designs: list[StudyDesignSpec] = []
     compiled_study_rigor_checklists: list[StudyRigorChecklistSpec] = []
     compiled_analysis_plans: list[AnalysisPlanSpec] = []
+    compiled_study_reviews: list[StudyReviewSummary] = []
     compiled_generated_design_matrix: list[GeneratedDesignCell] = []
     compiled_effect_summaries: list[EffectSummary] = []
     compiled_validation_warnings: list[str] = []
@@ -134,6 +136,20 @@ def compile_registry_payload(
         text = str(warning).strip()
         if text:
             compiled_validation_warnings.append(text)
+
+    raw_study_reviews = payload.get("study_reviews", [])
+    if raw_study_reviews is None:
+        raw_study_reviews = []
+    if not isinstance(raw_study_reviews, list):
+        raise ValueError("Invalid registry payload: expected 'study_reviews' to be a list.")
+    for raw_review in raw_study_reviews:
+        if not isinstance(raw_review, dict):
+            raise ValueError("Invalid study review payload: each review must be an object.")
+        try:
+            compiled_study_reviews.append(StudyReviewSummary.model_validate(dict(raw_review)))
+        except ValidationError as exc:
+            study_id = str(raw_review.get("study_id", "<missing-study-id>"))
+            raise ValueError(f"Invalid study review '{study_id}': {exc}") from exc
 
     raw_generated_matrix = payload.get("generated_design_matrix", [])
     if raw_generated_matrix is None:
@@ -209,6 +225,7 @@ def compile_registry_payload(
         "study_designs": compiled_study_designs,
         "study_rigor_checklists": compiled_study_rigor_checklists,
         "analysis_plans": compiled_analysis_plans,
+        "study_reviews": compiled_study_reviews,
         "generated_design_matrix": compiled_generated_design_matrix,
         "effect_summaries": compiled_effect_summaries,
         "validation_warnings": compiled_validation_warnings,

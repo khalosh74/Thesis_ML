@@ -16,6 +16,7 @@ _TRIAL_RESULTS_SHEET = "Trial_Results"
 _SUMMARY_OUTPUTS_SHEET = "Summary_Outputs"
 _GENERATED_DESIGN_MATRIX_SHEET = "Generated_Design_Matrix"
 _EFFECT_SUMMARIES_SHEET = "Effect_Summaries"
+_STUDY_REVIEW_SHEET = "Study_Review"
 _RUN_LOG_SHEET = "Run_Log"
 _README_SHEET = "README"
 
@@ -85,6 +86,46 @@ _EFFECT_SUMMARIES_COLUMNS = [
     "mean_primary_metric_value",
     "best_primary_metric_value",
     "best_trial_id",
+    "notes",
+]
+_STUDY_REVIEW_COLUMNS = [
+    "study_id",
+    "study_name",
+    "intent",
+    "execution_disposition",
+    "execution_eligibility_status",
+    "warning_count",
+    "error_count",
+    "missing_fields_json",
+    "warnings_json",
+    "errors_json",
+    "question",
+    "generalization_claim",
+    "start_section",
+    "end_section",
+    "factors_json",
+    "fixed_controls_json",
+    "constraints_json",
+    "excluded_combination_count",
+    "expected_design_cells",
+    "expected_trials",
+    "primary_metric",
+    "secondary_metrics",
+    "cv_scheme",
+    "nested_cv",
+    "external_validation_planned",
+    "blocking_strategy",
+    "randomization_strategy",
+    "replication_strategy",
+    "replication_mode",
+    "num_repeats",
+    "random_seed_policy",
+    "rigor_checklist_status",
+    "analysis_plan_status",
+    "completed_trials",
+    "failed_trials",
+    "blocked_trials",
+    "dry_run_trials",
     "notes",
 ]
 _RUN_LOG_COLUMNS = [
@@ -265,6 +306,7 @@ def write_workbook_results(
     summary_output_rows: list[dict[str, Any]] | None = None,
     generated_design_rows: list[dict[str, Any]] | None = None,
     effect_summary_rows: list[dict[str, Any]] | None = None,
+    study_review_rows: list[dict[str, Any]] | None = None,
     run_log_rows: list[dict[str, Any]] | None = None,
     append_run_log: bool = True,
     output_dir: Path | None = None,
@@ -359,6 +401,28 @@ def write_workbook_results(
                 data_start_row=3,
                 style_template_row=3,
                 max_column=len(_EFFECT_SUMMARIES_COLUMNS),
+            )
+
+    if study_review_rows:
+        if _STUDY_REVIEW_SHEET not in wb.sheetnames:
+            raise ValueError(
+                f"Workbook missing optional study review write-back sheet: '{_STUDY_REVIEW_SHEET}'"
+            )
+        review_ws = wb[_STUDY_REVIEW_SHEET]
+        review_headers = _assert_required_columns(
+            review_ws,
+            header_row=2,
+            required_columns=_STUDY_REVIEW_COLUMNS,
+        )
+        for row in study_review_rows:
+            _append_row(
+                review_ws,
+                header_map=review_headers,
+                row_payload=row,
+                key_column="study_id",
+                data_start_row=3,
+                style_template_row=3,
+                max_column=len(_STUDY_REVIEW_COLUMNS),
             )
 
     summary_ws = wb[_SUMMARY_OUTPUTS_SHEET]

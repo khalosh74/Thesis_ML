@@ -60,6 +60,7 @@ def validate_template_workbook(
         "Blocking_and_Replication",
         "Generated_Design_Matrix",
         "Effect_Summaries",
+        "Study_Review",
         "Artifact_Registry",
         "Fixed_Configs",
         "Objectives",
@@ -95,6 +96,7 @@ def validate_template_workbook(
             "Blocking_and_Replication",
             "Generated_Design_Matrix",
             "Effect_Summaries",
+            "Study_Review",
             "Data_Selection_Design",
             "Grouping_Strategy_Map",
             "Run_Log",
@@ -167,6 +169,8 @@ def validate_template_workbook(
         "List_Uncertainty_Method",
         "List_Multiplicity_Handling",
         "List_Interaction_Reporting_Policy",
+        "List_Study_Review_Disposition",
+        "List_Study_Eligibility_Status",
     ]
     defined_names = {name for name in wb.defined_names.keys()}
     named_lists_ok = all(name in defined_names for name in required_named_lists)

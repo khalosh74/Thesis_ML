@@ -57,6 +57,9 @@ from Thesis_ML.workbook.structured_execution_sheets import (
     fill_study_design as _fill_study_design_sheet,
 )
 from Thesis_ML.workbook.structured_execution_sheets import (
+    fill_study_review as _fill_study_review_sheet,
+)
+from Thesis_ML.workbook.structured_execution_sheets import (
     fill_study_rigor_checklist as _fill_study_rigor_checklist_sheet,
 )
 from Thesis_ML.workbook.structured_execution_sheets import (
@@ -95,6 +98,7 @@ SHEET_ORDER = [
     "Blocking_and_Replication",
     "Generated_Design_Matrix",
     "Effect_Summaries",
+    "Study_Review",
     "Artifact_Registry",
     "Fixed_Configs",
     "Objectives",
@@ -420,6 +424,47 @@ EFFECT_SUMMARIES_COLUMNS = [
     "notes",
 ]
 
+STUDY_REVIEW_COLUMNS = [
+    "study_id",
+    "study_name",
+    "intent",
+    "execution_disposition",
+    "execution_eligibility_status",
+    "warning_count",
+    "error_count",
+    "missing_fields_json",
+    "warnings_json",
+    "errors_json",
+    "question",
+    "generalization_claim",
+    "start_section",
+    "end_section",
+    "factors_json",
+    "fixed_controls_json",
+    "constraints_json",
+    "excluded_combination_count",
+    "expected_design_cells",
+    "expected_trials",
+    "primary_metric",
+    "secondary_metrics",
+    "cv_scheme",
+    "nested_cv",
+    "external_validation_planned",
+    "blocking_strategy",
+    "randomization_strategy",
+    "replication_strategy",
+    "replication_mode",
+    "num_repeats",
+    "random_seed_policy",
+    "rigor_checklist_status",
+    "analysis_plan_status",
+    "completed_trials",
+    "failed_trials",
+    "blocked_trials",
+    "dry_run_trials",
+    "notes",
+]
+
 DATA_SELECTION_COLUMNS = [
     "Data_Slice_ID",
     "Slice_Name",
@@ -698,6 +743,8 @@ VOCABS = {
         "pre_specified_only",
         "all_two_way_descriptive",
     ],
+    "Study_Review_Disposition": ["allowed", "warning", "blocked"],
+    "Study_Eligibility_Status": ["eligible", "eligible_with_warnings", "blocked"],
 }
 
 DEFINITIONS = [
@@ -1277,6 +1324,13 @@ def fill_effect_summaries_sheet(ws) -> int:
     return _fill_effect_summaries_sheet(
         ws=ws,
         effect_summaries_columns=EFFECT_SUMMARIES_COLUMNS,
+    )
+
+
+def fill_study_review_sheet(ws) -> int:
+    return _fill_study_review_sheet(
+        ws=ws,
+        study_review_columns=STUDY_REVIEW_COLUMNS,
     )
 
 
@@ -2768,6 +2822,8 @@ def fill_dictionary_sheet(ws, wb: Workbook) -> None:
         "Uncertainty_Method",
         "Multiplicity_Handling",
         "Interaction_Reporting_Policy",
+        "Study_Review_Disposition",
+        "Study_Eligibility_Status",
     ]
     ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=len(names))
     for c, name in enumerate(names, start=1):
@@ -3018,6 +3074,7 @@ def build_workbook() -> Workbook:
     fill_blocking_and_replication_sheet(wb["Blocking_and_Replication"])
     fill_generated_design_matrix_sheet(wb["Generated_Design_Matrix"])
     fill_effect_summaries_sheet(wb["Effect_Summaries"])
+    fill_study_review_sheet(wb["Study_Review"])
     fill_artifact_registry_sheet(wb["Artifact_Registry"])
     fill_fixed_configs_sheet(wb["Fixed_Configs"])
     fill_objectives_sheet(wb["Objectives"])

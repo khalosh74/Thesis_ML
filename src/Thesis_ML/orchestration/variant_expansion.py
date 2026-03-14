@@ -286,6 +286,11 @@ def expand_experiment_variants(
                     "params": {},
                     "supported": False,
                     "blocked_reason": reason,
+                    "study_id": (
+                        str(experiment.get("experiment_id", "")).strip()
+                        if bool(experiment.get("is_study_design"))
+                        else None
+                    ),
                 }
             ],
             [reason],

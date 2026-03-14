@@ -499,6 +499,72 @@ def fill_analysis_plan(ws: Worksheet, *, analysis_plan_columns: list[str]) -> in
     return last
 
 
+def fill_study_review(ws: Worksheet, *, study_review_columns: list[str]) -> int:
+    last = fill_simple_structured_sheet(
+        ws=ws,
+        columns=study_review_columns,
+        table_name="StudyReviewTable",
+        title="Study Review (Machine-managed pre-execution guardrails)",
+        width_map={
+            "A": 12,
+            "B": 24,
+            "C": 14,
+            "D": 14,
+            "E": 24,
+            "F": 12,
+            "G": 10,
+            "H": 26,
+            "I": 26,
+            "J": 26,
+            "K": 24,
+            "L": 28,
+            "M": 18,
+            "N": 16,
+            "O": 34,
+            "P": 34,
+            "Q": 30,
+            "R": 12,
+            "S": 12,
+            "T": 12,
+            "U": 20,
+            "V": 24,
+            "W": 20,
+            "X": 10,
+            "Y": 16,
+            "Z": 18,
+            "AA": 18,
+            "AB": 18,
+            "AC": 16,
+            "AD": 12,
+            "AE": 18,
+            "AF": 20,
+            "AG": 20,
+            "AH": 12,
+            "AI": 12,
+            "AJ": 12,
+            "AK": 12,
+            "AL": 36,
+        },
+        starter_rows=None,
+    )
+    add_list_validation(ws, "=List_Study_ID", col_idx(study_review_columns, "study_id"), 3, 1000)
+    add_list_validation(
+        ws,
+        "=List_Study_Review_Disposition",
+        col_idx(study_review_columns, "execution_disposition"),
+        3,
+        1000,
+    )
+    add_list_validation(
+        ws,
+        "=List_Study_Eligibility_Status",
+        col_idx(study_review_columns, "execution_eligibility_status"),
+        3,
+        1000,
+    )
+    return last
+
+
 def fill_fixed_controls(ws: Worksheet, *, fixed_controls_columns: list[str]) -> int:
     last = fill_simple_structured_sheet(
         ws=ws,
@@ -918,6 +984,7 @@ __all__ = [
     "fill_objectives",
     "fill_search_spaces",
     "fill_study_design",
+    "fill_study_review",
     "fill_study_rigor_checklist",
     "fill_summary_outputs",
     "fill_trial_results",

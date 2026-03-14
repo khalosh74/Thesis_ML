@@ -285,6 +285,56 @@ class AnalysisPlanSpec(_ContractModel):
     notes: str | None = None
 
 
+class StudyReviewSummary(_ContractModel):
+    study_id: str = Field(min_length=1)
+    study_name: str = Field(min_length=1)
+    intent: StudyIntent = StudyIntent.EXPLORATORY
+    question: str | None = None
+    generalization_claim: str | None = None
+    start_section: SectionName = SectionName.DATASET_SELECTION
+    end_section: SectionName = SectionName.EVALUATION
+    factors: dict[str, list[Any]] = Field(default_factory=dict)
+    fixed_controls: dict[str, Any] = Field(default_factory=dict)
+    blocked_constraints: list[str] = Field(default_factory=list)
+    excluded_combination_count: int = 0
+    expected_design_cells: int = 0
+    expected_trials: int = 0
+    primary_metric: str | None = None
+    secondary_metrics: str | None = None
+    cv_scheme: str | None = None
+    nested_cv: bool | None = None
+    external_validation_planned: bool | None = None
+    blocking_strategy: str | None = None
+    randomization_strategy: str | None = None
+    replication_strategy: str | None = None
+    replication_mode: str | None = None
+    num_repeats: int = 1
+    random_seed_policy: str | None = None
+    rigor_checklist_status: str = "missing"
+    analysis_plan_status: str = "missing"
+    execution_eligibility_status: str = "blocked"
+    execution_disposition: Literal["allowed", "warning", "blocked"] = "blocked"
+    warning_count: int = 0
+    error_count: int = 0
+    missing_fields: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    errors: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _validate_counts(self) -> StudyReviewSummary:
+        if self.expected_design_cells < 0:
+            raise ValueError("expected_design_cells must be >= 0.")
+        if self.expected_trials < 0:
+            raise ValueError("expected_trials must be >= 0.")
+        if self.excluded_combination_count < 0:
+            raise ValueError("excluded_combination_count must be >= 0.")
+        if self.warning_count < 0:
+            raise ValueError("warning_count must be >= 0.")
+        if self.error_count < 0:
+            raise ValueError("error_count must be >= 0.")
+        return self
+
+
 class GeneratedDesignCell(_ContractModel):
     study_id: str = Field(min_length=1)
     trial_id: str = Field(min_length=1)
@@ -422,6 +472,7 @@ class CompiledStudyManifest(_ContractModel):
     study_designs: list[StudyDesignSpec] = Field(default_factory=list)
     study_rigor_checklists: list[StudyRigorChecklistSpec] = Field(default_factory=list)
     analysis_plans: list[AnalysisPlanSpec] = Field(default_factory=list)
+    study_reviews: list[StudyReviewSummary] = Field(default_factory=list)
     generated_design_matrix: list[GeneratedDesignCell] = Field(default_factory=list)
     effect_summaries: list[EffectSummary] = Field(default_factory=list)
     validation_warnings: list[str] = Field(default_factory=list)
@@ -533,6 +584,26 @@ class CompiledStudyManifest(_ContractModel):
             raise ValueError(
                 "Analysis plans have duplicate entries for study_id values: "
                 + ", ".join(duplicate_analysis_ids)
+            )
+        unknown_review_studies = sorted(
+            {review.study_id for review in self.study_reviews if review.study_id not in known_studies}
+        )
+        if unknown_review_studies:
+            raise ValueError(
+                "Study review summaries reference unknown study_id values: "
+                + ", ".join(unknown_review_studies)
+            )
+        duplicate_review_ids = sorted(
+            {
+                review.study_id
+                for review in self.study_reviews
+                if sum(1 for other in self.study_reviews if other.study_id == review.study_id) > 1
+            }
+        )
+        if duplicate_review_ids:
+            raise ValueError(
+                "Study review summaries have duplicate entries for study_id values: "
+                + ", ".join(duplicate_review_ids)
             )
         known_trial_ids = {str(trial.trial_id) for trial in self.trial_specs if trial.trial_id}
         unknown_effect_trials = sorted(

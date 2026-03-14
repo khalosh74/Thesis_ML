@@ -39,6 +39,7 @@ Primary machine-readable execution sheets:
 - `Generated_Design_Matrix` (machine-managed; can be authored for `custom_matrix`)
 - `Trial_Results` (machine-managed)
 - `Effect_Summaries` (machine-managed descriptive grouped summaries)
+- `Study_Review` (machine-managed pre-execution rigor and eligibility summary)
 
 Governance sheets remain in place and are not removed.
 
@@ -60,7 +61,31 @@ Scientific scope:
 Scientific-rigor metadata scope:
 - `Study_Rigor_Checklist` records leakage/bias/reporting readiness metadata per study.
 - `Analysis_Plan` records primary contrast and interpretation policy metadata per study.
-- These sheets add metadata and validation only; they do not change execution semantics.
+- `Study_Review` reports pre-execution guardrail status (`allowed`, `warning`, `blocked`)
+  plus missing-field diagnostics.
+- Guardrails do not alter trial semantics for eligible studies; they gate whether a study
+  is eligible to execute.
+
+## Guardrail policy (explicit)
+
+- Core fields required for all enabled studies:
+  - `question`
+  - `generalization_claim`
+  - `primary_metric`
+  - `cv_scheme`
+- Exploratory (`intent=exploratory`):
+  - missing core fields => `blocked`
+  - missing non-core rigor/analysis metadata => `warning` (study may run)
+- Confirmatory (`intent=confirmatory`):
+  - missing any core field => `blocked`
+  - missing any of these => `blocked`:
+    - `leakage_risk_reviewed`
+    - `unit_of_analysis_defined`
+    - `data_hierarchy_defined`
+    - `primary_contrast`
+    - `interpretation_rules`
+    - `confirmatory_lock_applied`
+    - `multiplicity_handling`
 
 ## Compile behavior
 
@@ -80,6 +105,7 @@ Validation includes:
 - stricter confirmatory checks (`confirmatory_lock_applied`, `primary_contrast`,
   `multiplicity_handling`, `interpretation_rules`)
 - exploratory-mode warnings for missing rigor metadata (auditable in manifest warnings)
+- pre-execution study review generation with disposition + missing-field audit trail
 - explicit rejection of unsupported design modes (for example `fractional_factorial`)
 
 ## Execute from workbook

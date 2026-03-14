@@ -31,6 +31,13 @@ def _json_text(value: Any) -> str:
     return text
 
 
+def _int_value(value: Any) -> int:
+    try:
+        return int(value)
+    except Exception:
+        return 0
+
+
 def _build_dataset_subset_label(params: dict[str, Any]) -> str:
     subject = str(params.get("subject") or "").strip()
     train_subject = str(params.get("train_subject") or "").strip()
@@ -211,6 +218,78 @@ def build_effect_summary_rows(aggregation: dict[str, Any]) -> list[dict[str, Any
     return rows
 
 
+def build_study_review_rows(
+    *,
+    study_reviews: list[dict[str, Any]],
+    variant_records: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    status_by_study: dict[str, dict[str, int]] = {}
+    for record in variant_records:
+        study_id = str(record.get("study_id") or "").strip()
+        if not study_id:
+            continue
+        status = str(record.get("status") or "unknown")
+        status_map = status_by_study.setdefault(study_id, {})
+        status_map[status] = status_map.get(status, 0) + 1
+
+    rows: list[dict[str, Any]] = []
+    for review in study_reviews:
+        study_id = str(review.get("study_id") or "").strip()
+        if not study_id:
+            continue
+        observed = status_by_study.get(study_id, {})
+        warnings = list(review.get("warnings", []) or [])
+        errors = list(review.get("errors", []) or [])
+        notes_parts: list[str] = []
+        if warnings:
+            notes_parts.append("warnings=" + "; ".join(str(item) for item in warnings))
+        if errors:
+            notes_parts.append("errors=" + "; ".join(str(item) for item in errors))
+        rows.append(
+            {
+                "study_id": study_id,
+                "study_name": review.get("study_name"),
+                "intent": review.get("intent"),
+                "execution_disposition": review.get("execution_disposition"),
+                "execution_eligibility_status": review.get("execution_eligibility_status"),
+                "warning_count": _int_value(review.get("warning_count")),
+                "error_count": _int_value(review.get("error_count")),
+                "missing_fields_json": _json_text(review.get("missing_fields")),
+                "warnings_json": _json_text(warnings),
+                "errors_json": _json_text(errors),
+                "question": review.get("question"),
+                "generalization_claim": review.get("generalization_claim"),
+                "start_section": review.get("start_section"),
+                "end_section": review.get("end_section"),
+                "factors_json": _json_text(review.get("factors")),
+                "fixed_controls_json": _json_text(review.get("fixed_controls")),
+                "constraints_json": _json_text(review.get("blocked_constraints")),
+                "excluded_combination_count": _int_value(review.get("excluded_combination_count")),
+                "expected_design_cells": _int_value(review.get("expected_design_cells")),
+                "expected_trials": _int_value(review.get("expected_trials")),
+                "primary_metric": review.get("primary_metric"),
+                "secondary_metrics": review.get("secondary_metrics"),
+                "cv_scheme": review.get("cv_scheme"),
+                "nested_cv": review.get("nested_cv"),
+                "external_validation_planned": review.get("external_validation_planned"),
+                "blocking_strategy": review.get("blocking_strategy"),
+                "randomization_strategy": review.get("randomization_strategy"),
+                "replication_strategy": review.get("replication_strategy"),
+                "replication_mode": review.get("replication_mode"),
+                "num_repeats": _int_value(review.get("num_repeats")),
+                "random_seed_policy": review.get("random_seed_policy"),
+                "rigor_checklist_status": review.get("rigor_checklist_status"),
+                "analysis_plan_status": review.get("analysis_plan_status"),
+                "completed_trials": int(observed.get("completed", 0)),
+                "failed_trials": int(observed.get("failed", 0)),
+                "blocked_trials": int(observed.get("blocked", 0)),
+                "dry_run_trials": int(observed.get("dry_run", 0)),
+                "notes": " | ".join(notes_parts),
+            }
+        )
+    return rows
+
+
 def _derive_transfer_direction(row: dict[str, Any]) -> str:
     train_subject = str(row.get("train_subject") or "").strip()
     test_subject = str(row.get("test_subject") or "").strip()
@@ -282,6 +361,7 @@ __all__ = [
     "build_generated_design_rows",
     "build_machine_status_rows",
     "build_run_log_writeback_rows",
+    "build_study_review_rows",
     "build_trial_results_rows",
     "status_for_machine_sheet",
 ]
