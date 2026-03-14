@@ -55,7 +55,7 @@ def _validate_shipped_workbook_assets(repo_root: Path) -> None:
         template_manifest = compile_workbook_file(template_path)
     except ValueError as exc:
         message = str(exc)
-        if "No enabled executable rows were found in Experiment_Definitions." not in message:
+        if "No enabled executable rows were found in Experiment_Definitions" not in message:
             raise
         print("Template compile check: non-runnable template (no enabled rows).")
     else:

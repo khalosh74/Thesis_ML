@@ -75,7 +75,7 @@ jobs:
           try:
               manifest = compile_workbook_file(SHIPPED_WORKBOOK_TEMPLATE)
           except ValueError as exc:
-              if "No enabled executable rows were found in Experiment_Definitions." not in str(exc):
+              if "No enabled executable rows were found in Experiment_Definitions" not in str(exc):
                   raise
           else:
               if len(manifest.trial_specs) == 0:
