@@ -9,12 +9,14 @@ from pydantic import ValidationError
 
 from Thesis_ML.config.schema_versions import COMPILED_MANIFEST_SCHEMA_VERSION
 from Thesis_ML.orchestration.contracts import (
+    AnalysisPlanSpec,
     CompiledStudyManifest,
     EffectSummary,
     ExperimentSpec,
     GeneratedDesignCell,
     SearchSpaceSpec,
     StudyDesignSpec,
+    StudyRigorChecklistSpec,
     TrialSpec,
     supported_sections,
 )
@@ -57,8 +59,11 @@ def compile_registry_payload(
     compiled_trials: list[TrialSpec] = []
     compiled_search_spaces: list[SearchSpaceSpec] = []
     compiled_study_designs: list[StudyDesignSpec] = []
+    compiled_study_rigor_checklists: list[StudyRigorChecklistSpec] = []
+    compiled_analysis_plans: list[AnalysisPlanSpec] = []
     compiled_generated_design_matrix: list[GeneratedDesignCell] = []
     compiled_effect_summaries: list[EffectSummary] = []
+    compiled_validation_warnings: list[str] = []
 
     raw_search_spaces = payload.get("search_spaces", [])
     if raw_search_spaces is None:
@@ -87,6 +92,48 @@ def compile_registry_payload(
         except ValidationError as exc:
             study_id = str(raw_study.get("study_id", "<missing-study-id>"))
             raise ValueError(f"Invalid study design '{study_id}': {exc}") from exc
+
+    raw_study_rigor_checklists = payload.get("study_rigor_checklists", [])
+    if raw_study_rigor_checklists is None:
+        raw_study_rigor_checklists = []
+    if not isinstance(raw_study_rigor_checklists, list):
+        raise ValueError(
+            "Invalid registry payload: expected 'study_rigor_checklists' to be a list."
+        )
+    for raw_checklist in raw_study_rigor_checklists:
+        if not isinstance(raw_checklist, dict):
+            raise ValueError("Invalid checklist payload: each checklist must be an object.")
+        try:
+            compiled_study_rigor_checklists.append(
+                StudyRigorChecklistSpec.model_validate(dict(raw_checklist))
+            )
+        except ValidationError as exc:
+            study_id = str(raw_checklist.get("study_id", "<missing-study-id>"))
+            raise ValueError(f"Invalid study rigor checklist '{study_id}': {exc}") from exc
+
+    raw_analysis_plans = payload.get("analysis_plans", [])
+    if raw_analysis_plans is None:
+        raw_analysis_plans = []
+    if not isinstance(raw_analysis_plans, list):
+        raise ValueError("Invalid registry payload: expected 'analysis_plans' to be a list.")
+    for raw_plan in raw_analysis_plans:
+        if not isinstance(raw_plan, dict):
+            raise ValueError("Invalid analysis plan payload: each plan must be an object.")
+        try:
+            compiled_analysis_plans.append(AnalysisPlanSpec.model_validate(dict(raw_plan)))
+        except ValidationError as exc:
+            study_id = str(raw_plan.get("study_id", "<missing-study-id>"))
+            raise ValueError(f"Invalid analysis plan '{study_id}': {exc}") from exc
+
+    raw_validation_warnings = payload.get("validation_warnings", [])
+    if raw_validation_warnings is None:
+        raw_validation_warnings = []
+    if not isinstance(raw_validation_warnings, list):
+        raise ValueError("Invalid registry payload: expected 'validation_warnings' to be a list.")
+    for warning in raw_validation_warnings:
+        text = str(warning).strip()
+        if text:
+            compiled_validation_warnings.append(text)
 
     raw_generated_matrix = payload.get("generated_design_matrix", [])
     if raw_generated_matrix is None:
@@ -160,8 +207,11 @@ def compile_registry_payload(
         "trial_specs": compiled_trials,
         "search_spaces": compiled_search_spaces,
         "study_designs": compiled_study_designs,
+        "study_rigor_checklists": compiled_study_rigor_checklists,
+        "analysis_plans": compiled_analysis_plans,
         "generated_design_matrix": compiled_generated_design_matrix,
         "effect_summaries": compiled_effect_summaries,
+        "validation_warnings": compiled_validation_warnings,
     }
 
     try:

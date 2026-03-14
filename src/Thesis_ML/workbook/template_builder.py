@@ -15,6 +15,9 @@ from Thesis_ML.config.schema_versions import (
 )
 from Thesis_ML.workbook.schema_metadata import write_schema_metadata
 from Thesis_ML.workbook.structured_execution_sheets import (
+    fill_analysis_plan as _fill_analysis_plan_sheet,
+)
+from Thesis_ML.workbook.structured_execution_sheets import (
     fill_artifact_registry as _fill_artifact_registry_sheet,
 )
 from Thesis_ML.workbook.structured_execution_sheets import (
@@ -54,6 +57,9 @@ from Thesis_ML.workbook.structured_execution_sheets import (
     fill_study_design as _fill_study_design_sheet,
 )
 from Thesis_ML.workbook.structured_execution_sheets import (
+    fill_study_rigor_checklist as _fill_study_rigor_checklist_sheet,
+)
+from Thesis_ML.workbook.structured_execution_sheets import (
     fill_summary_outputs as _fill_summary_outputs_sheet,
 )
 from Thesis_ML.workbook.structured_execution_sheets import (
@@ -81,6 +87,8 @@ SHEET_ORDER = [
     "Experiment_Definitions",
     "Search_Spaces",
     "Study_Design",
+    "Study_Rigor_Checklist",
+    "Analysis_Plan",
     "Factors",
     "Fixed_Controls",
     "Constraints",
@@ -229,15 +237,50 @@ STUDY_DESIGN_COLUMNS = [
     "study_type",
     "intent",
     "question",
+    "generalization_claim",
     "start_section",
     "end_section",
     "base_artifact_id",
     "primary_metric",
     "secondary_metrics",
     "cv_scheme",
+    "nested_cv",
+    "external_validation_planned",
+    "blocking_strategy",
+    "randomization_strategy",
     "replication_mode",
+    "replication_strategy",
     "num_repeats",
     "random_seed_policy",
+    "stopping_rule",
+    "notes",
+]
+
+STUDY_RIGOR_CHECKLIST_COLUMNS = [
+    "study_id",
+    "leakage_risk_reviewed",
+    "deployment_boundary_defined",
+    "unit_of_analysis_defined",
+    "data_hierarchy_defined",
+    "missing_data_plan",
+    "class_imbalance_plan",
+    "subgroup_plan",
+    "fairness_or_applicability_notes",
+    "reporting_checklist_completed",
+    "risk_of_bias_reviewed",
+    "confirmatory_lock_applied",
+    "analysis_notes",
+]
+
+ANALYSIS_PLAN_COLUMNS = [
+    "study_id",
+    "primary_contrast",
+    "secondary_contrasts",
+    "aggregation_level",
+    "uncertainty_method",
+    "multiplicity_handling",
+    "interaction_reporting_policy",
+    "interpretation_rules",
     "notes",
 ]
 
@@ -621,9 +664,40 @@ VOCABS = {
     "Study_Intent": ["exploratory", "confirmatory"],
     "Factor_Type": ["categorical", "boolean", "ordinal", "numeric"],
     "Replication_Mode": ["none", "fixed_repeats", "custom_blocks"],
+    "Replication_Strategy": ["none", "fixed_repeats", "blocked_repeats", "custom"],
+    "Blocking_Strategy": ["none", "by_subject", "by_task", "by_modality", "custom"],
+    "Randomization_Strategy": [
+        "none",
+        "fixed_order",
+        "random_per_trial",
+        "random_per_repeat",
+        "custom",
+    ],
     "Random_Seed_Policy": ["fixed", "per_repeat", "per_cell"],
     "Block_Type": ["none", "subject", "task", "modality", "custom"],
     "Design_Cell_Status": ["planned", "dry_run", "completed", "failed", "blocked"],
+    "Aggregation_Level": ["trial", "cell", "subject", "fold", "group"],
+    "Uncertainty_Method": [
+        "none",
+        "standard_error",
+        "confidence_interval",
+        "bootstrap",
+        "permutation",
+    ],
+    "Multiplicity_Handling": [
+        "none",
+        "bonferroni",
+        "holm",
+        "fdr",
+        "hierarchical_gatekeeping",
+        "pre_specified_contrasts_only",
+    ],
+    "Interaction_Reporting_Policy": [
+        "none",
+        "descriptive_only",
+        "pre_specified_only",
+        "all_two_way_descriptive",
+    ],
 }
 
 DEFINITIONS = [
@@ -1147,6 +1221,20 @@ def fill_study_design_sheet(ws, wb: Workbook) -> int:
         ws=ws,
         wb=wb,
         study_design_columns=STUDY_DESIGN_COLUMNS,
+    )
+
+
+def fill_study_rigor_checklist_sheet(ws) -> int:
+    return _fill_study_rigor_checklist_sheet(
+        ws=ws,
+        study_rigor_checklist_columns=STUDY_RIGOR_CHECKLIST_COLUMNS,
+    )
+
+
+def fill_analysis_plan_sheet(ws) -> int:
+    return _fill_analysis_plan_sheet(
+        ws=ws,
+        analysis_plan_columns=ANALYSIS_PLAN_COLUMNS,
     )
 
 
@@ -2670,9 +2758,16 @@ def fill_dictionary_sheet(ws, wb: Workbook) -> None:
         "Study_Intent",
         "Factor_Type",
         "Replication_Mode",
+        "Replication_Strategy",
+        "Blocking_Strategy",
+        "Randomization_Strategy",
         "Random_Seed_Policy",
         "Block_Type",
         "Design_Cell_Status",
+        "Aggregation_Level",
+        "Uncertainty_Method",
+        "Multiplicity_Handling",
+        "Interaction_Reporting_Policy",
     ]
     ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=len(names))
     for c, name in enumerate(names, start=1):
@@ -2915,6 +3010,8 @@ def build_workbook() -> Workbook:
     fill_experiment_definitions_sheet(wb["Experiment_Definitions"])
     fill_search_spaces_sheet(wb["Search_Spaces"], wb)
     fill_study_design_sheet(wb["Study_Design"], wb)
+    fill_study_rigor_checklist_sheet(wb["Study_Rigor_Checklist"])
+    fill_analysis_plan_sheet(wb["Analysis_Plan"])
     fill_factors_sheet(wb["Factors"])
     fill_fixed_controls_sheet(wb["Fixed_Controls"])
     fill_constraints_sheet(wb["Constraints"])

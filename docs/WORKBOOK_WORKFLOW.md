@@ -30,6 +30,8 @@ Primary machine-readable execution sheets:
 - `Experiment_Definitions`
 - `Search_Spaces` (optional)
 - `Study_Design`
+- `Study_Rigor_Checklist`
+- `Analysis_Plan`
 - `Factors`
 - `Fixed_Controls`
 - `Constraints`
@@ -55,6 +57,11 @@ Scientific scope:
 - constraints are explicit and auditable;
 - effect summaries are descriptive unless explicitly extended by user methodology.
 
+Scientific-rigor metadata scope:
+- `Study_Rigor_Checklist` records leakage/bias/reporting readiness metadata per study.
+- `Analysis_Plan` records primary contrast and interpretation policy metadata per study.
+- These sheets add metadata and validation only; they do not change execution semantics.
+
 ## Compile behavior
 
 Compiler module: `src/Thesis_ML/orchestration/workbook_compiler.py`
@@ -68,7 +75,11 @@ Validation includes:
 - base artifact usage rules
 - supported workbook schema version in README metadata
 - study/factor/control/constraint cross-sheet consistency
+- study rigor/analysis-plan cross-sheet consistency and duplicate detection
 - supported study/factor types and replication fields
+- stricter confirmatory checks (`confirmatory_lock_applied`, `primary_contrast`,
+  `multiplicity_handling`, `interpretation_rules`)
+- exploratory-mode warnings for missing rigor metadata (auditable in manifest warnings)
 - explicit rejection of unsupported design modes (for example `fractional_factorial`)
 
 ## Execute from workbook

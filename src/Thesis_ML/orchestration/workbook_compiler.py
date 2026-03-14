@@ -9,6 +9,7 @@ from typing import Any
 
 from openpyxl import load_workbook
 from openpyxl.workbook.workbook import Workbook
+from pydantic import ValidationError
 
 from Thesis_ML.config.schema_versions import (
     SUPPORTED_WORKBOOK_SCHEMA_VERSIONS,
@@ -16,6 +17,7 @@ from Thesis_ML.config.schema_versions import (
 )
 from Thesis_ML.orchestration.compiler import compile_registry_payload
 from Thesis_ML.orchestration.contracts import (
+    AnalysisPlanSpec,
     BlockingReplicationSpec,
     CompiledStudyManifest,
     ConstraintSpec,
@@ -26,6 +28,7 @@ from Thesis_ML.orchestration.contracts import (
     SectionName,
     StudyDesignSpec,
     StudyIntent,
+    StudyRigorChecklistSpec,
     StudyType,
 )
 from Thesis_ML.workbook.schema_metadata import read_schema_metadata
@@ -68,7 +71,7 @@ _SEARCH_SPACES_COLUMNS = [
     "notes",
 ]
 
-_STUDY_DESIGN_COLUMNS = [
+_STUDY_DESIGN_REQUIRED_COLUMNS = [
     "study_id",
     "study_name",
     "enabled",
@@ -85,6 +88,16 @@ _STUDY_DESIGN_COLUMNS = [
     "num_repeats",
     "random_seed_policy",
     "notes",
+]
+
+_STUDY_DESIGN_OPTIONAL_COLUMNS = [
+    "generalization_claim",
+    "nested_cv",
+    "external_validation_planned",
+    "blocking_strategy",
+    "randomization_strategy",
+    "replication_strategy",
+    "stopping_rule",
 ]
 
 _FACTOR_COLUMNS = [
@@ -130,6 +143,44 @@ _GENERATED_DESIGN_MATRIX_COLUMNS = [
     "resolved_params_json",
     "status",
 ]
+
+_STUDY_RIGOR_CHECKLIST_COLUMNS = [
+    "study_id",
+    "leakage_risk_reviewed",
+    "deployment_boundary_defined",
+    "unit_of_analysis_defined",
+    "data_hierarchy_defined",
+    "missing_data_plan",
+    "class_imbalance_plan",
+    "subgroup_plan",
+    "fairness_or_applicability_notes",
+    "reporting_checklist_completed",
+    "risk_of_bias_reviewed",
+    "confirmatory_lock_applied",
+    "analysis_notes",
+]
+
+_ANALYSIS_PLAN_COLUMNS = [
+    "study_id",
+    "primary_contrast",
+    "secondary_contrasts",
+    "aggregation_level",
+    "uncertainty_method",
+    "multiplicity_handling",
+    "interaction_reporting_policy",
+    "interpretation_rules",
+    "notes",
+]
+
+_CHECKLIST_YES_NO_COLUMNS = (
+    "leakage_risk_reviewed",
+    "deployment_boundary_defined",
+    "unit_of_analysis_defined",
+    "data_hierarchy_defined",
+    "reporting_checklist_completed",
+    "risk_of_bias_reviewed",
+    "confirmatory_lock_applied",
+)
 
 _SECTION_ORDER: tuple[str, ...] = (
     SectionName.DATASET_SELECTION.value,
@@ -224,6 +275,36 @@ def _parse_enabled(value: Any, *, row_index: int, sheet_name: str) -> bool:
     raise ValueError(
         f"Invalid enabled value in {sheet_name} row {row_index}: '{value}'. Use Yes/No."
     )
+
+
+def _parse_yes_no(
+    value: Any,
+    *,
+    row_index: int,
+    sheet_name: str,
+    field_name: str,
+) -> bool:
+    text = _normalize_text(value).lower()
+    if text in {"yes", "y", "true", "1"}:
+        return True
+    if text in {"no", "n", "false", "0"}:
+        return False
+    raise ValueError(
+        f"Invalid {field_name} in {sheet_name} row {row_index}: '{value}'. Use Yes/No."
+    )
+
+
+def _parse_optional_yes_no(
+    value: Any,
+    *,
+    row_index: int,
+    sheet_name: str,
+    field_name: str,
+) -> bool | None:
+    text = _normalize_text(value)
+    if not text:
+        return None
+    return _parse_yes_no(value, row_index=row_index, sheet_name=sheet_name, field_name=field_name)
 
 
 def _validated_section(value: Any, *, field_name: str, row_index: int, sheet_name: str) -> str:
@@ -846,18 +927,97 @@ def _trial_spec_from_cell(study: StudyDesignSpec, cell: GeneratedDesignCell) -> 
     }
 
 
+def _append_warning(warnings: list[str], message: str) -> None:
+    text = str(message).strip()
+    if text:
+        warnings.append(text)
+
+
+def _validate_study_rigor_policy(
+    *,
+    study: StudyDesignSpec,
+    checklist: StudyRigorChecklistSpec | None,
+    analysis_plan: AnalysisPlanSpec | None,
+    field_presence: dict[str, bool] | None,
+    warnings: list[str],
+) -> None:
+    strict = study.intent == StudyIntent.CONFIRMATORY
+
+    required_core = {
+        "generalization_claim": bool(str(study.generalization_claim or "").strip()),
+        "primary_metric": bool(str(study.primary_metric or "").strip()),
+        "cv_scheme": bool(str(study.cv_scheme or "").strip()),
+    }
+    if field_presence:
+        for key, is_present in field_presence.items():
+            if key in required_core:
+                required_core[key] = bool(is_present)
+
+    for field_name, is_present in required_core.items():
+        if is_present:
+            continue
+        message = f"Study '{study.study_id}' is missing {field_name} in Study_Design."
+        if strict:
+            raise ValueError(message)
+        _append_warning(warnings, message)
+
+    if checklist is None:
+        message = f"Study '{study.study_id}' has no Study_Rigor_Checklist entry."
+        if strict:
+            raise ValueError(
+                message + " Confirmatory studies require a rigor checklist row."
+            )
+        _append_warning(warnings, message)
+    elif strict and not checklist.confirmatory_lock_applied:
+        raise ValueError(
+            "Confirmatory study "
+            f"'{study.study_id}' requires confirmatory_lock_applied=Yes in Study_Rigor_Checklist."
+        )
+
+    if analysis_plan is None:
+        message = f"Study '{study.study_id}' has no Analysis_Plan entry."
+        if strict:
+            raise ValueError(message + " Confirmatory studies require an analysis plan row.")
+        _append_warning(warnings, message)
+    elif strict:
+        missing_fields = [
+            field_name
+            for field_name, value in (
+                ("primary_contrast", analysis_plan.primary_contrast),
+                ("multiplicity_handling", analysis_plan.multiplicity_handling),
+                ("interpretation_rules", analysis_plan.interpretation_rules),
+            )
+            if not str(value or "").strip()
+        ]
+        if missing_fields:
+            raise ValueError(
+                f"Confirmatory study '{study.study_id}' is missing required Analysis_Plan "
+                "fields: "
+                + ", ".join(missing_fields)
+            )
+
+
 def _build_study_design_layer(
     workbook: Workbook,
-) -> tuple[list[StudyDesignSpec], list[GeneratedDesignCell], list[dict[str, Any]], list[dict[str, Any]]]:
+) -> tuple[
+    list[StudyDesignSpec],
+    list[StudyRigorChecklistSpec],
+    list[AnalysisPlanSpec],
+    list[GeneratedDesignCell],
+    list[dict[str, Any]],
+    list[dict[str, Any]],
+    list[str],
+]:
     if "Study_Design" not in workbook.sheetnames:
-        return [], [], [], []
+        return [], [], [], [], [], [], []
 
     study_header, study_rows = _sheet_rows(
         workbook,
         sheet_name="Study_Design",
-        required_columns=_STUDY_DESIGN_COLUMNS,
+        required_columns=_STUDY_DESIGN_REQUIRED_COLUMNS,
     )
     raw_studies: dict[str, dict[str, Any]] = {}
+    field_presence_by_study: dict[str, dict[str, bool]] = {}
     for row_index, row in study_rows:
         study_id = _normalize_text(_read_cell(row, study_header, "study_id"))
         if not study_id:
@@ -869,13 +1029,26 @@ def _build_study_design_layer(
             row_index=row_index,
             sheet_name="Study_Design",
         )
-        study_type = _normalize_text(_read_cell(row, study_header, "study_type")) or StudyType.SINGLE_EXPERIMENT.value
+        study_type = (
+            _normalize_text(_read_cell(row, study_header, "study_type"))
+            or StudyType.SINGLE_EXPERIMENT.value
+        )
         if enabled and study_type == StudyType.FRACTIONAL_FACTORIAL.value:
             raise ValueError(
                 "Study_Design row "
                 f"{row_index} uses unsupported study_type='fractional_factorial'. "
                 "Use full_factorial or custom_matrix."
             )
+        raw_primary_metric = _normalize_text(_read_cell(row, study_header, "primary_metric"))
+        raw_cv_scheme = _normalize_text(_read_cell(row, study_header, "cv_scheme"))
+        raw_generalization_claim = _normalize_text(
+            _read_cell(row, study_header, "generalization_claim")
+        )
+        field_presence_by_study[study_id] = {
+            "generalization_claim": bool(raw_generalization_claim),
+            "primary_metric": bool(raw_primary_metric),
+            "cv_scheme": bool(raw_cv_scheme),
+        }
         raw_studies[study_id] = {
             "study_id": study_id,
             "study_name": _normalize_text(_read_cell(row, study_header, "study_name")) or study_id,
@@ -884,6 +1057,7 @@ def _build_study_design_layer(
             "intent": _normalize_text(_read_cell(row, study_header, "intent"))
             or StudyIntent.EXPLORATORY.value,
             "question": _normalize_text(_read_cell(row, study_header, "question")) or None,
+            "generalization_claim": raw_generalization_claim or None,
             "start_section": _validated_section(
                 _read_cell(row, study_header, "start_section"),
                 field_name="start_section",
@@ -900,18 +1074,42 @@ def _build_study_design_layer(
             or SectionName.EVALUATION.value,
             "base_artifact_id": _normalize_text(_read_cell(row, study_header, "base_artifact_id"))
             or None,
-            "primary_metric": _normalize_text(_read_cell(row, study_header, "primary_metric"))
-            or "balanced_accuracy",
+            "primary_metric": raw_primary_metric or "balanced_accuracy",
             "secondary_metrics": _normalize_text(_read_cell(row, study_header, "secondary_metrics"))
             or None,
-            "cv_scheme": _normalize_text(_read_cell(row, study_header, "cv_scheme")) or None,
+            "cv_scheme": raw_cv_scheme or None,
+            "nested_cv": _parse_optional_yes_no(
+                _read_cell(row, study_header, "nested_cv"),
+                row_index=row_index,
+                sheet_name="Study_Design",
+                field_name="nested_cv",
+            ),
+            "external_validation_planned": _parse_optional_yes_no(
+                _read_cell(row, study_header, "external_validation_planned"),
+                row_index=row_index,
+                sheet_name="Study_Design",
+                field_name="external_validation_planned",
+            ),
+            "blocking_strategy": _normalize_text(
+                _read_cell(row, study_header, "blocking_strategy")
+            )
+            or None,
+            "randomization_strategy": _normalize_text(
+                _read_cell(row, study_header, "randomization_strategy")
+            )
+            or None,
             "replication_mode": _normalize_text(_read_cell(row, study_header, "replication_mode"))
             or "none",
+            "replication_strategy": _normalize_text(
+                _read_cell(row, study_header, "replication_strategy")
+            )
+            or None,
             "num_repeats": int(_read_cell(row, study_header, "num_repeats") or 1),
             "random_seed_policy": _normalize_text(
                 _read_cell(row, study_header, "random_seed_policy")
             )
             or "fixed",
+            "stopping_rule": _normalize_text(_read_cell(row, study_header, "stopping_rule")) or None,
             "notes": _normalize_text(_read_cell(row, study_header, "notes")) or None,
             "factors": [],
             "fixed_controls": [],
@@ -1081,14 +1279,158 @@ def _build_study_design_layer(
             }
         )
 
+    checklist_header, checklist_rows = _sheet_rows(
+        workbook,
+        sheet_name="Study_Rigor_Checklist",
+        required_columns=_STUDY_RIGOR_CHECKLIST_COLUMNS,
+    )
+    checklist_by_study: dict[str, StudyRigorChecklistSpec] = {}
+    for row_index, row in checklist_rows:
+        study_id = _normalize_text(_read_cell(row, checklist_header, "study_id"))
+        if not study_id:
+            continue
+        if study_id not in raw_studies:
+            raise ValueError(
+                "Study_Rigor_Checklist row "
+                f"{row_index} references unknown study_id '{study_id}'."
+            )
+        if study_id in checklist_by_study:
+            raise ValueError(
+                "Study_Rigor_Checklist has duplicate entries for "
+                f"study_id '{study_id}' (row {row_index})."
+            )
+
+        required_text_fields = {
+            "missing_data_plan": _normalize_text(
+                _read_cell(row, checklist_header, "missing_data_plan")
+            ),
+            "class_imbalance_plan": _normalize_text(
+                _read_cell(row, checklist_header, "class_imbalance_plan")
+            ),
+            "subgroup_plan": _normalize_text(_read_cell(row, checklist_header, "subgroup_plan")),
+        }
+        missing_required = [name for name, value in required_text_fields.items() if not value]
+        if missing_required:
+            raise ValueError(
+                "Study_Rigor_Checklist row "
+                f"{row_index} is missing required values: {', '.join(missing_required)}"
+            )
+
+        payload: dict[str, Any] = {
+            "study_id": study_id,
+            "missing_data_plan": required_text_fields["missing_data_plan"],
+            "class_imbalance_plan": required_text_fields["class_imbalance_plan"],
+            "subgroup_plan": required_text_fields["subgroup_plan"],
+            "fairness_or_applicability_notes": _normalize_text(
+                _read_cell(row, checklist_header, "fairness_or_applicability_notes")
+            )
+            or None,
+            "analysis_notes": _normalize_text(_read_cell(row, checklist_header, "analysis_notes"))
+            or None,
+        }
+        for column_name in _CHECKLIST_YES_NO_COLUMNS:
+            payload[column_name] = _parse_yes_no(
+                _read_cell(row, checklist_header, column_name),
+                row_index=row_index,
+                sheet_name="Study_Rigor_Checklist",
+                field_name=column_name,
+            )
+        try:
+            checklist_by_study[study_id] = StudyRigorChecklistSpec.model_validate(payload)
+        except ValidationError as exc:
+            raise ValueError(
+                f"Invalid Study_Rigor_Checklist entry for study_id '{study_id}' "
+                f"(row {row_index}): {exc}"
+            ) from exc
+
+    analysis_header, analysis_rows = _sheet_rows(
+        workbook,
+        sheet_name="Analysis_Plan",
+        required_columns=_ANALYSIS_PLAN_COLUMNS,
+    )
+    analysis_by_study: dict[str, AnalysisPlanSpec] = {}
+    for row_index, row in analysis_rows:
+        study_id = _normalize_text(_read_cell(row, analysis_header, "study_id"))
+        if not study_id:
+            continue
+        if study_id not in raw_studies:
+            raise ValueError(
+                f"Analysis_Plan row {row_index} references unknown study_id '{study_id}'."
+            )
+        if study_id in analysis_by_study:
+            raise ValueError(
+                f"Analysis_Plan has duplicate entries for study_id '{study_id}' (row {row_index})."
+            )
+
+        aggregation_level = _normalize_text(_read_cell(row, analysis_header, "aggregation_level"))
+        uncertainty_method = _normalize_text(_read_cell(row, analysis_header, "uncertainty_method"))
+        missing_required = [
+            field_name
+            for field_name, value in (
+                ("aggregation_level", aggregation_level),
+                ("uncertainty_method", uncertainty_method),
+            )
+            if not value
+        ]
+        if missing_required:
+            raise ValueError(
+                f"Analysis_Plan row {row_index} is missing required values: "
+                + ", ".join(missing_required)
+            )
+
+        try:
+            analysis_by_study[study_id] = AnalysisPlanSpec.model_validate(
+                {
+                    "study_id": study_id,
+                    "primary_contrast": _normalize_text(
+                        _read_cell(row, analysis_header, "primary_contrast")
+                    )
+                    or None,
+                    "secondary_contrasts": _normalize_text(
+                        _read_cell(row, analysis_header, "secondary_contrasts")
+                    )
+                    or None,
+                    "aggregation_level": aggregation_level,
+                    "uncertainty_method": uncertainty_method,
+                    "multiplicity_handling": _normalize_text(
+                        _read_cell(row, analysis_header, "multiplicity_handling")
+                    )
+                    or None,
+                    "interaction_reporting_policy": _normalize_text(
+                        _read_cell(row, analysis_header, "interaction_reporting_policy")
+                    )
+                    or None,
+                    "interpretation_rules": _normalize_text(
+                        _read_cell(row, analysis_header, "interpretation_rules")
+                    )
+                    or None,
+                    "notes": _normalize_text(_read_cell(row, analysis_header, "notes")) or None,
+                }
+            )
+        except ValidationError as exc:
+            raise ValueError(
+                f"Invalid analysis plan '{study_id}' in Analysis_Plan row {row_index}: {exc}"
+            ) from exc
+
     study_specs = [
         StudyDesignSpec.model_validate(raw_studies[study_id]) for study_id in sorted(raw_studies)
     ]
+    checklist_specs = [checklist_by_study[study_id] for study_id in sorted(checklist_by_study)]
+    analysis_plan_specs = [analysis_by_study[study_id] for study_id in sorted(analysis_by_study)]
     generated_cells: list[GeneratedDesignCell] = []
     study_trials: list[dict[str, Any]] = []
     study_experiments: list[dict[str, Any]] = []
+    validation_warnings: list[str] = []
 
     for study in study_specs:
+        if study.enabled:
+            _validate_study_rigor_policy(
+                study=study,
+                checklist=checklist_by_study.get(study.study_id),
+                analysis_plan=analysis_by_study.get(study.study_id),
+                field_presence=field_presence_by_study.get(study.study_id),
+                warnings=validation_warnings,
+            )
         if not study.enabled:
             continue
         if study.study_type == StudyType.CUSTOM_MATRIX:
@@ -1121,7 +1463,15 @@ def _build_study_design_layer(
                 }
             )
 
-    return study_specs, generated_cells, study_trials, study_experiments
+    return (
+        study_specs,
+        checklist_specs,
+        analysis_plan_specs,
+        generated_cells,
+        study_trials,
+        study_experiments,
+        validation_warnings,
+    )
 
 
 def compile_workbook_workbook(
@@ -1138,9 +1488,15 @@ def compile_workbook_workbook(
     master_map = _parse_master_experiment_rows(workbook["Master_Experiments"])
     trial_specs = _parse_experiment_definitions_rows(workbook["Experiment_Definitions"])
     search_spaces = _parse_search_spaces_rows(workbook)
-    study_specs, generated_cells, study_trials, study_experiments = _build_study_design_layer(
-        workbook
-    )
+    (
+        study_specs,
+        study_rigor_checklists,
+        analysis_plans,
+        generated_cells,
+        study_trials,
+        study_experiments,
+        validation_warnings,
+    ) = _build_study_design_layer(workbook)
     all_trials = list(trial_specs) + list(study_trials)
 
     if not all_trials:
@@ -1201,8 +1557,13 @@ def compile_workbook_workbook(
         "experiments": [experiments_payload[key] for key in sorted(experiments_payload)],
         "search_spaces": search_spaces,
         "study_designs": [study.model_dump(mode="python") for study in study_specs],
+        "study_rigor_checklists": [
+            checklist.model_dump(mode="python") for checklist in study_rigor_checklists
+        ],
+        "analysis_plans": [plan.model_dump(mode="python") for plan in analysis_plans],
         "generated_design_matrix": [cell.model_dump(mode="python") for cell in generated_cells],
         "effect_summaries": [],
+        "validation_warnings": validation_warnings,
     }
     return compile_registry_payload(payload, source_registry_path=source_workbook_path)
 

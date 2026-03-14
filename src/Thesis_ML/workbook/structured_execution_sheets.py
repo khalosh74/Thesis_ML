@@ -222,15 +222,22 @@ def fill_study_design(
             "study_type": "full_factorial",
             "intent": "exploratory",
             "question": "How do model and task filter settings change balanced accuracy?",
+            "generalization_claim": "Within-dataset transfer across held-out sessions only.",
             "start_section": "dataset_selection",
             "end_section": "evaluation",
             "base_artifact_id": "",
             "primary_metric": "balanced_accuracy",
             "secondary_metrics": "macro_f1|accuracy",
             "cv_scheme": "within_subject_loso_session",
+            "nested_cv": "No",
+            "external_validation_planned": "No",
+            "blocking_strategy": "none",
+            "randomization_strategy": "fixed_order",
             "replication_mode": "fixed_repeats",
+            "replication_strategy": "fixed_repeats",
             "num_repeats": "1",
             "random_seed_policy": "fixed",
+            "stopping_rule": "Complete all planned design cells.",
             "notes": "",
         }
     ]
@@ -246,16 +253,23 @@ def fill_study_design(
             "D": 20,
             "E": 14,
             "F": 36,
-            "G": 18,
-            "H": 16,
-            "I": 24,
-            "J": 18,
-            "K": 20,
-            "L": 24,
-            "M": 18,
-            "N": 14,
-            "O": 18,
-            "P": 34,
+            "G": 34,
+            "H": 18,
+            "I": 16,
+            "J": 24,
+            "K": 18,
+            "L": 20,
+            "M": 24,
+            "N": 10,
+            "O": 14,
+            "P": 18,
+            "Q": 18,
+            "R": 18,
+            "S": 18,
+            "T": 14,
+            "U": 18,
+            "V": 24,
+            "W": 34,
         },
         starter_rows=starter,
     )
@@ -286,6 +300,35 @@ def fill_study_design(
         ws,
         "=List_Replication_Mode",
         col_idx(study_design_columns, "replication_mode"),
+        3,
+        1000,
+    )
+    add_list_validation(ws, "=List_YesNo", col_idx(study_design_columns, "nested_cv"), 3, 1000)
+    add_list_validation(
+        ws,
+        "=List_YesNo",
+        col_idx(study_design_columns, "external_validation_planned"),
+        3,
+        1000,
+    )
+    add_list_validation(
+        ws,
+        "=List_Blocking_Strategy",
+        col_idx(study_design_columns, "blocking_strategy"),
+        3,
+        1000,
+    )
+    add_list_validation(
+        ws,
+        "=List_Randomization_Strategy",
+        col_idx(study_design_columns, "randomization_strategy"),
+        3,
+        1000,
+    )
+    add_list_validation(
+        ws,
+        "=List_Replication_Strategy",
+        col_idx(study_design_columns, "replication_strategy"),
         3,
         1000,
     )
@@ -346,6 +389,110 @@ def fill_factors(ws: Worksheet, *, factors_columns: list[str]) -> int:
         ws,
         "=List_Execution_Section",
         col_idx(factors_columns, "section_name"),
+        3,
+        1000,
+    )
+    return last
+
+
+def fill_study_rigor_checklist(
+    ws: Worksheet,
+    *,
+    study_rigor_checklist_columns: list[str],
+) -> int:
+    last = fill_simple_structured_sheet(
+        ws=ws,
+        columns=study_rigor_checklist_columns,
+        table_name="StudyRigorChecklistTable",
+        title="Study Rigor Checklist",
+        width_map={
+            "A": 12,
+            "B": 16,
+            "C": 22,
+            "D": 22,
+            "E": 22,
+            "F": 28,
+            "G": 28,
+            "H": 24,
+            "I": 30,
+            "J": 22,
+            "K": 20,
+            "L": 22,
+            "M": 34,
+        },
+        starter_rows=None,
+    )
+    add_list_validation(
+        ws,
+        "=List_Study_ID",
+        col_idx(study_rigor_checklist_columns, "study_id"),
+        3,
+        1000,
+    )
+    for column_name in (
+        "leakage_risk_reviewed",
+        "deployment_boundary_defined",
+        "unit_of_analysis_defined",
+        "data_hierarchy_defined",
+        "reporting_checklist_completed",
+        "risk_of_bias_reviewed",
+        "confirmatory_lock_applied",
+    ):
+        add_list_validation(
+            ws,
+            "=List_YesNo",
+            col_idx(study_rigor_checklist_columns, column_name),
+            3,
+            1000,
+        )
+    return last
+
+
+def fill_analysis_plan(ws: Worksheet, *, analysis_plan_columns: list[str]) -> int:
+    last = fill_simple_structured_sheet(
+        ws=ws,
+        columns=analysis_plan_columns,
+        table_name="AnalysisPlanTable",
+        title="Analysis Plan",
+        width_map={
+            "A": 12,
+            "B": 28,
+            "C": 28,
+            "D": 18,
+            "E": 18,
+            "F": 24,
+            "G": 24,
+            "H": 32,
+            "I": 34,
+        },
+        starter_rows=None,
+    )
+    add_list_validation(ws, "=List_Study_ID", col_idx(analysis_plan_columns, "study_id"), 3, 1000)
+    add_list_validation(
+        ws,
+        "=List_Aggregation_Level",
+        col_idx(analysis_plan_columns, "aggregation_level"),
+        3,
+        1000,
+    )
+    add_list_validation(
+        ws,
+        "=List_Uncertainty_Method",
+        col_idx(analysis_plan_columns, "uncertainty_method"),
+        3,
+        1000,
+    )
+    add_list_validation(
+        ws,
+        "=List_Multiplicity_Handling",
+        col_idx(analysis_plan_columns, "multiplicity_handling"),
+        3,
+        1000,
+    )
+    add_list_validation(
+        ws,
+        "=List_Interaction_Reporting_Policy",
+        col_idx(analysis_plan_columns, "interaction_reporting_policy"),
         3,
         1000,
     )
@@ -757,6 +904,7 @@ def fill_search_spaces(
 
 
 __all__ = [
+    "fill_analysis_plan",
     "fill_artifact_registry",
     "fill_blocking_and_replication",
     "fill_constraints",
@@ -770,6 +918,7 @@ __all__ = [
     "fill_objectives",
     "fill_search_spaces",
     "fill_study_design",
+    "fill_study_rigor_checklist",
     "fill_summary_outputs",
     "fill_trial_results",
 ]

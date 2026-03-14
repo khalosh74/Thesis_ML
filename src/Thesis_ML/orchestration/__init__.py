@@ -9,6 +9,8 @@ from importlib import import_module
 from typing import TYPE_CHECKING, Any
 
 __all__ = [
+    "AggregationLevel",
+    "AnalysisPlanSpec",
     "ArtifactRef",
     "BlockingReplicationSpec",
     "CompiledStudyManifest",
@@ -26,8 +28,10 @@ __all__ = [
     "SearchMode",
     "SearchSpaceSpec",
     "SectionName",
+    "StudyRigorChecklistSpec",
     "TrialResultSummary",
     "TrialSpec",
+    "UncertaintyMethod",
     "compile_registry_file",
     "compile_registry_payload",
     "compile_workbook_file",
@@ -39,6 +43,8 @@ __all__ = [
 ]
 
 _CONTRACT_EXPORTS = {
+    "AggregationLevel",
+    "AnalysisPlanSpec",
     "ArtifactRef",
     "BlockingReplicationSpec",
     "CompiledStudyManifest",
@@ -56,8 +62,10 @@ _CONTRACT_EXPORTS = {
     "SearchMode",
     "SearchSpaceSpec",
     "SectionName",
+    "StudyRigorChecklistSpec",
     "TrialResultSummary",
     "TrialSpec",
+    "UncertaintyMethod",
 }
 _COMPILER_EXPORTS = {
     "compile_registry_file",
@@ -71,6 +79,8 @@ _WRITEBACK_EXPORTS = {"write_workbook_results"}
 if TYPE_CHECKING:
     from .compiler import compile_registry_file, compile_registry_payload
     from .contracts import (
+        AggregationLevel,
+        AnalysisPlanSpec,
         ArtifactRef,
         BlockingReplicationSpec,
         CompiledStudyManifest,
@@ -87,9 +97,11 @@ if TYPE_CHECKING:
         SectionName,
         StudyDesignSpec,
         StudyIntent,
+        StudyRigorChecklistSpec,
         StudyType,
         TrialResultSummary,
         TrialSpec,
+        UncertaintyMethod,
     )
     from .decision_support import (
         run_decision_support_campaign,

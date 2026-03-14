@@ -46,6 +46,22 @@ class StudyIntent(StrEnum):
     CONFIRMATORY = "confirmatory"
 
 
+class AggregationLevel(StrEnum):
+    TRIAL = "trial"
+    CELL = "cell"
+    SUBJECT = "subject"
+    FOLD = "fold"
+    GROUP = "group"
+
+
+class UncertaintyMethod(StrEnum):
+    NONE = "none"
+    STANDARD_ERROR = "standard_error"
+    CONFIDENCE_INTERVAL = "confidence_interval"
+    BOOTSTRAP = "bootstrap"
+    PERMUTATION = "permutation"
+
+
 class FactorType(StrEnum):
     CATEGORICAL = "categorical"
     BOOLEAN = "boolean"
@@ -196,15 +212,22 @@ class StudyDesignSpec(_ContractModel):
     study_type: StudyType = StudyType.SINGLE_EXPERIMENT
     intent: StudyIntent = StudyIntent.EXPLORATORY
     question: str | None = None
+    generalization_claim: str | None = None
     start_section: SectionName = SectionName.DATASET_SELECTION
     end_section: SectionName = SectionName.EVALUATION
     base_artifact_id: str | None = None
     primary_metric: str = "balanced_accuracy"
     secondary_metrics: str | None = None
     cv_scheme: str | None = None
+    nested_cv: bool | None = None
+    external_validation_planned: bool | None = None
+    blocking_strategy: str | None = None
+    randomization_strategy: str | None = None
     replication_mode: str = "none"
+    replication_strategy: str | None = None
     num_repeats: int = 1
     random_seed_policy: str = "fixed"
+    stopping_rule: str | None = None
     notes: str | None = None
     factors: list[FactorSpec] = Field(default_factory=list)
     fixed_controls: list[FixedControlSpec] = Field(default_factory=list)
@@ -232,6 +255,34 @@ class StudyDesignSpec(_ContractModel):
                 f"Study '{self.study_id}' uses full_factorial but no factors were defined."
             )
         return self
+
+
+class StudyRigorChecklistSpec(_ContractModel):
+    study_id: str = Field(min_length=1)
+    leakage_risk_reviewed: bool
+    deployment_boundary_defined: bool
+    unit_of_analysis_defined: bool
+    data_hierarchy_defined: bool
+    missing_data_plan: str = Field(min_length=1)
+    class_imbalance_plan: str = Field(min_length=1)
+    subgroup_plan: str = Field(min_length=1)
+    fairness_or_applicability_notes: str | None = None
+    reporting_checklist_completed: bool
+    risk_of_bias_reviewed: bool
+    confirmatory_lock_applied: bool
+    analysis_notes: str | None = None
+
+
+class AnalysisPlanSpec(_ContractModel):
+    study_id: str = Field(min_length=1)
+    primary_contrast: str | None = None
+    secondary_contrasts: str | None = None
+    aggregation_level: AggregationLevel = AggregationLevel.CELL
+    uncertainty_method: UncertaintyMethod = UncertaintyMethod.NONE
+    multiplicity_handling: str | None = None
+    interaction_reporting_policy: str | None = None
+    interpretation_rules: str | None = None
+    notes: str | None = None
 
 
 class GeneratedDesignCell(_ContractModel):
@@ -369,8 +420,11 @@ class CompiledStudyManifest(_ContractModel):
     trial_specs: list[TrialSpec]
     search_spaces: list[SearchSpaceSpec] = Field(default_factory=list)
     study_designs: list[StudyDesignSpec] = Field(default_factory=list)
+    study_rigor_checklists: list[StudyRigorChecklistSpec] = Field(default_factory=list)
+    analysis_plans: list[AnalysisPlanSpec] = Field(default_factory=list)
     generated_design_matrix: list[GeneratedDesignCell] = Field(default_factory=list)
     effect_summaries: list[EffectSummary] = Field(default_factory=list)
+    validation_warnings: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def _validate_trial_coverage(self) -> CompiledStudyManifest:
@@ -426,6 +480,59 @@ class CompiledStudyManifest(_ContractModel):
             raise ValueError(
                 "Generated design matrix references unknown study_id values: "
                 + ", ".join(unknown_generated_studies)
+            )
+        unknown_rigor_studies = sorted(
+            {
+                checklist.study_id
+                for checklist in self.study_rigor_checklists
+                if checklist.study_id not in known_studies
+            }
+        )
+        if unknown_rigor_studies:
+            raise ValueError(
+                "Study rigor checklist references unknown study_id values: "
+                + ", ".join(unknown_rigor_studies)
+            )
+        unknown_analysis_studies = sorted(
+            {
+                plan.study_id
+                for plan in self.analysis_plans
+                if plan.study_id not in known_studies
+            }
+        )
+        if unknown_analysis_studies:
+            raise ValueError(
+                "Analysis plans reference unknown study_id values: "
+                + ", ".join(unknown_analysis_studies)
+            )
+        duplicate_rigor_ids = sorted(
+            {
+                checklist.study_id
+                for checklist in self.study_rigor_checklists
+                if sum(
+                    1
+                    for other in self.study_rigor_checklists
+                    if other.study_id == checklist.study_id
+                )
+                > 1
+            }
+        )
+        if duplicate_rigor_ids:
+            raise ValueError(
+                "Study rigor checklist has duplicate entries for study_id values: "
+                + ", ".join(duplicate_rigor_ids)
+            )
+        duplicate_analysis_ids = sorted(
+            {
+                plan.study_id
+                for plan in self.analysis_plans
+                if sum(1 for other in self.analysis_plans if other.study_id == plan.study_id) > 1
+            }
+        )
+        if duplicate_analysis_ids:
+            raise ValueError(
+                "Analysis plans have duplicate entries for study_id values: "
+                + ", ".join(duplicate_analysis_ids)
             )
         known_trial_ids = {str(trial.trial_id) for trial in self.trial_specs if trial.trial_id}
         unknown_effect_trials = sorted(

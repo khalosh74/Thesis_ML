@@ -23,7 +23,7 @@ Compatibility scripts are transitional only and should not be documented as prim
 - `src/Thesis_ML/orchestration/result_aggregation_core.py`: aggregation logic.
 - `src/Thesis_ML/orchestration/result_aggregation_rows.py`: summary row rendering.
 - `src/Thesis_ML/orchestration/workbook_compiler.py`: workbook-to-manifest compiler
-  including factorial design expansion.
+  including factorial design expansion and scientific-rigor metadata validation.
 - `src/Thesis_ML/orchestration/workbook_bridge.py`: workbook write-back row builders
   (trial/design/effect rows).
 - `src/Thesis_ML/workbook/template_primitives.py`: workbook styling/validation primitives.
@@ -52,6 +52,7 @@ Factorial-design guardrails:
 - `fractional_factorial` must fail explicitly unless implemented rigorously;
 - keep effect summaries labeled descriptive unless inferential methods are added with tests/docs;
 - maintain backward compatibility for existing `Experiment_Definitions` flow.
+- keep scientific-rigor layer additive: metadata + validation only, no execution semantics changes.
 
 ## Core verification commands
 

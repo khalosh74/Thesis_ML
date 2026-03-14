@@ -42,6 +42,8 @@ Template note:
 - enable/populate executable rows in `Experiment_Definitions` for single-experiment flow
 - or enable/populate `Study_Design` (+ `Factors`/`Fixed_Controls`/`Constraints` as needed)
   for factorial flow
+- optionally complete `Study_Rigor_Checklist` and `Analysis_Plan` for explicit
+  scientific-rigor metadata and stricter confirmatory validation
 
 Registry dry-run:
 
@@ -85,4 +87,8 @@ This command validates:
   - compiles design into executable trials
   - executes trials through existing engine/artifact lineage
   - writes descriptive grouped summaries to `Effect_Summaries`
+- Scientific-rigor metadata behavior:
+  - records checklist and analysis-plan metadata per study
+  - validates confirmatory studies more strictly than exploratory studies
+  - does not auto-design science or guarantee scientific validity
 - The framework does not auto-design study validity or perform automatic inferential statistics.
