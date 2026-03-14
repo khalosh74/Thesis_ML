@@ -29,8 +29,31 @@ Primary machine-readable execution sheets:
 
 - `Experiment_Definitions`
 - `Search_Spaces` (optional)
+- `Study_Design`
+- `Factors`
+- `Fixed_Controls`
+- `Constraints`
+- `Blocking_and_Replication`
+- `Generated_Design_Matrix` (machine-managed; can be authored for `custom_matrix`)
+- `Trial_Results` (machine-managed)
+- `Effect_Summaries` (machine-managed descriptive grouped summaries)
 
 Governance sheets remain in place and are not removed.
+
+## Single-experiment vs factorial studies
+
+- `Experiment_Definitions` remains the canonical single-experiment entry path.
+- `Study_Design` enables design-driven execution:
+  - `study_type=full_factorial`: compiler expands all valid factor combinations.
+  - `study_type=custom_matrix`: compiler executes rows from `Generated_Design_Matrix`.
+  - `study_type=single_experiment`: design-layer metadata path (single cell semantics).
+  - `study_type=fractional_factorial`: currently rejected with explicit validation error.
+
+Scientific scope:
+- the framework executes the design the user specifies;
+- it does not auto-invent a scientifically valid design;
+- constraints are explicit and auditable;
+- effect summaries are descriptive unless explicitly extended by user methodology.
 
 ## Compile behavior
 
@@ -44,6 +67,9 @@ Validation includes:
 - start/end section ordering
 - base artifact usage rules
 - supported workbook schema version in README metadata
+- study/factor/control/constraint cross-sheet consistency
+- supported study/factor types and replication fields
+- explicit rejection of unsupported design modes (for example `fractional_factorial`)
 
 ## Execute from workbook
 
@@ -87,6 +113,8 @@ Machine-owned write-back targets:
 - `Machine_Status`
 - `Trial_Results`
 - `Summary_Outputs`
+- `Generated_Design_Matrix`
+- `Effect_Summaries`
 - optional append to `Run_Log`
 
 Human-authored governance sheets are preserved.

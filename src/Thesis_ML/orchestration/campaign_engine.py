@@ -51,6 +51,12 @@ from Thesis_ML.orchestration.variant_expansion import (
     expand_experiment_variants as _expand_experiment_variants,
 )
 from Thesis_ML.orchestration.workbook_bridge import (
+    build_effect_summary_rows as _build_effect_summary_rows,
+)
+from Thesis_ML.orchestration.workbook_bridge import (
+    build_generated_design_rows as _build_generated_design_rows,
+)
+from Thesis_ML.orchestration.workbook_bridge import (
     build_machine_status_rows as _build_machine_status_rows,
 )
 from Thesis_ML.orchestration.workbook_bridge import (
@@ -298,6 +304,8 @@ def run_decision_support_campaign(
             variant_records=all_variant_records,
         )
         trial_rows = _build_trial_results_rows(all_variant_records)
+        generated_design_rows = _build_generated_design_rows(all_variant_records)
+        effect_rows = _build_effect_summary_rows(aggregation)
         summary_rows = list(summary_output_rows)
         run_log_rows = _build_run_log_writeback_rows(
             variant_records=all_variant_records,
@@ -311,6 +319,8 @@ def run_decision_support_campaign(
             machine_status_rows=machine_rows,
             trial_result_rows=trial_rows,
             summary_output_rows=summary_rows,
+            generated_design_rows=generated_design_rows,
+            effect_summary_rows=effect_rows,
             run_log_rows=run_log_rows,
             append_run_log=append_workbook_run_log,
             output_dir=workbook_output_dir,

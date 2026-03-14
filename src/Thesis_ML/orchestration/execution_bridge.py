@@ -30,6 +30,15 @@ def _safe_float(value: Any) -> float | None:
         return None
 
 
+def _optional_int(value: Any) -> int | None:
+    if value in (None, ""):
+        return None
+    try:
+        return int(str(value))
+    except Exception:
+        return None
+
+
 def _extract_metric(metrics: dict[str, Any], name: str) -> float | None:
     if name in metrics:
         return _safe_float(metrics.get(name))
@@ -125,8 +134,31 @@ def execute_variant(
     experiment_id = str(experiment["experiment_id"])
     template_id = str(variant["template_id"])
     variant_index = int(variant["variant_index"])
-    variant_id = f"{template_id}__{variant_index:03d}"
+    repeat_raw = variant.get("repeat_id")
+    seed_raw = variant.get("seed")
+    study_id = str(variant.get("study_id")).strip() if variant.get("study_id") else None
+    trial_id = str(variant.get("trial_id")).strip() if variant.get("trial_id") else None
+    cell_id = str(variant.get("cell_id")).strip() if variant.get("cell_id") else None
+    repeat_id = _optional_int(repeat_raw)
+    trial_seed = _optional_int(seed_raw)
+    factor_settings = (
+        dict(variant.get("factor_settings", {}))
+        if isinstance(variant.get("factor_settings"), dict)
+        else {}
+    )
+    fixed_controls = (
+        dict(variant.get("fixed_controls", {}))
+        if isinstance(variant.get("fixed_controls"), dict)
+        else {}
+    )
+    design_metadata = (
+        dict(variant.get("design_metadata", {}))
+        if isinstance(variant.get("design_metadata"), dict)
+        else {}
+    )
+    variant_id = trial_id or f"{template_id}__{variant_index:03d}"
     params = dict(variant.get("params", {}))
+    params_snapshot = dict(params)
     supported = bool(variant.get("supported", False))
     blocked_reason = variant.get("blocked_reason")
     start_section = (
@@ -142,7 +174,10 @@ def execute_variant(
     )
     search_assignment = variant.get("search_assignment")
 
-    run_id = f"ds_{experiment_id}_{template_id}_{variant_index:03d}_{campaign_id}"
+    run_token = (
+        variant_id.replace(" ", "_").replace("/", "_").replace("\\", "_").replace(":", "_")
+    )
+    run_id = f"ds_{experiment_id}_{run_token}_{campaign_id}"
     reports_root = experiment_root / "reports"
     reports_root.mkdir(parents=True, exist_ok=True)
     manifests_dir = experiment_root / "run_manifests"
@@ -155,6 +190,8 @@ def execute_variant(
     error: str | None = None
     result: dict[str, Any] | None = None
 
+    effective_seed = int(trial_seed) if trial_seed is not None else int(seed)
+
     if not supported:
         status = "blocked"
     else:
@@ -164,7 +201,7 @@ def execute_variant(
             cache_dir=cache_dir,
             reports_root=reports_root,
             run_id=run_id,
-            seed=seed,
+            seed=effective_seed,
             n_permutations=n_permutations,
             params=params,
             start_section=start_section,
@@ -191,7 +228,7 @@ def execute_variant(
                     test_subject=(
                         str(params["test_subject"]) if params.get("test_subject") else None
                     ),
-                    seed=seed,
+                    seed=effective_seed,
                     filter_task=(str(params["filter_task"]) if params.get("filter_task") else None),
                     filter_modality=(
                         str(params["filter_modality"]) if params.get("filter_modality") else None
@@ -231,7 +268,7 @@ def execute_variant(
             "index_csv": str(index_csv.resolve()),
             "data_root": str(data_root.resolve()),
             "cache_dir": str(cache_dir.resolve()),
-            "seed": int(seed),
+            "seed": int(effective_seed),
             "n_permutations": int(n_permutations),
             "start_section": start_section,
             "end_section": end_section,
@@ -240,6 +277,14 @@ def execute_variant(
             "search_space_id": search_space_id,
             "search_assignment": search_assignment,
             "params": params,
+            "params_snapshot": params_snapshot,
+            "study_id": study_id,
+            "trial_id": trial_id,
+            "cell_id": cell_id,
+            "repeat_id": repeat_id,
+            "factor_settings": factor_settings,
+            "fixed_controls": fixed_controls,
+            "design_metadata": design_metadata,
         },
         "dataset_subset": build_dataset_subset_label(params),
         "split_logic": params.get("cv"),
@@ -265,6 +310,15 @@ def execute_variant(
         },
         "warnings": [blocked_reason] if blocked_reason else [],
         "error": error,
+        "design": {
+            "study_id": study_id,
+            "trial_id": trial_id,
+            "cell_id": cell_id,
+            "repeat_id": repeat_id,
+            "factor_settings": factor_settings,
+            "fixed_controls": fixed_controls,
+            "design_metadata": design_metadata,
+        },
     }
 
     manifest_path = manifests_dir / f"{variant_id}.json"
@@ -306,6 +360,10 @@ def execute_variant(
         "decision_id": str(experiment.get("decision_id", "")),
         "template_id": template_id,
         "variant_id": variant_id,
+        "study_id": study_id,
+        "trial_id": trial_id or variant_id,
+        "cell_id": cell_id,
+        "repeat_id": repeat_id,
         "variant_label": variant_label(params),
         "status": status,
         "target": params.get("target"),
@@ -326,12 +384,18 @@ def execute_variant(
             if isinstance(search_assignment, dict)
             else (str(search_assignment) if search_assignment is not None else None)
         ),
+        "factor_settings": factor_settings,
+        "fixed_controls": fixed_controls,
+        "design_metadata": design_metadata,
+        "resolved_params": params,
+        "params_snapshot": params_snapshot,
         "primary_metric_name": primary_metric_name,
         "primary_metric_value": primary_metric_value,
         "balanced_accuracy": _safe_float(metrics.get("balanced_accuracy")),
         "macro_f1": _safe_float(metrics.get("macro_f1")),
         "accuracy": _safe_float(metrics.get("accuracy")),
         "run_id": run_id,
+        "seed": int(effective_seed),
         "report_dir": result.get("report_dir") if result else None,
         "config_path": result.get("config_path") if result else None,
         "metrics_path": result.get("metrics_path") if result else None,

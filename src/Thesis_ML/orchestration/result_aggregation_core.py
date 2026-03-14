@@ -103,6 +103,26 @@ def _xai_execution_status(row: dict[str, Any]) -> tuple[str, bool | None]:
     return "unknown", None
 
 
+def _factor_settings_dict(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return dict(value)
+    text = str(value or "").strip()
+    if not text:
+        return {}
+    try:
+        decoded = json.loads(text)
+    except Exception:
+        return {}
+    if isinstance(decoded, dict):
+        return decoded
+    return {}
+
+
+def _trial_id(row: dict[str, Any]) -> str:
+    value = row.get("trial_id") or row.get("variant_id") or row.get("run_id") or ""
+    return str(value)
+
+
 def completed_metric_rows(variant_records: list[dict[str, Any]]) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for row in variant_records:
@@ -138,9 +158,145 @@ def completed_metric_rows(variant_records: list[dict[str, Any]]) -> list[dict[st
                 "xai_method": xai_method_for_model(row.get("model")),
                 "xai_status": xai_status,
                 "xai_performed": xai_performed,
+                "study_id": (str(row.get("study_id") or "").strip() or None),
+                "trial_id": _trial_id(row),
+                "cell_id": (str(row.get("cell_id") or "").strip() or None),
+                "factor_settings": _factor_settings_dict(row.get("factor_settings")),
             }
         )
     return rows
+
+
+def aggregate_factorial_best_by_study(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        study_id = str(row.get("study_id") or "")
+        if not study_id:
+            continue
+        grouped.setdefault(study_id, []).append(row)
+    summary: list[dict[str, Any]] = []
+    for study_id in sorted(grouped):
+        group_rows = grouped[study_id]
+        best_row = max(group_rows, key=lambda item: float(item["primary_metric_value_float"]))
+        mean_metric = sum(float(item["primary_metric_value_float"]) for item in group_rows) / len(
+            group_rows
+        )
+        summary.append(
+            {
+                "study_id": study_id,
+                "n_trials": int(len(group_rows)),
+                "primary_metric_name": str(best_row.get("primary_metric_name") or "balanced_accuracy"),
+                "mean_primary_metric_value": float(mean_metric),
+                "best_primary_metric_value": float(best_row["primary_metric_value_float"]),
+                "best_trial_id": _trial_id(best_row),
+                "best_run_id": best_row.get("run_id"),
+                "best_experiment_id": best_row.get("experiment_id"),
+            }
+        )
+    return summary
+
+
+def aggregate_factorial_by_level(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    grouped: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
+    for row in rows:
+        study_id = str(row.get("study_id") or "")
+        if not study_id:
+            continue
+        settings = dict(row.get("factor_settings") or {})
+        for factor_name in sorted(settings):
+            factor_value = settings[factor_name]
+            level_key = f"{factor_name}={factor_value}"
+            grouped.setdefault((study_id, factor_name, level_key), []).append(row)
+    summary: list[dict[str, Any]] = []
+    for study_id, factor_name, level_key in sorted(grouped):
+        group_rows = grouped[(study_id, factor_name, level_key)]
+        best_row = max(group_rows, key=lambda item: float(item["primary_metric_value_float"]))
+        mean_metric = sum(float(item["primary_metric_value_float"]) for item in group_rows) / len(
+            group_rows
+        )
+        summary.append(
+            {
+                "study_id": study_id,
+                "summary_key": f"{study_id}:{factor_name}:{level_key}",
+                "factor_level_key": level_key,
+                "primary_metric_name": str(best_row.get("primary_metric_name") or "balanced_accuracy"),
+                "n_trials": int(len(group_rows)),
+                "mean_primary_metric_value": float(mean_metric),
+                "best_primary_metric_value": float(best_row["primary_metric_value_float"]),
+                "best_trial_id": _trial_id(best_row),
+            }
+        )
+    return summary
+
+
+def aggregate_factorial_combinations(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    grouped: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for row in rows:
+        study_id = str(row.get("study_id") or "")
+        if not study_id:
+            continue
+        settings = dict(row.get("factor_settings") or {})
+        if not settings:
+            continue
+        canonical = json.dumps(settings, sort_keys=True, default=str)
+        grouped.setdefault((study_id, canonical), []).append(row)
+    summary: list[dict[str, Any]] = []
+    for study_id, canonical in sorted(grouped):
+        group_rows = grouped[(study_id, canonical)]
+        best_row = max(group_rows, key=lambda item: float(item["primary_metric_value_float"]))
+        mean_metric = sum(float(item["primary_metric_value_float"]) for item in group_rows) / len(
+            group_rows
+        )
+        summary.append(
+            {
+                "study_id": study_id,
+                "summary_key": f"{study_id}:combination:{_trial_id(best_row)}",
+                "factor_level_key": canonical,
+                "primary_metric_name": str(best_row.get("primary_metric_name") or "balanced_accuracy"),
+                "n_trials": int(len(group_rows)),
+                "mean_primary_metric_value": float(mean_metric),
+                "best_primary_metric_value": float(best_row["primary_metric_value_float"]),
+                "best_trial_id": _trial_id(best_row),
+            }
+        )
+    return summary
+
+
+def aggregate_factorial_interactions(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    grouped: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for row in rows:
+        study_id = str(row.get("study_id") or "")
+        if not study_id:
+            continue
+        settings = dict(row.get("factor_settings") or {})
+        factor_keys = sorted(settings)
+        if len(factor_keys) < 2:
+            continue
+        for left_idx, left in enumerate(factor_keys):
+            for right in factor_keys[left_idx + 1 :]:
+                interaction_key = f"{left}={settings[left]}|{right}={settings[right]}"
+                grouped.setdefault((study_id, interaction_key), []).append(row)
+    summary: list[dict[str, Any]] = []
+    for study_id, interaction_key in sorted(grouped):
+        group_rows = grouped[(study_id, interaction_key)]
+        best_row = max(group_rows, key=lambda item: float(item["primary_metric_value_float"]))
+        mean_metric = sum(float(item["primary_metric_value_float"]) for item in group_rows) / len(
+            group_rows
+        )
+        summary.append(
+            {
+                "study_id": study_id,
+                "summary_key": f"{study_id}:interaction:{interaction_key}",
+                "interaction_key": interaction_key,
+                "primary_metric_name": str(best_row.get("primary_metric_name") or "balanced_accuracy"),
+                "n_trials": int(len(group_rows)),
+                "mean_primary_metric_value": float(mean_metric),
+                "best_primary_metric_value": float(best_row["primary_metric_value_float"]),
+                "best_trial_id": _trial_id(best_row),
+                "notes": "descriptive_only=true",
+            }
+        )
+    return summary
 
 
 def top_runs(rows: list[dict[str, Any]], top_k: int) -> list[dict[str, Any]]:
@@ -252,6 +408,7 @@ def aggregate_variant_records(
     completed = completed_metric_rows(variant_records)
     full_pipeline = [row for row in completed if bool(row["is_full_pipeline"])]
     segmented = [row for row in completed if not bool(row["is_full_pipeline"])]
+    factorial_rows = [row for row in completed if str(row.get("study_id") or "").strip()]
 
     return {
         "summary_result_schema_version": SUMMARY_RESULT_SCHEMA_VERSION,
@@ -271,6 +428,14 @@ def aggregate_variant_records(
         "xai": {
             "registry": XAI_METHOD_REGISTRY,
             "method_effects": aggregate_xai_methods(completed),
+        },
+        "factorial": {
+            "descriptive_only": True,
+            "n_factorial_trials": int(len(factorial_rows)),
+            "best_by_study": aggregate_factorial_best_by_study(factorial_rows),
+            "by_factor_level": aggregate_factorial_by_level(factorial_rows),
+            "by_factor_combination": aggregate_factorial_combinations(factorial_rows),
+            "interaction_descriptive": aggregate_factorial_interactions(factorial_rows),
         },
     }
 

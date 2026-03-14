@@ -154,6 +154,10 @@ def test_aggregate_variant_records_summarizes_segments_and_xai(tmp_path: Path) -
             "status": "completed",
             "experiment_id": "E16",
             "variant_id": "v001",
+            "trial_id": "S01_cell_001_r001",
+            "study_id": "S01",
+            "cell_id": "S01_cell_001",
+            "factor_settings": {"model": "ridge", "filter_task": "passive"},
             "run_id": "run_full_best",
             "model": "ridge",
             "cv": "within_subject_loso_session",
@@ -169,6 +173,10 @@ def test_aggregate_variant_records_summarizes_segments_and_xai(tmp_path: Path) -
             "status": "completed",
             "experiment_id": "E16",
             "variant_id": "v002",
+            "trial_id": "S01_cell_002_r001",
+            "study_id": "S01",
+            "cell_id": "S01_cell_002",
+            "factor_settings": {"model": "ridge", "filter_task": "emo"},
             "run_id": "run_full_other",
             "model": "ridge",
             "cv": "within_subject_loso_session",
@@ -211,6 +219,7 @@ def test_aggregate_variant_records_summarizes_segments_and_xai(tmp_path: Path) -
 
     aggregation = aggregate_variant_records(records, top_k=3)
     assert aggregation["completed_with_metric_count"] == 3
+    assert aggregation["factorial"]["n_factorial_trials"] == 2
     assert aggregation["best_full_pipeline_runs"][0]["run_id"] == "run_full_best"
     assert aggregation["best_segment_runs"][0]["run_id"] == "run_segment_best"
     section_keys = {row["section_key"] for row in aggregation["section_level_effects"]}
@@ -225,3 +234,4 @@ def test_aggregate_variant_records_summarizes_segments_and_xai(tmp_path: Path) -
     assert "best_segment_run" in summary_types
     assert "section_effect" in summary_types
     assert "xai_method_effect" in summary_types
+    assert "factor_level_effect_descriptive" in summary_types

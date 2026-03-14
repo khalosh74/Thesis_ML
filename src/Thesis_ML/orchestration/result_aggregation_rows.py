@@ -180,6 +180,62 @@ def build_summary_output_rows(aggregation: dict[str, Any]) -> list[dict[str, Any
             )
         )
 
+    factorial = aggregation.get("factorial", {})
+    for row in factorial.get("best_by_study", []):
+        rows.append(
+            _base_summary_row(
+                summary_type="factorial_best_by_study",
+                summary_key=str(row.get("study_id") or ""),
+                primary_metric_name="mean_primary_metric_value",
+                primary_metric_value=safe_float(row.get("mean_primary_metric_value")),
+                run_id=row.get("best_run_id"),
+                experiment_id=row.get("best_experiment_id"),
+                notes=(
+                    f"study_id={row.get('study_id')}; best_trial_id={row.get('best_trial_id')}; "
+                    "descriptive_only=true"
+                ),
+            )
+        )
+    for row in factorial.get("by_factor_level", []):
+        rows.append(
+            _base_summary_row(
+                summary_type="factor_level_effect_descriptive",
+                summary_key=str(row.get("summary_key") or ""),
+                primary_metric_name="mean_primary_metric_value",
+                primary_metric_value=safe_float(row.get("mean_primary_metric_value")),
+                notes=(
+                    f"factor_level_key={row.get('factor_level_key')}; "
+                    f"best_trial_id={row.get('best_trial_id')}; descriptive_only=true"
+                ),
+            )
+        )
+    for row in factorial.get("by_factor_combination", []):
+        rows.append(
+            _base_summary_row(
+                summary_type="factor_combination_effect_descriptive",
+                summary_key=str(row.get("summary_key") or ""),
+                primary_metric_name="mean_primary_metric_value",
+                primary_metric_value=safe_float(row.get("mean_primary_metric_value")),
+                notes=(
+                    f"factor_level_key={row.get('factor_level_key')}; "
+                    f"best_trial_id={row.get('best_trial_id')}; descriptive_only=true"
+                ),
+            )
+        )
+    for row in factorial.get("interaction_descriptive", []):
+        rows.append(
+            _base_summary_row(
+                summary_type="factor_interaction_descriptive",
+                summary_key=str(row.get("summary_key") or ""),
+                primary_metric_name="mean_primary_metric_value",
+                primary_metric_value=safe_float(row.get("mean_primary_metric_value")),
+                notes=(
+                    f"interaction_key={row.get('interaction_key')}; "
+                    f"best_trial_id={row.get('best_trial_id')}; descriptive_only=true"
+                ),
+            )
+        )
+
     return rows
 
 

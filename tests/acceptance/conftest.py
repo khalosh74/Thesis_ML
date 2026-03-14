@@ -96,6 +96,60 @@ def acceptance_sample_workbook(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
+def acceptance_factorial_workbook(tmp_path: Path) -> Path:
+    workbook_path = tmp_path / "thesis_experiment_program_factorial.xlsx"
+    wb = build_workbook()
+    wb.save(workbook_path)
+
+    workbook = load_workbook(workbook_path)
+
+    study_ws = workbook["Study_Design"]
+    study_headers = [study_ws.cell(2, col).value for col in range(1, study_ws.max_column + 1)]
+    study_col = {str(name): idx + 1 for idx, name in enumerate(study_headers) if name is not None}
+    study_ws.cell(3, study_col["study_id"], "S01")
+    study_ws.cell(3, study_col["study_name"], "Acceptance factorial study")
+    study_ws.cell(3, study_col["enabled"], "Yes")
+    study_ws.cell(3, study_col["study_type"], "full_factorial")
+    study_ws.cell(3, study_col["intent"], "exploratory")
+    study_ws.cell(3, study_col["start_section"], "dataset_selection")
+    study_ws.cell(3, study_col["end_section"], "evaluation")
+    study_ws.cell(3, study_col["primary_metric"], "balanced_accuracy")
+    study_ws.cell(3, study_col["cv_scheme"], "within_subject_loso_session")
+    study_ws.cell(3, study_col["num_repeats"], 1)
+    study_ws.cell(3, study_col["replication_mode"], "fixed_repeats")
+    study_ws.cell(3, study_col["random_seed_policy"], "fixed")
+
+    factors_ws = workbook["Factors"]
+    factor_headers = [factors_ws.cell(2, col).value for col in range(1, factors_ws.max_column + 1)]
+    factor_col = {str(name): idx + 1 for idx, name in enumerate(factor_headers) if name is not None}
+    factors_ws.cell(3, factor_col["study_id"], "S01")
+    factors_ws.cell(3, factor_col["factor_name"], "model")
+    factors_ws.cell(3, factor_col["parameter_path"], "model")
+    factors_ws.cell(3, factor_col["factor_type"], "categorical")
+    factors_ws.cell(3, factor_col["levels"], "ridge|logreg")
+
+    fixed_ws = workbook["Fixed_Controls"]
+    fixed_headers = [fixed_ws.cell(2, col).value for col in range(1, fixed_ws.max_column + 1)]
+    fixed_col = {str(name): idx + 1 for idx, name in enumerate(fixed_headers) if name is not None}
+    fixed_ws.cell(3, fixed_col["study_id"], "S01")
+    fixed_ws.cell(3, fixed_col["parameter_path"], "target")
+    fixed_ws.cell(3, fixed_col["value"], "coarse_affect")
+    fixed_ws.cell(4, fixed_col["study_id"], "S01")
+    fixed_ws.cell(4, fixed_col["parameter_path"], "subject")
+    fixed_ws.cell(4, fixed_col["value"], "sub-001")
+
+    block_ws = workbook["Blocking_and_Replication"]
+    block_headers = [block_ws.cell(2, col).value for col in range(1, block_ws.max_column + 1)]
+    block_col = {str(name): idx + 1 for idx, name in enumerate(block_headers) if name is not None}
+    block_ws.cell(3, block_col["study_id"], "S01")
+    block_ws.cell(3, block_col["block_type"], "none")
+    block_ws.cell(3, block_col["repeat_id"], 1)
+
+    workbook.save(workbook_path)
+    return workbook_path
+
+
+@pytest.fixture
 def acceptance_expected_manifest_shape() -> dict[str, Any]:
     return {
         "schema_version": WORKBOOK_SCHEMA_VERSION,

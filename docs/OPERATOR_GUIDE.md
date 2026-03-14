@@ -39,7 +39,9 @@ thesisml-workbook --output templates/thesis_experiment_program.xlsx
 
 Template note:
 - `templates/thesis_experiment_program.xlsx` is non-runnable by default
-- enable/populate executable rows in `Experiment_Definitions` before using `--workbook`
+- enable/populate executable rows in `Experiment_Definitions` for single-experiment flow
+- or enable/populate `Study_Design` (+ `Factors`/`Fixed_Controls`/`Constraints` as needed)
+  for factorial flow
 
 Registry dry-run:
 
@@ -70,3 +72,17 @@ This command validates:
 - shipped workbook template/schema compatibility
 - workbook generation through canonical CLI
 - shipped registry compilation/dry-run through canonical CLI
+
+## 5) Factorial design operator notes
+
+- Define the scientific design explicitly in workbook sheets.
+- Required user-owned design decisions:
+  - factors and allowed levels
+  - fixed controls
+  - invalid combinations (constraints)
+  - replication and seed policy
+- Framework behavior:
+  - compiles design into executable trials
+  - executes trials through existing engine/artifact lineage
+  - writes descriptive grouped summaries to `Effect_Summaries`
+- The framework does not auto-design study validity or perform automatic inferential statistics.

@@ -10,8 +10,11 @@ from pydantic import ValidationError
 from Thesis_ML.config.schema_versions import COMPILED_MANIFEST_SCHEMA_VERSION
 from Thesis_ML.orchestration.contracts import (
     CompiledStudyManifest,
+    EffectSummary,
     ExperimentSpec,
+    GeneratedDesignCell,
     SearchSpaceSpec,
+    StudyDesignSpec,
     TrialSpec,
     supported_sections,
 )
@@ -53,6 +56,9 @@ def compile_registry_payload(
     compiled_experiments: list[ExperimentSpec] = []
     compiled_trials: list[TrialSpec] = []
     compiled_search_spaces: list[SearchSpaceSpec] = []
+    compiled_study_designs: list[StudyDesignSpec] = []
+    compiled_generated_design_matrix: list[GeneratedDesignCell] = []
+    compiled_effect_summaries: list[EffectSummary] = []
 
     raw_search_spaces = payload.get("search_spaces", [])
     if raw_search_spaces is None:
@@ -67,6 +73,48 @@ def compile_registry_payload(
         except ValidationError as exc:
             space_id = str(raw_space.get("search_space_id", "<missing-search-space-id>"))
             raise ValueError(f"Invalid search space '{space_id}': {exc}") from exc
+
+    raw_study_designs = payload.get("study_designs", [])
+    if raw_study_designs is None:
+        raw_study_designs = []
+    if not isinstance(raw_study_designs, list):
+        raise ValueError("Invalid registry payload: expected 'study_designs' to be a list.")
+    for raw_study in raw_study_designs:
+        if not isinstance(raw_study, dict):
+            raise ValueError("Invalid study design payload: each study must be an object.")
+        try:
+            compiled_study_designs.append(StudyDesignSpec.model_validate(dict(raw_study)))
+        except ValidationError as exc:
+            study_id = str(raw_study.get("study_id", "<missing-study-id>"))
+            raise ValueError(f"Invalid study design '{study_id}': {exc}") from exc
+
+    raw_generated_matrix = payload.get("generated_design_matrix", [])
+    if raw_generated_matrix is None:
+        raw_generated_matrix = []
+    if not isinstance(raw_generated_matrix, list):
+        raise ValueError("Invalid registry payload: expected 'generated_design_matrix' to be a list.")
+    for raw_cell in raw_generated_matrix:
+        if not isinstance(raw_cell, dict):
+            raise ValueError("Invalid generated design cell payload: each cell must be an object.")
+        try:
+            compiled_generated_design_matrix.append(GeneratedDesignCell.model_validate(dict(raw_cell)))
+        except ValidationError as exc:
+            trial_id = str(raw_cell.get("trial_id", "<missing-trial-id>"))
+            raise ValueError(f"Invalid generated design cell '{trial_id}': {exc}") from exc
+
+    raw_effect_summaries = payload.get("effect_summaries", [])
+    if raw_effect_summaries is None:
+        raw_effect_summaries = []
+    if not isinstance(raw_effect_summaries, list):
+        raise ValueError("Invalid registry payload: expected 'effect_summaries' to be a list.")
+    for raw_summary in raw_effect_summaries:
+        if not isinstance(raw_summary, dict):
+            raise ValueError("Invalid effect summary payload: each summary must be an object.")
+        try:
+            compiled_effect_summaries.append(EffectSummary.model_validate(dict(raw_summary)))
+        except ValidationError as exc:
+            summary_type = str(raw_summary.get("summary_type", "<missing-summary-type>"))
+            raise ValueError(f"Invalid effect summary '{summary_type}': {exc}") from exc
 
     for raw_experiment in experiments_payload:
         if not isinstance(raw_experiment, dict):
@@ -111,6 +159,9 @@ def compile_registry_payload(
         "experiments": compiled_experiments,
         "trial_specs": compiled_trials,
         "search_spaces": compiled_search_spaces,
+        "study_designs": compiled_study_designs,
+        "generated_design_matrix": compiled_generated_design_matrix,
+        "effect_summaries": compiled_effect_summaries,
     }
 
     try:

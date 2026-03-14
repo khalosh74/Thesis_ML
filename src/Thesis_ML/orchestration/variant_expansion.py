@@ -5,6 +5,15 @@ from typing import Any
 from Thesis_ML.orchestration.search_space import expand_variant_search_space
 
 
+def _optional_int(value: Any) -> int | None:
+    if value in (None, ""):
+        return None
+    try:
+        return int(str(value))
+    except Exception:
+        return None
+
+
 def variant_label(params: dict[str, Any]) -> str:
     keys = [
         "target",
@@ -48,6 +57,28 @@ def expand_template_variants(
     search_space_id = (
         str(template.get("search_space_id")).strip() if template.get("search_space_id") else None
     )
+    repeat_raw = template.get("repeat_id")
+    seed_raw = template.get("seed")
+    study_id = str(template.get("study_id")).strip() if template.get("study_id") else None
+    trial_id = str(template.get("trial_id")).strip() if template.get("trial_id") else None
+    cell_id = str(template.get("cell_id")).strip() if template.get("cell_id") else None
+    repeat_id = _optional_int(repeat_raw)
+    seed = _optional_int(seed_raw)
+    factor_settings = (
+        dict(template.get("factor_settings", {}))
+        if isinstance(template.get("factor_settings"), dict)
+        else {}
+    )
+    fixed_controls = (
+        dict(template.get("fixed_controls", {}))
+        if isinstance(template.get("fixed_controls"), dict)
+        else {}
+    )
+    design_metadata = (
+        dict(template.get("design_metadata", {}))
+        if isinstance(template.get("design_metadata"), dict)
+        else {}
+    )
     if not supported:
         reason = str(template.get("unsupported_reason", "template marked unsupported"))
         return [
@@ -63,6 +94,14 @@ def expand_template_variants(
                 "reuse_policy": reuse_policy,
                 "search_space_id": search_space_id,
                 "search_assignment": None,
+                "study_id": study_id,
+                "trial_id": trial_id,
+                "cell_id": cell_id,
+                "repeat_id": repeat_id,
+                "seed": seed,
+                "factor_settings": factor_settings,
+                "fixed_controls": fixed_controls,
+                "design_metadata": design_metadata,
             }
         ]
 
@@ -96,6 +135,14 @@ def expand_template_variants(
                     "reuse_policy": reuse_policy,
                     "search_space_id": search_space_id,
                     "search_assignment": None,
+                    "study_id": study_id,
+                    "trial_id": trial_id,
+                    "cell_id": cell_id,
+                    "repeat_id": repeat_id,
+                    "seed": seed,
+                    "factor_settings": factor_settings,
+                    "fixed_controls": fixed_controls,
+                    "design_metadata": design_metadata,
                 }
             ]
 
@@ -134,6 +181,14 @@ def expand_template_variants(
             "reuse_policy": reuse_policy,
             "search_space_id": search_space_id,
             "search_assignment": None,
+            "study_id": study_id,
+            "trial_id": trial_id,
+            "cell_id": cell_id,
+            "repeat_id": repeat_id,
+            "seed": seed,
+            "factor_settings": factor_settings,
+            "fixed_controls": fixed_controls,
+            "design_metadata": design_metadata,
         }
         if not search_space_id:
             unresolved.append(base_variant)
@@ -172,6 +227,12 @@ def expand_template_variants(
 
     resolved: list[dict[str, Any]] = []
     for idx, row in enumerate(unresolved, start=1):
+        trial_id_value = (
+            str(row.get("trial_id")).strip() if row.get("trial_id") is not None else None
+        )
+        resolved_trial_id = None
+        if trial_id_value:
+            resolved_trial_id = trial_id_value if len(unresolved) == 1 else f"{trial_id_value}__v{idx:03d}"
         resolved.append(
             {
                 "template_id": template_id,
@@ -185,6 +246,14 @@ def expand_template_variants(
                 "reuse_policy": row.get("reuse_policy"),
                 "search_space_id": row.get("search_space_id"),
                 "search_assignment": row.get("search_assignment"),
+                "study_id": row.get("study_id"),
+                "trial_id": resolved_trial_id,
+                "cell_id": row.get("cell_id"),
+                "repeat_id": row.get("repeat_id"),
+                "seed": row.get("seed"),
+                "factor_settings": row.get("factor_settings") if isinstance(row.get("factor_settings"), dict) else {},
+                "fixed_controls": row.get("fixed_controls") if isinstance(row.get("fixed_controls"), dict) else {},
+                "design_metadata": row.get("design_metadata") if isinstance(row.get("design_metadata"), dict) else {},
             }
         )
     return resolved

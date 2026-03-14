@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import platform
 from datetime import UTC, datetime
 from pathlib import Path
@@ -17,6 +18,17 @@ def _safe_float(value: Any) -> float | None:
         return float(value)
     except Exception:
         return None
+
+
+def _json_text(value: Any) -> str:
+    if isinstance(value, dict):
+        return json.dumps(value, sort_keys=True)
+    if isinstance(value, list):
+        return json.dumps(value)
+    if value is None:
+        return ""
+    text = str(value).strip()
+    return text
 
 
 def _build_dataset_subset_label(params: dict[str, Any]) -> str:
@@ -89,6 +101,111 @@ def build_trial_results_rows(variant_records: list[dict[str, Any]]) -> list[dict
                 "metrics_path": row.get("metrics_path"),
                 "artifact_bundle": row.get("orchestrator_artifact_id") or row.get("manifest_path"),
                 "notes": notes,
+                "study_id": row.get("study_id"),
+                "cell_id": row.get("cell_id"),
+                "factor_settings_json": _json_text(row.get("factor_settings")),
+                "resolved_params_json": _json_text(
+                    row.get("resolved_params") or row.get("params_snapshot")
+                ),
+            }
+        )
+    return rows
+
+
+def build_generated_design_rows(variant_records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    seen_trials: set[str] = set()
+    for row in variant_records:
+        study_id = str(row.get("study_id") or "").strip()
+        if not study_id:
+            continue
+        trial_id = str(row.get("trial_id") or row.get("variant_id") or "").strip()
+        if not trial_id or trial_id in seen_trials:
+            continue
+        seen_trials.add(trial_id)
+        rows.append(
+            {
+                "study_id": study_id,
+                "trial_id": trial_id,
+                "cell_id": row.get("cell_id"),
+                "factor_settings_json": _json_text(row.get("factor_settings")),
+                "start_section": row.get("start_section") or "dataset_selection",
+                "end_section": row.get("end_section") or "evaluation",
+                "base_artifact_id": row.get("base_artifact_id") or "",
+                "resolved_params_json": _json_text(
+                    row.get("resolved_params") or row.get("params_snapshot")
+                ),
+                "status": row.get("status"),
+            }
+        )
+    return rows
+
+
+def build_effect_summary_rows(aggregation: dict[str, Any]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    factorial = aggregation.get("factorial", {})
+
+    for row in factorial.get("best_by_study", []):
+        rows.append(
+            {
+                "study_id": row.get("study_id"),
+                "summary_type": "best_by_study",
+                "summary_key": str(row.get("study_id") or ""),
+                "factor_level_key": "",
+                "interaction_key": "",
+                "primary_metric_name": row.get("primary_metric_name") or "balanced_accuracy",
+                "mean_primary_metric_value": _safe_float(row.get("mean_primary_metric_value")),
+                "best_primary_metric_value": _safe_float(row.get("best_primary_metric_value")),
+                "best_trial_id": row.get("best_trial_id"),
+                "notes": "descriptive_only=true",
+            }
+        )
+
+    for row in factorial.get("by_factor_level", []):
+        rows.append(
+            {
+                "study_id": row.get("study_id"),
+                "summary_type": "factor_level",
+                "summary_key": str(row.get("summary_key") or ""),
+                "factor_level_key": str(row.get("factor_level_key") or ""),
+                "interaction_key": "",
+                "primary_metric_name": row.get("primary_metric_name") or "balanced_accuracy",
+                "mean_primary_metric_value": _safe_float(row.get("mean_primary_metric_value")),
+                "best_primary_metric_value": _safe_float(row.get("best_primary_metric_value")),
+                "best_trial_id": row.get("best_trial_id"),
+                "notes": "descriptive_only=true",
+            }
+        )
+
+    for row in factorial.get("by_factor_combination", []):
+        rows.append(
+            {
+                "study_id": row.get("study_id"),
+                "summary_type": "factor_combination",
+                "summary_key": str(row.get("summary_key") or ""),
+                "factor_level_key": str(row.get("factor_level_key") or ""),
+                "interaction_key": "",
+                "primary_metric_name": row.get("primary_metric_name") or "balanced_accuracy",
+                "mean_primary_metric_value": _safe_float(row.get("mean_primary_metric_value")),
+                "best_primary_metric_value": _safe_float(row.get("best_primary_metric_value")),
+                "best_trial_id": row.get("best_trial_id"),
+                "notes": "descriptive_only=true",
+            }
+        )
+
+    for row in factorial.get("interaction_descriptive", []):
+        rows.append(
+            {
+                "study_id": row.get("study_id"),
+                "summary_type": "interaction_descriptive",
+                "summary_key": str(row.get("summary_key") or ""),
+                "factor_level_key": "",
+                "interaction_key": str(row.get("interaction_key") or ""),
+                "primary_metric_name": row.get("primary_metric_name") or "balanced_accuracy",
+                "mean_primary_metric_value": _safe_float(row.get("mean_primary_metric_value")),
+                "best_primary_metric_value": _safe_float(row.get("best_primary_metric_value")),
+                "best_trial_id": row.get("best_trial_id"),
+                "notes": "descriptive_only=true",
             }
         )
     return rows
@@ -161,6 +278,8 @@ def build_run_log_writeback_rows(
 
 
 __all__ = [
+    "build_effect_summary_rows",
+    "build_generated_design_rows",
     "build_machine_status_rows",
     "build_run_log_writeback_rows",
     "build_trial_results_rows",

@@ -14,6 +14,8 @@ from Thesis_ML.workbook.schema_metadata import write_schema_metadata
 _MACHINE_STATUS_SHEET = "Machine_Status"
 _TRIAL_RESULTS_SHEET = "Trial_Results"
 _SUMMARY_OUTPUTS_SHEET = "Summary_Outputs"
+_GENERATED_DESIGN_MATRIX_SHEET = "Generated_Design_Matrix"
+_EFFECT_SUMMARIES_SHEET = "Effect_Summaries"
 _RUN_LOG_SHEET = "Run_Log"
 _README_SHEET = "README"
 
@@ -27,7 +29,7 @@ _MACHINE_STATUS_COLUMNS = [
     "last_checked",
     "notes",
 ]
-_TRIAL_RESULTS_COLUMNS = [
+_TRIAL_RESULTS_REQUIRED_COLUMNS = [
     "trial_id",
     "experiment_id",
     "run_id",
@@ -39,6 +41,13 @@ _TRIAL_RESULTS_COLUMNS = [
     "artifact_bundle",
     "notes",
 ]
+_TRIAL_RESULTS_OPTIONAL_COLUMNS = [
+    "study_id",
+    "cell_id",
+    "factor_settings_json",
+    "resolved_params_json",
+]
+_TRIAL_RESULTS_COLUMNS = _TRIAL_RESULTS_REQUIRED_COLUMNS + _TRIAL_RESULTS_OPTIONAL_COLUMNS
 _SUMMARY_OUTPUTS_COLUMNS = [
     "summary_type",
     "summary_key",
@@ -53,6 +62,29 @@ _SUMMARY_OUTPUTS_COLUMNS = [
     "target",
     "xai_method",
     "report_path",
+    "notes",
+]
+_GENERATED_DESIGN_MATRIX_COLUMNS = [
+    "study_id",
+    "trial_id",
+    "cell_id",
+    "factor_settings_json",
+    "start_section",
+    "end_section",
+    "base_artifact_id",
+    "resolved_params_json",
+    "status",
+]
+_EFFECT_SUMMARIES_COLUMNS = [
+    "study_id",
+    "summary_type",
+    "summary_key",
+    "factor_level_key",
+    "interaction_key",
+    "primary_metric_name",
+    "mean_primary_metric_value",
+    "best_primary_metric_value",
+    "best_trial_id",
     "notes",
 ]
 _RUN_LOG_COLUMNS = [
@@ -231,6 +263,8 @@ def write_workbook_results(
     machine_status_rows: list[dict[str, Any]],
     trial_result_rows: list[dict[str, Any]],
     summary_output_rows: list[dict[str, Any]] | None = None,
+    generated_design_rows: list[dict[str, Any]] | None = None,
+    effect_summary_rows: list[dict[str, Any]] | None = None,
     run_log_rows: list[dict[str, Any]] | None = None,
     append_run_log: bool = True,
     output_dir: Path | None = None,
@@ -269,7 +303,7 @@ def write_workbook_results(
     trial_headers = _assert_required_columns(
         trial_ws,
         header_row=2,
-        required_columns=_TRIAL_RESULTS_COLUMNS,
+        required_columns=_TRIAL_RESULTS_REQUIRED_COLUMNS,
     )
     for row in trial_result_rows:
         _append_row(
@@ -279,9 +313,53 @@ def write_workbook_results(
             key_column="trial_id",
             data_start_row=3,
             style_template_row=3,
-            max_column=len(_TRIAL_RESULTS_COLUMNS),
+            max_column=max(trial_headers.values()),
             hyperlink_columns={"report_path", "metrics_path", "artifact_bundle"},
         )
+
+    if generated_design_rows:
+        if _GENERATED_DESIGN_MATRIX_SHEET not in wb.sheetnames:
+            raise ValueError(
+                f"Workbook missing optional factorial write-back sheet: '{_GENERATED_DESIGN_MATRIX_SHEET}'"
+            )
+        design_ws = wb[_GENERATED_DESIGN_MATRIX_SHEET]
+        design_headers = _assert_required_columns(
+            design_ws,
+            header_row=2,
+            required_columns=_GENERATED_DESIGN_MATRIX_COLUMNS,
+        )
+        for row in generated_design_rows:
+            _append_row(
+                design_ws,
+                header_map=design_headers,
+                row_payload=row,
+                key_column="trial_id",
+                data_start_row=3,
+                style_template_row=3,
+                max_column=len(_GENERATED_DESIGN_MATRIX_COLUMNS),
+            )
+
+    if effect_summary_rows:
+        if _EFFECT_SUMMARIES_SHEET not in wb.sheetnames:
+            raise ValueError(
+                f"Workbook missing optional factorial write-back sheet: '{_EFFECT_SUMMARIES_SHEET}'"
+            )
+        effect_ws = wb[_EFFECT_SUMMARIES_SHEET]
+        effect_headers = _assert_required_columns(
+            effect_ws,
+            header_row=2,
+            required_columns=_EFFECT_SUMMARIES_COLUMNS,
+        )
+        for row in effect_summary_rows:
+            _append_row(
+                effect_ws,
+                header_map=effect_headers,
+                row_payload=row,
+                key_column="summary_key",
+                data_start_row=3,
+                style_template_row=3,
+                max_column=len(_EFFECT_SUMMARIES_COLUMNS),
+            )
 
     summary_ws = wb[_SUMMARY_OUTPUTS_SHEET]
     summary_headers = _assert_required_columns(

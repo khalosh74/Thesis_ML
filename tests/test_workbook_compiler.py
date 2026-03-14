@@ -41,6 +41,82 @@ def _set_executable_row(path: Path) -> None:
     workbook.save(path)
 
 
+def _header_map(ws, header_row: int) -> dict[str, int]:
+    return {
+        str(ws.cell(header_row, col).value): col
+        for col in range(1, ws.max_column + 1)
+        if ws.cell(header_row, col).value is not None
+    }
+
+
+def _set_factorial_design(
+    path: Path,
+    *,
+    add_constraint: bool = False,
+    study_type: str = "full_factorial",
+) -> None:
+    workbook = load_workbook(path)
+
+    study_ws = workbook["Study_Design"]
+    study_col = _header_map(study_ws, 2)
+    study_ws.cell(3, study_col["study_id"], "S01")
+    study_ws.cell(3, study_col["study_name"], "Factorial model/task study")
+    study_ws.cell(3, study_col["enabled"], "Yes")
+    study_ws.cell(3, study_col["study_type"], study_type)
+    study_ws.cell(3, study_col["intent"], "exploratory")
+    study_ws.cell(3, study_col["start_section"], "dataset_selection")
+    study_ws.cell(3, study_col["end_section"], "evaluation")
+    study_ws.cell(3, study_col["primary_metric"], "balanced_accuracy")
+    study_ws.cell(3, study_col["cv_scheme"], "within_subject_loso_session")
+    study_ws.cell(3, study_col["replication_mode"], "fixed_repeats")
+    study_ws.cell(3, study_col["num_repeats"], 1)
+    study_ws.cell(3, study_col["random_seed_policy"], "fixed")
+
+    factors_ws = workbook["Factors"]
+    factors_col = _header_map(factors_ws, 2)
+    factors_ws.cell(3, factors_col["study_id"], "S01")
+    factors_ws.cell(3, factors_col["factor_name"], "model")
+    factors_ws.cell(3, factors_col["parameter_path"], "model")
+    factors_ws.cell(3, factors_col["factor_type"], "categorical")
+    factors_ws.cell(3, factors_col["levels"], "ridge|logreg")
+
+    factors_ws.cell(4, factors_col["study_id"], "S01")
+    factors_ws.cell(4, factors_col["factor_name"], "filter_task")
+    factors_ws.cell(4, factors_col["parameter_path"], "filter_task")
+    factors_ws.cell(4, factors_col["factor_type"], "categorical")
+    factors_ws.cell(4, factors_col["levels"], "passive|emo")
+
+    fixed_ws = workbook["Fixed_Controls"]
+    fixed_col = _header_map(fixed_ws, 2)
+    fixed_ws.cell(3, fixed_col["study_id"], "S01")
+    fixed_ws.cell(3, fixed_col["parameter_path"], "target")
+    fixed_ws.cell(3, fixed_col["value"], "coarse_affect")
+    fixed_ws.cell(4, fixed_col["study_id"], "S01")
+    fixed_ws.cell(4, fixed_col["parameter_path"], "cv")
+    fixed_ws.cell(4, fixed_col["value"], "within_subject_loso_session")
+    fixed_ws.cell(5, fixed_col["study_id"], "S01")
+    fixed_ws.cell(5, fixed_col["parameter_path"], "subject")
+    fixed_ws.cell(5, fixed_col["value"], "sub-001")
+
+    blocking_ws = workbook["Blocking_and_Replication"]
+    blocking_col = _header_map(blocking_ws, 2)
+    blocking_ws.cell(3, blocking_col["study_id"], "S01")
+    blocking_ws.cell(3, blocking_col["block_type"], "none")
+    blocking_ws.cell(3, blocking_col["repeat_id"], 1)
+
+    if add_constraint:
+        constraints_ws = workbook["Constraints"]
+        constraints_col = _header_map(constraints_ws, 2)
+        constraints_ws.cell(3, constraints_col["study_id"], "S01")
+        constraints_ws.cell(3, constraints_col["if_factor"], "model")
+        constraints_ws.cell(3, constraints_col["if_level"], "logreg")
+        constraints_ws.cell(3, constraints_col["disallow_factor"], "filter_task")
+        constraints_ws.cell(3, constraints_col["disallow_level"], "emo")
+        constraints_ws.cell(3, constraints_col["reason"], "example exclusion")
+
+    workbook.save(path)
+
+
 def test_compile_workbook_file_success(tmp_path: Path) -> None:
     workbook_path = tmp_path / "thesis_experiment_program.xlsx"
     _make_workbook(workbook_path)
@@ -59,6 +135,20 @@ def test_compile_workbook_file_success(tmp_path: Path) -> None:
     assert trial.params["target"] == "coarse_affect"
     assert trial.params["cv"] == "within_subject_loso_session"
     assert trial.params["model"] == "ridge"
+
+
+def test_build_workbook_includes_factorial_design_sheets() -> None:
+    workbook = build_workbook()
+    for sheet in [
+        "Study_Design",
+        "Factors",
+        "Fixed_Controls",
+        "Constraints",
+        "Blocking_and_Replication",
+        "Generated_Design_Matrix",
+        "Effect_Summaries",
+    ]:
+        assert sheet in workbook.sheetnames
 
 
 def test_compile_workbook_missing_required_columns_raises(tmp_path: Path) -> None:
@@ -121,6 +211,68 @@ def test_compile_workbook_with_search_space_rows(tmp_path: Path) -> None:
     assert len(manifest.search_spaces) == 1
     assert manifest.search_spaces[0].search_space_id == "SS01"
     assert manifest.trial_specs[0].search_space_id == "SS01"
+
+
+def test_compile_workbook_full_factorial_expands_design_cells(tmp_path: Path) -> None:
+    workbook_path = tmp_path / "thesis_experiment_program.xlsx"
+    _make_workbook(workbook_path)
+    _set_factorial_design(workbook_path, add_constraint=False)
+
+    manifest = compile_workbook_file(workbook_path)
+    study_trials = [trial for trial in manifest.trial_specs if trial.study_id == "S01"]
+    assert len(study_trials) == 4
+    assert len(manifest.generated_design_matrix) == 4
+
+
+def test_compile_workbook_constraints_remove_invalid_combinations(tmp_path: Path) -> None:
+    workbook_path = tmp_path / "thesis_experiment_program.xlsx"
+    _make_workbook(workbook_path)
+    _set_factorial_design(workbook_path, add_constraint=True)
+
+    manifest = compile_workbook_file(workbook_path)
+    study_trials = [trial for trial in manifest.trial_specs if trial.study_id == "S01"]
+    assert len(study_trials) == 3
+
+
+def test_compile_workbook_fixed_controls_propagate_to_generated_trials(tmp_path: Path) -> None:
+    workbook_path = tmp_path / "thesis_experiment_program.xlsx"
+    _make_workbook(workbook_path)
+    _set_factorial_design(workbook_path, add_constraint=False)
+
+    manifest = compile_workbook_file(workbook_path)
+    study_trials = [trial for trial in manifest.trial_specs if trial.study_id == "S01"]
+    assert study_trials
+    for trial in study_trials:
+        assert trial.params["target"] == "coarse_affect"
+        assert trial.params["cv"] == "within_subject_loso_session"
+        assert trial.params["subject"] == "sub-001"
+
+
+def test_compile_workbook_fractional_factorial_raises_clear_error(tmp_path: Path) -> None:
+    workbook_path = tmp_path / "thesis_experiment_program.xlsx"
+    _make_workbook(workbook_path)
+    _set_factorial_design(workbook_path, study_type="fractional_factorial")
+
+    with pytest.raises(ValueError, match="fractional_factorial"):
+        compile_workbook_file(workbook_path)
+
+
+def test_compile_workbook_factor_referencing_unknown_study_raises(tmp_path: Path) -> None:
+    workbook_path = tmp_path / "thesis_experiment_program.xlsx"
+    _make_workbook(workbook_path)
+    workbook = load_workbook(workbook_path)
+    ws = workbook["Factors"]
+    headers = [ws.cell(2, col).value for col in range(1, ws.max_column + 1)]
+    col = {str(name): idx + 1 for idx, name in enumerate(headers) if name is not None}
+    ws.cell(3, col["study_id"], "UNKNOWN_STUDY")
+    ws.cell(3, col["factor_name"], "model")
+    ws.cell(3, col["parameter_path"], "model")
+    ws.cell(3, col["factor_type"], "categorical")
+    ws.cell(3, col["levels"], "ridge|logreg")
+    workbook.save(workbook_path)
+
+    with pytest.raises(ValueError, match="unknown study_id"):
+        compile_workbook_file(workbook_path)
 
 
 def test_compile_workbook_unsupported_schema_version_raises(tmp_path: Path) -> None:

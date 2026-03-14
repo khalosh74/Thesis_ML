@@ -127,3 +127,54 @@ def test_golden_workbook_to_execution_writeback_acceptance(
     assert str(
         run_log_ws.cell(latest_run_log_row, run_log_cols["Artifact_Path"]).value or ""
     ).strip()
+
+
+def test_factorial_workbook_end_to_end_acceptance(
+    acceptance_sample_data: dict[str, Path],
+    acceptance_factorial_workbook: Path,
+) -> None:
+    manifest = compile_workbook_file(acceptance_factorial_workbook)
+    study_trials = [trial for trial in manifest.trial_specs if trial.study_id == "S01"]
+    assert len(study_trials) == 4
+
+    run_result = run_workbook_decision_support_campaign(
+        workbook_path=acceptance_factorial_workbook,
+        index_csv=acceptance_sample_data["index_csv"],
+        data_root=acceptance_sample_data["data_root"],
+        cache_dir=acceptance_sample_data["cache_dir"],
+        output_root=acceptance_sample_data["output_root"],
+        experiment_id=None,
+        stage=None,
+        run_all=True,
+        seed=42,
+        n_permutations=0,
+        dry_run=False,
+        write_back_to_workbook=True,
+        workbook_output_dir=acceptance_sample_data["workbook_output_dir"],
+        append_workbook_run_log=True,
+    )
+
+    workbook_output_path = Path(str(run_result["workbook_output_path"]))
+    output_workbook = load_workbook(workbook_output_path, data_only=False)
+
+    generated_ws = output_workbook["Generated_Design_Matrix"]
+    generated_cols = _header_map(generated_ws, header_row=2)
+    generated_rows = _rows_with_value(
+        generated_ws,
+        header_map=generated_cols,
+        key="study_id",
+        expected="S01",
+        start_row=3,
+    )
+    assert generated_rows
+
+    effect_ws = output_workbook["Effect_Summaries"]
+    effect_cols = _header_map(effect_ws, header_row=2)
+    effect_rows = _rows_with_value(
+        effect_ws,
+        header_map=effect_cols,
+        key="study_id",
+        expected="S01",
+        start_row=3,
+    )
+    assert effect_rows

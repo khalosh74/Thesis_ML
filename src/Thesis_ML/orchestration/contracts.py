@@ -34,8 +34,36 @@ class SearchMode(StrEnum):
     OPTUNA = "optuna"
 
 
+class StudyType(StrEnum):
+    SINGLE_EXPERIMENT = "single_experiment"
+    FULL_FACTORIAL = "full_factorial"
+    FRACTIONAL_FACTORIAL = "fractional_factorial"
+    CUSTOM_MATRIX = "custom_matrix"
+
+
+class StudyIntent(StrEnum):
+    EXPLORATORY = "exploratory"
+    CONFIRMATORY = "confirmatory"
+
+
+class FactorType(StrEnum):
+    CATEGORICAL = "categorical"
+    BOOLEAN = "boolean"
+    ORDINAL = "ordinal"
+    NUMERIC = "numeric"
+
+
 def supported_sections() -> list[SectionName]:
     return list(SectionName)
+
+
+_SECTION_ORDER_MAP = {section.value: idx for idx, section in enumerate(SectionName)}
+
+
+def _section_value(value: SectionName | str) -> str:
+    if isinstance(value, SectionName):
+        return value.value
+    return str(value)
 
 
 class _ContractModel(BaseModel):
@@ -68,6 +96,14 @@ class TrialSpec(_ContractModel):
     base_artifact_id: str | None = None
     reuse_policy: ReusePolicy = ReusePolicy.AUTO
     search_space_id: str | None = None
+    study_id: str | None = None
+    trial_id: str | None = None
+    cell_id: str | None = None
+    repeat_id: int | None = None
+    seed: int | None = None
+    factor_settings: dict[str, Any] = Field(default_factory=dict)
+    fixed_controls: dict[str, Any] = Field(default_factory=dict)
+    design_metadata: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def _validate_supported_template_params(self) -> TrialSpec:
@@ -85,6 +121,179 @@ class TrialSpec(_ContractModel):
             raise ValueError("base_artifact_id must be non-empty when provided.")
         if self.search_space_id is not None and not self.search_space_id.strip():
             raise ValueError("search_space_id must be non-empty when provided.")
+        if self.study_id is not None and not self.study_id.strip():
+            raise ValueError("study_id must be non-empty when provided.")
+        if self.trial_id is not None and not self.trial_id.strip():
+            raise ValueError("trial_id must be non-empty when provided.")
+        if self.cell_id is not None and not self.cell_id.strip():
+            raise ValueError("cell_id must be non-empty when provided.")
+        if self.repeat_id is not None and int(self.repeat_id) <= 0:
+            raise ValueError("repeat_id must be > 0 when provided.")
+        if self.seed is not None and int(self.seed) < 0:
+            raise ValueError("seed must be >= 0 when provided.")
+        return self
+
+
+class FactorSpec(_ContractModel):
+    study_id: str = Field(min_length=1)
+    factor_name: str = Field(min_length=1)
+    section_name: SectionName | None = None
+    parameter_path: str = Field(min_length=1)
+    factor_type: FactorType = FactorType.CATEGORICAL
+    levels: list[Any] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _validate_levels(self) -> FactorSpec:
+        if not self.levels:
+            raise ValueError(
+                f"Factor '{self.factor_name}' in study '{self.study_id}' must define levels."
+            )
+        if self.factor_type == FactorType.BOOLEAN:
+            normalized = {str(value).strip().lower() for value in self.levels}
+            if not normalized.issubset({"true", "false", "0", "1", "yes", "no"}):
+                raise ValueError(
+                    f"Boolean factor '{self.factor_name}' in study '{self.study_id}' "
+                    "must use boolean-like levels."
+                )
+        return self
+
+
+class FixedControlSpec(_ContractModel):
+    study_id: str = Field(min_length=1)
+    parameter_path: str = Field(min_length=1)
+    value: Any
+
+
+class ConstraintSpec(_ContractModel):
+    study_id: str = Field(min_length=1)
+    if_factor: str = Field(min_length=1)
+    if_level: Any
+    disallow_factor: str = Field(min_length=1)
+    disallow_level: Any
+    reason: str | None = None
+
+
+class BlockingReplicationSpec(_ContractModel):
+    study_id: str = Field(min_length=1)
+    block_type: str = Field(min_length=1)
+    block_value: str | None = None
+    repeat_id: int = 1
+    seed: int | None = None
+
+    @model_validator(mode="after")
+    def _validate_repeat_seed(self) -> BlockingReplicationSpec:
+        if int(self.repeat_id) <= 0:
+            raise ValueError("repeat_id must be > 0.")
+        if self.seed is not None and int(self.seed) < 0:
+            raise ValueError("seed must be >= 0 when provided.")
+        return self
+
+
+class StudyDesignSpec(_ContractModel):
+    study_id: str = Field(min_length=1)
+    study_name: str = Field(min_length=1)
+    enabled: bool = False
+    study_type: StudyType = StudyType.SINGLE_EXPERIMENT
+    intent: StudyIntent = StudyIntent.EXPLORATORY
+    question: str | None = None
+    start_section: SectionName = SectionName.DATASET_SELECTION
+    end_section: SectionName = SectionName.EVALUATION
+    base_artifact_id: str | None = None
+    primary_metric: str = "balanced_accuracy"
+    secondary_metrics: str | None = None
+    cv_scheme: str | None = None
+    replication_mode: str = "none"
+    num_repeats: int = 1
+    random_seed_policy: str = "fixed"
+    notes: str | None = None
+    factors: list[FactorSpec] = Field(default_factory=list)
+    fixed_controls: list[FixedControlSpec] = Field(default_factory=list)
+    constraints: list[ConstraintSpec] = Field(default_factory=list)
+    blocking_replication: list[BlockingReplicationSpec] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _validate_study(self) -> StudyDesignSpec:
+        start_key = _section_value(self.start_section)
+        end_key = _section_value(self.end_section)
+        start_idx = _SECTION_ORDER_MAP[start_key]
+        end_idx = _SECTION_ORDER_MAP[end_key]
+        if start_idx > end_idx:
+            raise ValueError(
+                f"Invalid section range in study '{self.study_id}': "
+                f"start_section='{start_key}' is after "
+                f"end_section='{end_key}'."
+            )
+        if int(self.num_repeats) <= 0:
+            raise ValueError(f"Study '{self.study_id}' requires num_repeats > 0.")
+        if self.base_artifact_id is not None and not self.base_artifact_id.strip():
+            raise ValueError("base_artifact_id must be non-empty when provided.")
+        if self.study_type == StudyType.FULL_FACTORIAL and not self.factors:
+            raise ValueError(
+                f"Study '{self.study_id}' uses full_factorial but no factors were defined."
+            )
+        return self
+
+
+class GeneratedDesignCell(_ContractModel):
+    study_id: str = Field(min_length=1)
+    trial_id: str = Field(min_length=1)
+    cell_id: str = Field(min_length=1)
+    factor_settings: dict[str, Any] = Field(default_factory=dict)
+    start_section: SectionName = SectionName.DATASET_SELECTION
+    end_section: SectionName = SectionName.EVALUATION
+    base_artifact_id: str | None = None
+    resolved_params: dict[str, Any] = Field(default_factory=dict)
+    status: Literal["planned", "dry_run", "completed", "failed", "blocked"] = "planned"
+    repeat_id: int = 1
+    seed: int | None = None
+    notes: str | None = None
+
+    @model_validator(mode="after")
+    def _validate_generated_cell(self) -> GeneratedDesignCell:
+        start_key = _section_value(self.start_section)
+        end_key = _section_value(self.end_section)
+        start_idx = _SECTION_ORDER_MAP[start_key]
+        end_idx = _SECTION_ORDER_MAP[end_key]
+        if start_idx > end_idx:
+            raise ValueError(
+                f"Invalid section range for trial '{self.trial_id}': "
+                f"{start_key}->{end_key}."
+            )
+        missing = [
+            name
+            for name in ("target", "cv", "model")
+            if not str(self.resolved_params.get(name, "")).strip()
+        ]
+        if missing:
+            raise ValueError(
+                f"Generated design cell '{self.trial_id}' is missing required params: "
+                + ", ".join(missing)
+            )
+        if int(self.repeat_id) <= 0:
+            raise ValueError("repeat_id must be > 0.")
+        if self.seed is not None and int(self.seed) < 0:
+            raise ValueError("seed must be >= 0 when provided.")
+        return self
+
+
+class EffectSummary(_ContractModel):
+    study_id: str = Field(min_length=1)
+    summary_type: str = Field(min_length=1)
+    factor_keys: list[str] = Field(default_factory=list)
+    factor_levels: dict[str, Any] = Field(default_factory=dict)
+    primary_metric_name: str = "balanced_accuracy"
+    primary_metric_value: float | None = None
+    best_trial_id: str | None = None
+    n_trials: int = 0
+    descriptive_only: bool = True
+    notes: str | None = None
+
+    @model_validator(mode="after")
+    def _validate_effect_summary(self) -> EffectSummary:
+        if int(self.n_trials) < 0:
+            raise ValueError("n_trials must be >= 0.")
+        if self.best_trial_id is not None and not self.best_trial_id.strip():
+            raise ValueError("best_trial_id must be non-empty when provided.")
         return self
 
 
@@ -159,6 +368,9 @@ class CompiledStudyManifest(_ContractModel):
     experiments: list[ExperimentSpec]
     trial_specs: list[TrialSpec]
     search_spaces: list[SearchSpaceSpec] = Field(default_factory=list)
+    study_designs: list[StudyDesignSpec] = Field(default_factory=list)
+    generated_design_matrix: list[GeneratedDesignCell] = Field(default_factory=list)
+    effect_summaries: list[EffectSummary] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def _validate_trial_coverage(self) -> CompiledStudyManifest:
@@ -193,6 +405,40 @@ class CompiledStudyManifest(_ContractModel):
             raise ValueError(
                 "Compiled trial specs reference unknown search_space_id values: "
                 + ", ".join(unknown_search_space_refs)
+            )
+        known_studies = {study.study_id for study in self.study_designs}
+        unknown_study_refs = sorted(
+            {
+                str(trial.study_id)
+                for trial in self.trial_specs
+                if trial.study_id and str(trial.study_id) not in known_studies
+            }
+        )
+        if unknown_study_refs:
+            raise ValueError(
+                "Compiled trial specs reference unknown study_id values: "
+                + ", ".join(unknown_study_refs)
+            )
+        unknown_generated_studies = sorted(
+            {cell.study_id for cell in self.generated_design_matrix if cell.study_id not in known_studies}
+        )
+        if unknown_generated_studies:
+            raise ValueError(
+                "Generated design matrix references unknown study_id values: "
+                + ", ".join(unknown_generated_studies)
+            )
+        known_trial_ids = {str(trial.trial_id) for trial in self.trial_specs if trial.trial_id}
+        unknown_effect_trials = sorted(
+            {
+                str(summary.best_trial_id)
+                for summary in self.effect_summaries
+                if summary.best_trial_id and str(summary.best_trial_id) not in known_trial_ids
+            }
+        )
+        if unknown_effect_trials:
+            raise ValueError(
+                "Effect summaries reference unknown best_trial_id values: "
+                + ", ".join(unknown_effect_trials)
             )
         return self
 

@@ -18,10 +18,28 @@ from Thesis_ML.workbook.structured_execution_sheets import (
     fill_artifact_registry as _fill_artifact_registry_sheet,
 )
 from Thesis_ML.workbook.structured_execution_sheets import (
+    fill_blocking_and_replication as _fill_blocking_and_replication_sheet,
+)
+from Thesis_ML.workbook.structured_execution_sheets import (
+    fill_constraints as _fill_constraints_sheet,
+)
+from Thesis_ML.workbook.structured_execution_sheets import (
+    fill_effect_summaries as _fill_effect_summaries_sheet,
+)
+from Thesis_ML.workbook.structured_execution_sheets import (
     fill_experiment_definitions as _fill_experiment_definitions_sheet,
 )
 from Thesis_ML.workbook.structured_execution_sheets import (
+    fill_factors as _fill_factors_sheet,
+)
+from Thesis_ML.workbook.structured_execution_sheets import (
     fill_fixed_configs as _fill_fixed_configs_sheet,
+)
+from Thesis_ML.workbook.structured_execution_sheets import (
+    fill_fixed_controls as _fill_fixed_controls_sheet,
+)
+from Thesis_ML.workbook.structured_execution_sheets import (
+    fill_generated_design_matrix as _fill_generated_design_matrix_sheet,
 )
 from Thesis_ML.workbook.structured_execution_sheets import (
     fill_machine_status as _fill_machine_status_sheet,
@@ -31,6 +49,9 @@ from Thesis_ML.workbook.structured_execution_sheets import (
 )
 from Thesis_ML.workbook.structured_execution_sheets import (
     fill_search_spaces as _fill_search_spaces_sheet,
+)
+from Thesis_ML.workbook.structured_execution_sheets import (
+    fill_study_design as _fill_study_design_sheet,
 )
 from Thesis_ML.workbook.structured_execution_sheets import (
     fill_summary_outputs as _fill_summary_outputs_sheet,
@@ -59,6 +80,13 @@ SHEET_ORDER = [
     "Master_Experiments",
     "Experiment_Definitions",
     "Search_Spaces",
+    "Study_Design",
+    "Factors",
+    "Fixed_Controls",
+    "Constraints",
+    "Blocking_and_Replication",
+    "Generated_Design_Matrix",
+    "Effect_Summaries",
     "Artifact_Registry",
     "Fixed_Configs",
     "Objectives",
@@ -194,6 +222,69 @@ SEARCH_SPACES_COLUMNS = [
     "notes",
 ]
 
+STUDY_DESIGN_COLUMNS = [
+    "study_id",
+    "study_name",
+    "enabled",
+    "study_type",
+    "intent",
+    "question",
+    "start_section",
+    "end_section",
+    "base_artifact_id",
+    "primary_metric",
+    "secondary_metrics",
+    "cv_scheme",
+    "replication_mode",
+    "num_repeats",
+    "random_seed_policy",
+    "notes",
+]
+
+FACTORS_COLUMNS = [
+    "study_id",
+    "factor_name",
+    "section_name",
+    "parameter_path",
+    "factor_type",
+    "levels",
+]
+
+FIXED_CONTROLS_COLUMNS = [
+    "study_id",
+    "parameter_path",
+    "value",
+]
+
+CONSTRAINTS_COLUMNS = [
+    "study_id",
+    "if_factor",
+    "if_level",
+    "disallow_factor",
+    "disallow_level",
+    "reason",
+]
+
+BLOCKING_AND_REPLICATION_COLUMNS = [
+    "study_id",
+    "block_type",
+    "block_value",
+    "repeat_id",
+    "seed",
+]
+
+GENERATED_DESIGN_MATRIX_COLUMNS = [
+    "study_id",
+    "trial_id",
+    "cell_id",
+    "factor_settings_json",
+    "start_section",
+    "end_section",
+    "base_artifact_id",
+    "resolved_params_json",
+    "status",
+]
+
 ARTIFACT_REGISTRY_COLUMNS = [
     "artifact_id",
     "artifact_type",
@@ -250,6 +341,10 @@ TRIAL_RESULTS_COLUMNS = [
     "metrics_path",
     "artifact_bundle",
     "notes",
+    "study_id",
+    "cell_id",
+    "factor_settings_json",
+    "resolved_params_json",
 ]
 
 SUMMARY_OUTPUTS_COLUMNS = [
@@ -266,6 +361,19 @@ SUMMARY_OUTPUTS_COLUMNS = [
     "target",
     "xai_method",
     "report_path",
+    "notes",
+]
+
+EFFECT_SUMMARIES_COLUMNS = [
+    "study_id",
+    "summary_type",
+    "summary_key",
+    "factor_level_key",
+    "interaction_key",
+    "primary_metric_name",
+    "mean_primary_metric_value",
+    "best_primary_metric_value",
+    "best_trial_id",
     "notes",
 ]
 
@@ -509,6 +617,13 @@ VOCABS = {
     "Reuse_Policy": ["auto", "require_explicit_base", "disallow"],
     "Search_Optimization_Mode": ["deterministic_grid", "optuna"],
     "Search_Parameter_Scope": ["parameter", "segment", "xai"],
+    "Study_Type": ["single_experiment", "full_factorial", "fractional_factorial", "custom_matrix"],
+    "Study_Intent": ["exploratory", "confirmatory"],
+    "Factor_Type": ["categorical", "boolean", "ordinal", "numeric"],
+    "Replication_Mode": ["none", "fixed_repeats", "custom_blocks"],
+    "Random_Seed_Policy": ["fixed", "per_repeat", "per_cell"],
+    "Block_Type": ["none", "subject", "task", "modality", "custom"],
+    "Design_Cell_Status": ["planned", "dry_run", "completed", "failed", "blocked"],
 }
 
 DEFINITIONS = [
@@ -1024,6 +1139,56 @@ def fill_search_spaces_sheet(ws, wb: Workbook) -> int:
         ws=ws,
         wb=wb,
         search_spaces_columns=SEARCH_SPACES_COLUMNS,
+    )
+
+
+def fill_study_design_sheet(ws, wb: Workbook) -> int:
+    return _fill_study_design_sheet(
+        ws=ws,
+        wb=wb,
+        study_design_columns=STUDY_DESIGN_COLUMNS,
+    )
+
+
+def fill_factors_sheet(ws) -> int:
+    return _fill_factors_sheet(
+        ws=ws,
+        factors_columns=FACTORS_COLUMNS,
+    )
+
+
+def fill_fixed_controls_sheet(ws) -> int:
+    return _fill_fixed_controls_sheet(
+        ws=ws,
+        fixed_controls_columns=FIXED_CONTROLS_COLUMNS,
+    )
+
+
+def fill_constraints_sheet(ws) -> int:
+    return _fill_constraints_sheet(
+        ws=ws,
+        constraints_columns=CONSTRAINTS_COLUMNS,
+    )
+
+
+def fill_blocking_and_replication_sheet(ws) -> int:
+    return _fill_blocking_and_replication_sheet(
+        ws=ws,
+        blocking_and_replication_columns=BLOCKING_AND_REPLICATION_COLUMNS,
+    )
+
+
+def fill_generated_design_matrix_sheet(ws) -> int:
+    return _fill_generated_design_matrix_sheet(
+        ws=ws,
+        generated_design_matrix_columns=GENERATED_DESIGN_MATRIX_COLUMNS,
+    )
+
+
+def fill_effect_summaries_sheet(ws) -> int:
+    return _fill_effect_summaries_sheet(
+        ws=ws,
+        effect_summaries_columns=EFFECT_SUMMARIES_COLUMNS,
     )
 
 
@@ -2501,6 +2666,13 @@ def fill_dictionary_sheet(ws, wb: Workbook) -> None:
         "Reuse_Policy",
         "Search_Optimization_Mode",
         "Search_Parameter_Scope",
+        "Study_Type",
+        "Study_Intent",
+        "Factor_Type",
+        "Replication_Mode",
+        "Random_Seed_Policy",
+        "Block_Type",
+        "Design_Cell_Status",
     ]
     ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=len(names))
     for c, name in enumerate(names, start=1):
@@ -2742,6 +2914,13 @@ def build_workbook() -> Workbook:
     )
     fill_experiment_definitions_sheet(wb["Experiment_Definitions"])
     fill_search_spaces_sheet(wb["Search_Spaces"], wb)
+    fill_study_design_sheet(wb["Study_Design"], wb)
+    fill_factors_sheet(wb["Factors"])
+    fill_fixed_controls_sheet(wb["Fixed_Controls"])
+    fill_constraints_sheet(wb["Constraints"])
+    fill_blocking_and_replication_sheet(wb["Blocking_and_Replication"])
+    fill_generated_design_matrix_sheet(wb["Generated_Design_Matrix"])
+    fill_effect_summaries_sheet(wb["Effect_Summaries"])
     fill_artifact_registry_sheet(wb["Artifact_Registry"])
     fill_fixed_configs_sheet(wb["Fixed_Configs"])
     fill_objectives_sheet(wb["Objectives"])
