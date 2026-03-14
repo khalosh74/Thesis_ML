@@ -357,8 +357,7 @@ class GeneratedDesignCell(_ContractModel):
         end_idx = _SECTION_ORDER_MAP[end_key]
         if start_idx > end_idx:
             raise ValueError(
-                f"Invalid section range for trial '{self.trial_id}': "
-                f"{start_key}->{end_key}."
+                f"Invalid section range for trial '{self.trial_id}': {start_key}->{end_key}."
             )
         missing = [
             name
@@ -525,7 +524,11 @@ class CompiledStudyManifest(_ContractModel):
                 + ", ".join(unknown_study_refs)
             )
         unknown_generated_studies = sorted(
-            {cell.study_id for cell in self.generated_design_matrix if cell.study_id not in known_studies}
+            {
+                cell.study_id
+                for cell in self.generated_design_matrix
+                if cell.study_id not in known_studies
+            }
         )
         if unknown_generated_studies:
             raise ValueError(
@@ -545,11 +548,7 @@ class CompiledStudyManifest(_ContractModel):
                 + ", ".join(unknown_rigor_studies)
             )
         unknown_analysis_studies = sorted(
-            {
-                plan.study_id
-                for plan in self.analysis_plans
-                if plan.study_id not in known_studies
-            }
+            {plan.study_id for plan in self.analysis_plans if plan.study_id not in known_studies}
         )
         if unknown_analysis_studies:
             raise ValueError(
@@ -586,7 +585,11 @@ class CompiledStudyManifest(_ContractModel):
                 + ", ".join(duplicate_analysis_ids)
             )
         unknown_review_studies = sorted(
-            {review.study_id for review in self.study_reviews if review.study_id not in known_studies}
+            {
+                review.study_id
+                for review in self.study_reviews
+                if review.study_id not in known_studies
+            }
         )
         if unknown_review_studies:
             raise ValueError(

@@ -232,7 +232,9 @@ def expand_template_variants(
         )
         resolved_trial_id = None
         if trial_id_value:
-            resolved_trial_id = trial_id_value if len(unresolved) == 1 else f"{trial_id_value}__v{idx:03d}"
+            resolved_trial_id = (
+                trial_id_value if len(unresolved) == 1 else f"{trial_id_value}__v{idx:03d}"
+            )
         resolved.append(
             {
                 "template_id": template_id,
@@ -251,9 +253,15 @@ def expand_template_variants(
                 "cell_id": row.get("cell_id"),
                 "repeat_id": row.get("repeat_id"),
                 "seed": row.get("seed"),
-                "factor_settings": row.get("factor_settings") if isinstance(row.get("factor_settings"), dict) else {},
-                "fixed_controls": row.get("fixed_controls") if isinstance(row.get("fixed_controls"), dict) else {},
-                "design_metadata": row.get("design_metadata") if isinstance(row.get("design_metadata"), dict) else {},
+                "factor_settings": row.get("factor_settings")
+                if isinstance(row.get("factor_settings"), dict)
+                else {},
+                "fixed_controls": row.get("fixed_controls")
+                if isinstance(row.get("fixed_controls"), dict)
+                else {},
+                "design_metadata": row.get("design_metadata")
+                if isinstance(row.get("design_metadata"), dict)
+                else {},
             }
         )
     return resolved

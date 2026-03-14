@@ -434,18 +434,24 @@ def _parse_experiment_definitions_rows(ws) -> list[dict[str, Any]]:
                 f"{row_index} is missing required values: {', '.join(missing_required)}"
             )
 
-        start_section = _validated_section(
-            _read_cell(row, header_map, "start_section"),
-            field_name="start_section",
-            row_index=row_index,
-            sheet_name="Experiment_Definitions",
-        ) or SectionName.DATASET_SELECTION.value
-        end_section = _validated_section(
-            _read_cell(row, header_map, "end_section"),
-            field_name="end_section",
-            row_index=row_index,
-            sheet_name="Experiment_Definitions",
-        ) or SectionName.EVALUATION.value
+        start_section = (
+            _validated_section(
+                _read_cell(row, header_map, "start_section"),
+                field_name="start_section",
+                row_index=row_index,
+                sheet_name="Experiment_Definitions",
+            )
+            or SectionName.DATASET_SELECTION.value
+        )
+        end_section = (
+            _validated_section(
+                _read_cell(row, header_map, "end_section"),
+                field_name="end_section",
+                row_index=row_index,
+                sheet_name="Experiment_Definitions",
+            )
+            or SectionName.EVALUATION.value
+        )
         if _SECTION_TO_INDEX[start_section] > _SECTION_TO_INDEX[end_section]:
             raise ValueError(
                 "Invalid section range in Experiment_Definitions row "
@@ -669,9 +675,7 @@ def _parse_json_object(
             f"{sheet_name} row {row_index} has invalid JSON in {column_name}: {exc.msg}"
         ) from exc
     if not isinstance(decoded, dict):
-        raise ValueError(
-            f"{sheet_name} row {row_index} must use JSON object for {column_name}."
-        )
+        raise ValueError(f"{sheet_name} row {row_index} must use JSON object for {column_name}.")
     return decoded
 
 
@@ -989,9 +993,8 @@ def _checklist_status(checklist: StudyRigorChecklistSpec | None) -> str:
 def _analysis_status(analysis_plan: AnalysisPlanSpec | None) -> str:
     if analysis_plan is None:
         return "missing"
-    missing_core = (
-        not bool(str(analysis_plan.primary_contrast or "").strip())
-        or not bool(str(analysis_plan.interpretation_rules or "").strip())
+    missing_core = not bool(str(analysis_plan.primary_contrast or "").strip()) or not bool(
+        str(analysis_plan.interpretation_rules or "").strip()
     )
     return "partial" if missing_core else "complete"
 
@@ -1231,9 +1234,7 @@ def _build_study_design_layer(
                 sheet_name="Study_Design",
                 field_name="external_validation_planned",
             ),
-            "blocking_strategy": _normalize_text(
-                _read_cell(row, study_header, "blocking_strategy")
-            )
+            "blocking_strategy": _normalize_text(_read_cell(row, study_header, "blocking_strategy"))
             or None,
             "randomization_strategy": _normalize_text(
                 _read_cell(row, study_header, "randomization_strategy")
@@ -1250,7 +1251,8 @@ def _build_study_design_layer(
                 _read_cell(row, study_header, "random_seed_policy")
             )
             or "fixed",
-            "stopping_rule": _normalize_text(_read_cell(row, study_header, "stopping_rule")) or None,
+            "stopping_rule": _normalize_text(_read_cell(row, study_header, "stopping_rule"))
+            or None,
             "notes": _normalize_text(_read_cell(row, study_header, "notes")) or None,
             "factors": [],
             "fixed_controls": [],
@@ -1268,9 +1270,7 @@ def _build_study_design_layer(
         if not study_id:
             continue
         if study_id not in raw_studies:
-            raise ValueError(
-                f"Factors row {row_index} references unknown study_id '{study_id}'."
-            )
+            raise ValueError(f"Factors row {row_index} references unknown study_id '{study_id}'.")
         factor_name = _normalize_text(_read_cell(row, factor_header, "factor_name"))
         raw_studies[study_id]["factors"].append(
             FactorSpec.model_validate(
@@ -1286,7 +1286,9 @@ def _build_study_design_layer(
                         )
                         or None
                     ),
-                    "parameter_path": _normalize_text(_read_cell(row, factor_header, "parameter_path")),
+                    "parameter_path": _normalize_text(
+                        _read_cell(row, factor_header, "parameter_path")
+                    ),
                     "factor_type": _normalize_text(_read_cell(row, factor_header, "factor_type"))
                     or "categorical",
                     "levels": _parse_levels(
@@ -1432,8 +1434,7 @@ def _build_study_design_layer(
             continue
         if study_id not in raw_studies:
             raise ValueError(
-                "Study_Rigor_Checklist row "
-                f"{row_index} references unknown study_id '{study_id}'."
+                f"Study_Rigor_Checklist row {row_index} references unknown study_id '{study_id}'."
             )
         if study_id in checklist_by_study:
             raise ValueError(
@@ -1668,7 +1669,11 @@ def _build_study_design_layer(
                 "blocked_reasons": [],
                 "notes": (
                     "Factorial study design compiled from workbook."
-                    + (" Guardrail disposition=warning." if review.execution_disposition == "warning" else "")
+                    + (
+                        " Guardrail disposition=warning."
+                        if review.execution_disposition == "warning"
+                        else ""
+                    )
                     + (f" Question: {study.question}" if study.question else "")
                     + (f" Notes: {study.notes}" if study.notes else "")
                 ),

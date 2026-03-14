@@ -185,7 +185,9 @@ def aggregate_factorial_best_by_study(rows: list[dict[str, Any]]) -> list[dict[s
             {
                 "study_id": study_id,
                 "n_trials": int(len(group_rows)),
-                "primary_metric_name": str(best_row.get("primary_metric_name") or "balanced_accuracy"),
+                "primary_metric_name": str(
+                    best_row.get("primary_metric_name") or "balanced_accuracy"
+                ),
                 "mean_primary_metric_value": float(mean_metric),
                 "best_primary_metric_value": float(best_row["primary_metric_value_float"]),
                 "best_trial_id": _trial_id(best_row),
@@ -219,7 +221,9 @@ def aggregate_factorial_by_level(rows: list[dict[str, Any]]) -> list[dict[str, A
                 "study_id": study_id,
                 "summary_key": f"{study_id}:{factor_name}:{level_key}",
                 "factor_level_key": level_key,
-                "primary_metric_name": str(best_row.get("primary_metric_name") or "balanced_accuracy"),
+                "primary_metric_name": str(
+                    best_row.get("primary_metric_name") or "balanced_accuracy"
+                ),
                 "n_trials": int(len(group_rows)),
                 "mean_primary_metric_value": float(mean_metric),
                 "best_primary_metric_value": float(best_row["primary_metric_value_float"]),
@@ -252,7 +256,9 @@ def aggregate_factorial_combinations(rows: list[dict[str, Any]]) -> list[dict[st
                 "study_id": study_id,
                 "summary_key": f"{study_id}:combination:{_trial_id(best_row)}",
                 "factor_level_key": canonical,
-                "primary_metric_name": str(best_row.get("primary_metric_name") or "balanced_accuracy"),
+                "primary_metric_name": str(
+                    best_row.get("primary_metric_name") or "balanced_accuracy"
+                ),
                 "n_trials": int(len(group_rows)),
                 "mean_primary_metric_value": float(mean_metric),
                 "best_primary_metric_value": float(best_row["primary_metric_value_float"]),
@@ -288,7 +294,9 @@ def aggregate_factorial_interactions(rows: list[dict[str, Any]]) -> list[dict[st
                 "study_id": study_id,
                 "summary_key": f"{study_id}:interaction:{interaction_key}",
                 "interaction_key": interaction_key,
-                "primary_metric_name": str(best_row.get("primary_metric_name") or "balanced_accuracy"),
+                "primary_metric_name": str(
+                    best_row.get("primary_metric_name") or "balanced_accuracy"
+                ),
                 "n_trials": int(len(group_rows)),
                 "mean_primary_metric_value": float(mean_metric),
                 "best_primary_metric_value": float(best_row["primary_metric_value_float"]),

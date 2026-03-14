@@ -420,6 +420,8 @@ def test_workbook_roundtrip_confirmatory_study_blocked_by_guardrails(
     ]
     assert review_rows
     latest_review_row = review_rows[-1]
-    assert review_ws.cell(latest_review_row, review_cols["execution_disposition"]).value == "blocked"
+    assert (
+        review_ws.cell(latest_review_row, review_cols["execution_disposition"]).value == "blocked"
+    )
     assert int(review_ws.cell(latest_review_row, review_cols["error_count"]).value or 0) >= 1
     assert int(review_ws.cell(latest_review_row, review_cols["blocked_trials"]).value or 0) >= 1

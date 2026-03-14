@@ -174,9 +174,7 @@ def execute_variant(
     )
     search_assignment = variant.get("search_assignment")
 
-    run_token = (
-        variant_id.replace(" ", "_").replace("/", "_").replace("\\", "_").replace(":", "_")
-    )
+    run_token = variant_id.replace(" ", "_").replace("/", "_").replace("\\", "_").replace(":", "_")
     run_id = f"ds_{experiment_id}_{run_token}_{campaign_id}"
     reports_root = experiment_root / "reports"
     reports_root.mkdir(parents=True, exist_ok=True)

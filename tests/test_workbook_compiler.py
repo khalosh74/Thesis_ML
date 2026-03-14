@@ -441,7 +441,9 @@ def test_compile_workbook_rigor_unknown_study_reference_fails(tmp_path: Path) ->
         compile_workbook_file(workbook_path)
 
 
-def test_compile_workbook_confirmatory_missing_key_rigor_fields_blocks_study(tmp_path: Path) -> None:
+def test_compile_workbook_confirmatory_missing_key_rigor_fields_blocks_study(
+    tmp_path: Path,
+) -> None:
     workbook_path = tmp_path / "thesis_experiment_program.xlsx"
     _make_workbook(workbook_path)
     _set_factorial_design(workbook_path, add_constraint=False, intent="confirmatory")
@@ -486,8 +488,12 @@ def test_compile_workbook_exploratory_without_rigor_sheets_still_compiles(tmp_pa
     assert review.execution_disposition == "warning"
     assert review.warning_count >= 1
     assert review.error_count == 0
-    assert any("Incomplete rigor checklist field" in warning for warning in manifest.validation_warnings)
-    assert any("Incomplete analysis plan field" in warning for warning in manifest.validation_warnings)
+    assert any(
+        "Incomplete rigor checklist field" in warning for warning in manifest.validation_warnings
+    )
+    assert any(
+        "Incomplete analysis plan field" in warning for warning in manifest.validation_warnings
+    )
 
 
 def test_compile_workbook_fractional_factorial_raises_clear_error(tmp_path: Path) -> None:

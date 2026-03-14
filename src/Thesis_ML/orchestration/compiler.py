@@ -155,12 +155,16 @@ def compile_registry_payload(
     if raw_generated_matrix is None:
         raw_generated_matrix = []
     if not isinstance(raw_generated_matrix, list):
-        raise ValueError("Invalid registry payload: expected 'generated_design_matrix' to be a list.")
+        raise ValueError(
+            "Invalid registry payload: expected 'generated_design_matrix' to be a list."
+        )
     for raw_cell in raw_generated_matrix:
         if not isinstance(raw_cell, dict):
             raise ValueError("Invalid generated design cell payload: each cell must be an object.")
         try:
-            compiled_generated_design_matrix.append(GeneratedDesignCell.model_validate(dict(raw_cell)))
+            compiled_generated_design_matrix.append(
+                GeneratedDesignCell.model_validate(dict(raw_cell))
+            )
         except ValidationError as exc:
             trial_id = str(raw_cell.get("trial_id", "<missing-trial-id>"))
             raise ValueError(f"Invalid generated design cell '{trial_id}': {exc}") from exc
