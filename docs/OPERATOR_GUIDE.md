@@ -77,6 +77,16 @@ This command validates:
 
 ## 5) Factorial design operator notes
 
+- Canonical example workbook:
+  - `templates/examples/canonical_designed_study.xlsx`
+  - includes one small 2x2 designed study with rigor metadata and analysis plan
+  - intended as a reference pattern, not a production claim
+
+- Single experiment vs designed study:
+  - single experiment: populate `Experiment_Definitions` rows directly
+  - designed study: define one study in `Study_Design` and related sheets (`Factors`,
+    `Fixed_Controls`, `Constraints`, `Blocking_and_Replication`)
+
 - Define the scientific design explicitly in workbook sheets.
 - Required user-owned design decisions:
   - factors and allowed levels
@@ -93,6 +103,7 @@ This command validates:
   - validates confirmatory studies more strictly than exploratory studies
   - does not auto-design science or guarantee scientific validity
 - The framework does not auto-design study validity or perform automatic inferential statistics.
+- It also does not perform automatic causal inference or automatic significance testing.
 
 Execution policy:
 - Exploratory studies:
@@ -106,3 +117,16 @@ Before trusting results:
 - review `Study_Review` in workbook outputs
 - check `study_review_summary.json` in campaign exports
 - verify why a study was allowed, warned, or blocked
+
+How to fill scientific-rigor sheets:
+- `Study_Rigor_Checklist`: record leakage review, unit-of-analysis, hierarchy assumptions,
+  missing-data/class-imbalance/subgroup plans, and lock status.
+- `Analysis_Plan`: record primary contrast, aggregation level, uncertainty method,
+  multiplicity handling, interaction reporting policy, and interpretation rules.
+
+How to read machine-managed study outputs:
+- `Generated_Design_Matrix`: concrete generated design cells/trials from your study definition.
+- `Trial_Results`: per-trial execution outcomes and artifact paths.
+- `Effect_Summaries`: descriptive grouped summaries by factor levels/combinations.
+- `Study_Review`: guardrail disposition (`allowed`, `warning`, `blocked`), missing fields, and
+  warning/error counts that explain execution eligibility.

@@ -56,6 +56,36 @@ Factorial-design guardrails:
 - maintain explicit study guardrail dispositions (`allowed`, `warning`, `blocked`) and
   keep confirmatory blocking requirements strict/auditable.
 
+## Scientific-rigor extension map
+
+- Schema and contract models:
+  - `src/Thesis_ML/orchestration/contracts.py`
+  - key models: `StudyDesignSpec`, `StudyRigorChecklistSpec`, `AnalysisPlanSpec`,
+    `StudyReviewSummary`
+- Workbook schema and sheet columns:
+  - `src/Thesis_ML/workbook/template_builder.py`
+  - `src/Thesis_ML/workbook/structured_execution_sheets.py`
+  - `src/Thesis_ML/workbook/template_validation.py`
+- Guardrail validation policy and study review generation:
+  - `src/Thesis_ML/orchestration/workbook_compiler.py` (`_build_study_review`)
+- Runtime study-review artifact and workbook write-back bridge:
+  - `src/Thesis_ML/orchestration/campaign_engine.py`
+  - `src/Thesis_ML/orchestration/workbook_bridge.py`
+  - `src/Thesis_ML/orchestration/workbook_writeback.py`
+
+Adding a new rigor field safely:
+1. Add field to contract model(s) in `contracts.py`.
+2. Add workbook column(s) in template builder/sheet builders.
+3. Add parsing + validation in `workbook_compiler.py` (including study cross-references).
+4. Extend `StudyReviewSummary` if the field affects guardrail visibility/disposition.
+5. Add tests for schema presence, validation behavior, and write-back visibility.
+6. Update operator/maintainer docs with policy impact and limits.
+
+Extending supported study types honestly:
+- Add explicit model + parser support first.
+- Keep unsupported types rejected with clear validation errors until fully implemented.
+- Do not label partial implementations as complete design support.
+
 ## Core verification commands
 
 ```bash

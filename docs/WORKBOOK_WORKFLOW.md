@@ -17,6 +17,11 @@ Template policy:
 - it is intentionally non-runnable until executable rows are enabled/populated in
   `Experiment_Definitions`
 
+Canonical designed-study example:
+- `templates/examples/canonical_designed_study.xlsx`
+- small 2x2 `full_factorial` workbook with `Study_Rigor_Checklist` + `Analysis_Plan`
+- intended for orientation and acceptance coverage, not as a claim of scientific validity
+
 ## Generate template
 
 ```bash

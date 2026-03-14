@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +16,10 @@ from Thesis_ML.config.schema_versions import (
 )
 from Thesis_ML.data.index_dataset import build_dataset_index
 from Thesis_ML.workbook.builder import build_workbook
+
+
+def _repo_root() -> Path:
+    return Path(__file__).resolve().parents[2]
 
 
 def _write_nifti(path: Path, data: np.ndarray) -> None:
@@ -146,6 +151,16 @@ def acceptance_factorial_workbook(tmp_path: Path) -> Path:
     block_ws.cell(3, block_col["repeat_id"], 1)
 
     workbook.save(workbook_path)
+    return workbook_path
+
+
+@pytest.fixture
+def acceptance_canonical_designed_study_workbook(tmp_path: Path) -> Path:
+    source = _repo_root() / "templates" / "examples" / "canonical_designed_study.xlsx"
+    if not source.exists():
+        raise FileNotFoundError(f"Missing canonical designed-study example workbook: {source}")
+    workbook_path = tmp_path / source.name
+    shutil.copy2(source, workbook_path)
     return workbook_path
 
 
