@@ -7,7 +7,10 @@ import tempfile
 from pathlib import Path
 from shutil import which
 
-from Thesis_ML.orchestration.workbook_compiler import compile_workbook_file
+from Thesis_ML.orchestration.workbook_compiler import (
+    NoEnabledExecutableRowsError,
+    compile_workbook_file,
+)
 from Thesis_ML.workbook.validation import validate_workbook
 
 
@@ -53,10 +56,7 @@ def _validate_shipped_workbook_assets(repo_root: Path) -> None:
 
     try:
         template_manifest = compile_workbook_file(template_path)
-    except ValueError as exc:
-        message = str(exc)
-        if "No enabled executable rows were found in Experiment_Definitions" not in message:
-            raise
+    except NoEnabledExecutableRowsError:
         print("Template compile check: non-runnable template (no enabled rows).")
     else:
         if len(template_manifest.trial_specs) == 0:

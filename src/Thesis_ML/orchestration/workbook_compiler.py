@@ -34,6 +34,11 @@ from Thesis_ML.orchestration.contracts import (
 )
 from Thesis_ML.workbook.schema_metadata import read_schema_metadata
 
+
+class NoEnabledExecutableRowsError(ValueError):
+    """Raised when workbook compilation finds no enabled executable rows."""
+
+
 _REQUIRED_SHEETS = {"Master_Experiments", "Experiment_Definitions"}
 
 _MASTER_REQUIRED_COLUMNS = {
@@ -1715,7 +1720,7 @@ def compile_workbook_workbook(
             review.execution_disposition == "blocked" for review in study_reviews
         )
         if not (has_enabled_studies and has_blocked_enabled_study):
-            raise ValueError(
+            raise NoEnabledExecutableRowsError(
                 "No enabled executable rows were found in Experiment_Definitions or Study_Design."
             )
 

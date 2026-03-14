@@ -50,7 +50,10 @@ jobs:
               DEFAULT_DECISION_SUPPORT_REGISTRY,
               SHIPPED_WORKBOOK_TEMPLATE,
           )
-          from Thesis_ML.orchestration.workbook_compiler import compile_workbook_file
+          from Thesis_ML.orchestration.workbook_compiler import (
+              NoEnabledExecutableRowsError,
+              compile_workbook_file,
+          )
           from Thesis_ML.workbook.validation import validate_workbook
 
           print(DEFAULT_DECISION_SUPPORT_REGISTRY)
@@ -74,9 +77,8 @@ jobs:
 
           try:
               manifest = compile_workbook_file(SHIPPED_WORKBOOK_TEMPLATE)
-          except ValueError as exc:
-              if "No enabled executable rows were found in Experiment_Definitions" not in str(exc):
-                  raise
+          except NoEnabledExecutableRowsError:
+              pass
           else:
               if len(manifest.trial_specs) == 0:
                   raise SystemExit(

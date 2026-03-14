@@ -10,7 +10,10 @@ from Thesis_ML.config.paths import (
     DEFAULT_DECISION_SUPPORT_REGISTRY,
     SHIPPED_WORKBOOK_TEMPLATE,
 )
-from Thesis_ML.orchestration.workbook_compiler import compile_workbook_file
+from Thesis_ML.orchestration.workbook_compiler import (
+    NoEnabledExecutableRowsError,
+    compile_workbook_file,
+)
 from Thesis_ML.workbook.validation import validate_workbook
 
 
@@ -65,5 +68,5 @@ def test_committed_template_validates_with_schema_metadata() -> None:
 
 def test_committed_template_is_non_runnable_until_enabled() -> None:
     repo_template = _repo_root() / "templates" / "thesis_experiment_program.xlsx"
-    with pytest.raises(ValueError, match="No enabled executable rows were found"):
+    with pytest.raises(NoEnabledExecutableRowsError):
         compile_workbook_file(repo_template)
