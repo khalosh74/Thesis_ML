@@ -47,3 +47,10 @@ thesisml-run-decision-support \
   --dry-run
 python -m pytest tests/test_import_decoupling.py -q
 ```
+
+Additional local hygiene/performance checks:
+
+```bash
+python scripts/release_hygiene_check.py
+python scripts/performance_smoke.py --output outputs/performance/performance_smoke_summary.json
+```

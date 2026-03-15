@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from openpyxl.workbook.workbook import Workbook
 
-from Thesis_ML.workbook.template_builder import (
+from Thesis_ML.workbook.governance_sheet_builders import (
     fill_ai_usage_sheet,
     fill_claim_ledger_sheet,
     fill_confirmatory_sheet,
@@ -13,11 +13,10 @@ from Thesis_ML.workbook.template_builder import (
     fill_dictionary_sheet,
     fill_ethics_sheet,
     fill_grouping_strategy_map_sheet,
-    fill_master_sheet,
-    fill_readme_sheet,
     fill_run_log_sheet,
     fill_thesis_map_sheet,
 )
+from Thesis_ML.workbook.template_builder import fill_master_sheet, fill_readme_sheet
 
 
 def fill_governance_core(wb: Workbook) -> None:

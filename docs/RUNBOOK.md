@@ -231,6 +231,18 @@ python -m ruff format --check src/Thesis_ML/artifacts src/Thesis_ML/orchestratio
 python -m pytest -q
 ```
 
+Release hygiene + performance smoke:
+
+```bash
+python scripts/release_hygiene_check.py
+python scripts/performance_smoke.py --output outputs/performance/performance_smoke_summary.json
+```
+
+`scripts/performance_smoke.py` records timing for:
+- workbook build/save/load/compile
+- `thesisml-run-comparison` dry-run
+- `thesisml-run-protocol` dry-run
+
 `mypy` is a required CI gate and includes nibabel boundary modules:
 - `src/Thesis_ML/spm/extract_glm.py`
 - `src/Thesis_ML/features/nifti_features.py`

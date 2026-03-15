@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from time import perf_counter
 from typing import Any
 
 from Thesis_ML.comparisons.artifacts import write_comparison_artifacts
@@ -122,10 +123,12 @@ def execute_compiled_comparison(
     force: bool,
     resume: bool,
     dry_run: bool,
+    compile_duration_seconds: float | None = None,
 ) -> dict[str, Any]:
     run_results: list[ComparisonRunResult] = []
     reports_root_path = Path(reports_root)
     reports_root_path.mkdir(parents=True, exist_ok=True)
+    run_loop_start = perf_counter()
 
     for spec in compiled_manifest.runs:
         if dry_run:
@@ -194,14 +197,23 @@ def execute_compiled_comparison(
                 )
             )
 
+    run_loop_duration_seconds = perf_counter() - run_loop_start
+    artifact_write_start = perf_counter()
     comparison_output_dir = _comparison_output_dir(comparison, reports_root=reports_root_path)
+    stage_timings: dict[str, float] = {
+        "run_execution": float(run_loop_duration_seconds),
+    }
+    if compile_duration_seconds is not None:
+        stage_timings["compile"] = float(compile_duration_seconds)
     artifact_paths = write_comparison_artifacts(
         comparison=comparison,
         compiled_manifest=compiled_manifest,
         run_results=run_results,
         output_dir=comparison_output_dir,
         dry_run=dry_run,
+        stage_timings=stage_timings,
     )
+    stage_timings["artifact_writing"] = float(perf_counter() - artifact_write_start)
 
     n_completed = sum(result.status == "completed" for result in run_results)
     n_failed = sum(result.status == "failed" for result in run_results)
@@ -215,6 +227,7 @@ def execute_compiled_comparison(
         "n_completed": int(n_completed),
         "n_failed": int(n_failed),
         "n_planned": int(n_planned),
+        "stage_timings_seconds": {key: round(value, 6) for key, value in stage_timings.items()},
         "artifact_paths": artifact_paths,
     }
 
@@ -238,11 +251,13 @@ def compile_and_run_comparison(
             "Comparison execution rejected: comparison status is 'draft'. "
             "Lock comparison spec before execution."
         )
+    compile_start = perf_counter()
     compiled_manifest = compile_comparison(
         comparison,
         index_csv=index_csv,
         variant_ids=variant_ids,
     )
+    compile_duration_seconds = perf_counter() - compile_start
     return execute_compiled_comparison(
         comparison=comparison,
         compiled_manifest=compiled_manifest,
@@ -253,4 +268,5 @@ def compile_and_run_comparison(
         force=force,
         resume=resume,
         dry_run=dry_run,
+        compile_duration_seconds=compile_duration_seconds,
     )

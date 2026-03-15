@@ -48,6 +48,7 @@ Core package root: `src/Thesis_ML/`
   - protocol-level artifact writers (`artifacts.py`)
 - `orchestration/`
   - manifest contracts/compiler (`contracts.py`, `compiler.py`, `workbook_compiler.py`)
+  - extracted study-design workbook compilation layer (`workbook_study_design_layer.py`)
   - workbook study-review guardrail helpers (`study_review.py`)
   - campaign execution (`campaign_engine.py`)
   - campaign CLI plumbing (`campaign_cli.py`)
@@ -58,7 +59,12 @@ Core package root: `src/Thesis_ML/`
 - `workbook/`
   - workbook builder facade (`builder.py`)
   - workbook builder/orchestration facade (`template_builder.py`)
-  - workbook primitives and structured sheet helpers (`template_primitives.py`, `structured_execution_sheets.py`)
+  - workbook constants catalog (`template_constants.py`)
+  - governance sheet builders (`governance_sheet_builders.py`)
+  - structured sheet core + design + operations modules
+    (`structured_sheet_core.py`, `structured_sheet_design.py`, `structured_sheet_operations.py`)
+  - compatibility structured sheet facade (`structured_execution_sheets.py`)
+  - workbook primitives (`template_primitives.py`)
   - workbook validation layer (`template_validation.py`, `validation.py`)
   - metadata helpers (`schema_metadata.py`)
   - compatibility sheet/style helpers (`sheets/`, `styles.py`, `named_ranges.py`)

@@ -108,6 +108,10 @@ Modular architecture highlights:
 - `src/Thesis_ML/experiments/run_artifacts.py` owns run identity extraction and run-level artifact payload stamping/building.
 - `src/Thesis_ML/comparisons/decision.py` owns comparison winner/inconclusive/invalid decision logic.
 - `src/Thesis_ML/orchestration/study_review.py` owns workbook study-review guardrail evaluation helpers.
+- `src/Thesis_ML/workbook/template_constants.py` owns workbook catalog constants and seeded experiment definitions.
+- `src/Thesis_ML/workbook/governance_sheet_builders.py` owns governance sheet rendering logic; `template_builder.py` is the coordinator/facade.
+- `src/Thesis_ML/workbook/structured_sheet_core.py`, `structured_sheet_design.py`, and `structured_sheet_operations.py` own structured execution-sheet rendering internals behind `structured_execution_sheets.py`.
+- `src/Thesis_ML/orchestration/workbook_study_design_layer.py` owns study-design layer compilation; `workbook_compiler.py` coordinates top-level workbook compilation flow.
 - top-level runners remain orchestration-first and delegate policy/decision/artifact logic to dedicated modules.
 
 Locked comparison example:
@@ -211,6 +215,8 @@ docker run --rm thesis-ml:dev
 - Release validation workflow: `.github/workflows/release_gate.yml` (tags `v*`)
 - Release details: `docs/RELEASE.md`
 - Gold acceptance path used by CI/release: `python scripts/acceptance_smoke.py`
+- Local release hygiene check: `python scripts/release_hygiene_check.py`
+- Lightweight performance smoke: `python scripts/performance_smoke.py`
 
 ## Operator documentation
 

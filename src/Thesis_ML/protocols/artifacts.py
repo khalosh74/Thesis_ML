@@ -19,6 +19,16 @@ def _write_json(path: Path, payload: dict[str, Any]) -> None:
     path.write_text(f"{json.dumps(payload, indent=2)}\n", encoding="utf-8")
 
 
+def _relative_path(path_text: str | None) -> str | None:
+    if not path_text:
+        return None
+    path_obj = Path(path_text)
+    try:
+        return str(path_obj.resolve().relative_to(Path.cwd().resolve()))
+    except ValueError:
+        return str(path_obj)
+
+
 def _suite_summary(
     compiled_manifest: CompiledProtocolManifest,
     run_results: list[ProtocolRunResult],
@@ -65,8 +75,9 @@ def _execution_status_payload(
     run_results: list[ProtocolRunResult],
     *,
     dry_run: bool,
+    stage_timings: dict[str, float] | None = None,
 ) -> dict[str, Any]:
-    return {
+    payload: dict[str, Any] = {
         "framework_mode": FrameworkMode.CONFIRMATORY.value,
         "protocol_id": protocol.protocol_id,
         "protocol_version": protocol.protocol_version,
@@ -75,6 +86,11 @@ def _execution_status_payload(
         "dry_run": bool(dry_run),
         "runs": [result.model_dump(mode="json") for result in run_results],
     }
+    if stage_timings:
+        payload["stage_timings_seconds"] = {
+            key: round(float(value), 6) for key, value in stage_timings.items()
+        }
+    return payload
 
 
 def _report_index_rows(
@@ -82,15 +98,35 @@ def _report_index_rows(
     run_results: list[ProtocolRunResult],
 ) -> list[dict[str, Any]]:
     result_by_run_id = {result.run_id: result for result in run_results}
+    metric_policy_cache: dict[
+        tuple[str, tuple[str, ...], str],
+        dict[str, Any],
+    ] = {}
     rows: list[dict[str, Any]] = []
     for spec in compiled_manifest.runs:
-        metric_policy_effective = resolve_effective_metric_policy(
-            primary_metric=spec.primary_metric,
-            secondary_metrics=compiled_manifest.metric_policy.secondary_metrics,
-            decision_metric=spec.primary_metric,
-            tuning_metric=spec.primary_metric,
-            permutation_metric=spec.controls.permutation_metric or spec.primary_metric,
+        cache_key = (
+            spec.primary_metric,
+            tuple(compiled_manifest.metric_policy.secondary_metrics),
+            spec.controls.permutation_metric or spec.primary_metric,
         )
+        metric_policy_effective = metric_policy_cache.get(cache_key)
+        if metric_policy_effective is None:
+            resolved_metric_policy = resolve_effective_metric_policy(
+                primary_metric=spec.primary_metric,
+                secondary_metrics=compiled_manifest.metric_policy.secondary_metrics,
+                decision_metric=spec.primary_metric,
+                tuning_metric=spec.primary_metric,
+                permutation_metric=spec.controls.permutation_metric or spec.primary_metric,
+            )
+            metric_policy_effective = {
+                "primary_metric": resolved_metric_policy.primary_metric,
+                "secondary_metrics": list(resolved_metric_policy.secondary_metrics),
+                "decision_metric": resolved_metric_policy.decision_metric,
+                "tuning_metric": resolved_metric_policy.tuning_metric,
+                "permutation_metric": resolved_metric_policy.permutation_metric,
+                "higher_is_better": bool(resolved_metric_policy.higher_is_better),
+            }
+            metric_policy_cache[cache_key] = metric_policy_effective
         result = result_by_run_id.get(spec.run_id)
         metrics = result.metrics if result and result.metrics else {}
         rows.append(
@@ -108,22 +144,31 @@ def _report_index_rows(
                 "test_subject": spec.test_subject,
                 "seed": int(spec.seed),
                 "primary_metric": spec.primary_metric,
-                "decision_metric": metric_policy_effective.decision_metric,
-                "tuning_metric": metric_policy_effective.tuning_metric,
+                "decision_metric": metric_policy_effective["decision_metric"],
+                "tuning_metric": metric_policy_effective["tuning_metric"],
                 "methodology_policy_name": spec.methodology_policy_name.value,
                 "class_weight_policy": spec.class_weight_policy.value,
                 "tuning_enabled": bool(spec.tuning_enabled),
                 "permutation_enabled": bool(spec.controls.permutation_enabled),
                 "n_permutations": int(spec.controls.n_permutations),
                 "permutation_metric": spec.controls.permutation_metric,
-                "higher_is_better": bool(metric_policy_effective.higher_is_better),
+                "higher_is_better": bool(metric_policy_effective["higher_is_better"]),
                 "dummy_baseline_run": bool(spec.controls.dummy_baseline_run),
                 "interpretability_enabled": bool(spec.interpretability_enabled),
                 "subgroup_reporting_enabled": bool(spec.subgroup_reporting_enabled),
                 "canonical_run": bool(spec.canonical_run),
                 "report_dir": result.report_dir if result is not None else None,
+                "report_dir_relative": (
+                    _relative_path(result.report_dir) if result is not None else None
+                ),
                 "config_path": result.config_path if result is not None else None,
+                "config_path_relative": (
+                    _relative_path(result.config_path) if result is not None else None
+                ),
                 "metrics_path": result.metrics_path if result is not None else None,
+                "metrics_path_relative": (
+                    _relative_path(result.metrics_path) if result is not None else None
+                ),
                 "error": result.error if result is not None else None,
                 "balanced_accuracy": metrics.get("balanced_accuracy"),
                 "macro_f1": metrics.get("macro_f1"),
@@ -142,6 +187,7 @@ def write_protocol_artifacts(
     run_results: list[ProtocolRunResult],
     output_dir: Path | str,
     dry_run: bool,
+    stage_timings: dict[str, float] | None = None,
 ) -> dict[str, str]:
     protocol_dir = Path(output_dir)
     protocol_dir.mkdir(parents=True, exist_ok=True)
@@ -181,6 +227,7 @@ def write_protocol_artifacts(
             compiled_manifest=compiled_manifest,
             run_results=run_results,
             dry_run=dry_run,
+            stage_timings=stage_timings,
         ),
     )
 

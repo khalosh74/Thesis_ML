@@ -9,6 +9,13 @@ from Thesis_ML.config.metric_policy import EffectiveMetricPolicy
 from Thesis_ML.experiments.segment_execution import SegmentExecutionResult
 
 
+def _relative_path(path: Path) -> str | None:
+    try:
+        return str(path.resolve().relative_to(Path.cwd().resolve()))
+    except ValueError:
+        return None
+
+
 @dataclass(frozen=True)
 class RunIdentity:
     protocol_id: str | None
@@ -105,9 +112,17 @@ def stamp_metrics_artifact(
     persisted_metrics["class_weight_policy"] = class_weight_policy
     persisted_metrics["tuning_enabled"] = bool(tuning_enabled)
     persisted_metrics["tuning_summary_path"] = str(tuning_summary_path.resolve())
+    persisted_metrics["tuning_summary_path_relative"] = _relative_path(tuning_summary_path)
     persisted_metrics["tuning_best_params_path"] = str(tuning_best_params_path.resolve())
+    persisted_metrics["tuning_best_params_path_relative"] = _relative_path(
+        tuning_best_params_path
+    )
     persisted_metrics["subgroup_metrics_json_path"] = str(subgroup_metrics_json_path.resolve())
+    persisted_metrics["subgroup_metrics_json_path_relative"] = _relative_path(
+        subgroup_metrics_json_path
+    )
     persisted_metrics["subgroup_metrics_csv_path"] = str(subgroup_metrics_csv_path.resolve())
+    persisted_metrics["subgroup_metrics_csv_path_relative"] = _relative_path(subgroup_metrics_csv_path)
     persisted_metrics["metric_policy_effective"] = metric_policy_effective_payload(
         metric_policy_effective
     )
@@ -197,8 +212,11 @@ def build_run_config_payload(
         "run_id": run_id,
         "timestamp": timestamp,
         "index_csv": str(index_csv.resolve()),
+        "index_csv_relative": _relative_path(index_csv),
         "data_root": str(data_root.resolve()),
+        "data_root_relative": _relative_path(data_root),
         "cache_dir": str(cache_dir.resolve()),
+        "cache_dir_relative": _relative_path(cache_dir),
         "target": target_column,
         "model": model,
         "cv": cv_mode,
@@ -220,12 +238,16 @@ def build_run_config_payload(
         "tuning_inner_cv_scheme": tuning_inner_cv_scheme,
         "tuning_inner_group_field": tuning_inner_group_field,
         "tuning_summary_path": str(tuning_summary_path.resolve()),
+        "tuning_summary_path_relative": _relative_path(tuning_summary_path),
         "tuning_best_params_path": str(tuning_best_params_path.resolve()),
+        "tuning_best_params_path_relative": _relative_path(tuning_best_params_path),
         "subgroup_reporting_enabled": bool(subgroup_reporting_enabled),
         "subgroup_dimensions": list(subgroup_dimensions),
         "subgroup_min_samples_per_group": int(subgroup_min_samples_per_group),
         "subgroup_metrics_json_path": str(subgroup_metrics_json_path.resolve()),
+        "subgroup_metrics_json_path_relative": _relative_path(subgroup_metrics_json_path),
         "subgroup_metrics_csv_path": str(subgroup_metrics_csv_path.resolve()),
+        "subgroup_metrics_csv_path_relative": _relative_path(subgroup_metrics_csv_path),
         "filter_task": filter_task,
         "filter_modality": filter_modality,
         "n_permutations": int(n_permutations),
@@ -253,17 +275,22 @@ def build_run_config_payload(
         "executed_sections": segment_result.executed_sections,
         "reused_sections": segment_result.reused_sections,
         "fold_splits_path": str(fold_splits_path.resolve()),
+        "fold_splits_path_relative": _relative_path(fold_splits_path),
         "spatial_compatibility_status": spatial_compatibility_status,
         "spatial_compatibility_passed": spatial_compatibility_passed,
         "spatial_compatibility_n_groups_checked": spatial_compatibility_n_groups_checked,
         "spatial_compatibility_reference_group_id": spatial_compatibility_reference_group_id,
         "spatial_compatibility_affine_atol": spatial_compatibility_affine_atol,
         "spatial_compatibility_report_path": str(spatial_compatibility_report_path.resolve()),
+        "spatial_compatibility_report_path_relative": _relative_path(
+            spatial_compatibility_report_path
+        ),
         "interpretability_enabled": interpretability_enabled,
         "interpretability_performed": interpretability_performed,
         "interpretability_status": interpretability_status,
         "interpretability_fold_artifacts_path": interpretability_fold_artifacts_path,
         "interpretability_summary_path": str(interpretability_summary_path.resolve()),
+        "interpretability_summary_path_relative": _relative_path(interpretability_summary_path),
         "python_version": python_version,
         "numpy_version": numpy_version,
         "pandas_version": pandas_version,
@@ -307,25 +334,41 @@ def build_run_result_payload(
     return {
         "run_id": run_id,
         "report_dir": str(report_dir.resolve()),
+        "report_dir_relative": _relative_path(report_dir),
         "config_path": str(config_path.resolve()),
+        "config_path_relative": _relative_path(config_path),
         "metrics_path": str(metrics_path.resolve()),
+        "metrics_path_relative": _relative_path(metrics_path),
         "subgroup_metrics_json_path": str(subgroup_metrics_json_path.resolve()),
+        "subgroup_metrics_json_path_relative": _relative_path(subgroup_metrics_json_path),
         "subgroup_metrics_csv_path": str(subgroup_metrics_csv_path.resolve()),
+        "subgroup_metrics_csv_path_relative": _relative_path(subgroup_metrics_csv_path),
         "tuning_summary_path": str(tuning_summary_path.resolve()),
+        "tuning_summary_path_relative": _relative_path(tuning_summary_path),
         "tuning_best_params_path": str(tuning_best_params_path.resolve()),
+        "tuning_best_params_path_relative": _relative_path(tuning_best_params_path),
         "fold_metrics_path": str(fold_metrics_path.resolve()),
+        "fold_metrics_path_relative": _relative_path(fold_metrics_path),
         "fold_splits_path": str(fold_splits_path.resolve()),
+        "fold_splits_path_relative": _relative_path(fold_splits_path),
         "predictions_path": str(predictions_path.resolve()),
+        "predictions_path_relative": _relative_path(predictions_path),
         "spatial_compatibility_report_path": str(spatial_compatibility_report_path.resolve()),
+        "spatial_compatibility_report_path_relative": _relative_path(
+            spatial_compatibility_report_path
+        ),
         "interpretability_summary_path": str(interpretability_summary_path.resolve()),
+        "interpretability_summary_path_relative": _relative_path(interpretability_summary_path),
         "interpretability_fold_artifacts_path": interpretability_fold_artifacts_path,
         "artifact_registry_path": str(artifact_registry_path.resolve()),
+        "artifact_registry_path_relative": _relative_path(artifact_registry_path),
         "planned_sections": segment_result.planned_sections,
         "executed_sections": segment_result.executed_sections,
         "reused_sections": segment_result.reused_sections,
         "artifact_ids": artifact_ids,
         "metrics": metrics,
         "run_status_path": str(run_status_path.resolve()),
+        "run_status_path_relative": _relative_path(run_status_path),
         "run_mode": run_mode,
         "framework_mode": framework_mode,
         "canonical_run": bool(canonical_run),

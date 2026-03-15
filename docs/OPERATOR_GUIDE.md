@@ -201,3 +201,18 @@ How to read machine-managed study outputs:
 - `Effect_Summaries`: descriptive grouped summaries by factor levels/combinations.
 - `Study_Review`: guardrail disposition (`allowed`, `warning`, `blocked`), missing fields, and
   warning/error counts that explain execution eligibility.
+
+## 6) Release hygiene and performance smoke
+
+Run before cutting a release candidate:
+
+```bash
+python scripts/release_hygiene_check.py
+python scripts/acceptance_smoke.py
+```
+
+Optional lightweight performance snapshot:
+
+```bash
+python scripts/performance_smoke.py --output outputs/performance/performance_smoke_summary.json
+```

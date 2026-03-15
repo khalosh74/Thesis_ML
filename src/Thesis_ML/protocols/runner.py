@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from time import perf_counter
 from typing import Any
 
 from Thesis_ML.config.framework_mode import FrameworkMode
@@ -113,10 +114,12 @@ def execute_compiled_protocol(
     force: bool,
     resume: bool,
     dry_run: bool,
+    compile_duration_seconds: float | None = None,
 ) -> dict[str, Any]:
     run_results: list[ProtocolRunResult] = []
     reports_root_path = Path(reports_root)
     reports_root_path.mkdir(parents=True, exist_ok=True)
+    execute_start = perf_counter()
 
     for spec in compiled_manifest.runs:
         if dry_run:
@@ -180,14 +183,23 @@ def execute_compiled_protocol(
                 )
             )
 
+    run_loop_duration_seconds = perf_counter() - execute_start
+    artifact_write_start = perf_counter()
     protocol_output_dir = _protocol_output_dir(protocol, reports_root=reports_root_path)
+    stage_timings: dict[str, float] = {
+        "run_execution": float(run_loop_duration_seconds),
+    }
+    if compile_duration_seconds is not None:
+        stage_timings["compile"] = float(compile_duration_seconds)
     artifact_paths = write_protocol_artifacts(
         protocol=protocol,
         compiled_manifest=compiled_manifest,
         run_results=run_results,
         output_dir=protocol_output_dir,
         dry_run=dry_run,
+        stage_timings=stage_timings,
     )
+    stage_timings["artifact_writing"] = float(perf_counter() - artifact_write_start)
 
     n_completed = sum(result.status == "completed" for result in run_results)
     n_failed = sum(result.status == "failed" for result in run_results)
@@ -201,6 +213,7 @@ def execute_compiled_protocol(
         "n_completed": int(n_completed),
         "n_failed": int(n_failed),
         "n_planned": int(n_planned),
+        "stage_timings_seconds": {key: round(value, 6) for key, value in stage_timings.items()},
         "artifact_paths": artifact_paths,
     }
 
@@ -222,11 +235,13 @@ def compile_and_run_protocol(
             "Confirmatory protocol execution rejects status='draft'. "
             "Set protocol status to 'locked' or 'released' before running."
         )
+    compile_start = perf_counter()
     compiled_manifest = compile_protocol(
         protocol,
         index_csv=index_csv,
         suite_ids=suite_ids,
     )
+    compile_duration_seconds = perf_counter() - compile_start
     return execute_compiled_protocol(
         protocol=protocol,
         compiled_manifest=compiled_manifest,
@@ -237,4 +252,5 @@ def compile_and_run_protocol(
         force=force,
         resume=resume,
         dry_run=dry_run,
+        compile_duration_seconds=compile_duration_seconds,
     )
