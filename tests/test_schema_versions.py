@@ -6,6 +6,7 @@ from Thesis_ML.config.schema_versions import (
     PUBLIC_SCHEMA_VERSIONS,
     SUMMARY_RESULT_SCHEMA_VERSION,
     SUPPORTED_SCHEMA_VERSIONS,
+    THESIS_PROTOCOL_SCHEMA_VERSION,
     WORKBOOK_SCHEMA_METADATA_ROWS,
     WORKBOOK_SCHEMA_VERSION,
     WORKBOOK_WRITEBACK_SCHEMA_VERSION,
@@ -19,6 +20,7 @@ def test_public_schema_versions_map_matches_constants() -> None:
         "artifact_schema_version": ARTIFACT_SCHEMA_VERSION,
         "workbook_writeback_schema_version": WORKBOOK_WRITEBACK_SCHEMA_VERSION,
         "summary_result_schema_version": SUMMARY_RESULT_SCHEMA_VERSION,
+        "thesis_protocol_schema_version": THESIS_PROTOCOL_SCHEMA_VERSION,
     }
 
 

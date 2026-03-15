@@ -109,6 +109,7 @@ class ModelFitInput(_SectionModel):
     train_subject: str | None = None
     test_subject: str | None = None
     seed: int
+    interpretability_enabled: bool | None = None
     run_id: str = Field(min_length=1)
     config_filename: str = Field(min_length=1)
     report_dir: Path
@@ -167,6 +168,8 @@ class EvaluationInput(_SectionModel):
     train_subject: str | None = None
     test_subject: str | None = None
     n_permutations: int = 0
+    primary_metric_name: str = "balanced_accuracy"
+    permutation_metric_name: str | None = None
     spatial_compatibility: dict[str, Any]
     spatial_report_path: Path
     interpretability_summary: dict[str, Any]

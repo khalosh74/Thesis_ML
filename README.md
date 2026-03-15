@@ -72,8 +72,18 @@ Or run the commands directly:
 ```powershell
 python -m uv sync --frozen --extra dev
 python -m uv run python -m pytest -q
+python -m uv run thesisml-run-protocol --help
 python -m uv run thesisml-run-decision-support --help
 python -m uv run thesisml-workbook --output outputs/workbooks/bootstrap_thesis_experiment_program.xlsx
+```
+
+Official thesis run path (canonical protocol):
+
+```powershell
+python -m uv run thesisml-run-protocol `
+  --protocol configs/protocols/thesis_canonical_v1.json `
+  --all-suites `
+  --reports-root outputs/reports/experiments
 ```
 
 Decision-support campaign command (requires index/cache/data paths to exist):

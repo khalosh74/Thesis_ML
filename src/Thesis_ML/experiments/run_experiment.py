@@ -127,7 +127,8 @@ def _evaluate_permutations(
     splits: list[tuple[np.ndarray, np.ndarray]],
     seed: int,
     n_permutations: int,
-    observed_accuracy: float,
+    metric_name: str,
+    observed_metric: float,
 ) -> dict[str, Any]:
     return evaluate_permutations(
         pipeline_template=pipeline_template,
@@ -136,7 +137,8 @@ def _evaluate_permutations(
         splits=splits,
         seed=seed,
         n_permutations=n_permutations,
-        observed_accuracy=observed_accuracy,
+        metric_name=metric_name,
+        observed_metric=observed_metric,
     )
 
 
@@ -162,6 +164,10 @@ def run_experiment(
     filter_task: str | None = None,
     filter_modality: str | None = None,
     n_permutations: int = 0,
+    primary_metric_name: str = "balanced_accuracy",
+    permutation_metric_name: str | None = None,
+    interpretability_enabled_override: bool | None = None,
+    protocol_context: dict[str, Any] | None = None,
     run_id: str | None = None,
     reports_root: Path | str = DEFAULT_EXPERIMENT_REPORTS_ROOT,
     start_section: str | None = None,
@@ -201,6 +207,14 @@ def run_experiment(
             raise ValueError("train_subject and test_subject must be different.")
 
     target_column = _resolve_target_column(target)
+    resolved_primary_metric_name = str(primary_metric_name).strip()
+    resolved_permutation_metric_name = (
+        str(permutation_metric_name).strip()
+        if permutation_metric_name is not None
+        else resolved_primary_metric_name
+    )
+    resolved_protocol_context = dict(protocol_context or {})
+    canonical_run = bool(resolved_protocol_context.get("canonical_run", False))
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     resolved_run_id = run_id or f"{timestamp}_{model}_{target_column}"
@@ -246,6 +260,9 @@ def run_experiment(
                 filter_modality=filter_modality,
                 seed=seed,
                 n_permutations=n_permutations,
+                primary_metric_name=resolved_primary_metric_name,
+                permutation_metric_name=resolved_permutation_metric_name,
+                interpretability_enabled_override=interpretability_enabled_override,
                 run_id=resolved_run_id,
                 config_filename=config_path.name,
                 report_dir=report_dir,
@@ -284,6 +301,47 @@ def run_experiment(
     metrics = dict(segment_result.metrics or {})
     spatial_compatibility = segment_result.spatial_compatibility
     interpretability_summary = segment_result.interpretability_summary
+    protocol_id = (
+        str(resolved_protocol_context.get("protocol_id"))
+        if resolved_protocol_context.get("protocol_id")
+        else None
+    )
+    protocol_version = (
+        str(resolved_protocol_context.get("protocol_version"))
+        if resolved_protocol_context.get("protocol_version")
+        else None
+    )
+    protocol_schema_version = (
+        str(resolved_protocol_context.get("protocol_schema_version"))
+        if resolved_protocol_context.get("protocol_schema_version")
+        else None
+    )
+    suite_id = (
+        str(resolved_protocol_context.get("suite_id"))
+        if resolved_protocol_context.get("suite_id")
+        else None
+    )
+    claim_ids_raw = resolved_protocol_context.get("claim_ids")
+    claim_ids = (
+        [str(value) for value in claim_ids_raw]
+        if isinstance(claim_ids_raw, list)
+        else None
+    )
+
+    if metrics_path.exists():
+        try:
+            persisted_metrics = json.loads(metrics_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            persisted_metrics = None
+        if isinstance(persisted_metrics, dict):
+            persisted_metrics["canonical_run"] = bool(canonical_run)
+            persisted_metrics["protocol_id"] = protocol_id
+            persisted_metrics["protocol_version"] = protocol_version
+            persisted_metrics["protocol_schema_version"] = protocol_schema_version
+            persisted_metrics["suite_id"] = suite_id
+            persisted_metrics["claim_ids"] = claim_ids
+            metrics_path.write_text(f"{json.dumps(persisted_metrics, indent=2)}\n", encoding="utf-8")
+            metrics = dict(persisted_metrics)
 
     spatial_status = str(spatial_compatibility["status"]) if spatial_compatibility else None
     spatial_passed = bool(spatial_compatibility["passed"]) if spatial_compatibility else None
@@ -326,9 +384,18 @@ def run_experiment(
         ),
         "test_subject": str(test_subject) if cv_mode == "frozen_cross_person_transfer" else None,
         "seed": int(seed),
+        "primary_metric_name": resolved_primary_metric_name,
+        "permutation_metric_name": resolved_permutation_metric_name,
         "filter_task": filter_task,
         "filter_modality": filter_modality,
         "n_permutations": int(n_permutations),
+        "canonical_run": bool(canonical_run),
+        "protocol_id": protocol_id,
+        "protocol_version": protocol_version,
+        "protocol_schema_version": protocol_schema_version,
+        "suite_id": suite_id,
+        "claim_ids": claim_ids,
+        "protocol_context": resolved_protocol_context if resolved_protocol_context else None,
         "start_section": start_section,
         "end_section": end_section,
         "base_artifact_id": base_artifact_id,
@@ -406,6 +473,8 @@ def run_experiment(
         "metrics": metrics,
         "run_status_path": str(run_status.resolve()),
         "run_mode": run_mode,
+        "canonical_run": bool(canonical_run),
+        "protocol_context": resolved_protocol_context if resolved_protocol_context else None,
     }
 
 

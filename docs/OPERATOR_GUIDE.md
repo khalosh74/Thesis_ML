@@ -22,6 +22,7 @@ Installed wheel path is also supported; default decision-support registry is pac
 
 ## 2) Canonical CLIs
 
+- `thesisml-run-protocol` (official thesis-facing command)
 - `thesisml-run-experiment`
 - `thesisml-run-decision-support`
 - `thesisml-workbook`
@@ -30,6 +31,29 @@ Installed wheel path is also supported; default decision-support registry is pac
 Compatibility wrappers are kept only for migration and are deprecated.
 
 ## 3) First-use checks
+
+Canonical protocol dry-run:
+
+```bash
+thesisml-run-protocol \
+  --protocol configs/protocols/thesis_canonical_v1.json \
+  --all-suites \
+  --reports-root outputs/reports/experiments \
+  --dry-run
+```
+
+Canonical protocol execution:
+
+```bash
+thesisml-run-protocol \
+  --protocol configs/protocols/thesis_canonical_v1.json \
+  --all-suites \
+  --reports-root outputs/reports/experiments
+```
+
+Official-policy note:
+- thesis-critical settings must come from protocol JSON.
+- `thesisml-run-experiment` remains available as a low-level exploratory/ad hoc interface.
 
 Generate workbook template:
 

@@ -1,0 +1,139 @@
+{
+  "protocol_schema_version": "thesis-protocol-v1",
+  "protocol_id": "thesis-canonical",
+  "protocol_version": "1.0.0",
+  "status": "locked",
+  "description": "Canonical thesis protocol for official confirmatory runs. This file is the single source of truth for thesis-critical settings.",
+  "notes": "Official thesis runs must be executed via thesisml-run-protocol using this protocol.",
+  "scientific_contract": {
+    "sample_unit": "beta_event",
+    "target": "coarse_affect",
+    "label_policy": "coarse_affect is derived from emotion using the fixed mapping in Thesis_ML.data.affect_labels.",
+    "primary_metric": "balanced_accuracy",
+    "secondary_metrics": [
+      "macro_f1",
+      "accuracy"
+    ],
+    "seed_policy": {
+      "global_seed": 42,
+      "per_suite_overrides_allowed": false
+    }
+  },
+  "split_policy": {
+    "primary_mode": "within_subject_loso_session",
+    "secondary_mode": "frozen_cross_person_transfer",
+    "grouping_field": "session",
+    "transfer_constraints": "Directional transfer pairs are evaluated separately and train_subject/test_subject must differ."
+  },
+  "model_policy": {
+    "selection_strategy": "fixed_baselines",
+    "models": [
+      "ridge"
+    ],
+    "tuning_enabled": false,
+    "nested_grouped_cv": false,
+    "class_weight_policy": "none"
+  },
+  "control_policy": {
+    "dummy_baseline": {
+      "enabled": true,
+      "suites": [
+        "primary_controls"
+      ]
+    },
+    "permutation": {
+      "enabled": true,
+      "metric": "balanced_accuracy",
+      "n_permutations": 100,
+      "suites": [
+        "primary_controls"
+      ]
+    }
+  },
+  "interpretability_policy": {
+    "enabled": true,
+    "suites": [
+      "primary_within_subject"
+    ],
+    "modes": [
+      "within_subject_loso_session"
+    ],
+    "models": [
+      "ridge"
+    ],
+    "supporting_evidence_only": true
+  },
+  "sensitivity_policy": {
+    "role": "exploratory_only",
+    "suites": []
+  },
+  "artifact_contract": {
+    "required_run_artifacts": [
+      "config.json",
+      "metrics.json",
+      "fold_metrics.csv",
+      "fold_splits.csv",
+      "predictions.csv",
+      "spatial_compatibility_report.json",
+      "interpretability_summary.json"
+    ],
+    "required_protocol_artifacts": [
+      "protocol.json",
+      "compiled_protocol_manifest.json",
+      "claim_to_run_map.json",
+      "suite_summary.json",
+      "execution_status.json",
+      "report_index.csv"
+    ],
+    "required_run_metadata_fields": [
+      "canonical_run",
+      "protocol_id",
+      "protocol_version",
+      "protocol_schema_version",
+      "suite_id",
+      "claim_ids"
+    ]
+  },
+  "official_run_suites": [
+    {
+      "suite_id": "primary_within_subject",
+      "description": "Primary confirmatory suite: within-subject held-out-session decoding.",
+      "enabled": true,
+      "suite_type": "primary",
+      "claim_ids": [
+        "C01_primary_within_subject_generalization"
+      ],
+      "split_mode": "within_subject_loso_session",
+      "subject_source": "all_from_index",
+      "controls_required": false,
+      "interpretability_requested": true
+    },
+    {
+      "suite_id": "secondary_cross_person_transfer",
+      "description": "Secondary suite: frozen cross-person transfer in both directions for each subject pair.",
+      "enabled": true,
+      "suite_type": "secondary",
+      "claim_ids": [
+        "C02_cross_person_transfer_directional"
+      ],
+      "split_mode": "frozen_cross_person_transfer",
+      "transfer_pair_source": "all_ordered_pairs_from_index",
+      "controls_required": false,
+      "interpretability_requested": false
+    },
+    {
+      "suite_id": "primary_controls",
+      "description": "Control suite for primary claim with dummy baseline and permutation testing.",
+      "enabled": true,
+      "suite_type": "control",
+      "claim_ids": [
+        "C03_primary_controls_dummy_and_permutation"
+      ],
+      "split_mode": "within_subject_loso_session",
+      "subject_source": "all_from_index",
+      "controls_required": true,
+      "interpretability_requested": false
+    }
+  ]
+}
+

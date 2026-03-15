@@ -48,6 +48,27 @@ Configured in `src/Thesis_ML/config/paths.py`.
 
 ## 3) Standard experiment run
 
+Official thesis run path:
+
+```bash
+thesisml-run-protocol \
+  --protocol configs/protocols/thesis_canonical_v1.json \
+  --all-suites \
+  --reports-root outputs/reports/experiments
+```
+
+Dry-run validation/compilation:
+
+```bash
+thesisml-run-protocol \
+  --protocol configs/protocols/thesis_canonical_v1.json \
+  --all-suites \
+  --reports-root outputs/reports/experiments \
+  --dry-run
+```
+
+Low-level ad hoc runner (kept for exploratory work):
+
 ```bash
 thesisml-run-experiment \
   --index-csv Data/processed/dataset_index.csv \
@@ -59,6 +80,9 @@ thesisml-run-experiment \
   --subject sub-001 \
   --run-id within_sub001_ridge
 ```
+
+Policy note:
+- official thesis-critical settings (target, split, model policy, controls, interpretability, metric policy) must come from protocol JSON, not ad hoc CLI flag combinations.
 
 ## 4) Rerun / resume behavior
 
@@ -72,6 +96,8 @@ thesisml-run-experiment \
 - `--reuse-completed-artifacts`: explicitly enables same-run section artifact reuse
 - `--reuse-completed-artifacts` never reuses artifacts from a different `run_id`
 - `--force` and `--resume` are mutually exclusive
+
+`thesisml-run-protocol` forwards `--force`/`--resume` to underlying concrete runs.
 
 Run state file:
 - `outputs/reports/experiments/<run_id>/run_status.json`
@@ -147,10 +173,10 @@ Template policy:
 python -m mypy
 python -m ruff check src/Thesis_ML/artifacts src/Thesis_ML/orchestration src/Thesis_ML/workbook \
   src/Thesis_ML/experiments/segment_execution.py src/Thesis_ML/experiments/sections.py \
-  src/Thesis_ML/experiments/run_experiment.py
+  src/Thesis_ML/experiments/run_experiment.py src/Thesis_ML/protocols src/Thesis_ML/cli/protocol_runner.py
 python -m ruff format --check src/Thesis_ML/artifacts src/Thesis_ML/orchestration src/Thesis_ML/workbook \
   src/Thesis_ML/experiments/segment_execution.py src/Thesis_ML/experiments/sections.py \
-  src/Thesis_ML/experiments/run_experiment.py
+  src/Thesis_ML/experiments/run_experiment.py src/Thesis_ML/protocols src/Thesis_ML/cli/protocol_runner.py
 python -m pytest -q
 ```
 

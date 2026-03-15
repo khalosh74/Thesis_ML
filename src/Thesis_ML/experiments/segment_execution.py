@@ -75,6 +75,9 @@ class SegmentExecutionRequest:
     spatial_report_path: Path
     interpretability_summary_path: Path
     interpretability_fold_artifacts_path: Path
+    primary_metric_name: str = "balanced_accuracy"
+    permutation_metric_name: str | None = None
+    interpretability_enabled_override: bool | None = None
     start_section: str | SectionName | None = None
     end_section: str | SectionName | None = None
     base_artifact_id: str | None = None
@@ -346,6 +349,7 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
                     train_subject=request.train_subject,
                     test_subject=request.test_subject,
                     seed=request.seed,
+                    interpretability_enabled=request.interpretability_enabled_override,
                     run_id=request.run_id,
                     config_filename=request.config_filename,
                     report_dir=request.report_dir,
@@ -453,6 +457,8 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
                     train_subject=request.train_subject,
                     test_subject=request.test_subject,
                     n_permutations=request.n_permutations,
+                    primary_metric_name=request.primary_metric_name,
+                    permutation_metric_name=request.permutation_metric_name,
                     spatial_compatibility=spatial_compatibility,
                     spatial_report_path=request.spatial_report_path,
                     interpretability_summary=interpretability_summary,

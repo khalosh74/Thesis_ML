@@ -1,0 +1,298 @@
+from __future__ import annotations
+
+import re
+from itertools import permutations
+from pathlib import Path
+
+import pandas as pd
+
+from Thesis_ML.protocols.models import (
+    CompiledProtocolManifest,
+    CompiledRunControls,
+    CompiledRunSpec,
+    SubjectSource,
+    SuiteSpec,
+    ThesisProtocol,
+    TransferPair,
+    TransferPairSource,
+)
+
+
+def _slug(value: str) -> str:
+    lowered = str(value).strip().lower()
+    return re.sub(r"[^a-z0-9]+", "_", lowered).strip("_")
+
+
+def _load_subjects(index_csv: Path | str) -> list[str]:
+    index_df = pd.read_csv(index_csv)
+    if "subject" not in index_df.columns:
+        raise ValueError(
+            f"Dataset index '{Path(index_csv)}' is missing required column 'subject' for protocol compilation."
+        )
+    subjects = sorted({str(value).strip() for value in index_df["subject"].astype(str).tolist() if str(value).strip()})
+    if not subjects:
+        raise ValueError(
+            f"Dataset index '{Path(index_csv)}' does not contain any non-empty subject values."
+        )
+    return subjects
+
+
+def _resolve_suite_subjects(suite: SuiteSpec, all_subjects: list[str]) -> list[str]:
+    if suite.subject_source == SubjectSource.ALL_FROM_INDEX:
+        return all_subjects
+    resolved = sorted({str(value).strip() for value in suite.subjects if str(value).strip()})
+    if not resolved:
+        raise ValueError(
+            f"Suite '{suite.suite_id}' resolved to an empty subject list for within-subject runs."
+        )
+    return resolved
+
+
+def _resolve_transfer_pairs(suite: SuiteSpec, all_subjects: list[str]) -> list[TransferPair]:
+    if suite.transfer_pair_source == TransferPairSource.ALL_ORDERED_PAIRS_FROM_INDEX:
+        ordered_pairs = [TransferPair(train_subject=left, test_subject=right) for left, right in permutations(all_subjects, 2)]
+        if not ordered_pairs:
+            raise ValueError(
+                f"Suite '{suite.suite_id}' requires at least two subjects for transfer runs."
+            )
+        return ordered_pairs
+    if not suite.transfer_pairs:
+        raise ValueError(f"Suite '{suite.suite_id}' resolved to an empty transfer pair list.")
+    return list(suite.transfer_pairs)
+
+
+def _resolve_suite_models(protocol: ThesisProtocol, suite: SuiteSpec) -> list[str]:
+    base_models = list(suite.models) if suite.models is not None else list(protocol.model_policy.models)
+    if protocol.control_policy.dummy_baseline.enabled and suite.suite_id in set(
+        protocol.control_policy.dummy_baseline.suites
+    ):
+        if "dummy" not in base_models:
+            base_models.append("dummy")
+    unique_models = sorted(set(base_models), key=base_models.index)
+    if suite.controls_required:
+        has_dummy = "dummy" in unique_models
+        has_permutation = protocol.control_policy.permutation.enabled and suite.suite_id in set(
+            protocol.control_policy.permutation.suites
+        )
+        if not has_dummy and not has_permutation:
+            raise ValueError(
+                f"Suite '{suite.suite_id}' is marked controls_required but no dummy/permutation control applies."
+            )
+    return unique_models
+
+
+def _resolve_suite_seed(protocol: ThesisProtocol, suite: SuiteSpec) -> int:
+    if suite.seed_override is None:
+        return int(protocol.scientific_contract.seed_policy.global_seed)
+    if not protocol.scientific_contract.seed_policy.per_suite_overrides_allowed:
+        raise ValueError(
+            f"Suite '{suite.suite_id}' sets seed_override but per-suite seed overrides are disabled by protocol."
+        )
+    return int(suite.seed_override)
+
+
+def _interpretability_enabled(protocol: ThesisProtocol, suite: SuiteSpec, model_name: str) -> bool:
+    if not suite.interpretability_requested:
+        return False
+    policy = protocol.interpretability_policy
+    return (
+        bool(policy.enabled)
+        and suite.suite_id in set(policy.suites)
+        and suite.split_mode in set(policy.modes)
+        and model_name in set(policy.models)
+    )
+
+
+def _build_run_id(
+    protocol: ThesisProtocol,
+    suite: SuiteSpec,
+    model_name: str,
+    *,
+    subject: str | None = None,
+    train_subject: str | None = None,
+    test_subject: str | None = None,
+) -> str:
+    parts = [
+        "canonical",
+        _slug(protocol.protocol_id),
+        _slug(protocol.protocol_version),
+        _slug(suite.suite_id),
+        _slug(model_name),
+    ]
+    if subject is not None:
+        parts.append(_slug(subject))
+    if train_subject is not None and test_subject is not None:
+        parts.append(f"{_slug(train_subject)}_to_{_slug(test_subject)}")
+    return "_".join(part for part in parts if part)
+
+
+def compile_protocol(
+    protocol: ThesisProtocol,
+    *,
+    index_csv: Path | str,
+    suite_ids: list[str] | None = None,
+) -> CompiledProtocolManifest:
+    all_subjects = _load_subjects(index_csv)
+
+    available_suites = {suite.suite_id: suite for suite in protocol.official_run_suites if suite.enabled}
+    if suite_ids is None:
+        selected_suite_ids = sorted(available_suites.keys())
+    else:
+        selected_suite_ids = []
+        for suite_id in suite_ids:
+            if suite_id not in available_suites:
+                known = ", ".join(sorted(available_suites))
+                raise ValueError(
+                    f"Requested suite '{suite_id}' was not found among enabled suites. Enabled suites: {known}."
+                )
+            selected_suite_ids.append(suite_id)
+
+    if not selected_suite_ids:
+        raise ValueError("No enabled suites were selected for protocol compilation.")
+
+    runs: list[CompiledRunSpec] = []
+    claim_to_run_map: dict[str, list[str]] = {}
+    permutation_enabled_suites = set(protocol.control_policy.permutation.suites)
+    permutation_metric = protocol.control_policy.permutation.metric or protocol.scientific_contract.primary_metric
+
+    for suite_id in selected_suite_ids:
+        suite = available_suites[suite_id]
+        suite_models = _resolve_suite_models(protocol, suite)
+        if suite.interpretability_requested:
+            unsupported_models = [
+                model_name
+                for model_name in suite_models
+                if not _interpretability_enabled(protocol, suite, model_name)
+            ]
+            if unsupported_models:
+                raise ValueError(
+                    f"Suite '{suite.suite_id}' requests interpretability for unsupported models: "
+                    + ", ".join(sorted(set(unsupported_models)))
+                )
+        suite_seed = _resolve_suite_seed(protocol, suite)
+
+        if suite.split_mode == "within_subject_loso_session":
+            for subject in _resolve_suite_subjects(suite, all_subjects):
+                for model_name in suite_models:
+                    run_id = _build_run_id(
+                        protocol,
+                        suite,
+                        model_name,
+                        subject=subject,
+                    )
+                    controls = CompiledRunControls(
+                        dummy_baseline_run=(model_name == "dummy"),
+                        permutation_enabled=(
+                            protocol.control_policy.permutation.enabled
+                            and suite.suite_id in permutation_enabled_suites
+                        ),
+                        permutation_metric=(
+                            permutation_metric
+                            if protocol.control_policy.permutation.enabled
+                            and suite.suite_id in permutation_enabled_suites
+                            else None
+                        ),
+                        n_permutations=(
+                            int(protocol.control_policy.permutation.n_permutations)
+                            if protocol.control_policy.permutation.enabled
+                            and suite.suite_id in permutation_enabled_suites
+                            else 0
+                        ),
+                    )
+                    run = CompiledRunSpec(
+                        run_id=run_id,
+                        suite_id=suite.suite_id,
+                        claim_ids=list(suite.claim_ids),
+                        target=protocol.scientific_contract.target,
+                        model=model_name,
+                        cv_mode=suite.split_mode,
+                        subject=subject,
+                        seed=suite_seed,
+                        filter_task=suite.filter_task,
+                        filter_modality=suite.filter_modality,
+                        primary_metric=protocol.scientific_contract.primary_metric,
+                        controls=controls,
+                        interpretability_enabled=_interpretability_enabled(
+                            protocol, suite, model_name
+                        ),
+                        canonical_run=True,
+                        artifact_requirements=list(protocol.artifact_contract.required_run_artifacts),
+                        protocol_id=protocol.protocol_id,
+                        protocol_version=protocol.protocol_version,
+                        protocol_schema_version=protocol.protocol_schema_version,
+                    )
+                    runs.append(run)
+                    for claim_id in suite.claim_ids:
+                        claim_to_run_map.setdefault(claim_id, []).append(run.run_id)
+
+        if suite.split_mode == "frozen_cross_person_transfer":
+            transfer_pairs = _resolve_transfer_pairs(suite, all_subjects)
+            for pair in transfer_pairs:
+                for model_name in suite_models:
+                    run_id = _build_run_id(
+                        protocol,
+                        suite,
+                        model_name,
+                        train_subject=pair.train_subject,
+                        test_subject=pair.test_subject,
+                    )
+                    controls = CompiledRunControls(
+                        dummy_baseline_run=(model_name == "dummy"),
+                        permutation_enabled=(
+                            protocol.control_policy.permutation.enabled
+                            and suite.suite_id in permutation_enabled_suites
+                        ),
+                        permutation_metric=(
+                            permutation_metric
+                            if protocol.control_policy.permutation.enabled
+                            and suite.suite_id in permutation_enabled_suites
+                            else None
+                        ),
+                        n_permutations=(
+                            int(protocol.control_policy.permutation.n_permutations)
+                            if protocol.control_policy.permutation.enabled
+                            and suite.suite_id in permutation_enabled_suites
+                            else 0
+                        ),
+                    )
+                    run = CompiledRunSpec(
+                        run_id=run_id,
+                        suite_id=suite.suite_id,
+                        claim_ids=list(suite.claim_ids),
+                        target=protocol.scientific_contract.target,
+                        model=model_name,
+                        cv_mode=suite.split_mode,
+                        train_subject=pair.train_subject,
+                        test_subject=pair.test_subject,
+                        seed=suite_seed,
+                        filter_task=suite.filter_task,
+                        filter_modality=suite.filter_modality,
+                        primary_metric=protocol.scientific_contract.primary_metric,
+                        controls=controls,
+                        interpretability_enabled=_interpretability_enabled(
+                            protocol, suite, model_name
+                        ),
+                        canonical_run=True,
+                        artifact_requirements=list(protocol.artifact_contract.required_run_artifacts),
+                        protocol_id=protocol.protocol_id,
+                        protocol_version=protocol.protocol_version,
+                        protocol_schema_version=protocol.protocol_schema_version,
+                    )
+                    runs.append(run)
+                    for claim_id in suite.claim_ids:
+                        claim_to_run_map.setdefault(claim_id, []).append(run.run_id)
+
+    if not runs:
+        raise ValueError("Protocol compilation produced zero concrete runs.")
+
+    return CompiledProtocolManifest(
+        protocol_schema_version=protocol.protocol_schema_version,
+        protocol_id=protocol.protocol_id,
+        protocol_version=protocol.protocol_version,
+        status=protocol.status,
+        suite_ids=selected_suite_ids,
+        runs=runs,
+        claim_to_run_map=claim_to_run_map,
+        required_protocol_artifacts=list(protocol.artifact_contract.required_protocol_artifacts),
+        required_run_artifacts=list(protocol.artifact_contract.required_run_artifacts),
+    )

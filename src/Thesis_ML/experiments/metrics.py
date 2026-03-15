@@ -7,8 +7,25 @@ from typing import Any
 import numpy as np
 import pandas as pd
 from sklearn.base import clone
-from sklearn.metrics import accuracy_score
+from sklearn.metrics import accuracy_score, balanced_accuracy_score, f1_score
 from sklearn.pipeline import Pipeline
+
+SUPPORTED_CLASSIFICATION_METRICS = frozenset({"accuracy", "balanced_accuracy", "macro_f1"})
+
+
+def classification_metric_score(
+    y_true: list[str] | np.ndarray,
+    y_pred: list[str] | np.ndarray,
+    metric_name: str,
+) -> float:
+    if metric_name == "accuracy":
+        return float(accuracy_score(y_true, y_pred))
+    if metric_name == "balanced_accuracy":
+        return float(balanced_accuracy_score(y_true, y_pred))
+    if metric_name == "macro_f1":
+        return float(f1_score(y_true, y_pred, average="macro", zero_division=0))
+    allowed = ", ".join(sorted(SUPPORTED_CLASSIFICATION_METRICS))
+    raise ValueError(f"Unsupported metric_name '{metric_name}'. Allowed values: {allowed}")
 
 
 def scores_for_predictions(estimator: Pipeline, x_test: np.ndarray) -> dict[str, list[Any]]:
@@ -43,10 +60,11 @@ def evaluate_permutations(
     splits: list[tuple[np.ndarray, np.ndarray]],
     seed: int,
     n_permutations: int,
-    observed_accuracy: float,
+    metric_name: str,
+    observed_metric: float,
 ) -> dict[str, Any]:
     rng = np.random.default_rng(seed)
-    permutation_accuracies: list[float] = []
+    permutation_scores: list[float] = []
 
     for _ in range(n_permutations):
         y_true_all: list[str] = []
@@ -63,16 +81,28 @@ def evaluate_permutations(
             y_true_all.extend(y[test_idx].tolist())
             y_pred_all.extend(pred.tolist())
 
-        permutation_accuracies.append(float(accuracy_score(y_true_all, y_pred_all)))
+        permutation_scores.append(
+            classification_metric_score(
+                y_true=y_true_all,
+                y_pred=y_pred_all,
+                metric_name=metric_name,
+            )
+        )
 
-    ge_count = sum(score >= observed_accuracy for score in permutation_accuracies)
+    ge_count = sum(score >= observed_metric for score in permutation_scores)
     p_value = (ge_count + 1.0) / (n_permutations + 1.0)
-    return {
+    payload: dict[str, Any] = {
         "n_permutations": int(n_permutations),
-        "permutation_accuracy_mean": float(np.mean(permutation_accuracies)),
-        "permutation_accuracy_std": float(np.std(permutation_accuracies)),
+        "metric_name": metric_name,
+        "observed_metric": float(observed_metric),
+        "permutation_metric_mean": float(np.mean(permutation_scores)),
+        "permutation_metric_std": float(np.std(permutation_scores)),
         "permutation_p_value": float(p_value),
     }
+    if metric_name == "accuracy":
+        payload["permutation_accuracy_mean"] = payload["permutation_metric_mean"]
+        payload["permutation_accuracy_std"] = payload["permutation_metric_std"]
+    return payload
 
 
 def extract_linear_coefficients(estimator: Pipeline) -> tuple[np.ndarray, np.ndarray, list[str]]:

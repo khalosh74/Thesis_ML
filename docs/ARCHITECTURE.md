@@ -14,7 +14,7 @@ Core package root: `src/Thesis_ML/`
   - SQLite artifact registry (`registry.py`)
   - artifact types, compatibility lookup, run-level listing
 - `cli/`
-  - canonical user entry points (`decision_support.py`, `workbook.py`, `baseline.py`)
+  - canonical user entry points (`protocol_runner.py`, `decision_support.py`, `workbook.py`, `baseline.py`)
 - `config/`
   - default paths (`paths.py`)
   - schema/version constants (`schema_versions.py`)
@@ -27,6 +27,12 @@ Core package root: `src/Thesis_ML/`
   - segment helper layer (`segment_execution_helpers.py`)
   - segment planner/executor (`segment_execution.py`)
   - idempotency/run-state policy (`execution_policy.py`)
+- `protocols/`
+  - strict thesis protocol schema (`models.py`)
+  - protocol JSON loader/validation (`loader.py`)
+  - canonical suite compiler (`compiler.py`)
+  - protocol runner bridge onto low-level runner (`runner.py`)
+  - protocol-level artifact writers (`artifacts.py`)
 - `orchestration/`
   - manifest contracts/compiler (`contracts.py`, `compiler.py`, `workbook_compiler.py`)
   - campaign execution (`campaign_engine.py`)
@@ -52,14 +58,20 @@ Core package root: `src/Thesis_ML/`
 - Register section artifacts in SQLite.
 - Write metrics/report files in `outputs/reports/experiments/<run_id>/`.
 
-2. Decision-support campaign (`thesisml-run-decision-support`)
+2. Canonical thesis protocol run (`thesisml-run-protocol`)
+- Load and validate canonical protocol JSON (`thesis-protocol-v1`).
+- Compile official suites into explicit concrete run specs.
+- Execute each run spec through existing `run_experiment(...)`.
+- Persist protocol metadata in run artifacts and emit protocol-level manifests/summaries.
+
+3. Decision-support campaign (`thesisml-run-decision-support`)
 - Compile JSON registry or workbook rows to internal manifest.
 - Select experiments and expand variants/search spaces.
 - Dispatch variants through `run_experiment(...)`.
 - Export campaign summaries + manifests + decision notes.
 - Optionally write results back to a versioned workbook copy.
 
-3. Workbook lifecycle (`thesisml-workbook`)
+4. Workbook lifecycle (`thesisml-workbook`)
 - Generate governed template workbook.
 - Compile executable rows to internal manifest (`workbook_compiler.py`).
 - Run campaign and write machine-owned outputs only.
@@ -72,6 +84,7 @@ Use packaged commands from `pyproject.toml`:
 - `thesisml-build-index`
 - `thesisml-cache-features`
 - `thesisml-run-experiment`
+- `thesisml-run-protocol`
 - `thesisml-run-decision-support`
 - `thesisml-run-baseline`
 - `thesisml-workbook`

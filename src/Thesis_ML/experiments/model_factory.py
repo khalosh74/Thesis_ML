@@ -2,12 +2,15 @@ from __future__ import annotations
 
 from typing import Any
 
+from sklearn.dummy import DummyClassifier
 from sklearn.linear_model import LogisticRegression, RidgeClassifier
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.svm import LinearSVC
 
 MODEL_NAMES = ("logreg", "linearsvc", "ridge")
+CONTROL_MODEL_NAMES = ("dummy",)
+ALL_MODEL_NAMES = MODEL_NAMES + CONTROL_MODEL_NAMES
 
 
 def make_model(name: str, seed: int) -> Any:
@@ -23,6 +26,9 @@ def make_model(name: str, seed: int) -> Any:
         return LinearSVC(dual=True, random_state=seed, max_iter=5000)
     if name == "ridge":
         return RidgeClassifier(random_state=seed)
+    if name == "dummy":
+        # Deterministic fixed baseline used in protocol-level control suites.
+        return DummyClassifier(strategy="most_frequent")
     raise ValueError(f"Unknown model: {name}")
 
 

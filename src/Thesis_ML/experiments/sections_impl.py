@@ -15,6 +15,8 @@ from sklearn.metrics import (
 )
 from sklearn.model_selection import LeaveOneGroupOut
 
+from Thesis_ML.experiments.metrics import classification_metric_score
+
 if TYPE_CHECKING:
     from Thesis_ML.experiments.section_models import (
         EvaluationInput,
@@ -91,7 +93,10 @@ def execute_model_fit(section_input: ModelFitInput) -> dict[str, Any]:
         seed=section_input.seed,
     )
 
-    interpretability_enabled = section_input.cv_mode == "within_subject_loso_session"
+    if section_input.interpretability_enabled is None:
+        interpretability_enabled = section_input.cv_mode == "within_subject_loso_session"
+    else:
+        interpretability_enabled = bool(section_input.interpretability_enabled)
     interpretability_fold_rows: list[dict[str, Any]] = []
     interpretability_vectors: list[np.ndarray] = []
     interpretability_dir: Path | None = None
@@ -356,6 +361,12 @@ def execute_evaluation(section_input: EvaluationInput) -> dict[str, Any]:
             zero_division=0,
         )
     )
+    primary_metric_name = str(section_input.primary_metric_name)
+    primary_metric_value = classification_metric_score(
+        section_input.y_true_all,
+        section_input.y_pred_all,
+        metric_name=primary_metric_name,
+    )
     labels_sorted = sorted(
         np.unique(
             np.concatenate(
@@ -395,6 +406,8 @@ def execute_evaluation(section_input: EvaluationInput) -> dict[str, Any]:
         "accuracy": overall_accuracy,
         "balanced_accuracy": overall_balanced,
         "macro_f1": overall_macro_f1,
+        "primary_metric_name": primary_metric_name,
+        "primary_metric_value": primary_metric_value,
         "labels": labels_sorted,
         "confusion_matrix": cmatrix.tolist(),
         "spatial_compatibility": {
@@ -408,6 +421,9 @@ def execute_evaluation(section_input: EvaluationInput) -> dict[str, Any]:
     }
 
     if section_input.n_permutations > 0:
+        permutation_metric_name = str(
+            section_input.permutation_metric_name or section_input.primary_metric_name
+        )
         metrics["permutation_test"] = section_input.evaluate_permutations_fn(
             pipeline_template=section_input.build_pipeline_fn(
                 model_name=section_input.model,
@@ -418,7 +434,12 @@ def execute_evaluation(section_input: EvaluationInput) -> dict[str, Any]:
             splits=section_input.splits,
             seed=section_input.seed,
             n_permutations=section_input.n_permutations,
-            observed_accuracy=overall_accuracy,
+            metric_name=permutation_metric_name,
+            observed_metric=classification_metric_score(
+                section_input.y_true_all,
+                section_input.y_pred_all,
+                metric_name=permutation_metric_name,
+            ),
         )
 
     metrics["interpretability"] = {
