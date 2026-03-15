@@ -126,6 +126,12 @@ Metric policy note (official runs):
 - `config.json`, `metrics.json`, and mode-level manifests include `metric_policy_effective`
 - implicit metric fallbacks are disabled; workbook/registry/search-space inputs must explicitly declare required metric fields
 
+Implementation ownership notes (for maintainers):
+- framework/methodology/metric runtime resolution: `src/Thesis_ML/experiments/runtime_policies.py`
+- run artifact payload stamping/building: `src/Thesis_ML/experiments/run_artifacts.py`
+- comparison decision logic: `src/Thesis_ML/comparisons/decision.py`
+- workbook study-review guardrail helpers: `src/Thesis_ML/orchestration/study_review.py`
+
 ## 4) Rerun / resume behavior
 
 `run_experiment` is intentionally strict.

@@ -103,6 +103,13 @@ Strict metric consistency policy:
 - metric drift fallbacks are disallowed; decision-support/workbook/search-space inputs must declare explicit metric fields
 - official run artifacts persist effective metric policy in `config.json` / `metrics.json` under `metric_policy_effective`
 
+Modular architecture highlights:
+- `src/Thesis_ML/experiments/runtime_policies.py` owns framework-context, methodology, and official metric-policy resolution.
+- `src/Thesis_ML/experiments/run_artifacts.py` owns run identity extraction and run-level artifact payload stamping/building.
+- `src/Thesis_ML/comparisons/decision.py` owns comparison winner/inconclusive/invalid decision logic.
+- `src/Thesis_ML/orchestration/study_review.py` owns workbook study-review guardrail evaluation helpers.
+- top-level runners remain orchestration-first and delegate policy/decision/artifact logic to dedicated modules.
+
 Locked comparison example:
 
 ```powershell

@@ -20,6 +20,7 @@ Core package root: `src/Thesis_ML/`
   - comparison JSON loader/validation (`loader.py`)
   - locked variant compiler (`compiler.py`)
   - comparison runner bridge onto low-level runner (`runner.py`)
+  - comparison decision logic (`decision.py`)
   - comparison-level artifact writers (`artifacts.py`)
 - `config/`
   - default paths (`paths.py`)
@@ -31,6 +32,8 @@ Core package root: `src/Thesis_ML/`
   - indexing, cache extraction, SPM utilities
 - `experiments/`
   - full pipeline wrapper (`run_experiment.py`)
+  - runtime policy/context resolution (`runtime_policies.py`)
+  - run artifact payload builders/stamping (`run_artifacts.py`)
   - section contracts/runtime adapters (`sections.py`)
   - shared section I/O models (`section_models.py`)
   - segment helper layer (`segment_execution_helpers.py`)
@@ -45,6 +48,7 @@ Core package root: `src/Thesis_ML/`
   - protocol-level artifact writers (`artifacts.py`)
 - `orchestration/`
   - manifest contracts/compiler (`contracts.py`, `compiler.py`, `workbook_compiler.py`)
+  - workbook study-review guardrail helpers (`study_review.py`)
   - campaign execution (`campaign_engine.py`)
   - campaign CLI plumbing (`campaign_cli.py`)
   - result aggregation core + row rendering (`result_aggregation_core.py`, `result_aggregation_rows.py`)
@@ -63,8 +67,10 @@ Core package root: `src/Thesis_ML/`
 
 1. Exploratory experiment run (`thesisml-run-experiment`)
 - Resolve run mode (`fresh`, `resume`, `forced_rerun`) and status file.
+- Resolve framework/methodology/metric runtime policy via `experiments/runtime_policies.py`.
 - Plan section path from `start_section`/`end_section`.
 - Execute section adapters in order.
+- Build/stamp run artifacts via `experiments/run_artifacts.py`.
 - Register section artifacts in SQLite.
 - Stamp `framework_mode=exploratory` and `canonical_run=false`.
 - Write metrics/report files in `outputs/reports/exploratory/<run_id>/` by default.
@@ -75,7 +81,7 @@ Core package root: `src/Thesis_ML/`
 - Execute each run spec through existing `run_experiment(...)`.
 - Stamp `framework_mode=locked_comparison` and comparison identity metadata.
 - Emit comparison-level manifests/summaries under `outputs/reports/comparisons/`.
-- Emit machine-readable `comparison_decision.json` (`winner_selected`, `inconclusive`, `invalid_comparison`).
+- Emit machine-readable `comparison_decision.json` (`winner_selected`, `inconclusive`, `invalid_comparison`) via `comparisons/decision.py`.
 
 3. Confirmatory canonical thesis protocol run (`thesisml-run-protocol`)
 - Load and validate canonical protocol JSON (`thesis-protocol-v1`).

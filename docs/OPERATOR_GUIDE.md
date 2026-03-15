@@ -96,6 +96,12 @@ Official metric policy:
 - official permutation metric must match primary metric
 - artifacts include `metric_policy_effective` so operators can audit effective primary/decision/tuning/permutation metrics
 
+Architecture ownership (where to extend safely):
+- runner policy resolution belongs in `src/Thesis_ML/experiments/runtime_policies.py`
+- run artifact payload shaping belongs in `src/Thesis_ML/experiments/run_artifacts.py`
+- comparison decision rules belong in `src/Thesis_ML/comparisons/decision.py`
+- workbook study-review guardrails belong in `src/Thesis_ML/orchestration/study_review.py`
+
 Generate workbook template:
 
 ```bash
