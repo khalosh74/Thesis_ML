@@ -275,14 +275,16 @@ class ComparisonSpec(_ComparisonModel):
         validate_metric_name(self.metric_policy.primary_metric)
         for metric_name in self.metric_policy.secondary_metrics:
             validate_metric_name(metric_name)
+        if self.decision_policy.primary_metric != self.metric_policy.primary_metric:
+            raise ValueError(
+                "decision_policy.primary_metric must match metric_policy.primary_metric "
+                "for locked comparisons."
+            )
 
         resolved_permutation_metric = (
             self.control_policy.permutation_metric or self.metric_policy.primary_metric
         )
-        if (
-            self.control_policy.permutation_enabled
-            and resolved_permutation_metric != self.metric_policy.primary_metric
-        ):
+        if resolved_permutation_metric != self.metric_policy.primary_metric:
             raise ValueError(
                 "control_policy.permutation_metric must match metric_policy.primary_metric for locked comparisons."
             )
@@ -366,6 +368,12 @@ class CompiledComparisonRunSpec(_ComparisonModel):
                     f"CompiledComparisonRunSpec '{self.run_id}' requires train_subject and test_subject."
                 )
         validate_metric_name(self.primary_metric)
+        if self.controls.permutation_enabled:
+            if self.controls.permutation_metric != self.primary_metric:
+                raise ValueError(
+                    f"CompiledComparisonRunSpec '{self.run_id}' requires controls.permutation_metric "
+                    "to match primary_metric for locked comparisons."
+                )
         MethodologyPolicy(
             policy_name=self.methodology_policy_name,
             class_weight_policy=self.class_weight_policy,

@@ -20,6 +20,14 @@ def _make_workbook(path: Path) -> None:
 
 def _set_executable_row(path: Path) -> None:
     workbook = load_workbook(path)
+    master_ws = workbook["Master_Experiments"]
+    master_headers = [master_ws.cell(1, col).value for col in range(1, master_ws.max_column + 1)]
+    master_col = {str(name): idx + 1 for idx, name in enumerate(master_headers)}
+    master_ws.cell(2, master_col["Experiment_ID"], "E16")
+    master_ws.cell(2, master_col["Short_Title"], "Executable test row")
+    master_ws.cell(2, master_col["Stage"], "Stage 1 - Target lock")
+    master_ws.cell(2, master_col["Primary_Metric"], "balanced_accuracy")
+
     ws = workbook["Experiment_Definitions"]
     headers = [ws.cell(1, col).value for col in range(1, ws.max_column + 1)]
     col = {str(name): idx + 1 for idx, name in enumerate(headers)}
@@ -259,13 +267,37 @@ def test_compile_workbook_with_search_space_rows(tmp_path: Path) -> None:
     search_headers = [search_ws.cell(2, col).value for col in range(1, search_ws.max_column + 1)]
     search_col = {str(name): idx + 1 for idx, name in enumerate(search_headers)}
     search_ws.cell(3, search_col["enabled"], "Yes")
+    search_ws.cell(3, search_col["objective_metric"], "balanced_accuracy")
     search_ws.cell(4, search_col["enabled"], "Yes")
+    search_ws.cell(4, search_col["objective_metric"], "balanced_accuracy")
     workbook.save(workbook_path)
 
     manifest = compile_workbook_file(workbook_path)
     assert len(manifest.search_spaces) == 1
     assert manifest.search_spaces[0].search_space_id == "SS01"
     assert manifest.trial_specs[0].search_space_id == "SS01"
+
+
+def test_compile_workbook_search_space_missing_objective_metric_fails(tmp_path: Path) -> None:
+    workbook_path = tmp_path / "thesis_experiment_program.xlsx"
+    _make_workbook(workbook_path)
+    _set_executable_row(workbook_path)
+
+    workbook = load_workbook(workbook_path)
+    defs_ws = workbook["Experiment_Definitions"]
+    search_ws = workbook["Search_Spaces"]
+    defs_headers = [defs_ws.cell(1, col).value for col in range(1, defs_ws.max_column + 1)]
+    defs_col = {str(name): idx + 1 for idx, name in enumerate(defs_headers)}
+    defs_ws.cell(2, defs_col["search_space_id"], "SS01")
+
+    search_headers = [search_ws.cell(2, col).value for col in range(1, search_ws.max_column + 1)]
+    search_col = {str(name): idx + 1 for idx, name in enumerate(search_headers)}
+    search_ws.cell(3, search_col["enabled"], "Yes")
+    search_ws.cell(3, search_col["objective_metric"], "")
+    workbook.save(workbook_path)
+
+    with pytest.raises(ValueError, match="missing objective_metric"):
+        compile_workbook_file(workbook_path)
 
 
 def test_compile_workbook_full_factorial_expands_design_cells(tmp_path: Path) -> None:

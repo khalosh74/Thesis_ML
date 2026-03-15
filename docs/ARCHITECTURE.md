@@ -115,7 +115,10 @@ Framework guardrails:
 - `thesisml-run-comparison` can execute only registered variants from a comparison spec.
 - `thesisml-run-protocol` can execute only canonical protocol suites and cannot accept ad hoc science overrides.
 - comparison/protocol contracts must explicitly declare methodology policy (`fixed_baselines_only` or `grouped_nested_tuning`).
-- primary metric is centralized and drives reporting, tuning objective, and permutation controls.
+- primary metric is centralized in `config.metric_policy` and is the single metric authority for official runs.
+- decision metric, tuning metric, and permutation metric are resolved from primary metric and must align (drift raises validation/runtime errors).
+- secondary metrics are emitted for descriptive reporting only.
+- official artifacts (`config.json`, `metrics.json`, comparison/protocol manifests and summaries) persist `metric_policy_effective` for auditability.
 
 Compatibility wrappers are still present but deprecated:
 

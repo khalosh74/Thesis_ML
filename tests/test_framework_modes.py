@@ -166,3 +166,39 @@ def test_mode_boundary_rejects_illegal_context_crossing(tmp_path: Path) -> None:
             framework_mode=FrameworkMode.LOCKED_COMPARISON,
         )
 
+
+def test_official_context_rejects_metric_policy_drift(tmp_path: Path) -> None:
+    kwargs = _base_run_kwargs(tmp_path)
+
+    protocol_context = {
+        "framework_mode": FrameworkMode.CONFIRMATORY.value,
+        "canonical_run": True,
+        "protocol_id": "thesis-canonical",
+        "protocol_version": "1.0.0",
+        "protocol_schema_version": "thesis-protocol-v1",
+        "suite_id": "primary_controls",
+        "claim_ids": ["claim-001"],
+        "methodology_policy_name": "fixed_baselines_only",
+        "class_weight_policy": "none",
+        "tuning_enabled": False,
+        "subgroup_reporting_enabled": True,
+        "subgroup_dimensions": ["label"],
+        "subgroup_min_samples_per_group": 1,
+        "metric_policy": {
+            "primary_metric": "macro_f1",
+            "secondary_metrics": ["balanced_accuracy", "accuracy"],
+            "decision_metric": "macro_f1",
+            "tuning_metric": "macro_f1",
+            "permutation_metric": "macro_f1",
+            "higher_is_better": True,
+        },
+    }
+
+    with pytest.raises(ValueError, match="Illegal override for official run key 'metric_policy.primary_metric'"):
+        run_experiment(
+            **kwargs,
+            framework_mode=FrameworkMode.CONFIRMATORY,
+            protocol_context=protocol_context,
+            primary_metric_name="balanced_accuracy",
+            permutation_metric_name="balanced_accuracy",
+        )

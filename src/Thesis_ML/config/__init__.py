@@ -11,10 +11,15 @@ from .methodology import (
     SubgroupReportingPolicy,
 )
 from .metric_policy import (
+    EffectiveMetricPolicy,
     SUPPORTED_CLASSIFICATION_METRICS,
     classification_metric_score,
+    enforce_primary_metric_alignment,
+    extract_metric_value,
+    metric_higher_is_better,
     metric_bundle,
     metric_scorer,
+    resolve_effective_metric_policy,
     validate_metric_name,
 )
 from .paths import (
@@ -111,8 +116,13 @@ __all__ = [
     "ComparisonDecisionPolicy",
     "ALLOWED_SUBGROUP_DIMENSIONS",
     "SUPPORTED_CLASSIFICATION_METRICS",
+    "EffectiveMetricPolicy",
     "validate_metric_name",
     "classification_metric_score",
     "metric_bundle",
     "metric_scorer",
+    "metric_higher_is_better",
+    "extract_metric_value",
+    "resolve_effective_metric_policy",
+    "enforce_primary_metric_alignment",
 ]

@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from Thesis_ML.config.metric_policy import validate_metric_name
 from Thesis_ML.orchestration.experiment_selection import STAGE_ORDER
 from Thesis_ML.orchestration.reporting import STAGE_SUMMARY_FILENAMES
 
@@ -20,7 +21,12 @@ def decision_text_for_experiment(
     experiment: dict[str, Any],
     rows: list[dict[str, Any]],
 ) -> list[str]:
-    primary_metric = str(experiment.get("primary_metric", "balanced_accuracy"))
+    raw_primary_metric = experiment.get("primary_metric")
+    if raw_primary_metric is None or not str(raw_primary_metric).strip():
+        raise ValueError(
+            f"Experiment '{experiment.get('experiment_id')}' is missing required primary_metric."
+        )
+    primary_metric = validate_metric_name(str(raw_primary_metric).strip())
     completed = [row for row in rows if row.get("status") == "completed"]
     blocked = [row for row in rows if row.get("status") == "blocked"]
     failed = [row for row in rows if row.get("status") == "failed"]

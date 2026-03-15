@@ -174,3 +174,42 @@ def test_grouped_nested_tuning_writes_tuning_artifacts(tmp_path: Path) -> None:
     assert int(summary["n_tuned_folds"]) > 0
     params_df = pd.read_csv(fit_output.tuning_best_params_path)
     assert set(params_df["status"].astype(str).tolist()) == {"tuned"}
+
+
+def test_grouped_nested_tuning_uses_declared_primary_metric(tmp_path: Path) -> None:
+    report_dir = tmp_path / "run_macro_f1"
+    report_dir.mkdir(parents=True, exist_ok=True)
+    tuning_summary_path = report_dir / "tuning_summary.json"
+    tuning_params_path = report_dir / "best_params_per_fold.csv"
+
+    fit_output = model_fit(
+        ModelFitInput(
+            x_matrix=_x_matrix(),
+            metadata_df=_metadata(),
+            target_column="coarse_affect",
+            cv_mode="within_subject_loso_session",
+            model="ridge",
+            subject="sub-001",
+            seed=13,
+            primary_metric_name="macro_f1",
+            methodology_policy_name="grouped_nested_tuning",
+            class_weight_policy="none",
+            tuning_enabled=True,
+            tuning_search_space_id="linear-grouped-nested-v1",
+            tuning_search_space_version="1.0.0",
+            tuning_inner_cv_scheme="grouped_leave_one_group_out",
+            tuning_inner_group_field="session",
+            tuning_summary_path=tuning_summary_path,
+            tuning_best_params_path=tuning_params_path,
+            run_id="nested_tuning_macro_f1",
+            config_filename="config.json",
+            report_dir=report_dir,
+            build_pipeline_fn=_build_pipeline,
+            scores_for_predictions_fn=_scores_for_predictions,
+            extract_linear_coefficients_fn=_extract_linear_coefficients,
+        )
+    )
+    summary = json.loads(fit_output.tuning_summary_path.read_text(encoding="utf-8"))
+    assert summary["primary_metric_name"] == "macro_f1"
+    params_df = pd.read_csv(fit_output.tuning_best_params_path)
+    assert set(params_df["primary_metric_name"].astype(str).tolist()) == {"macro_f1"}

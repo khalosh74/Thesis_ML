@@ -5,6 +5,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from Thesis_ML.config.metric_policy import validate_metric_name
 from Thesis_ML.config.schema_versions import (
     COMPILED_MANIFEST_SCHEMA_VERSION,
     SUMMARY_RESULT_SCHEMA_VERSION,
@@ -236,6 +237,13 @@ class StudyDesignSpec(_ContractModel):
 
     @model_validator(mode="after")
     def _validate_study(self) -> StudyDesignSpec:
+        if "primary_metric" not in self.model_fields_set:
+            raise ValueError(
+                f"Study '{self.study_id}' must explicitly declare primary_metric."
+            )
+        if not str(self.primary_metric).strip():
+            raise ValueError(f"Study '{self.study_id}' requires non-empty primary_metric.")
+        self.primary_metric = validate_metric_name(str(self.primary_metric).strip())
         start_key = _section_value(self.start_section)
         end_key = _section_value(self.end_section)
         start_idx = _SECTION_ORDER_MAP[start_key]
@@ -390,6 +398,9 @@ class EffectSummary(_ContractModel):
 
     @model_validator(mode="after")
     def _validate_effect_summary(self) -> EffectSummary:
+        if "primary_metric_name" not in self.model_fields_set:
+            raise ValueError("EffectSummary must explicitly declare primary_metric_name.")
+        self.primary_metric_name = validate_metric_name(str(self.primary_metric_name).strip())
         if int(self.n_trials) < 0:
             raise ValueError("n_trials must be >= 0.")
         if self.best_trial_id is not None and not self.best_trial_id.strip():
@@ -420,6 +431,11 @@ class SearchSpaceSpec(_ContractModel):
 
     @model_validator(mode="after")
     def _validate_shape(self) -> SearchSpaceSpec:
+        if "objective_metric" not in self.model_fields_set:
+            raise ValueError(
+                f"Search space '{self.search_space_id}' must explicitly declare objective_metric."
+            )
+        self.objective_metric = validate_metric_name(str(self.objective_metric).strip())
         if self.enabled and not self.dimensions:
             raise ValueError(
                 f"Enabled search space '{self.search_space_id}' must define at least one dimension."
@@ -445,6 +461,13 @@ class ExperimentSpec(_ContractModel):
 
     @model_validator(mode="after")
     def _validate_trial_experiment_ids(self) -> ExperimentSpec:
+        if "primary_metric" not in self.model_fields_set:
+            raise ValueError(
+                f"Experiment '{self.experiment_id}' must explicitly declare primary_metric."
+            )
+        if not str(self.primary_metric).strip():
+            raise ValueError(f"Experiment '{self.experiment_id}' requires non-empty primary_metric.")
+        self.primary_metric = validate_metric_name(str(self.primary_metric).strip())
         mismatched = [
             trial.template_id
             for trial in self.variant_templates
@@ -637,6 +660,9 @@ class TrialResultSummary(_ContractModel):
 
     @model_validator(mode="after")
     def _validate_summary_schema(self) -> TrialResultSummary:
+        if "primary_metric_name" not in self.model_fields_set:
+            raise ValueError("TrialResultSummary must explicitly declare primary_metric_name.")
+        self.primary_metric_name = validate_metric_name(str(self.primary_metric_name).strip())
         if self.summary_result_schema_version not in SUPPORTED_SUMMARY_RESULT_SCHEMA_VERSIONS:
             supported = ", ".join(sorted(SUPPORTED_SUMMARY_RESULT_SCHEMA_VERSIONS))
             raise ValueError(

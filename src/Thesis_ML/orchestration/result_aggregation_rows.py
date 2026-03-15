@@ -69,7 +69,7 @@ def build_summary_output_rows(aggregation: dict[str, Any]) -> list[dict[str, Any
             _base_summary_row(
                 summary_type="best_full_pipeline",
                 summary_key=f"rank_{rank}",
-                primary_metric_name=str(row.get("primary_metric_name") or "balanced_accuracy"),
+                primary_metric_name=str(row.get("primary_metric_name")),
                 primary_metric_value=safe_float(row.get("primary_metric_value_float")),
                 run_id=row.get("run_id"),
                 experiment_id=row.get("experiment_id"),
@@ -89,7 +89,7 @@ def build_summary_output_rows(aggregation: dict[str, Any]) -> list[dict[str, Any
             _base_summary_row(
                 summary_type="best_segment_run",
                 summary_key=f"rank_{rank}",
-                primary_metric_name=str(row.get("primary_metric_name") or "balanced_accuracy"),
+                primary_metric_name=str(row.get("primary_metric_name")),
                 primary_metric_value=safe_float(row.get("primary_metric_value_float")),
                 run_id=row.get("run_id"),
                 experiment_id=row.get("experiment_id"),
@@ -109,7 +109,7 @@ def build_summary_output_rows(aggregation: dict[str, Any]) -> list[dict[str, Any
             _base_summary_row(
                 summary_type="section_effect",
                 summary_key=str(row.get("section_key") or ""),
-                primary_metric_name="mean_primary_metric_value",
+                primary_metric_name=str(row.get("primary_metric_name")),
                 primary_metric_value=safe_float(row.get("mean_primary_metric_value")),
                 run_id=row.get("best_run_id"),
                 experiment_id=row.get("best_experiment_id"),
@@ -133,7 +133,7 @@ def build_summary_output_rows(aggregation: dict[str, Any]) -> list[dict[str, Any
             _base_summary_row(
                 summary_type="pattern_by_model",
                 summary_key=str(row.get("key") or ""),
-                primary_metric_name="mean_primary_metric_value",
+                primary_metric_name=str(row.get("primary_metric_name")),
                 primary_metric_value=safe_float(row.get("mean_primary_metric_value")),
                 run_id=row.get("best_run_id"),
                 experiment_id=row.get("best_experiment_id"),
@@ -150,7 +150,7 @@ def build_summary_output_rows(aggregation: dict[str, Any]) -> list[dict[str, Any
             _base_summary_row(
                 summary_type="pattern_by_cv",
                 summary_key=str(row.get("key") or ""),
-                primary_metric_name="mean_primary_metric_value",
+                primary_metric_name=str(row.get("primary_metric_name")),
                 primary_metric_value=safe_float(row.get("mean_primary_metric_value")),
                 run_id=row.get("best_run_id"),
                 experiment_id=row.get("best_experiment_id"),
@@ -168,7 +168,7 @@ def build_summary_output_rows(aggregation: dict[str, Any]) -> list[dict[str, Any
             _base_summary_row(
                 summary_type="xai_method_effect",
                 summary_key=str(row.get("xai_method") or ""),
-                primary_metric_name="mean_primary_metric_value",
+                primary_metric_name=str(row.get("primary_metric_name")),
                 primary_metric_value=safe_float(row.get("mean_primary_metric_value")),
                 run_id=row.get("best_run_id"),
                 experiment_id=row.get("best_experiment_id"),
@@ -186,7 +186,7 @@ def build_summary_output_rows(aggregation: dict[str, Any]) -> list[dict[str, Any
             _base_summary_row(
                 summary_type="factorial_best_by_study",
                 summary_key=str(row.get("study_id") or ""),
-                primary_metric_name="mean_primary_metric_value",
+                primary_metric_name=str(row.get("primary_metric_name")),
                 primary_metric_value=safe_float(row.get("mean_primary_metric_value")),
                 run_id=row.get("best_run_id"),
                 experiment_id=row.get("best_experiment_id"),
@@ -201,7 +201,7 @@ def build_summary_output_rows(aggregation: dict[str, Any]) -> list[dict[str, Any
             _base_summary_row(
                 summary_type="factor_level_effect_descriptive",
                 summary_key=str(row.get("summary_key") or ""),
-                primary_metric_name="mean_primary_metric_value",
+                primary_metric_name=str(row.get("primary_metric_name")),
                 primary_metric_value=safe_float(row.get("mean_primary_metric_value")),
                 notes=(
                     f"factor_level_key={row.get('factor_level_key')}; "
@@ -214,7 +214,7 @@ def build_summary_output_rows(aggregation: dict[str, Any]) -> list[dict[str, Any
             _base_summary_row(
                 summary_type="factor_combination_effect_descriptive",
                 summary_key=str(row.get("summary_key") or ""),
-                primary_metric_name="mean_primary_metric_value",
+                primary_metric_name=str(row.get("primary_metric_name")),
                 primary_metric_value=safe_float(row.get("mean_primary_metric_value")),
                 notes=(
                     f"factor_level_key={row.get('factor_level_key')}; "
@@ -227,7 +227,7 @@ def build_summary_output_rows(aggregation: dict[str, Any]) -> list[dict[str, Any
             _base_summary_row(
                 summary_type="factor_interaction_descriptive",
                 summary_key=str(row.get("summary_key") or ""),
-                primary_metric_name="mean_primary_metric_value",
+                primary_metric_name=str(row.get("primary_metric_name")),
                 primary_metric_value=safe_float(row.get("mean_primary_metric_value")),
                 notes=(
                     f"interaction_key={row.get('interaction_key')}; "

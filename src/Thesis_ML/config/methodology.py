@@ -5,7 +5,10 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from Thesis_ML.config.metric_policy import SUPPORTED_CLASSIFICATION_METRICS
+from Thesis_ML.config.metric_policy import (
+    SUPPORTED_CLASSIFICATION_METRICS,
+    validate_metric_name,
+)
 
 ALLOWED_SUBGROUP_DIMENSIONS = frozenset({"label", "task", "modality", "session", "subject"})
 
@@ -82,20 +85,15 @@ class MetricPolicy(_MethodologyModel):
 
     @model_validator(mode="after")
     def _validate_metrics(self) -> MetricPolicy:
-        if self.primary_metric not in SUPPORTED_CLASSIFICATION_METRICS:
-            allowed = ", ".join(sorted(SUPPORTED_CLASSIFICATION_METRICS))
-            raise ValueError(
-                f"Unsupported metric_policy.primary_metric '{self.primary_metric}'. "
-                f"Allowed values: {allowed}."
-            )
+        self.primary_metric = validate_metric_name(self.primary_metric)
+        normalized_secondary: list[str] = []
         for metric_name in self.secondary_metrics:
-            if metric_name not in SUPPORTED_CLASSIFICATION_METRICS:
-                allowed = ", ".join(sorted(SUPPORTED_CLASSIFICATION_METRICS))
-                raise ValueError(
-                    f"Unsupported secondary metric '{metric_name}'. Allowed values: {allowed}."
-                )
+            normalized_secondary.append(validate_metric_name(metric_name))
+        self.secondary_metrics = normalized_secondary
         if len(set(self.secondary_metrics)) != len(self.secondary_metrics):
             raise ValueError("metric_policy.secondary_metrics must be unique.")
+        if self.primary_metric in set(self.secondary_metrics):
+            raise ValueError("metric_policy.secondary_metrics must not include primary_metric.")
         return self
 
 
@@ -152,4 +150,3 @@ class ComparisonDecisionPolicy(_MethodologyModel):
         if float(self.tie_tolerance) < 0.0:
             raise ValueError("comparison decision tie_tolerance must be >= 0.0.")
         return self
-

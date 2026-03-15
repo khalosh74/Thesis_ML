@@ -32,7 +32,11 @@ from Thesis_ML.config.methodology import (
     MethodologyPolicyName,
     SubgroupReportingPolicy,
 )
-from Thesis_ML.config.metric_policy import validate_metric_name
+from Thesis_ML.config.metric_policy import (
+    enforce_primary_metric_alignment,
+    resolve_effective_metric_policy,
+    validate_metric_name,
+)
 from Thesis_ML.config.paths import DEFAULT_EXPERIMENT_REPORTS_ROOT
 from Thesis_ML.experiments.cache_loading import load_features_from_cache
 from Thesis_ML.experiments.execution_policy import (
@@ -216,6 +220,7 @@ def _resolve_framework_context(
             "subgroup_reporting_enabled",
             "subgroup_dimensions",
             "subgroup_min_samples_per_group",
+            "metric_policy",
         ]
         missing = [key for key in required_keys if key not in resolved_protocol_context]
         if missing:
@@ -252,6 +257,7 @@ def _resolve_framework_context(
             "subgroup_reporting_enabled",
             "subgroup_dimensions",
             "subgroup_min_samples_per_group",
+            "metric_policy",
         ]
         missing = [key for key in required_keys if key not in resolved_comparison_context]
         if missing:
@@ -479,6 +485,9 @@ def run_experiment(
         official_context = dict(resolved_protocol_context)
     if resolved_framework_mode == FrameworkMode.LOCKED_COMPARISON:
         official_context = dict(resolved_comparison_context)
+    resolved_secondary_metrics: list[str] = []
+    resolved_decision_metric = resolved_primary_metric_name
+    resolved_tuning_metric = resolved_primary_metric_name
     if official_context:
         context_primary_metric = official_context.get("primary_metric")
         if context_primary_metric is not None and validate_metric_name(
@@ -516,6 +525,62 @@ def run_experiment(
                 "Illegal override for official run key 'interpretability_enabled'. "
                 "Use protocol/comparison spec values only."
             )
+        metric_policy_payload = official_context.get("metric_policy")
+        if not isinstance(metric_policy_payload, dict):
+            raise ValueError(
+                "Official run context is missing metric_policy payload. "
+                "Use protocol/comparison spec values only."
+            )
+        payload_primary_metric = metric_policy_payload.get("primary_metric")
+        if payload_primary_metric is None:
+            raise ValueError(
+                "Official run context metric_policy is missing primary_metric."
+            )
+        if validate_metric_name(str(payload_primary_metric)) != resolved_primary_metric_name:
+            raise ValueError(
+                "Illegal override for official run key 'metric_policy.primary_metric'. "
+                "Use protocol/comparison spec values only."
+            )
+        payload_secondary_metrics = metric_policy_payload.get("secondary_metrics", [])
+        if payload_secondary_metrics is not None and not isinstance(
+            payload_secondary_metrics, list
+        ):
+            raise ValueError(
+                "Official run context metric_policy.secondary_metrics must be a list."
+            )
+        resolved_secondary_metrics = (
+            [str(value) for value in payload_secondary_metrics]
+            if isinstance(payload_secondary_metrics, list)
+            else []
+        )
+        payload_decision_metric = metric_policy_payload.get("decision_metric")
+        if payload_decision_metric is not None:
+            resolved_decision_metric = validate_metric_name(str(payload_decision_metric))
+        payload_tuning_metric = metric_policy_payload.get("tuning_metric")
+        if payload_tuning_metric is not None:
+            resolved_tuning_metric = validate_metric_name(str(payload_tuning_metric))
+        payload_permutation_metric = metric_policy_payload.get("permutation_metric")
+        if payload_permutation_metric is not None:
+            if validate_metric_name(str(payload_permutation_metric)) != resolved_permutation_metric_name:
+                raise ValueError(
+                    "Illegal override for official run key 'metric_policy.permutation_metric'. "
+                    "Use protocol/comparison spec values only."
+                )
+    metric_policy_effective = resolve_effective_metric_policy(
+        primary_metric=resolved_primary_metric_name,
+        secondary_metrics=resolved_secondary_metrics,
+        decision_metric=resolved_decision_metric,
+        tuning_metric=resolved_tuning_metric,
+        permutation_metric=resolved_permutation_metric_name,
+    )
+    if resolved_framework_mode in {
+        FrameworkMode.CONFIRMATORY,
+        FrameworkMode.LOCKED_COMPARISON,
+    }:
+        metric_policy_effective = enforce_primary_metric_alignment(
+            metric_policy_effective,
+            context=f"framework_mode='{resolved_framework_mode.value}'",
+        )
     methodology_policy, subgroup_policy = _resolve_methodology_runtime(
         framework_mode=resolved_framework_mode,
         methodology_policy_name=methodology_policy_name,
@@ -712,6 +777,19 @@ def run_experiment(
             persisted_metrics["subgroup_metrics_csv_path"] = str(
                 subgroup_metrics_csv_path.resolve()
             )
+            persisted_metrics["metric_policy_effective"] = {
+                "primary_metric": metric_policy_effective.primary_metric,
+                "secondary_metrics": list(metric_policy_effective.secondary_metrics),
+                "decision_metric": metric_policy_effective.decision_metric,
+                "tuning_metric": metric_policy_effective.tuning_metric,
+                "permutation_metric": metric_policy_effective.permutation_metric,
+                "higher_is_better": bool(metric_policy_effective.higher_is_better),
+            }
+            persisted_metrics["decision_metric_name"] = metric_policy_effective.decision_metric
+            persisted_metrics["tuning_metric_name"] = metric_policy_effective.tuning_metric
+            persisted_metrics["permutation_metric_name"] = (
+                metric_policy_effective.permutation_metric
+            )
             persisted_metrics["protocol_id"] = protocol_id
             persisted_metrics["protocol_version"] = protocol_version
             persisted_metrics["protocol_schema_version"] = protocol_schema_version
@@ -768,6 +846,16 @@ def run_experiment(
         "seed": int(seed),
         "primary_metric_name": resolved_primary_metric_name,
         "permutation_metric_name": resolved_permutation_metric_name,
+        "metric_policy_effective": {
+            "primary_metric": metric_policy_effective.primary_metric,
+            "secondary_metrics": list(metric_policy_effective.secondary_metrics),
+            "decision_metric": metric_policy_effective.decision_metric,
+            "tuning_metric": metric_policy_effective.tuning_metric,
+            "permutation_metric": metric_policy_effective.permutation_metric,
+            "higher_is_better": bool(metric_policy_effective.higher_is_better),
+        },
+        "decision_metric_name": metric_policy_effective.decision_metric,
+        "tuning_metric_name": metric_policy_effective.tuning_metric,
         "methodology_policy_name": methodology_policy.policy_name.value,
         "class_weight_policy": methodology_policy.class_weight_policy.value,
         "tuning_enabled": bool(methodology_policy.tuning_enabled),
@@ -882,6 +970,14 @@ def run_experiment(
         "run_mode": run_mode,
         "framework_mode": resolved_framework_mode.value,
         "canonical_run": bool(canonical_run),
+        "metric_policy_effective": {
+            "primary_metric": metric_policy_effective.primary_metric,
+            "secondary_metrics": list(metric_policy_effective.secondary_metrics),
+            "decision_metric": metric_policy_effective.decision_metric,
+            "tuning_metric": metric_policy_effective.tuning_metric,
+            "permutation_metric": metric_policy_effective.permutation_metric,
+            "higher_is_better": bool(metric_policy_effective.higher_is_better),
+        },
         "methodology_policy_name": methodology_policy.policy_name.value,
         "class_weight_policy": methodology_policy.class_weight_policy.value,
         "tuning_enabled": bool(methodology_policy.tuning_enabled),

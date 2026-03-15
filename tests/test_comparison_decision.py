@@ -235,3 +235,48 @@ def test_comparison_decision_invalid_on_missing_metrics() -> None:
         run_results=run_results,
     )
     assert decision["decision_status"] == "invalid_comparison"
+
+
+def test_comparison_decision_uses_declared_primary_metric_for_selection() -> None:
+    spec = _base_comparison_spec().model_copy(deep=True)
+    spec.metric_policy.primary_metric = "macro_f1"
+    spec.metric_policy.secondary_metrics = ["balanced_accuracy", "accuracy"]
+    spec.decision_policy.primary_metric = "macro_f1"
+    spec.control_policy.permutation_metric = "macro_f1"
+
+    manifest = _compiled_manifest().model_copy(deep=True)
+    manifest.metric_policy.primary_metric = "macro_f1"
+    manifest.metric_policy.secondary_metrics = ["balanced_accuracy", "accuracy"]
+    manifest.decision_policy.primary_metric = "macro_f1"
+    for run in manifest.runs:
+        run.primary_metric = "macro_f1"
+        run.controls.permutation_metric = "macro_f1"
+
+    run_results = [
+        ComparisonRunResult(
+            run_id="r1",
+            framework_mode=FrameworkMode.LOCKED_COMPARISON.value,
+            comparison_id="cmp-decision-test",
+            comparison_version="1.0.0",
+            variant_id="ridge",
+            status="completed",
+            metrics={"balanced_accuracy": 0.90, "macro_f1": 0.40},
+        ),
+        ComparisonRunResult(
+            run_id="r2",
+            framework_mode=FrameworkMode.LOCKED_COMPARISON.value,
+            comparison_id="cmp-decision-test",
+            comparison_version="1.0.0",
+            variant_id="logreg",
+            status="completed",
+            metrics={"balanced_accuracy": 0.60, "macro_f1": 0.70},
+        ),
+    ]
+    decision = build_comparison_decision(
+        comparison=spec,
+        compiled_manifest=manifest,
+        run_results=run_results,
+    )
+    assert decision["decision_status"] == "winner_selected"
+    assert decision["primary_metric"] == "macro_f1"
+    assert decision["selected_variant"] == "logreg"

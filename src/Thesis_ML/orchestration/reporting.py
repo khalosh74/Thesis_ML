@@ -6,6 +6,7 @@ from typing import Any
 
 import pandas as pd
 
+from Thesis_ML.config.metric_policy import validate_metric_name
 from Thesis_ML.orchestration.experiment_selection import STAGE_ORDER
 
 STAGE_SUMMARY_FILENAMES = {
@@ -131,6 +132,12 @@ def write_experiment_outputs(
     variant_records: list[dict[str, Any]],
     warnings: list[str],
 ) -> None:
+    raw_primary_metric = experiment.get("primary_metric")
+    if raw_primary_metric is None or not str(raw_primary_metric).strip():
+        raise ValueError(
+            f"Experiment '{experiment.get('experiment_id')}' is missing required primary_metric."
+        )
+    primary_metric_name = validate_metric_name(str(raw_primary_metric))
     export_rows = []
     for row in variant_records:
         export_rows.append({column: row.get(column) for column in VARIANT_EXPORT_COLUMNS})
@@ -145,7 +152,7 @@ def write_experiment_outputs(
         "stage": str(experiment.get("stage", "")),
         "decision_id": str(experiment.get("decision_id", "")),
         "manipulated_factor": str(experiment.get("manipulated_factor", "")),
-        "primary_metric": str(experiment.get("primary_metric", "balanced_accuracy")),
+        "primary_metric": primary_metric_name,
         "warnings": warnings,
         "variant_count": int(len(variant_records)),
         "completed_count": int(sum(1 for row in variant_records if row["status"] == "completed")),
@@ -167,7 +174,12 @@ def summarize_by_experiment(
     rows: list[dict[str, Any]] = []
     for experiment in experiments:
         experiment_id = str(experiment["experiment_id"])
-        metric_name = str(experiment.get("primary_metric", "balanced_accuracy"))
+        raw_metric_name = experiment.get("primary_metric")
+        if raw_metric_name is None or not str(raw_metric_name).strip():
+            raise ValueError(
+                f"Experiment '{experiment_id}' is missing required primary_metric."
+            )
+        metric_name = validate_metric_name(str(raw_metric_name))
         records = [row for row in variant_records if row["experiment_id"] == experiment_id]
 
         completed = [row for row in records if row["status"] == "completed"]
@@ -297,9 +309,21 @@ def write_stage_summaries(
                 lines.append(f"- {status_name}: {status_counts[status_name]}")
             lines.append("")
             lines.append("## Metric focus")
-            lines.append(
-                "- Primary metric tracked per experiment: balanced_accuracy (registry-defined)."
+            metric_names = sorted(
+                {
+                    validate_metric_name(str(value).strip())
+                    for value in stage_df["primary_metric_name"].tolist()
+                    if isinstance(value, str) and value.strip()
+                }
             )
+            if metric_names:
+                lines.append(
+                    "- Primary metric tracked per experiment: "
+                    + ", ".join(metric_names)
+                    + " (registry-defined)."
+                )
+            else:
+                lines.append("- Primary metric tracked per experiment: missing_in_stage_rows.")
             lines.append(
                 "- Use corresponding CSV for exact per-variant evidence before locking decisions."
             )

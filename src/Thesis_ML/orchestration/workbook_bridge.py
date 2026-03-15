@@ -6,6 +6,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from Thesis_ML.config.metric_policy import validate_metric_name
+
 
 def _utc_timestamp() -> str:
     return datetime.now(UTC).replace(microsecond=0).isoformat()
@@ -36,6 +38,12 @@ def _int_value(value: Any) -> int:
         return int(value)
     except Exception:
         return 0
+
+
+def _required_metric_name(value: Any, *, context: str) -> str:
+    if value is None or not str(value).strip():
+        raise ValueError(f"{context} is missing required primary_metric_name.")
+    return validate_metric_name(str(value).strip())
 
 
 def _build_dataset_subset_label(params: dict[str, Any]) -> str:
@@ -102,7 +110,10 @@ def build_trial_results_rows(variant_records: list[dict[str, Any]]) -> list[dict
                 "experiment_id": row.get("experiment_id"),
                 "run_id": row.get("run_id"),
                 "status": row.get("status"),
-                "primary_metric_name": row.get("primary_metric_name") or "balanced_accuracy",
+                "primary_metric_name": _required_metric_name(
+                    row.get("primary_metric_name"),
+                    context=f"trial_result row '{row.get('variant_id')}'",
+                ),
                 "primary_metric_value": _safe_float(row.get("primary_metric_value")),
                 "report_path": row.get("report_dir"),
                 "metrics_path": row.get("metrics_path"),
@@ -160,7 +171,10 @@ def build_effect_summary_rows(aggregation: dict[str, Any]) -> list[dict[str, Any
                 "summary_key": str(row.get("study_id") or ""),
                 "factor_level_key": "",
                 "interaction_key": "",
-                "primary_metric_name": row.get("primary_metric_name") or "balanced_accuracy",
+                "primary_metric_name": _required_metric_name(
+                    row.get("primary_metric_name"),
+                    context=f"effect_summary best_by_study '{row.get('study_id')}'",
+                ),
                 "mean_primary_metric_value": _safe_float(row.get("mean_primary_metric_value")),
                 "best_primary_metric_value": _safe_float(row.get("best_primary_metric_value")),
                 "best_trial_id": row.get("best_trial_id"),
@@ -176,7 +190,10 @@ def build_effect_summary_rows(aggregation: dict[str, Any]) -> list[dict[str, Any
                 "summary_key": str(row.get("summary_key") or ""),
                 "factor_level_key": str(row.get("factor_level_key") or ""),
                 "interaction_key": "",
-                "primary_metric_name": row.get("primary_metric_name") or "balanced_accuracy",
+                "primary_metric_name": _required_metric_name(
+                    row.get("primary_metric_name"),
+                    context=f"effect_summary factor_level '{row.get('summary_key')}'",
+                ),
                 "mean_primary_metric_value": _safe_float(row.get("mean_primary_metric_value")),
                 "best_primary_metric_value": _safe_float(row.get("best_primary_metric_value")),
                 "best_trial_id": row.get("best_trial_id"),
@@ -192,7 +209,10 @@ def build_effect_summary_rows(aggregation: dict[str, Any]) -> list[dict[str, Any
                 "summary_key": str(row.get("summary_key") or ""),
                 "factor_level_key": str(row.get("factor_level_key") or ""),
                 "interaction_key": "",
-                "primary_metric_name": row.get("primary_metric_name") or "balanced_accuracy",
+                "primary_metric_name": _required_metric_name(
+                    row.get("primary_metric_name"),
+                    context=f"effect_summary factor_combination '{row.get('summary_key')}'",
+                ),
                 "mean_primary_metric_value": _safe_float(row.get("mean_primary_metric_value")),
                 "best_primary_metric_value": _safe_float(row.get("best_primary_metric_value")),
                 "best_trial_id": row.get("best_trial_id"),
@@ -208,7 +228,10 @@ def build_effect_summary_rows(aggregation: dict[str, Any]) -> list[dict[str, Any
                 "summary_key": str(row.get("summary_key") or ""),
                 "factor_level_key": "",
                 "interaction_key": str(row.get("interaction_key") or ""),
-                "primary_metric_name": row.get("primary_metric_name") or "balanced_accuracy",
+                "primary_metric_name": _required_metric_name(
+                    row.get("primary_metric_name"),
+                    context=f"effect_summary interaction '{row.get('summary_key')}'",
+                ),
                 "mean_primary_metric_value": _safe_float(row.get("mean_primary_metric_value")),
                 "best_primary_metric_value": _safe_float(row.get("best_primary_metric_value")),
                 "best_trial_id": row.get("best_trial_id"),

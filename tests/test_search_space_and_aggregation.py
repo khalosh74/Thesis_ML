@@ -30,6 +30,7 @@ def test_deterministic_search_space_expands_cartesian_grid() -> None:
             "search_space_id": "SS01",
             "enabled": True,
             "optimization_mode": "deterministic_grid",
+            "objective_metric": "balanced_accuracy",
             "dimensions": [
                 {"parameter_name": "model", "values": ["ridge", "logreg"]},
                 {
@@ -72,6 +73,7 @@ def test_optuna_search_space_requires_optuna_mode_flag() -> None:
             "search_space_id": "SS_OPTUNA",
             "enabled": True,
             "optimization_mode": "optuna",
+            "objective_metric": "balanced_accuracy",
             "dimensions": [
                 {"parameter_name": "model", "values": ["ridge", "logreg"]},
             ],
@@ -108,6 +110,7 @@ def test_optuna_search_space_expands_when_enabled() -> None:
             "search_space_id": "SS_OPTUNA_ENABLED",
             "enabled": True,
             "optimization_mode": "optuna",
+            "objective_metric": "balanced_accuracy",
             "dimensions": [
                 {"parameter_name": "model", "values": ["ridge", "logreg"]},
                 {"parameter_name": "start_section", "values": ["dataset_selection"]},
@@ -235,3 +238,10 @@ def test_aggregate_variant_records_summarizes_segments_and_xai(tmp_path: Path) -
     assert "section_effect" in summary_types
     assert "xai_method_effect" in summary_types
     assert "factor_level_effect_descriptive" in summary_types
+    metric_names = {
+        str(row.get("primary_metric_name"))
+        for row in rows
+        if row.get("primary_metric_name") not in (None, "")
+    }
+    assert metric_names == {"balanced_accuracy"}
+    assert "mean_primary_metric_value" not in metric_names

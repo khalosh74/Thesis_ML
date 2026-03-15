@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from Thesis_ML.config.framework_mode import FrameworkMode
+from Thesis_ML.config.metric_policy import resolve_effective_metric_policy
 from Thesis_ML.protocols.models import (
     CompiledProtocolManifest,
     ProtocolRunResult,
@@ -22,6 +23,13 @@ def _suite_summary(
     compiled_manifest: CompiledProtocolManifest,
     run_results: list[ProtocolRunResult],
 ) -> dict[str, Any]:
+    metric_policy_effective = resolve_effective_metric_policy(
+        primary_metric=compiled_manifest.metric_policy.primary_metric,
+        secondary_metrics=compiled_manifest.metric_policy.secondary_metrics,
+        decision_metric=compiled_manifest.metric_policy.primary_metric,
+        tuning_metric=compiled_manifest.metric_policy.primary_metric,
+        permutation_metric=compiled_manifest.metric_policy.primary_metric,
+    )
     by_suite: dict[str, dict[str, int]] = {}
     for suite_id in compiled_manifest.suite_ids:
         by_suite[suite_id] = {"planned": 0, "completed": 0, "failed": 0}
@@ -37,6 +45,14 @@ def _suite_summary(
         "protocol_version": compiled_manifest.protocol_version,
         "methodology_policy_name": compiled_manifest.methodology_policy.policy_name.value,
         "primary_metric": compiled_manifest.metric_policy.primary_metric,
+        "metric_policy_effective": {
+            "primary_metric": metric_policy_effective.primary_metric,
+            "secondary_metrics": list(metric_policy_effective.secondary_metrics),
+            "decision_metric": metric_policy_effective.decision_metric,
+            "tuning_metric": metric_policy_effective.tuning_metric,
+            "permutation_metric": metric_policy_effective.permutation_metric,
+            "higher_is_better": bool(metric_policy_effective.higher_is_better),
+        },
         "subgroup_reporting_enabled": bool(compiled_manifest.subgroup_reporting_policy.enabled),
         "suite_status_counts": by_suite,
         "n_runs": int(len(run_results)),
@@ -68,6 +84,13 @@ def _report_index_rows(
     result_by_run_id = {result.run_id: result for result in run_results}
     rows: list[dict[str, Any]] = []
     for spec in compiled_manifest.runs:
+        metric_policy_effective = resolve_effective_metric_policy(
+            primary_metric=spec.primary_metric,
+            secondary_metrics=compiled_manifest.metric_policy.secondary_metrics,
+            decision_metric=spec.primary_metric,
+            tuning_metric=spec.primary_metric,
+            permutation_metric=spec.controls.permutation_metric or spec.primary_metric,
+        )
         result = result_by_run_id.get(spec.run_id)
         metrics = result.metrics if result and result.metrics else {}
         rows.append(
@@ -85,12 +108,15 @@ def _report_index_rows(
                 "test_subject": spec.test_subject,
                 "seed": int(spec.seed),
                 "primary_metric": spec.primary_metric,
+                "decision_metric": metric_policy_effective.decision_metric,
+                "tuning_metric": metric_policy_effective.tuning_metric,
                 "methodology_policy_name": spec.methodology_policy_name.value,
                 "class_weight_policy": spec.class_weight_policy.value,
                 "tuning_enabled": bool(spec.tuning_enabled),
                 "permutation_enabled": bool(spec.controls.permutation_enabled),
                 "n_permutations": int(spec.controls.n_permutations),
                 "permutation_metric": spec.controls.permutation_metric,
+                "higher_is_better": bool(metric_policy_effective.higher_is_better),
                 "dummy_baseline_run": bool(spec.controls.dummy_baseline_run),
                 "interpretability_enabled": bool(spec.interpretability_enabled),
                 "subgroup_reporting_enabled": bool(spec.subgroup_reporting_enabled),
@@ -102,6 +128,8 @@ def _report_index_rows(
                 "balanced_accuracy": metrics.get("balanced_accuracy"),
                 "macro_f1": metrics.get("macro_f1"),
                 "accuracy": metrics.get("accuracy"),
+                "primary_metric_name": metrics.get("primary_metric_name"),
+                "primary_metric_value": metrics.get("primary_metric_value"),
             }
         )
     return rows
@@ -125,8 +153,25 @@ def write_protocol_artifacts(
     execution_status_path = protocol_dir / "execution_status.json"
     report_index_path = protocol_dir / "report_index.csv"
 
+    metric_policy_effective = resolve_effective_metric_policy(
+        primary_metric=compiled_manifest.metric_policy.primary_metric,
+        secondary_metrics=compiled_manifest.metric_policy.secondary_metrics,
+        decision_metric=compiled_manifest.metric_policy.primary_metric,
+        tuning_metric=compiled_manifest.metric_policy.primary_metric,
+        permutation_metric=compiled_manifest.metric_policy.primary_metric,
+    )
+    compiled_manifest_payload = compiled_manifest.model_dump(mode="json")
+    compiled_manifest_payload["metric_policy_effective"] = {
+        "primary_metric": metric_policy_effective.primary_metric,
+        "secondary_metrics": list(metric_policy_effective.secondary_metrics),
+        "decision_metric": metric_policy_effective.decision_metric,
+        "tuning_metric": metric_policy_effective.tuning_metric,
+        "permutation_metric": metric_policy_effective.permutation_metric,
+        "higher_is_better": bool(metric_policy_effective.higher_is_better),
+    }
+
     _write_json(protocol_json_path, protocol.model_dump(mode="json"))
-    _write_json(compiled_manifest_path, compiled_manifest.model_dump(mode="json"))
+    _write_json(compiled_manifest_path, compiled_manifest_payload)
     _write_json(claim_map_path, compiled_manifest.claim_to_run_map)
     _write_json(suite_summary_path, _suite_summary(compiled_manifest, run_results))
     _write_json(

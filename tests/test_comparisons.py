@@ -133,6 +133,28 @@ def test_comparison_requires_explicit_methodology_policy(tmp_path: Path) -> None
         load_comparison_spec(spec_path)
 
 
+def test_comparison_validation_rejects_metric_drift(tmp_path: Path) -> None:
+    payload = json.loads(_comparison_spec_path().read_text(encoding="utf-8"))
+    payload["decision_policy"]["primary_metric"] = "macro_f1"
+    decision_drift_path = tmp_path / "decision_metric_drift_comparison.json"
+    decision_drift_path.write_text(f"{json.dumps(payload, indent=2)}\n", encoding="utf-8")
+    with pytest.raises(
+        ValueError,
+        match="decision_policy.primary_metric must match metric_policy.primary_metric",
+    ):
+        load_comparison_spec(decision_drift_path)
+
+    payload = json.loads(_comparison_spec_path().read_text(encoding="utf-8"))
+    payload["control_policy"]["permutation_metric"] = "macro_f1"
+    permutation_drift_path = tmp_path / "permutation_metric_drift_comparison.json"
+    permutation_drift_path.write_text(f"{json.dumps(payload, indent=2)}\n", encoding="utf-8")
+    with pytest.raises(
+        ValueError,
+        match="control_policy.permutation_metric must match metric_policy.primary_metric",
+    ):
+        load_comparison_spec(permutation_drift_path)
+
+
 def test_comparison_runner_dry_run_emits_artifacts(
     comparison_dataset: dict[str, Path],
 ) -> None:
@@ -159,6 +181,22 @@ def test_comparison_runner_dry_run_emits_artifacts(
     assert status_payload["framework_mode"] == "locked_comparison"
     assert status_payload["dry_run"] is True
     assert all(run["status"] == "planned" for run in status_payload["runs"])
+
+    summary_payload = json.loads(
+        Path(result["artifact_paths"]["comparison_summary"]).read_text(encoding="utf-8")
+    )
+    decision_payload = json.loads(
+        Path(result["artifact_paths"]["comparison_decision"]).read_text(encoding="utf-8")
+    )
+    manifest_payload = json.loads(
+        Path(result["artifact_paths"]["compiled_comparison_manifest"]).read_text(encoding="utf-8")
+    )
+    assert summary_payload["metric_policy_effective"]["primary_metric"] == "balanced_accuracy"
+    assert summary_payload["metric_policy_effective"]["decision_metric"] == "balanced_accuracy"
+    assert decision_payload["metric_policy_effective"]["primary_metric"] == "balanced_accuracy"
+    assert decision_payload["metric_policy_effective"]["decision_metric"] == "balanced_accuracy"
+    assert manifest_payload["metric_policy_effective"]["primary_metric"] == "balanced_accuracy"
+    assert manifest_payload["metric_policy_effective"]["decision_metric"] == "balanced_accuracy"
 
 
 def test_comparison_runner_real_run_stamps_metadata(
@@ -190,6 +228,11 @@ def test_comparison_runner_real_run_stamps_metadata(
     assert config["comparison_variant_id"] == "ridge"
     assert config["methodology_policy_name"] == "fixed_baselines_only"
     assert config["subgroup_reporting_enabled"] is True
+    assert config["metric_policy_effective"]["primary_metric"] == "balanced_accuracy"
+    assert config["metric_policy_effective"]["decision_metric"] == "balanced_accuracy"
+    assert config["metric_policy_effective"]["tuning_metric"] == "balanced_accuracy"
+    assert config["metric_policy_effective"]["permutation_metric"] == "balanced_accuracy"
+    assert config["metric_policy_effective"]["higher_is_better"] is True
 
     assert metrics["framework_mode"] == "locked_comparison"
     assert metrics["canonical_run"] is False
@@ -198,6 +241,14 @@ def test_comparison_runner_real_run_stamps_metadata(
     assert metrics["comparison_variant_id"] == "ridge"
     assert metrics["methodology_policy_name"] == "fixed_baselines_only"
     assert "subgroup_reporting" in metrics
+    assert metrics["decision_metric_name"] == "balanced_accuracy"
+    assert metrics["tuning_metric_name"] == "balanced_accuracy"
+    assert metrics["permutation_metric_name"] == "balanced_accuracy"
+    assert metrics["metric_policy_effective"]["primary_metric"] == "balanced_accuracy"
+    assert metrics["metric_policy_effective"]["decision_metric"] == "balanced_accuracy"
+    assert metrics["metric_policy_effective"]["tuning_metric"] == "balanced_accuracy"
+    assert metrics["metric_policy_effective"]["permutation_metric"] == "balanced_accuracy"
+    assert metrics["metric_policy_effective"]["higher_is_better"] is True
 
 
 def test_comparison_runner_rejects_draft_or_retired_status(

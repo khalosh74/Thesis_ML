@@ -96,6 +96,13 @@ Each comparison/protocol contract must choose exactly one methodology policy:
 Thesis-facing active contracts do not include ROI-switch, dimensionality-reduction, or scaling-policy
 variation dimensions; those remain out of scope unless explicitly introduced as new locked specs/protocols.
 
+Metric consistency rules for official runs:
+- each contract declares exactly one `primary_metric` (`balanced_accuracy`, `macro_f1`, or `accuracy`)
+- decision selection, nested tuning objective, permutation testing, and headline summaries must use that same primary metric
+- secondary metrics remain descriptive and cannot silently drive decisions
+- official permutation metric must equal primary metric
+- run and mode-level artifacts expose resolved metric policy in `metric_policy_effective`
+
 ## Artifacts by mode
 
 Run-level artifacts (all modes):

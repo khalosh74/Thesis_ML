@@ -387,14 +387,20 @@ def _parse_master_experiment_rows(ws) -> dict[str, dict[str, Any]]:
         experiment_id = _normalize_text(_read_cell(row, header_map, "Experiment_ID"))
         if not experiment_id:
             continue
+        primary_metric = _normalize_text(_read_cell(row, header_map, "Primary_Metric"))
+        if not primary_metric:
+            raise ValueError(
+                "Master_Experiments row for experiment_id '"
+                + experiment_id
+                + "' is missing required Primary_Metric."
+            )
         result[experiment_id] = {
             "experiment_id": experiment_id,
             "title": _normalize_text(_read_cell(row, header_map, "Short_Title")) or experiment_id,
             "stage": _normalize_text(_read_cell(row, header_map, "Stage")) or "Unspecified stage",
             "manipulated_factor": _normalize_text(_read_cell(row, header_map, "Manipulated_Factor"))
             or None,
-            "primary_metric": _normalize_text(_read_cell(row, header_map, "Primary_Metric"))
-            or "balanced_accuracy",
+            "primary_metric": primary_metric,
         }
     return result
 
@@ -568,6 +574,11 @@ def _parse_search_spaces_rows(workbook: Workbook) -> list[dict[str, Any]]:
             )
 
         max_trials_raw = _read_cell(row, header_map, "max_trials")
+        objective_metric = _normalize_text(_read_cell(row, header_map, "objective_metric"))
+        if not objective_metric:
+            raise ValueError(
+                f"Search_Spaces row {row_index} is missing objective_metric for '{search_space_id}'."
+            )
         space = grouped.setdefault(
             search_space_id,
             {
@@ -577,8 +588,7 @@ def _parse_search_spaces_rows(workbook: Workbook) -> list[dict[str, Any]]:
                     _read_cell(row, header_map, "optimization_mode")
                 )
                 or "deterministic_grid",
-                "objective_metric": _normalize_text(_read_cell(row, header_map, "objective_metric"))
-                or "balanced_accuracy",
+                "objective_metric": objective_metric,
                 "max_trials": int(max_trials_raw) if max_trials_raw not in (None, "") else None,
                 "notes": _normalize_text(_read_cell(row, header_map, "notes")) or None,
                 "dimensions": [],
@@ -1218,7 +1228,7 @@ def _build_study_design_layer(
             or SectionName.EVALUATION.value,
             "base_artifact_id": _normalize_text(_read_cell(row, study_header, "base_artifact_id"))
             or None,
-            "primary_metric": raw_primary_metric or "balanced_accuracy",
+            "primary_metric": raw_primary_metric,
             "secondary_metrics": _normalize_text(_read_cell(row, study_header, "secondary_metrics"))
             or None,
             "cv_scheme": raw_cv_scheme or None,

@@ -119,6 +119,13 @@ Policy note:
   `fixed_baselines_only` or `grouped_nested_tuning`.
 - locked comparison outputs include `comparison_decision.json` for machine-readable winner/inconclusive/invalid decisions.
 
+Metric policy note (official runs):
+- one declared `primary_metric` governs tuning, decision selection, permutation testing, and headline reporting
+- `secondary_metrics` are descriptive-only
+- official permutation metric must equal the primary metric
+- `config.json`, `metrics.json`, and mode-level manifests include `metric_policy_effective`
+- implicit metric fallbacks are disabled; workbook/registry/search-space inputs must explicitly declare required metric fields
+
 ## 4) Rerun / resume behavior
 
 `run_experiment` is intentionally strict.

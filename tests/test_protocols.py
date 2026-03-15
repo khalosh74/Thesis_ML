@@ -120,11 +120,13 @@ def test_protocol_validation_rejects_permutation_metric_conflict_without_justifi
 ) -> None:
     payload = json.loads(_canonical_protocol_path().read_text(encoding="utf-8"))
     payload["control_policy"]["permutation"]["metric"] = "accuracy"
-    payload["control_policy"]["permutation"]["metric_conflict_justification"] = None
     protocol_path = tmp_path / "invalid_metric_conflict_protocol.json"
     protocol_path.write_text(f"{json.dumps(payload, indent=2)}\n", encoding="utf-8")
 
-    with pytest.raises(ValueError, match="metric conflicts with metric_policy.primary_metric"):
+    with pytest.raises(
+        ValueError,
+        match="control_policy.permutation.metric must match metric_policy.primary_metric",
+    ):
         load_protocol(protocol_path)
 
 
@@ -186,9 +188,19 @@ def test_protocol_runner_dry_run_emits_protocol_artifacts(
     execution_status = json.loads(
         Path(result["artifact_paths"]["execution_status"]).read_text(encoding="utf-8")
     )
+    suite_summary = json.loads(
+        Path(result["artifact_paths"]["suite_summary"]).read_text(encoding="utf-8")
+    )
+    manifest_payload = json.loads(
+        Path(result["artifact_paths"]["compiled_protocol_manifest"]).read_text(encoding="utf-8")
+    )
     assert execution_status["framework_mode"] == "confirmatory"
     assert execution_status["dry_run"] is True
     assert all(row["status"] == "planned" for row in execution_status["runs"])
+    assert suite_summary["metric_policy_effective"]["primary_metric"] == "balanced_accuracy"
+    assert suite_summary["metric_policy_effective"]["decision_metric"] == "balanced_accuracy"
+    assert manifest_payload["metric_policy_effective"]["primary_metric"] == "balanced_accuracy"
+    assert manifest_payload["metric_policy_effective"]["decision_metric"] == "balanced_accuracy"
 
 
 def test_protocol_run_records_metadata_in_run_artifacts(
@@ -221,6 +233,11 @@ def test_protocol_run_records_metadata_in_run_artifacts(
     assert config["suite_id"] == "primary_within_subject"
     assert config["methodology_policy_name"] == "fixed_baselines_only"
     assert config["subgroup_reporting_enabled"] is True
+    assert config["metric_policy_effective"]["primary_metric"] == "balanced_accuracy"
+    assert config["metric_policy_effective"]["decision_metric"] == "balanced_accuracy"
+    assert config["metric_policy_effective"]["tuning_metric"] == "balanced_accuracy"
+    assert config["metric_policy_effective"]["permutation_metric"] == "balanced_accuracy"
+    assert config["metric_policy_effective"]["higher_is_better"] is True
     assert isinstance(config["claim_ids"], list) and config["claim_ids"]
 
     assert metrics["canonical_run"] is True
@@ -230,6 +247,14 @@ def test_protocol_run_records_metadata_in_run_artifacts(
     assert metrics["suite_id"] == "primary_within_subject"
     assert metrics["methodology_policy_name"] == "fixed_baselines_only"
     assert "subgroup_reporting" in metrics
+    assert metrics["decision_metric_name"] == "balanced_accuracy"
+    assert metrics["tuning_metric_name"] == "balanced_accuracy"
+    assert metrics["permutation_metric_name"] == "balanced_accuracy"
+    assert metrics["metric_policy_effective"]["primary_metric"] == "balanced_accuracy"
+    assert metrics["metric_policy_effective"]["decision_metric"] == "balanced_accuracy"
+    assert metrics["metric_policy_effective"]["tuning_metric"] == "balanced_accuracy"
+    assert metrics["metric_policy_effective"]["permutation_metric"] == "balanced_accuracy"
+    assert metrics["metric_policy_effective"]["higher_is_better"] is True
     assert isinstance(metrics["claim_ids"], list) and metrics["claim_ids"]
     assert Path(str(config["subgroup_metrics_json_path"])).exists()
     assert Path(str(config["subgroup_metrics_csv_path"])).exists()
@@ -267,6 +292,44 @@ def test_permutation_control_uses_primary_metric(
         assert "permutation_metric_std" in permutation
         assert "observed_score" in permutation
         assert "p_value" in permutation
+
+
+def test_protocol_primary_metric_change_propagates_to_official_metric_policy(
+    protocol_dataset: dict[str, Path],
+) -> None:
+    protocol = load_protocol(_canonical_protocol_path()).model_copy(deep=True)
+    protocol.scientific_contract.primary_metric = "macro_f1"
+    protocol.scientific_contract.secondary_metrics = ["balanced_accuracy", "accuracy"]
+    protocol.metric_policy.primary_metric = "macro_f1"
+    protocol.metric_policy.secondary_metrics = ["balanced_accuracy", "accuracy"]
+    protocol.control_policy.permutation.metric = "macro_f1"
+    protocol.control_policy.permutation.n_permutations = 2
+
+    result = compile_and_run_protocol(
+        protocol=protocol,
+        index_csv=protocol_dataset["index_csv"],
+        data_root=protocol_dataset["data_root"],
+        cache_dir=protocol_dataset["cache_dir"],
+        reports_root=protocol_dataset["reports_root"],
+        suite_ids=["primary_controls"],
+        dry_run=False,
+    )
+
+    assert result["n_failed"] == 0
+    completed = [row for row in result["run_results"] if row["status"] == "completed"]
+    assert completed
+
+    metrics_path = Path(str(completed[0]["metrics_path"]))
+    metrics = json.loads(metrics_path.read_text(encoding="utf-8"))
+    assert metrics["primary_metric_name"] == "macro_f1"
+    assert metrics["decision_metric_name"] == "macro_f1"
+    assert metrics["tuning_metric_name"] == "macro_f1"
+    assert metrics["permutation_metric_name"] == "macro_f1"
+    assert metrics["metric_policy_effective"]["primary_metric"] == "macro_f1"
+    assert metrics["metric_policy_effective"]["decision_metric"] == "macro_f1"
+    assert metrics["metric_policy_effective"]["tuning_metric"] == "macro_f1"
+    assert metrics["metric_policy_effective"]["permutation_metric"] == "macro_f1"
+    assert metrics["permutation_test"]["metric_name"] == "macro_f1"
 
 
 def test_protocol_level_report_index_is_emitted_for_completed_runs(

@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from Thesis_ML.config.metric_policy import extract_metric_value, validate_metric_name
 from Thesis_ML.config.schema_versions import SUMMARY_RESULT_SCHEMA_VERSION
 
 SECTION_DEFAULT_START = "dataset_selection"
@@ -43,6 +44,34 @@ def safe_float(value: Any) -> float | None:
         return float(value)
     except Exception:
         return None
+
+
+def _required_row_primary_metric_name(row: dict[str, Any]) -> str:
+    raw_value = row.get("primary_metric_name")
+    if raw_value is None or not str(raw_value).strip():
+        trial_id = str(row.get("trial_id") or row.get("variant_id") or row.get("run_id") or "")
+        raise ValueError(
+            "Completed run record is missing required primary_metric_name"
+            + (f" (trial/run: {trial_id})." if trial_id else ".")
+        )
+    return validate_metric_name(str(raw_value).strip())
+
+
+def _group_primary_metric_name(group_rows: list[dict[str, Any]]) -> str:
+    metric_names = {
+        str(row.get("primary_metric_name"))
+        for row in group_rows
+        if isinstance(row.get("primary_metric_name"), str) and str(row.get("primary_metric_name")).strip()
+    }
+    if not metric_names:
+        raise ValueError("Grouped aggregation rows are missing primary_metric_name.")
+    normalized = {validate_metric_name(value.strip()) for value in metric_names}
+    if len(normalized) != 1:
+        raise ValueError(
+            "Grouped aggregation rows contain mixed primary_metric_name values: "
+            + ", ".join(sorted(normalized))
+        )
+    return sorted(normalized)[0]
 
 
 def normalize_section(value: Any, *, default: str) -> str:
@@ -128,15 +157,13 @@ def completed_metric_rows(variant_records: list[dict[str, Any]]) -> list[dict[st
     for row in variant_records:
         if str(row.get("status")) != "completed":
             continue
-        metric = safe_float(row.get("primary_metric_value"))
-        if metric is None:
-            metric = (
-                safe_float(row.get("balanced_accuracy"))
-                or safe_float(row.get("macro_f1"))
-                or safe_float(row.get("accuracy"))
-            )
-        if metric is None:
-            continue
+        primary_metric_name = _required_row_primary_metric_name(row)
+        metric = extract_metric_value(
+            row,
+            primary_metric_name,
+            require=True,
+            payload_label=f"variant record '{_trial_id(row)}'",
+        )
         start_section = normalize_section(
             row.get("start_section"),
             default=SECTION_DEFAULT_START,
@@ -149,6 +176,7 @@ def completed_metric_rows(variant_records: list[dict[str, Any]]) -> list[dict[st
         rows.append(
             {
                 **row,
+                "primary_metric_name": primary_metric_name,
                 "primary_metric_value_float": metric,
                 "start_section_norm": start_section,
                 "end_section_norm": end_section,
@@ -181,13 +209,12 @@ def aggregate_factorial_best_by_study(rows: list[dict[str, Any]]) -> list[dict[s
         mean_metric = sum(float(item["primary_metric_value_float"]) for item in group_rows) / len(
             group_rows
         )
+        primary_metric_name = _group_primary_metric_name(group_rows)
         summary.append(
             {
                 "study_id": study_id,
                 "n_trials": int(len(group_rows)),
-                "primary_metric_name": str(
-                    best_row.get("primary_metric_name") or "balanced_accuracy"
-                ),
+                "primary_metric_name": primary_metric_name,
                 "mean_primary_metric_value": float(mean_metric),
                 "best_primary_metric_value": float(best_row["primary_metric_value_float"]),
                 "best_trial_id": _trial_id(best_row),
@@ -216,14 +243,13 @@ def aggregate_factorial_by_level(rows: list[dict[str, Any]]) -> list[dict[str, A
         mean_metric = sum(float(item["primary_metric_value_float"]) for item in group_rows) / len(
             group_rows
         )
+        primary_metric_name = _group_primary_metric_name(group_rows)
         summary.append(
             {
                 "study_id": study_id,
                 "summary_key": f"{study_id}:{factor_name}:{level_key}",
                 "factor_level_key": level_key,
-                "primary_metric_name": str(
-                    best_row.get("primary_metric_name") or "balanced_accuracy"
-                ),
+                "primary_metric_name": primary_metric_name,
                 "n_trials": int(len(group_rows)),
                 "mean_primary_metric_value": float(mean_metric),
                 "best_primary_metric_value": float(best_row["primary_metric_value_float"]),
@@ -251,14 +277,13 @@ def aggregate_factorial_combinations(rows: list[dict[str, Any]]) -> list[dict[st
         mean_metric = sum(float(item["primary_metric_value_float"]) for item in group_rows) / len(
             group_rows
         )
+        primary_metric_name = _group_primary_metric_name(group_rows)
         summary.append(
             {
                 "study_id": study_id,
                 "summary_key": f"{study_id}:combination:{_trial_id(best_row)}",
                 "factor_level_key": canonical,
-                "primary_metric_name": str(
-                    best_row.get("primary_metric_name") or "balanced_accuracy"
-                ),
+                "primary_metric_name": primary_metric_name,
                 "n_trials": int(len(group_rows)),
                 "mean_primary_metric_value": float(mean_metric),
                 "best_primary_metric_value": float(best_row["primary_metric_value_float"]),
@@ -289,14 +314,13 @@ def aggregate_factorial_interactions(rows: list[dict[str, Any]]) -> list[dict[st
         mean_metric = sum(float(item["primary_metric_value_float"]) for item in group_rows) / len(
             group_rows
         )
+        primary_metric_name = _group_primary_metric_name(group_rows)
         summary.append(
             {
                 "study_id": study_id,
                 "summary_key": f"{study_id}:interaction:{interaction_key}",
                 "interaction_key": interaction_key,
-                "primary_metric_name": str(
-                    best_row.get("primary_metric_name") or "balanced_accuracy"
-                ),
+                "primary_metric_name": primary_metric_name,
                 "n_trials": int(len(group_rows)),
                 "mean_primary_metric_value": float(mean_metric),
                 "best_primary_metric_value": float(best_row["primary_metric_value_float"]),
@@ -331,9 +355,11 @@ def aggregate_by_key(rows: list[dict[str, Any]], key_name: str) -> list[dict[str
         mean_metric = sum(float(item["primary_metric_value_float"]) for item in group_rows) / len(
             group_rows
         )
+        primary_metric_name = _group_primary_metric_name(group_rows)
         summary.append(
             {
                 "key": key,
+                "primary_metric_name": primary_metric_name,
                 "n_runs": int(len(group_rows)),
                 "mean_primary_metric_value": float(mean_metric),
                 "best_primary_metric_value": float(best_row["primary_metric_value_float"]),
@@ -357,9 +383,11 @@ def aggregate_by_section(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         mean_metric = sum(float(item["primary_metric_value_float"]) for item in group_rows) / len(
             group_rows
         )
+        primary_metric_name = _group_primary_metric_name(group_rows)
         summary.append(
             {
                 "section_key": key,
+                "primary_metric_name": primary_metric_name,
                 "start_section": best_row["start_section_norm"],
                 "end_section": best_row["end_section_norm"],
                 "n_runs": int(len(group_rows)),
@@ -389,12 +417,14 @@ def aggregate_xai_methods(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         mean_metric = sum(float(item["primary_metric_value_float"]) for item in group_rows) / len(
             group_rows
         )
+        primary_metric_name = _group_primary_metric_name(group_rows)
         performed_count = sum(1 for item in group_rows if item.get("xai_performed") is True)
         not_performed_count = sum(1 for item in group_rows if item.get("xai_performed") is False)
         unknown_count = sum(1 for item in group_rows if item.get("xai_performed") is None)
         summary.append(
             {
                 "xai_method": method,
+                "primary_metric_name": primary_metric_name,
                 "n_runs": int(len(group_rows)),
                 "performed_count": int(performed_count),
                 "not_performed_count": int(not_performed_count),
@@ -414,6 +444,14 @@ def aggregate_variant_records(
     top_k: int = 5,
 ) -> dict[str, Any]:
     completed = completed_metric_rows(variant_records)
+    primary_metric_names = sorted(
+        {
+            str(row["primary_metric_name"]).strip()
+            for row in completed
+            if isinstance(row.get("primary_metric_name"), str)
+            and str(row.get("primary_metric_name")).strip()
+        }
+    )
     full_pipeline = [row for row in completed if bool(row["is_full_pipeline"])]
     segmented = [row for row in completed if not bool(row["is_full_pipeline"])]
     factorial_rows = [row for row in completed if str(row.get("study_id") or "").strip()]
@@ -423,6 +461,7 @@ def aggregate_variant_records(
         "top_k": int(top_k),
         "total_variant_records": int(len(variant_records)),
         "completed_with_metric_count": int(len(completed)),
+        "primary_metric_names": primary_metric_names,
         "full_pipeline_count": int(len(full_pipeline)),
         "segment_count": int(len(segmented)),
         "best_full_pipeline_runs": top_runs(full_pipeline, top_k=top_k),

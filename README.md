@@ -95,6 +95,14 @@ Framework mode lifecycle:
   - `fixed_baselines_only`
   - `grouped_nested_tuning`
 
+Strict metric consistency policy:
+- official runs must declare one primary metric (`balanced_accuracy`, `macro_f1`, or `accuracy`)
+- the declared primary metric drives tuning objective, comparison winner selection, confirmatory summaries, and permutation testing
+- secondary metrics are reporting-only and do not drive selection decisions
+- official permutation metric must equal the declared primary metric
+- metric drift fallbacks are disallowed; decision-support/workbook/search-space inputs must declare explicit metric fields
+- official run artifacts persist effective metric policy in `config.json` / `metrics.json` under `metric_policy_effective`
+
 Locked comparison example:
 
 ```powershell

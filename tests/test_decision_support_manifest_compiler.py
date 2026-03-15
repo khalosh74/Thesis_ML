@@ -74,6 +74,7 @@ def test_compile_registry_file_sets_source_path(tmp_path: Path) -> None:
                         "experiment_id": "E01",
                         "title": "Target granularity experiment",
                         "stage": "Stage 1 - Target lock",
+                        "primary_metric": "balanced_accuracy",
                         "variant_templates": [
                             {
                                 "template_id": "t1",
@@ -142,6 +143,18 @@ def test_compile_registry_payload_invalid_reuse_policy_raises() -> None:
     template["reuse_policy"] = "invalid_policy"
 
     with pytest.raises(ValueError, match="reuse_policy"):
+        compile_registry_payload(payload)
+
+
+def test_compile_registry_payload_missing_primary_metric_raises() -> None:
+    payload = _minimal_registry_payload()
+    experiments = payload["experiments"]
+    assert isinstance(experiments, list)
+    experiment = experiments[0]
+    assert isinstance(experiment, dict)
+    experiment.pop("primary_metric", None)
+
+    with pytest.raises(ValueError, match="must explicitly declare primary_metric"):
         compile_registry_payload(payload)
 
 

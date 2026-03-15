@@ -12,6 +12,12 @@ from Thesis_ML.comparisons.models import (
     CompiledComparisonManifest,
 )
 from Thesis_ML.config.framework_mode import FrameworkMode
+from Thesis_ML.config.metric_policy import (
+    enforce_primary_metric_alignment,
+    extract_metric_value,
+    resolve_effective_metric_policy,
+    validate_metric_name,
+)
 
 
 def _write_json(path: Path, payload: dict[str, Any]) -> None:
@@ -46,6 +52,19 @@ def _comparison_summary(
     compiled_manifest: CompiledComparisonManifest,
     run_results: list[ComparisonRunResult],
 ) -> dict[str, Any]:
+    metric_policy_effective = enforce_primary_metric_alignment(
+        resolve_effective_metric_policy(
+            primary_metric=comparison.metric_policy.primary_metric,
+            secondary_metrics=comparison.metric_policy.secondary_metrics,
+            decision_metric=comparison.decision_policy.primary_metric,
+            tuning_metric=comparison.metric_policy.primary_metric,
+            permutation_metric=(
+                comparison.control_policy.permutation_metric
+                or comparison.metric_policy.primary_metric
+            ),
+        ),
+        context="locked comparison",
+    )
     by_variant: dict[str, dict[str, int]] = {}
     for variant_id in compiled_manifest.variant_ids:
         by_variant[variant_id] = {"planned": 0, "completed": 0, "failed": 0}
@@ -62,6 +81,14 @@ def _comparison_summary(
         "comparison_dimension": comparison.comparison_dimension,
         "methodology_policy_name": comparison.methodology_policy.policy_name.value,
         "primary_metric": comparison.metric_policy.primary_metric,
+        "metric_policy_effective": {
+            "primary_metric": metric_policy_effective.primary_metric,
+            "secondary_metrics": list(metric_policy_effective.secondary_metrics),
+            "decision_metric": metric_policy_effective.decision_metric,
+            "tuning_metric": metric_policy_effective.tuning_metric,
+            "permutation_metric": metric_policy_effective.permutation_metric,
+            "higher_is_better": bool(metric_policy_effective.higher_is_better),
+        },
         "variant_status_counts": by_variant,
         "n_runs": int(len(run_results)),
     }
@@ -91,7 +118,20 @@ def build_comparison_decision(
     compiled_manifest: CompiledComparisonManifest,
     run_results: list[ComparisonRunResult],
 ) -> dict[str, Any]:
-    primary_metric = comparison.decision_policy.primary_metric
+    metric_policy_effective = enforce_primary_metric_alignment(
+        resolve_effective_metric_policy(
+            primary_metric=comparison.metric_policy.primary_metric,
+            secondary_metrics=comparison.metric_policy.secondary_metrics,
+            decision_metric=comparison.decision_policy.primary_metric,
+            tuning_metric=comparison.metric_policy.primary_metric,
+            permutation_metric=(
+                comparison.control_policy.permutation_metric
+                or comparison.metric_policy.primary_metric
+            ),
+        ),
+        context="locked comparison decision",
+    )
+    primary_metric = metric_policy_effective.primary_metric
     decision_policy = comparison.decision_policy
     result_by_run_id = {result.run_id: result for result in run_results}
     variant_scores: dict[str, dict[str, Any]] = {
@@ -131,9 +171,18 @@ def build_comparison_decision(
         if result.status == "completed":
             bucket["n_completed"] = int(bucket["n_completed"]) + 1
             metrics_payload = _load_metrics_payload(result)
-            metric_value = _safe_float(metrics_payload.get(primary_metric))
-            if metric_value is None:
-                metric_value = _safe_float(metrics_payload.get("primary_metric_value"))
+            payload_primary_metric_name = metrics_payload.get("primary_metric_name")
+            if payload_primary_metric_name is not None and validate_metric_name(
+                str(payload_primary_metric_name)
+            ) != primary_metric:
+                missing_metric_runs.append(spec.run_id)
+                continue
+            metric_value = extract_metric_value(
+                metrics_payload,
+                primary_metric,
+                require=False,
+                payload_label=f"run '{spec.run_id}' metrics",
+            )
             if metric_value is None:
                 missing_metric_runs.append(spec.run_id)
             else:
@@ -163,6 +212,14 @@ def build_comparison_decision(
                 "comparison_version": comparison.comparison_version,
                 "decision_status": ComparisonDecisionStatus.INVALID_COMPARISON.value,
                 "primary_metric": primary_metric,
+                "metric_policy_effective": {
+                    "primary_metric": metric_policy_effective.primary_metric,
+                    "secondary_metrics": list(metric_policy_effective.secondary_metrics),
+                    "decision_metric": metric_policy_effective.decision_metric,
+                    "tuning_metric": metric_policy_effective.tuning_metric,
+                    "permutation_metric": metric_policy_effective.permutation_metric,
+                    "higher_is_better": bool(metric_policy_effective.higher_is_better),
+                },
                 "variant_scores": variant_scores,
                 "selected_variant": None,
                 "reason": "not_all_runs_completed",
@@ -178,6 +235,14 @@ def build_comparison_decision(
             "comparison_version": comparison.comparison_version,
             "decision_status": ComparisonDecisionStatus.INVALID_COMPARISON.value,
             "primary_metric": primary_metric,
+            "metric_policy_effective": {
+                "primary_metric": metric_policy_effective.primary_metric,
+                "secondary_metrics": list(metric_policy_effective.secondary_metrics),
+                "decision_metric": metric_policy_effective.decision_metric,
+                "tuning_metric": metric_policy_effective.tuning_metric,
+                "permutation_metric": metric_policy_effective.permutation_metric,
+                "higher_is_better": bool(metric_policy_effective.higher_is_better),
+            },
             "variant_scores": variant_scores,
             "selected_variant": None,
             "reason": "missing_primary_metric_values",
@@ -197,6 +262,14 @@ def build_comparison_decision(
             "comparison_version": comparison.comparison_version,
             "decision_status": ComparisonDecisionStatus.INVALID_COMPARISON.value,
             "primary_metric": primary_metric,
+            "metric_policy_effective": {
+                "primary_metric": metric_policy_effective.primary_metric,
+                "secondary_metrics": list(metric_policy_effective.secondary_metrics),
+                "decision_metric": metric_policy_effective.decision_metric,
+                "tuning_metric": metric_policy_effective.tuning_metric,
+                "permutation_metric": metric_policy_effective.permutation_metric,
+                "higher_is_better": bool(metric_policy_effective.higher_is_better),
+            },
             "variant_scores": variant_scores,
             "selected_variant": None,
             "reason": "no_variant_scores",
@@ -235,6 +308,14 @@ def build_comparison_decision(
                 "comparison_version": comparison.comparison_version,
                 "decision_status": ComparisonDecisionStatus.INCONCLUSIVE.value,
                 "primary_metric": primary_metric,
+                "metric_policy_effective": {
+                    "primary_metric": metric_policy_effective.primary_metric,
+                    "secondary_metrics": list(metric_policy_effective.secondary_metrics),
+                    "decision_metric": metric_policy_effective.decision_metric,
+                    "tuning_metric": metric_policy_effective.tuning_metric,
+                    "permutation_metric": metric_policy_effective.permutation_metric,
+                    "higher_is_better": bool(metric_policy_effective.higher_is_better),
+                },
                 "variant_scores": variant_scores,
                 "selected_variant": None,
                 "reason": "controls_not_passed",
@@ -255,6 +336,14 @@ def build_comparison_decision(
             "comparison_version": comparison.comparison_version,
             "decision_status": ComparisonDecisionStatus.INCONCLUSIVE.value,
             "primary_metric": primary_metric,
+            "metric_policy_effective": {
+                "primary_metric": metric_policy_effective.primary_metric,
+                "secondary_metrics": list(metric_policy_effective.secondary_metrics),
+                "decision_metric": metric_policy_effective.decision_metric,
+                "tuning_metric": metric_policy_effective.tuning_metric,
+                "permutation_metric": metric_policy_effective.permutation_metric,
+                "higher_is_better": bool(metric_policy_effective.higher_is_better),
+            },
             "variant_scores": variant_scores,
             "selected_variant": None,
             "reason": "tie_within_tolerance",
@@ -278,6 +367,14 @@ def build_comparison_decision(
                 "comparison_version": comparison.comparison_version,
                 "decision_status": status,
                 "primary_metric": primary_metric,
+                "metric_policy_effective": {
+                    "primary_metric": metric_policy_effective.primary_metric,
+                    "secondary_metrics": list(metric_policy_effective.secondary_metrics),
+                    "decision_metric": metric_policy_effective.decision_metric,
+                    "tuning_metric": metric_policy_effective.tuning_metric,
+                    "permutation_metric": metric_policy_effective.permutation_metric,
+                    "higher_is_better": bool(metric_policy_effective.higher_is_better),
+                },
                 "variant_scores": variant_scores,
                 "selected_variant": None,
                 "reason": "subgroup_reporting_failure",
@@ -291,6 +388,14 @@ def build_comparison_decision(
         "comparison_version": comparison.comparison_version,
         "decision_status": ComparisonDecisionStatus.WINNER_SELECTED.value,
         "primary_metric": primary_metric,
+        "metric_policy_effective": {
+            "primary_metric": metric_policy_effective.primary_metric,
+            "secondary_metrics": list(metric_policy_effective.secondary_metrics),
+            "decision_metric": metric_policy_effective.decision_metric,
+            "tuning_metric": metric_policy_effective.tuning_metric,
+            "permutation_metric": metric_policy_effective.permutation_metric,
+            "higher_is_better": bool(metric_policy_effective.higher_is_better),
+        },
         "variant_scores": variant_scores,
         "selected_variant": selected_variant,
         "reason": "best_primary_metric",
@@ -323,6 +428,13 @@ def _report_index_rows(
     result_by_run_id = {result.run_id: result for result in run_results}
     rows: list[dict[str, Any]] = []
     for spec in compiled_manifest.runs:
+        metric_policy_effective = resolve_effective_metric_policy(
+            primary_metric=spec.primary_metric,
+            secondary_metrics=compiled_manifest.metric_policy.secondary_metrics,
+            decision_metric=compiled_manifest.decision_policy.primary_metric,
+            tuning_metric=spec.primary_metric,
+            permutation_metric=spec.controls.permutation_metric,
+        )
         result = result_by_run_id.get(spec.run_id)
         metrics = result.metrics if result and result.metrics else {}
         rows.append(
@@ -342,12 +454,15 @@ def _report_index_rows(
                 "test_subject": spec.test_subject,
                 "seed": int(spec.seed),
                 "primary_metric": spec.primary_metric,
+                "decision_metric": metric_policy_effective.decision_metric,
+                "tuning_metric": metric_policy_effective.tuning_metric,
                 "methodology_policy_name": spec.methodology_policy_name.value,
                 "class_weight_policy": spec.class_weight_policy.value,
                 "tuning_enabled": bool(spec.tuning_enabled),
                 "permutation_enabled": bool(spec.controls.permutation_enabled),
                 "n_permutations": int(spec.controls.n_permutations),
                 "permutation_metric": spec.controls.permutation_metric,
+                "higher_is_better": bool(metric_policy_effective.higher_is_better),
                 "dummy_baseline_enabled": bool(spec.controls.dummy_baseline_enabled),
                 "interpretability_enabled": bool(spec.interpretability_enabled),
                 "subgroup_reporting_enabled": bool(spec.subgroup_reporting_enabled),
@@ -383,8 +498,31 @@ def write_comparison_artifacts(
     execution_status_path = comparison_dir / "execution_status.json"
     report_index_path = comparison_dir / "report_index.csv"
 
+    metric_policy_effective = enforce_primary_metric_alignment(
+        resolve_effective_metric_policy(
+            primary_metric=compiled_manifest.metric_policy.primary_metric,
+            secondary_metrics=compiled_manifest.metric_policy.secondary_metrics,
+            decision_metric=compiled_manifest.decision_policy.primary_metric,
+            tuning_metric=compiled_manifest.metric_policy.primary_metric,
+            permutation_metric=(
+                comparison.control_policy.permutation_metric
+                or compiled_manifest.metric_policy.primary_metric
+            ),
+        ),
+        context="locked comparison artifacts",
+    )
+    compiled_manifest_payload = compiled_manifest.model_dump(mode="json")
+    compiled_manifest_payload["metric_policy_effective"] = {
+        "primary_metric": metric_policy_effective.primary_metric,
+        "secondary_metrics": list(metric_policy_effective.secondary_metrics),
+        "decision_metric": metric_policy_effective.decision_metric,
+        "tuning_metric": metric_policy_effective.tuning_metric,
+        "permutation_metric": metric_policy_effective.permutation_metric,
+        "higher_is_better": bool(metric_policy_effective.higher_is_better),
+    }
+
     _write_json(comparison_json_path, comparison.model_dump(mode="json"))
-    _write_json(compiled_manifest_path, compiled_manifest.model_dump(mode="json"))
+    _write_json(compiled_manifest_path, compiled_manifest_payload)
     _write_json(
         comparison_summary_path,
         _comparison_summary(comparison, compiled_manifest, run_results),

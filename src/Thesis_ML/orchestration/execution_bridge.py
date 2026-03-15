@@ -13,6 +13,7 @@ from Thesis_ML.artifacts.registry import (
     compute_config_hash,
     register_artifact,
 )
+from Thesis_ML.config.metric_policy import extract_metric_value, validate_metric_name
 from Thesis_ML.orchestration.reporting import build_dataset_subset_label
 from Thesis_ML.orchestration.variant_expansion import variant_label
 
@@ -37,18 +38,6 @@ def _optional_int(value: Any) -> int | None:
         return int(str(value))
     except Exception:
         return None
-
-
-def _extract_metric(metrics: dict[str, Any], name: str) -> float | None:
-    if name in metrics:
-        return _safe_float(metrics.get(name))
-    if name == "balanced_accuracy":
-        return _safe_float(metrics.get("balanced_accuracy"))
-    if name == "macro_f1":
-        return _safe_float(metrics.get("macro_f1"))
-    if name == "accuracy":
-        return _safe_float(metrics.get("accuracy"))
-    return None
 
 
 def build_command(
@@ -246,8 +235,18 @@ def execute_variant(
 
     now_end = _utc_timestamp()
     metrics = dict(result.get("metrics", {})) if result else {}
-    primary_metric_name = str(experiment.get("primary_metric", "balanced_accuracy"))
-    primary_metric_value = _extract_metric(metrics, primary_metric_name)
+    raw_primary_metric_name = experiment.get("primary_metric")
+    if raw_primary_metric_name is None or not str(raw_primary_metric_name).strip():
+        raise ValueError(
+            f"Experiment '{experiment_id}' is missing required primary_metric."
+        )
+    primary_metric_name = validate_metric_name(str(raw_primary_metric_name))
+    primary_metric_value = extract_metric_value(
+        metrics,
+        primary_metric_name,
+        require=False,
+        payload_label=f"decision-support run '{run_id}' metrics",
+    )
 
     manifest_payload = {
         "campaign_id": campaign_id,

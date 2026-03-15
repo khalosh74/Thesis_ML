@@ -172,7 +172,6 @@ class PermutationPolicy(_ProtocolModel):
     metric: str | None = None
     n_permutations: int = 0
     suites: list[str] = Field(default_factory=list)
-    metric_conflict_justification: str | None = None
 
     @model_validator(mode="after")
     def _validate_permutation_policy(self) -> PermutationPolicy:
@@ -460,11 +459,10 @@ class ThesisProtocol(_ProtocolModel):
         if (
             self.control_policy.permutation.enabled
             and permutation_metric != self.metric_policy.primary_metric
-            and not self.control_policy.permutation.metric_conflict_justification
         ):
             raise ValueError(
-                "control_policy.permutation.metric conflicts with metric_policy.primary_metric "
-                "without metric_conflict_justification."
+                "control_policy.permutation.metric must match metric_policy.primary_metric "
+                "for confirmatory protocol runs."
             )
 
         for suite in self.official_run_suites:
@@ -595,6 +593,12 @@ class CompiledRunSpec(_ProtocolModel):
         if int(self.seed) < 0:
             raise ValueError("CompiledRunSpec.seed must be >= 0.")
         validate_metric_name(self.primary_metric)
+        if self.controls.permutation_enabled:
+            if self.controls.permutation_metric != self.primary_metric:
+                raise ValueError(
+                    f"CompiledRunSpec '{self.run_id}' requires controls.permutation_metric "
+                    "to match primary_metric for confirmatory runs."
+                )
         MethodologyPolicy(
             policy_name=self.methodology_policy_name,
             class_weight_policy=self.class_weight_policy,

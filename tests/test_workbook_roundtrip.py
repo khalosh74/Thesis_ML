@@ -24,6 +24,14 @@ def _make_workbook(path: Path) -> None:
 
 def _set_executable_row(path: Path) -> None:
     workbook = load_workbook(path)
+    master_ws = workbook["Master_Experiments"]
+    master_headers = [master_ws.cell(1, col).value for col in range(1, master_ws.max_column + 1)]
+    master_col = {str(name): idx + 1 for idx, name in enumerate(master_headers)}
+    master_ws.cell(2, master_col["Experiment_ID"], "E16")
+    master_ws.cell(2, master_col["Short_Title"], "Roundtrip executable row")
+    master_ws.cell(2, master_col["Stage"], "Stage 1 - Target lock")
+    master_ws.cell(2, master_col["Primary_Metric"], "balanced_accuracy")
+
     ws = workbook["Experiment_Definitions"]
     headers = [ws.cell(1, col).value for col in range(1, ws.max_column + 1)]
     col = {str(name): idx + 1 for idx, name in enumerate(headers)}

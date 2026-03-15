@@ -89,6 +89,13 @@ Official-policy note:
   `fixed_baselines_only` or `grouped_nested_tuning`.
 - locked comparison runs emit `comparison_decision.json` for machine-readable selection outcomes.
 
+Official metric policy:
+- declare one `primary_metric` per comparison/protocol contract (`balanced_accuracy`, `macro_f1`, or `accuracy`)
+- primary metric is decision-driving for tuning, comparison winner selection, permutation testing, and headline summaries
+- secondary metrics are reporting-only
+- official permutation metric must match primary metric
+- artifacts include `metric_policy_effective` so operators can audit effective primary/decision/tuning/permutation metrics
+
 Generate workbook template:
 
 ```bash
