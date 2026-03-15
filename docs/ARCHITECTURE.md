@@ -14,9 +14,16 @@ Core package root: `src/Thesis_ML/`
   - SQLite artifact registry (`registry.py`)
   - artifact types, compatibility lookup, run-level listing
 - `cli/`
-  - canonical user entry points (`protocol_runner.py`, `decision_support.py`, `workbook.py`, `baseline.py`)
+  - canonical user entry points (`comparison_runner.py`, `protocol_runner.py`, `decision_support.py`, `workbook.py`, `baseline.py`)
+- `comparisons/`
+  - strict comparison spec schema (`models.py`)
+  - comparison JSON loader/validation (`loader.py`)
+  - locked variant compiler (`compiler.py`)
+  - comparison runner bridge onto low-level runner (`runner.py`)
+  - comparison-level artifact writers (`artifacts.py`)
 - `config/`
   - default paths (`paths.py`)
+  - framework lifecycle mode enum (`framework_mode.py`)
   - schema/version constants (`schema_versions.py`)
 - `data/`, `features/`, `spm/`
   - indexing, cache extraction, SPM utilities
@@ -51,27 +58,36 @@ Core package root: `src/Thesis_ML/`
 
 ## Runtime flows
 
-1. Experiment run (`thesisml-run-experiment`)
+1. Exploratory experiment run (`thesisml-run-experiment`)
 - Resolve run mode (`fresh`, `resume`, `forced_rerun`) and status file.
 - Plan section path from `start_section`/`end_section`.
 - Execute section adapters in order.
 - Register section artifacts in SQLite.
-- Write metrics/report files in `outputs/reports/experiments/<run_id>/`.
+- Stamp `framework_mode=exploratory` and `canonical_run=false`.
+- Write metrics/report files in `outputs/reports/exploratory/<run_id>/` by default.
 
-2. Canonical thesis protocol run (`thesisml-run-protocol`)
+2. Locked comparison run (`thesisml-run-comparison`)
+- Load and validate registered comparison JSON (`comparison-spec-v1`).
+- Compile declared variants into explicit concrete run specs.
+- Execute each run spec through existing `run_experiment(...)`.
+- Stamp `framework_mode=locked_comparison` and comparison identity metadata.
+- Emit comparison-level manifests/summaries under `outputs/reports/comparisons/`.
+
+3. Confirmatory canonical thesis protocol run (`thesisml-run-protocol`)
 - Load and validate canonical protocol JSON (`thesis-protocol-v1`).
 - Compile official suites into explicit concrete run specs.
 - Execute each run spec through existing `run_experiment(...)`.
-- Persist protocol metadata in run artifacts and emit protocol-level manifests/summaries.
+- Stamp `framework_mode=confirmatory` and `canonical_run=true`.
+- Persist protocol metadata in run artifacts and emit protocol-level manifests/summaries under `outputs/reports/confirmatory/`.
 
-3. Decision-support campaign (`thesisml-run-decision-support`)
+4. Decision-support campaign (`thesisml-run-decision-support`)
 - Compile JSON registry or workbook rows to internal manifest.
 - Select experiments and expand variants/search spaces.
 - Dispatch variants through `run_experiment(...)`.
 - Export campaign summaries + manifests + decision notes.
 - Optionally write results back to a versioned workbook copy.
 
-4. Workbook lifecycle (`thesisml-workbook`)
+5. Workbook lifecycle (`thesisml-workbook`)
 - Generate governed template workbook.
 - Compile executable rows to internal manifest (`workbook_compiler.py`).
 - Run campaign and write machine-owned outputs only.
@@ -84,10 +100,16 @@ Use packaged commands from `pyproject.toml`:
 - `thesisml-build-index`
 - `thesisml-cache-features`
 - `thesisml-run-experiment`
+- `thesisml-run-comparison`
 - `thesisml-run-protocol`
 - `thesisml-run-decision-support`
 - `thesisml-run-baseline`
 - `thesisml-workbook`
+
+Framework guardrails:
+- `thesisml-run-experiment` cannot label outputs as confirmatory or accept protocol/comparison contexts.
+- `thesisml-run-comparison` can execute only registered variants from a comparison spec.
+- `thesisml-run-protocol` can execute only canonical protocol suites and cannot accept ad hoc science overrides.
 
 Compatibility wrappers are still present but deprecated:
 

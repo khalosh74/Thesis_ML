@@ -72,18 +72,33 @@ Or run the commands directly:
 ```powershell
 python -m uv sync --frozen --extra dev
 python -m uv run python -m pytest -q
+python -m uv run thesisml-run-comparison --help
 python -m uv run thesisml-run-protocol --help
 python -m uv run thesisml-run-decision-support --help
 python -m uv run thesisml-workbook --output outputs/workbooks/bootstrap_thesis_experiment_program.xlsx
 ```
 
-Official thesis run path (canonical protocol):
+Official confirmatory thesis run path (canonical protocol):
 
 ```powershell
 python -m uv run thesisml-run-protocol `
   --protocol configs/protocols/thesis_canonical_v1.json `
   --all-suites `
-  --reports-root outputs/reports/experiments
+  --reports-root outputs/reports/confirmatory
+```
+
+Framework mode lifecycle:
+- `thesisml-run-experiment` -> exploratory mode (`framework_mode=exploratory`, `canonical_run=false`), default reports root `outputs/reports/exploratory/`
+- `thesisml-run-comparison` -> locked comparison mode (`framework_mode=locked_comparison`, `canonical_run=false`), default reports root `outputs/reports/comparisons/`
+- `thesisml-run-protocol` -> confirmatory mode (`framework_mode=confirmatory`, `canonical_run=true`), default reports root `outputs/reports/confirmatory/`
+
+Locked comparison example:
+
+```powershell
+python -m uv run thesisml-run-comparison `
+  --comparison configs/comparisons/model_family_comparison_v1.json `
+  --all-variants `
+  --reports-root outputs/reports/comparisons
 ```
 
 Decision-support campaign command (requires index/cache/data paths to exist):
@@ -228,7 +243,7 @@ Cache behavior:
 - Each beta is validated against its mask for shape + affine compatibility before vectorization.
 - Existing cache files are skipped unless `--force` is passed.
 
-### 4) Run primary within-person session-held-out experiment (`within_subject_loso_session`)
+### 4) Run exploratory within-person session-held-out experiment (`within_subject_loso_session`)
 
 ```powershell
 thesisml-run-experiment `
@@ -242,7 +257,7 @@ thesisml-run-experiment `
   --seed 42
 ```
 
-### 5) Run secondary frozen cross-person transfer (`frozen_cross_person_transfer`)
+### 5) Run exploratory frozen cross-person transfer (`frozen_cross_person_transfer`)
 
 ```powershell
 thesisml-run-experiment `
@@ -278,7 +293,7 @@ thesisml-run-experiment `
 Each run writes:
 
 ```text
-outputs/reports/experiments/<run_id>/
+outputs/reports/<mode>/<run_id>/
   config.json
   metrics.json
   fold_metrics.csv
@@ -287,6 +302,11 @@ outputs/reports/experiments/<run_id>/
   spatial_compatibility_report.json
   interpretability_summary.json
 ```
+
+Default `<mode>` by command:
+- `thesisml-run-experiment` -> `exploratory`
+- `thesisml-run-comparison` -> `comparisons`
+- `thesisml-run-protocol` -> `confirmatory`
 
 Within-subject linear runs (`logreg`, `linearsvc`, `ridge`) additionally write:
 - `interpretability_fold_explanations.csv`
@@ -300,6 +320,10 @@ All models use the same split/metrics core:
 
 Interpretability outputs are supporting model-behavior robustness evidence only; they are not
 direct neural localization claims.
+
+Mode-level manifests:
+- locked comparison executions write `comparison_runs/<comparison_id>__<comparison_version>/...`
+- confirmatory protocol executions write `protocol_runs/<protocol_id>__<protocol_version>/...`
 
 ## Adding a new model to the registry
 
@@ -315,8 +339,8 @@ Edit `src/Thesis_ML/experiments/model_factory.py`:
 
 ```powershell
 python -m uv run python -m mypy
-python -m uv run python -m ruff check src/Thesis_ML/artifacts src/Thesis_ML/orchestration src/Thesis_ML/workbook src/Thesis_ML/experiments/segment_execution.py src/Thesis_ML/experiments/sections.py src/Thesis_ML/experiments/run_experiment.py --exclude src/Thesis_ML/workbook/template_builder.py
-python -m uv run python -m ruff format --check src/Thesis_ML/artifacts src/Thesis_ML/orchestration src/Thesis_ML/workbook src/Thesis_ML/experiments/segment_execution.py src/Thesis_ML/experiments/sections.py src/Thesis_ML/experiments/run_experiment.py --exclude src/Thesis_ML/workbook/template_builder.py
+python -m uv run python -m ruff check src/Thesis_ML/artifacts src/Thesis_ML/comparisons src/Thesis_ML/protocols src/Thesis_ML/orchestration src/Thesis_ML/workbook src/Thesis_ML/experiments/segment_execution.py src/Thesis_ML/experiments/sections.py src/Thesis_ML/experiments/run_experiment.py src/Thesis_ML/cli/comparison_runner.py src/Thesis_ML/cli/protocol_runner.py --exclude src/Thesis_ML/workbook/template_builder.py
+python -m uv run python -m ruff format --check src/Thesis_ML/artifacts src/Thesis_ML/comparisons src/Thesis_ML/protocols src/Thesis_ML/orchestration src/Thesis_ML/workbook src/Thesis_ML/experiments/segment_execution.py src/Thesis_ML/experiments/sections.py src/Thesis_ML/experiments/run_experiment.py src/Thesis_ML/cli/comparison_runner.py src/Thesis_ML/cli/protocol_runner.py --exclude src/Thesis_ML/workbook/template_builder.py
 python -m uv run python -m pytest -q
 python -m uv run python scripts/acceptance_smoke.py
 ```
@@ -328,6 +352,10 @@ python -m uv run python scripts/acceptance_smoke.py
 - `src/Thesis_ML/spm/extract_glm.py`
 - `src/Thesis_ML/features/nifti_features.py`
 - `src/Thesis_ML/experiments/run_experiment.py`
+- `src/Thesis_ML/comparisons`
+- `src/Thesis_ML/protocols`
+- `src/Thesis_ML/cli/comparison_runner.py`
+- `src/Thesis_ML/cli/protocol_runner.py`
 - `src/Thesis_ML/experiments/segment_execution.py`
 - `src/Thesis_ML/experiments/sections.py`
 

@@ -79,6 +79,7 @@ def protocol_dataset(tmp_path: Path) -> dict[str, Path]:
 def test_load_canonical_protocol_validates() -> None:
     protocol = load_protocol(_canonical_protocol_path())
     assert protocol.protocol_schema_version == "thesis-protocol-v1"
+    assert protocol.framework_mode == "confirmatory"
     assert protocol.scientific_contract.target == "coarse_affect"
     assert protocol.scientific_contract.primary_metric == "balanced_accuracy"
     assert {suite.suite_id for suite in protocol.official_run_suites} == {
@@ -169,6 +170,7 @@ def test_protocol_runner_dry_run_emits_protocol_artifacts(
     execution_status = json.loads(
         Path(result["artifact_paths"]["execution_status"]).read_text(encoding="utf-8")
     )
+    assert execution_status["framework_mode"] == "confirmatory"
     assert execution_status["dry_run"] is True
     assert all(row["status"] == "planned" for row in execution_status["runs"])
 
@@ -197,12 +199,14 @@ def test_protocol_run_records_metadata_in_run_artifacts(
     metrics = json.loads(metrics_path.read_text(encoding="utf-8"))
 
     assert config["canonical_run"] is True
+    assert config["framework_mode"] == "confirmatory"
     assert config["protocol_id"] == protocol.protocol_id
     assert config["protocol_version"] == protocol.protocol_version
     assert config["suite_id"] == "primary_within_subject"
     assert isinstance(config["claim_ids"], list) and config["claim_ids"]
 
     assert metrics["canonical_run"] is True
+    assert metrics["framework_mode"] == "confirmatory"
     assert metrics["protocol_id"] == protocol.protocol_id
     assert metrics["protocol_version"] == protocol.protocol_version
     assert metrics["suite_id"] == "primary_within_subject"
@@ -259,4 +263,3 @@ def test_protocol_level_report_index_is_emitted_for_completed_runs(
     assert len(report_index) == 2
     assert set(report_index["suite_id"].astype(str)) == {"secondary_cross_person_transfer"}
     assert set(report_index["status"].astype(str)) == {"completed"}
-

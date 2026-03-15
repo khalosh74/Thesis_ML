@@ -56,6 +56,6 @@ def test_canonical_protocol_cli_dry_run_acceptance(
     execution_payload = json.loads(
         (protocol_output_dir / "execution_status.json").read_text(encoding="utf-8")
     )
+    assert execution_payload["framework_mode"] == "confirmatory"
     assert execution_payload["dry_run"] is True
     assert all(run["status"] == "planned" for run in execution_payload["runs"])
-

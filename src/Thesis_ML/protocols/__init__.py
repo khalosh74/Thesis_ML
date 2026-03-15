@@ -20,4 +20,3 @@ __all__ = [
     "execute_compiled_protocol",
     "load_protocol",
 ]
-

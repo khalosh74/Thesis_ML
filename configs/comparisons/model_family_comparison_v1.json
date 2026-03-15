@@ -1,0 +1,90 @@
+{
+  "comparison_schema_version": "comparison-spec-v1",
+  "framework_mode": "locked_comparison",
+  "comparison_id": "model-family-within-subject",
+  "comparison_version": "1.0.0",
+  "status": "locked",
+  "description": "Locked comparison of fixed linear model families under within-subject LOSO-session split.",
+  "comparison_dimension": "model_family",
+  "scientific_contract": {
+    "target": "coarse_affect",
+    "split_mode": "within_subject_loso_session",
+    "grouping_policy": "session",
+    "primary_metric": "balanced_accuracy",
+    "seed_policy": {
+      "global_seed": 42
+    },
+    "control_policy": {
+      "permutation_enabled": false,
+      "permutation_metric": "balanced_accuracy",
+      "n_permutations": 0,
+      "dummy_baseline_enabled": false
+    },
+    "interpretability_policy": {
+      "enabled": false,
+      "allowed_models": []
+    },
+    "subject_policy": {
+      "source": "all_from_index",
+      "subjects": []
+    },
+    "transfer_policy": {
+      "source": "all_ordered_pairs_from_index",
+      "pairs": []
+    },
+    "filter_task": null,
+    "filter_modality": null
+  },
+  "allowed_variants": [
+    {
+      "variant_id": "ridge",
+      "model": "ridge",
+      "claim_ids": [
+        "CMP_C01_model_family_ridge"
+      ],
+      "notes": "Fixed RidgeClassifier baseline."
+    },
+    {
+      "variant_id": "logreg",
+      "model": "logreg",
+      "claim_ids": [
+        "CMP_C01_model_family_logreg"
+      ],
+      "notes": "Fixed LogisticRegression baseline."
+    },
+    {
+      "variant_id": "linearsvc",
+      "model": "linearsvc",
+      "claim_ids": [
+        "CMP_C01_model_family_linearsvc"
+      ],
+      "notes": "Fixed LinearSVC baseline."
+    }
+  ],
+  "artifact_contract": {
+    "required_comparison_artifacts": [
+      "comparison.json",
+      "compiled_comparison_manifest.json",
+      "comparison_summary.json",
+      "execution_status.json",
+      "report_index.csv"
+    ],
+    "required_run_artifacts": [
+      "config.json",
+      "metrics.json",
+      "fold_metrics.csv",
+      "fold_splits.csv",
+      "predictions.csv",
+      "spatial_compatibility_report.json",
+      "interpretability_summary.json"
+    ],
+    "required_run_metadata_fields": [
+      "framework_mode",
+      "canonical_run",
+      "comparison_id",
+      "comparison_version",
+      "comparison_variant_id"
+    ]
+  }
+}
+

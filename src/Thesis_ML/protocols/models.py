@@ -5,6 +5,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from Thesis_ML.config.framework_mode import FrameworkMode
 from Thesis_ML.config.schema_versions import (
     SUPPORTED_THESIS_PROTOCOL_SCHEMA_VERSIONS,
     THESIS_PROTOCOL_SCHEMA_VERSION,
@@ -148,7 +149,10 @@ class ModelPolicy(_ProtocolModel):
                 raise ValueError(
                     f"Unsupported model_policy model '{model_name}'. Allowed values: {allowed}."
                 )
-        if self.selection_strategy == ModelSelectionStrategy.FIXED_BASELINES and self.tuning_enabled:
+        if (
+            self.selection_strategy == ModelSelectionStrategy.FIXED_BASELINES
+            and self.tuning_enabled
+        ):
             raise ValueError(
                 "model_policy.selection_strategy='fixed_baselines' forbids tuning_enabled=True."
             )
@@ -243,6 +247,7 @@ class ArtifactContract(_ProtocolModel):
     )
     required_run_metadata_fields: list[str] = Field(
         default_factory=lambda: [
+            "framework_mode",
             "canonical_run",
             "protocol_id",
             "protocol_version",
@@ -259,14 +264,20 @@ class ArtifactContract(_ProtocolModel):
         if not self.required_protocol_artifacts:
             raise ValueError("artifact_contract.required_protocol_artifacts must not be empty.")
         missing_protocol = [
-            name for name in REQUIRED_PROTOCOL_ARTIFACTS if name not in self.required_protocol_artifacts
+            name
+            for name in REQUIRED_PROTOCOL_ARTIFACTS
+            if name not in self.required_protocol_artifacts
         ]
         if missing_protocol:
             raise ValueError(
                 "artifact_contract.required_protocol_artifacts is missing required entries: "
                 + ", ".join(missing_protocol)
             )
-        missing_run = [name for name in ("config.json", "metrics.json") if name not in self.required_run_artifacts]
+        missing_run = [
+            name
+            for name in ("config.json", "metrics.json")
+            if name not in self.required_run_artifacts
+        ]
         if missing_run:
             raise ValueError(
                 "artifact_contract.required_run_artifacts is missing required entries: "
@@ -274,6 +285,17 @@ class ArtifactContract(_ProtocolModel):
             )
         if not self.required_run_metadata_fields:
             raise ValueError("artifact_contract.required_run_metadata_fields must not be empty.")
+        for key in (
+            "framework_mode",
+            "canonical_run",
+            "protocol_id",
+            "protocol_version",
+            "suite_id",
+        ):
+            if key not in self.required_run_metadata_fields:
+                raise ValueError(
+                    "artifact_contract.required_run_metadata_fields is missing required key: " + key
+                )
         return self
 
 
@@ -340,6 +362,7 @@ class SuiteSpec(_ProtocolModel):
 
 class ThesisProtocol(_ProtocolModel):
     protocol_schema_version: str = THESIS_PROTOCOL_SCHEMA_VERSION
+    framework_mode: Literal["confirmatory"] = FrameworkMode.CONFIRMATORY.value
     protocol_id: str = Field(min_length=1)
     protocol_version: str = Field(min_length=1)
     status: ProtocolStatus
@@ -430,10 +453,10 @@ class ThesisProtocol(_ProtocolModel):
                         + ", ".join(sorted(set(disallowed_models)))
                     )
 
-            if (
-                suite.split_mode == self.split_policy.secondary_mode
-                and suite.suite_type not in {SuiteType.SECONDARY, SuiteType.CONTROL}
-            ):
+            if suite.split_mode == self.split_policy.secondary_mode and suite.suite_type not in {
+                SuiteType.SECONDARY,
+                SuiteType.CONTROL,
+            }:
                 raise ValueError(
                     f"Suite '{suite.suite_id}' uses secondary split_mode "
                     f"'{self.split_policy.secondary_mode}' but suite_type='{suite.suite_type.value}'."
@@ -474,8 +497,11 @@ class CompiledRunSpec(_ProtocolModel):
     primary_metric: str = "balanced_accuracy"
     controls: CompiledRunControls = Field(default_factory=CompiledRunControls)
     interpretability_enabled: bool = False
+    framework_mode: Literal["confirmatory"] = FrameworkMode.CONFIRMATORY.value
     canonical_run: bool = True
-    artifact_requirements: list[str] = Field(default_factory=lambda: list(REQUIRED_RUN_ARTIFACTS_BASELINE))
+    artifact_requirements: list[str] = Field(
+        default_factory=lambda: list(REQUIRED_RUN_ARTIFACTS_BASELINE)
+    )
     protocol_id: str = Field(min_length=1)
     protocol_version: str = Field(min_length=1)
     protocol_schema_version: str = THESIS_PROTOCOL_SCHEMA_VERSION
@@ -484,7 +510,9 @@ class CompiledRunSpec(_ProtocolModel):
     def _validate_compiled_spec(self) -> CompiledRunSpec:
         if self.model not in set(ALL_MODEL_NAMES):
             allowed = ", ".join(sorted(ALL_MODEL_NAMES))
-            raise ValueError(f"CompiledRunSpec model '{self.model}' is unsupported. Allowed values: {allowed}.")
+            raise ValueError(
+                f"CompiledRunSpec model '{self.model}' is unsupported. Allowed values: {allowed}."
+            )
         if self.cv_mode == "within_subject_loso_session":
             if self.subject is None:
                 raise ValueError(
@@ -515,11 +543,20 @@ class CompiledRunSpec(_ProtocolModel):
                 f"CompiledRunSpec '{self.run_id}' primary_metric '{self.primary_metric}' is unsupported. "
                 f"Allowed values: {allowed}."
             )
+        if self.framework_mode != FrameworkMode.CONFIRMATORY.value:
+            raise ValueError(
+                f"CompiledRunSpec '{self.run_id}' must use framework_mode='confirmatory'."
+            )
+        if self.canonical_run is not True:
+            raise ValueError(
+                f"CompiledRunSpec '{self.run_id}' must set canonical_run=true in confirmatory mode."
+            )
         return self
 
 
 class CompiledProtocolManifest(_ProtocolModel):
     compiled_schema_version: str = "thesis-protocol-compiled-v1"
+    framework_mode: Literal["confirmatory"] = FrameworkMode.CONFIRMATORY.value
     protocol_schema_version: str = THESIS_PROTOCOL_SCHEMA_VERSION
     protocol_id: str = Field(min_length=1)
     protocol_version: str = Field(min_length=1)
@@ -527,11 +564,17 @@ class CompiledProtocolManifest(_ProtocolModel):
     suite_ids: list[str] = Field(min_length=1)
     runs: list[CompiledRunSpec] = Field(min_length=1)
     claim_to_run_map: dict[str, list[str]]
-    required_protocol_artifacts: list[str] = Field(default_factory=lambda: list(REQUIRED_PROTOCOL_ARTIFACTS))
-    required_run_artifacts: list[str] = Field(default_factory=lambda: list(REQUIRED_RUN_ARTIFACTS_BASELINE))
+    required_protocol_artifacts: list[str] = Field(
+        default_factory=lambda: list(REQUIRED_PROTOCOL_ARTIFACTS)
+    )
+    required_run_artifacts: list[str] = Field(
+        default_factory=lambda: list(REQUIRED_RUN_ARTIFACTS_BASELINE)
+    )
 
     @model_validator(mode="after")
     def _validate_manifest(self) -> CompiledProtocolManifest:
+        if self.framework_mode != FrameworkMode.CONFIRMATORY.value:
+            raise ValueError("CompiledProtocolManifest.framework_mode must be 'confirmatory'.")
         if len(set(self.suite_ids)) != len(self.suite_ids):
             raise ValueError("CompiledProtocolManifest.suite_ids must be unique.")
         run_ids = [run.run_id for run in self.runs]
@@ -548,9 +591,20 @@ class CompiledProtocolManifest(_ProtocolModel):
 class ProtocolRunResult(_ProtocolModel):
     run_id: str = Field(min_length=1)
     suite_id: str = Field(min_length=1)
+    framework_mode: Literal["confirmatory"] = FrameworkMode.CONFIRMATORY.value
     status: Literal["planned", "completed", "failed"]
     report_dir: str | None = None
     metrics_path: str | None = None
     config_path: str | None = None
     error: str | None = None
     metrics: dict[str, float | int | str | bool | None] | None = None
+
+    @model_validator(mode="after")
+    def _validate_result(self) -> ProtocolRunResult:
+        if self.framework_mode != FrameworkMode.CONFIRMATORY.value:
+            raise ValueError("ProtocolRunResult.framework_mode must be 'confirmatory'.")
+        if self.status == "failed" and not self.error:
+            raise ValueError("ProtocolRunResult.error is required when status='failed'.")
+        if self.status != "failed" and self.error is not None:
+            raise ValueError("ProtocolRunResult.error must be null unless status='failed'.")
+        return self

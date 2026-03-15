@@ -24,6 +24,7 @@ Installed wheel path is also supported; default decision-support registry is pac
 
 - `thesisml-run-protocol` (official thesis-facing command)
 - `thesisml-run-experiment`
+- `thesisml-run-comparison`
 - `thesisml-run-decision-support`
 - `thesisml-workbook`
 - `thesisml-run-baseline`
@@ -38,7 +39,7 @@ Canonical protocol dry-run:
 thesisml-run-protocol \
   --protocol configs/protocols/thesis_canonical_v1.json \
   --all-suites \
-  --reports-root outputs/reports/experiments \
+  --reports-root outputs/reports/confirmatory \
   --dry-run
 ```
 
@@ -48,12 +49,33 @@ Canonical protocol execution:
 thesisml-run-protocol \
   --protocol configs/protocols/thesis_canonical_v1.json \
   --all-suites \
-  --reports-root outputs/reports/experiments
+  --reports-root outputs/reports/confirmatory
+```
+
+Locked comparison dry-run:
+
+```bash
+thesisml-run-comparison \
+  --comparison configs/comparisons/model_family_comparison_v1.json \
+  --all-variants \
+  --reports-root outputs/reports/comparisons \
+  --dry-run
+```
+
+Locked comparison execution:
+
+```bash
+thesisml-run-comparison \
+  --comparison configs/comparisons/model_family_comparison_v1.json \
+  --all-variants \
+  --reports-root outputs/reports/comparisons
 ```
 
 Official-policy note:
-- thesis-critical settings must come from protocol JSON.
-- `thesisml-run-experiment` remains available as a low-level exploratory/ad hoc interface.
+- exploratory mode (`thesisml-run-experiment`) is ad hoc and non-confirmatory.
+- locked comparison mode (`thesisml-run-comparison`) is restricted to registered variants.
+- confirmatory mode (`thesisml-run-protocol`) is the final thesis evidence path.
+- default mode roots are `outputs/reports/exploratory`, `outputs/reports/comparisons`, and `outputs/reports/confirmatory`.
 
 Generate workbook template:
 

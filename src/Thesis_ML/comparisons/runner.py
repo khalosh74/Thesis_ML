@@ -3,32 +3,30 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from Thesis_ML.comparisons.artifacts import write_comparison_artifacts
+from Thesis_ML.comparisons.compiler import compile_comparison
+from Thesis_ML.comparisons.models import (
+    ComparisonRunResult,
+    ComparisonSpec,
+    ComparisonStatus,
+    CompiledComparisonManifest,
+    CompiledComparisonRunSpec,
+)
 from Thesis_ML.config.framework_mode import FrameworkMode
 from Thesis_ML.experiments.run_experiment import run_experiment
-from Thesis_ML.protocols.artifacts import write_protocol_artifacts
-from Thesis_ML.protocols.compiler import compile_protocol
-from Thesis_ML.protocols.models import (
-    CompiledProtocolManifest,
-    CompiledRunSpec,
-    ProtocolRunResult,
-    ProtocolStatus,
-    ThesisProtocol,
-)
 
 
-def _protocol_output_dir(protocol: ThesisProtocol, reports_root: Path | str) -> Path:
+def _comparison_output_dir(comparison: ComparisonSpec, reports_root: Path | str) -> Path:
     root = Path(reports_root)
-    return root / "protocol_runs" / f"{protocol.protocol_id}__{protocol.protocol_version}"
+    return root / "comparison_runs" / f"{comparison.comparison_id}__{comparison.comparison_version}"
 
 
-def _protocol_context_payload(spec: CompiledRunSpec) -> dict[str, Any]:
+def _comparison_context_payload(spec: CompiledComparisonRunSpec) -> dict[str, Any]:
     return {
-        "framework_mode": FrameworkMode.CONFIRMATORY.value,
-        "canonical_run": bool(spec.canonical_run),
-        "protocol_id": spec.protocol_id,
-        "protocol_version": spec.protocol_version,
-        "protocol_schema_version": spec.protocol_schema_version,
-        "suite_id": spec.suite_id,
+        "framework_mode": FrameworkMode.LOCKED_COMPARISON.value,
+        "comparison_id": spec.comparison_id,
+        "comparison_version": spec.comparison_version,
+        "variant_id": spec.variant_id,
         "claim_ids": list(spec.claim_ids),
         "artifact_requirements": list(spec.artifact_requirements),
         "primary_metric": spec.primary_metric,
@@ -38,9 +36,9 @@ def _protocol_context_payload(spec: CompiledRunSpec) -> dict[str, Any]:
 
 
 def _to_run_result_success(
-    spec: CompiledRunSpec,
+    spec: CompiledComparisonRunSpec,
     run_payload: dict[str, Any],
-) -> ProtocolRunResult:
+) -> ComparisonRunResult:
     metrics_payload = run_payload.get("metrics", {}) if isinstance(run_payload, dict) else {}
     metrics: dict[str, float | int | str | bool | None] = {}
     if isinstance(metrics_payload, dict):
@@ -49,26 +47,28 @@ def _to_run_result_success(
             if isinstance(value, (float, int, str, bool)) or value is None:
                 metrics[key] = value
 
-    return ProtocolRunResult(
+    return ComparisonRunResult(
         run_id=spec.run_id,
-        suite_id=spec.suite_id,
-        framework_mode=FrameworkMode.CONFIRMATORY.value,
+        framework_mode=FrameworkMode.LOCKED_COMPARISON.value,
+        comparison_id=spec.comparison_id,
+        comparison_version=spec.comparison_version,
+        variant_id=spec.variant_id,
         status="completed",
         report_dir=(str(run_payload.get("report_dir")) if run_payload.get("report_dir") else None),
-        metrics_path=(
-            str(run_payload.get("metrics_path")) if run_payload.get("metrics_path") else None
-        ),
         config_path=(
             str(run_payload.get("config_path")) if run_payload.get("config_path") else None
+        ),
+        metrics_path=(
+            str(run_payload.get("metrics_path")) if run_payload.get("metrics_path") else None
         ),
         metrics=metrics,
     )
 
 
-def execute_compiled_protocol(
+def execute_compiled_comparison(
     *,
-    protocol: ThesisProtocol,
-    compiled_manifest: CompiledProtocolManifest,
+    comparison: ComparisonSpec,
+    compiled_manifest: CompiledComparisonManifest,
     index_csv: Path | str,
     data_root: Path | str,
     cache_dir: Path | str,
@@ -77,17 +77,19 @@ def execute_compiled_protocol(
     resume: bool,
     dry_run: bool,
 ) -> dict[str, Any]:
-    run_results: list[ProtocolRunResult] = []
+    run_results: list[ComparisonRunResult] = []
     reports_root_path = Path(reports_root)
     reports_root_path.mkdir(parents=True, exist_ok=True)
 
     for spec in compiled_manifest.runs:
         if dry_run:
             run_results.append(
-                ProtocolRunResult(
+                ComparisonRunResult(
                     run_id=spec.run_id,
-                    suite_id=spec.suite_id,
-                    framework_mode=FrameworkMode.CONFIRMATORY.value,
+                    framework_mode=FrameworkMode.LOCKED_COMPARISON.value,
+                    comparison_id=spec.comparison_id,
+                    comparison_version=spec.comparison_version,
+                    variant_id=spec.variant_id,
                     status="planned",
                 )
             )
@@ -112,30 +114,32 @@ def execute_compiled_protocol(
                 reports_root=reports_root_path,
                 force=bool(force),
                 resume=bool(resume),
-                framework_mode=FrameworkMode.CONFIRMATORY,
+                framework_mode=FrameworkMode.LOCKED_COMPARISON,
                 primary_metric_name=spec.primary_metric,
                 permutation_metric_name=spec.controls.permutation_metric,
                 interpretability_enabled_override=bool(spec.interpretability_enabled),
-                protocol_context=_protocol_context_payload(spec),
+                comparison_context=_comparison_context_payload(spec),
             )
             run_results.append(_to_run_result_success(spec, payload))
         except Exception as exc:
             run_results.append(
-                ProtocolRunResult(
+                ComparisonRunResult(
                     run_id=spec.run_id,
-                    suite_id=spec.suite_id,
-                    framework_mode=FrameworkMode.CONFIRMATORY.value,
+                    framework_mode=FrameworkMode.LOCKED_COMPARISON.value,
+                    comparison_id=spec.comparison_id,
+                    comparison_version=spec.comparison_version,
+                    variant_id=spec.variant_id,
                     status="failed",
                     error=str(exc),
                 )
             )
 
-    protocol_output_dir = _protocol_output_dir(protocol, reports_root=reports_root_path)
-    artifact_paths = write_protocol_artifacts(
-        protocol=protocol,
+    comparison_output_dir = _comparison_output_dir(comparison, reports_root=reports_root_path)
+    artifact_paths = write_comparison_artifacts(
+        comparison=comparison,
         compiled_manifest=compiled_manifest,
         run_results=run_results,
-        output_dir=protocol_output_dir,
+        output_dir=comparison_output_dir,
         dry_run=dry_run,
     )
 
@@ -143,9 +147,9 @@ def execute_compiled_protocol(
     n_failed = sum(result.status == "failed" for result in run_results)
     n_planned = sum(result.status == "planned" for result in run_results)
     return {
-        "protocol_id": protocol.protocol_id,
-        "protocol_version": protocol.protocol_version,
-        "protocol_output_dir": str(protocol_output_dir.resolve()),
+        "comparison_id": comparison.comparison_id,
+        "comparison_version": comparison.comparison_version,
+        "comparison_output_dir": str(comparison_output_dir.resolve()),
         "compiled_manifest": compiled_manifest.model_dump(mode="json"),
         "run_results": [result.model_dump(mode="json") for result in run_results],
         "n_completed": int(n_completed),
@@ -155,30 +159,32 @@ def execute_compiled_protocol(
     }
 
 
-def compile_and_run_protocol(
+def compile_and_run_comparison(
     *,
-    protocol: ThesisProtocol,
+    comparison: ComparisonSpec,
     index_csv: Path | str,
     data_root: Path | str,
     cache_dir: Path | str,
     reports_root: Path | str,
-    suite_ids: list[str] | None = None,
+    variant_ids: list[str] | None = None,
     force: bool = False,
     resume: bool = False,
     dry_run: bool = False,
 ) -> dict[str, Any]:
-    if protocol.status == ProtocolStatus.DRAFT:
+    if comparison.status == ComparisonStatus.RETIRED:
+        raise ValueError("Comparison execution rejected: comparison status is 'retired'.")
+    if comparison.status == ComparisonStatus.DRAFT:
         raise ValueError(
-            "Confirmatory protocol execution rejects status='draft'. "
-            "Set protocol status to 'locked' or 'released' before running."
+            "Comparison execution rejected: comparison status is 'draft'. "
+            "Lock comparison spec before execution."
         )
-    compiled_manifest = compile_protocol(
-        protocol,
+    compiled_manifest = compile_comparison(
+        comparison,
         index_csv=index_csv,
-        suite_ids=suite_ids,
+        variant_ids=variant_ids,
     )
-    return execute_compiled_protocol(
-        protocol=protocol,
+    return execute_compiled_comparison(
+        comparison=comparison,
         compiled_manifest=compiled_manifest,
         index_csv=index_csv,
         data_root=data_root,

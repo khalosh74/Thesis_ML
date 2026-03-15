@@ -1,72 +1,99 @@
-# Experiments Guide (Canonical Thesis Protocol)
+# Experiments Guide (Framework Modes)
 
-## Official thesis command
+This framework now has three hard-separated execution modes:
 
-Official thesis runs must be executed through:
+- exploratory experiments
+- locked comparison experiments
+- confirmatory thesis runs
 
-```powershell
-thesisml-run-protocol `
-  --protocol configs/protocols/thesis_canonical_v1.json `
-  --all-suites `
-  --reports-root outputs/reports/experiments
+Mode identity is explicit in run artifacts via `framework_mode` and enforced by runner guardrails.
+
+## Mode commands and intent
+
+Exploratory mode (`thesisml-run-experiment`):
+- purpose: ad hoc idea generation, debugging, flexible probing
+- default reports root: `outputs/reports/exploratory/`
+- metadata: `framework_mode=exploratory`, `canonical_run=false`
+- science-affecting CLI flags are allowed
+
+Locked comparison mode (`thesisml-run-comparison`):
+- purpose: predeclared method-lock comparisons from registered specs
+- default reports root: `outputs/reports/comparisons/`
+- metadata: `framework_mode=locked_comparison`, `canonical_run=false`
+- science-affecting settings are frozen in comparison JSON
+
+Confirmatory mode (`thesisml-run-protocol`):
+- purpose: final thesis evidence only
+- default reports root: `outputs/reports/confirmatory/`
+- metadata: `framework_mode=confirmatory`, `canonical_run=true`
+- science-affecting settings come only from canonical protocol JSON
+
+## Exploratory command
+
+```bash
+thesisml-run-experiment \
+  --index-csv Data/processed/dataset_index.csv \
+  --data-root Data \
+  --cache-dir Data/processed/feature_cache \
+  --target coarse_affect \
+  --model ridge \
+  --cv within_subject_loso_session \
+  --subject sub-001 \
+  --seed 42
 ```
 
-Dry-run (compile + validation + protocol artifacts only):
+## Locked comparison commands
 
-```powershell
-thesisml-run-protocol `
-  --protocol configs/protocols/thesis_canonical_v1.json `
-  --all-suites `
-  --reports-root outputs/reports/experiments `
+Dry-run:
+
+```bash
+thesisml-run-comparison \
+  --comparison configs/comparisons/model_family_comparison_v1.json \
+  --all-variants \
   --dry-run
 ```
 
-For official thesis runs, science-affecting settings are loaded from the protocol and not from CLI flags.
+Execute all registered variants:
 
-## Canonical protocol source of truth
+```bash
+thesisml-run-comparison \
+  --comparison configs/comparisons/model_family_comparison_v1.json \
+  --all-variants
+```
 
-Canonical protocol file:
+## Confirmatory protocol commands
+
+Dry-run:
+
+```bash
+thesisml-run-protocol \
+  --protocol configs/protocols/thesis_canonical_v1.json \
+  --all-suites \
+  --dry-run
+```
+
+Execute official suites:
+
+```bash
+thesisml-run-protocol \
+  --protocol configs/protocols/thesis_canonical_v1.json \
+  --all-suites
+```
+
+## Canonical protocol and comparison sources
+
+Confirmatory source of truth:
 - `configs/protocols/thesis_canonical_v1.json`
 
-Protocol includes and locks:
-- scientific contract (`target`, primary/secondary metric policy, seed policy)
-- split policy (`within_subject_loso_session` primary, `frozen_cross_person_transfer` secondary)
-- model policy (fixed baselines)
-- control policy (dummy baseline + permutation controls)
-- interpretability policy (explicitly allowed suites/modes/models only)
-- sensitivity policy role
-- artifact contract
-- official run suites (`primary_within_subject`, `secondary_cross_person_transfer`, `primary_controls`)
+Locked comparison source of truth:
+- `configs/comparisons/model_family_comparison_v1.json`
 
-## Leakage and spatial safeguards
+For confirmatory and comparison runs, parameters such as target, split mode, model selection,
+metric policy, controls, and interpretability policy are loaded from JSON contracts, not ad hoc CLI flags.
 
-Leakage-safe behavior remains enforced by `run_experiment`:
-- preprocessing/model fit inside sklearn `Pipeline`
-- scaler fit on train fold only
-- no test-fold fit leakage
-- permutation labels shuffled in train folds only
+## Artifacts by mode
 
-Spatial safeguards remain mandatory:
-- beta/mask affine + shape validation during cache build
-- cross-group spatial-signature compatibility validation before stacking
-
-## Metric and control policy
-
-For canonical protocol runs:
-- primary metric is `balanced_accuracy`
-- permutation testing uses the protocol metric (no silent fallback to plain accuracy)
-- control runs are protocol-declared (`dummy` baseline and permutation policy)
-
-## Interpretability policy
-
-Interpretability is protocol-controlled:
-- enabled only for suites/modes/models allowed in protocol
-- output is supporting model-behavior evidence only
-- disallowed suites/modes/models do not emit interpretability artifacts
-
-## Run and protocol artifacts
-
-Each concrete run still writes under `outputs/reports/experiments/<run_id>/`:
+Run-level artifacts (all modes):
 - `config.json`
 - `metrics.json`
 - `fold_metrics.csv`
@@ -75,18 +102,14 @@ Each concrete run still writes under `outputs/reports/experiments/<run_id>/`:
 - `spatial_compatibility_report.json`
 - `interpretability_summary.json`
 
-Canonical-run metadata is written to run artifacts (`config.json` and `metrics.json`):
-- `canonical_run`
-- `protocol_id`
-- `protocol_version`
-- `protocol_schema_version`
-- `suite_id`
-- `claim_ids`
+Locked comparison execution artifacts:
+- `comparison.json`
+- `compiled_comparison_manifest.json`
+- `comparison_summary.json`
+- `execution_status.json`
+- `report_index.csv`
 
-Protocol-level artifacts are written under:
-- `outputs/reports/experiments/protocol_runs/<protocol_id>__<protocol_version>/`
-
-Files:
+Confirmatory protocol execution artifacts:
 - `protocol.json`
 - `compiled_protocol_manifest.json`
 - `claim_to_run_map.json`
@@ -94,9 +117,10 @@ Files:
 - `execution_status.json`
 - `report_index.csv`
 
-## Low-level ad hoc runner
+## Guardrail policy
 
-`thesisml-run-experiment` is still supported for exploratory/ad hoc execution, including section-level resume controls.
-It is no longer the official thesis-facing command for confirmatory runs.
-
-See `docs/SEGMENT_EXECUTION.md` for low-level segmented execution behavior.
+- exploratory path cannot emit confirmatory mode labels
+- comparison path cannot emit confirmatory mode labels
+- comparison path rejects variants outside registered specs
+- confirmatory path rejects ad hoc science-affecting overrides
+- protocol and comparison runs stamp mode + identity metadata into run artifacts

@@ -26,12 +26,10 @@ def load_protocol(protocol_path: Path | str) -> ThesisProtocol:
     if schema_version not in SUPPORTED_THESIS_PROTOCOL_SCHEMA_VERSIONS:
         allowed = ", ".join(sorted(SUPPORTED_THESIS_PROTOCOL_SCHEMA_VERSIONS))
         raise ValueError(
-            "Unsupported protocol_schema_version "
-            f"'{schema_version}'. Allowed values: {allowed}."
+            f"Unsupported protocol_schema_version '{schema_version}'. Allowed values: {allowed}."
         )
 
     try:
         return ThesisProtocol.model_validate(payload)
     except ValidationError as exc:
         raise ValueError(f"Protocol validation failed for '{resolved_path}': {exc}") from exc
-

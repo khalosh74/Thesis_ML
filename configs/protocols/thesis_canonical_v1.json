@@ -1,5 +1,6 @@
 {
   "protocol_schema_version": "thesis-protocol-v1",
+  "framework_mode": "confirmatory",
   "protocol_id": "thesis-canonical",
   "protocol_version": "1.0.0",
   "status": "locked",
@@ -86,6 +87,7 @@
       "report_index.csv"
     ],
     "required_run_metadata_fields": [
+      "framework_mode",
       "canonical_run",
       "protocol_id",
       "protocol_version",
@@ -136,4 +138,3 @@
     }
   ]
 }
-

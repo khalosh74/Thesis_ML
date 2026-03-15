@@ -42,32 +42,15 @@ Configured in `src/Thesis_ML/config/paths.py`.
   - source checkout: `templates/thesis_experiment_program.xlsx`
   - installed wheel: packaged asset under `Thesis_ML/assets/templates/thesis_experiment_program.xlsx`
 - Output root: `outputs/`
-  - experiment reports: `outputs/reports/experiments/`
+  - exploratory reports: `outputs/reports/exploratory/`
+  - locked comparison reports: `outputs/reports/comparisons/`
+  - confirmatory reports: `outputs/reports/confirmatory/`
   - decision-support campaign artifacts: `outputs/artifacts/decision_support/`
   - workbook write-back files: `outputs/workbooks/`
 
-## 3) Standard experiment run
+## 3) Framework mode commands
 
-Official thesis run path:
-
-```bash
-thesisml-run-protocol \
-  --protocol configs/protocols/thesis_canonical_v1.json \
-  --all-suites \
-  --reports-root outputs/reports/experiments
-```
-
-Dry-run validation/compilation:
-
-```bash
-thesisml-run-protocol \
-  --protocol configs/protocols/thesis_canonical_v1.json \
-  --all-suites \
-  --reports-root outputs/reports/experiments \
-  --dry-run
-```
-
-Low-level ad hoc runner (kept for exploratory work):
+Exploratory run:
 
 ```bash
 thesisml-run-experiment \
@@ -78,11 +61,51 @@ thesisml-run-experiment \
   --model ridge \
   --cv within_subject_loso_session \
   --subject sub-001 \
-  --run-id within_sub001_ridge
+  --run-id exploratory_sub001_ridge
+```
+
+Locked comparison dry-run:
+
+```bash
+thesisml-run-comparison \
+  --comparison configs/comparisons/model_family_comparison_v1.json \
+  --all-variants \
+  --reports-root outputs/reports/comparisons \
+  --dry-run
+```
+
+Locked comparison execution:
+
+```bash
+thesisml-run-comparison \
+  --comparison configs/comparisons/model_family_comparison_v1.json \
+  --all-variants \
+  --reports-root outputs/reports/comparisons
+```
+
+Confirmatory canonical protocol run:
+
+```bash
+thesisml-run-protocol \
+  --protocol configs/protocols/thesis_canonical_v1.json \
+  --all-suites \
+  --reports-root outputs/reports/confirmatory
+```
+
+Confirmatory dry-run validation/compilation:
+
+```bash
+thesisml-run-protocol \
+  --protocol configs/protocols/thesis_canonical_v1.json \
+  --all-suites \
+  --reports-root outputs/reports/confirmatory \
+  --dry-run
 ```
 
 Policy note:
-- official thesis-critical settings (target, split, model policy, controls, interpretability, metric policy) must come from protocol JSON, not ad hoc CLI flag combinations.
+- exploratory mode is flexible and not confirmatory evidence.
+- locked comparison mode allows only declared variants from comparison specs.
+- confirmatory mode must load thesis-critical settings from protocol JSON, not ad hoc CLI flags.
 
 ## 4) Rerun / resume behavior
 
@@ -98,9 +121,10 @@ Policy note:
 - `--force` and `--resume` are mutually exclusive
 
 `thesisml-run-protocol` forwards `--force`/`--resume` to underlying concrete runs.
+`thesisml-run-comparison` forwards `--force`/`--resume` to underlying concrete runs.
 
 Run state file:
-- `outputs/reports/experiments/<run_id>/run_status.json`
+- `outputs/reports/<mode>/<run_id>/run_status.json`
 
 ## 5) Decision-support campaign (registry)
 
@@ -173,10 +197,12 @@ Template policy:
 python -m mypy
 python -m ruff check src/Thesis_ML/artifacts src/Thesis_ML/orchestration src/Thesis_ML/workbook \
   src/Thesis_ML/experiments/segment_execution.py src/Thesis_ML/experiments/sections.py \
-  src/Thesis_ML/experiments/run_experiment.py src/Thesis_ML/protocols src/Thesis_ML/cli/protocol_runner.py
+  src/Thesis_ML/experiments/run_experiment.py src/Thesis_ML/protocols src/Thesis_ML/comparisons \
+  src/Thesis_ML/cli/protocol_runner.py src/Thesis_ML/cli/comparison_runner.py
 python -m ruff format --check src/Thesis_ML/artifacts src/Thesis_ML/orchestration src/Thesis_ML/workbook \
   src/Thesis_ML/experiments/segment_execution.py src/Thesis_ML/experiments/sections.py \
-  src/Thesis_ML/experiments/run_experiment.py src/Thesis_ML/protocols src/Thesis_ML/cli/protocol_runner.py
+  src/Thesis_ML/experiments/run_experiment.py src/Thesis_ML/protocols src/Thesis_ML/comparisons \
+  src/Thesis_ML/cli/protocol_runner.py src/Thesis_ML/cli/comparison_runner.py
 python -m pytest -q
 ```
 

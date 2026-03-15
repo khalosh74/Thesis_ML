@@ -25,6 +25,7 @@ from Thesis_ML.artifacts.registry import (
     compute_config_hash,
     register_artifact,
 )
+from Thesis_ML.config.framework_mode import FrameworkMode, coerce_framework_mode
 from Thesis_ML.config.paths import DEFAULT_EXPERIMENT_REPORTS_ROOT
 from Thesis_ML.experiments.cache_loading import load_features_from_cache
 from Thesis_ML.experiments.execution_policy import (
@@ -150,6 +151,93 @@ def _compute_interpretability_stability(coef_vectors: list[np.ndarray]) -> dict[
     return compute_interpretability_stability(coef_vectors=coef_vectors)
 
 
+def _resolve_framework_context(
+    framework_mode: FrameworkMode | str,
+    *,
+    protocol_context: dict[str, Any] | None,
+    comparison_context: dict[str, Any] | None,
+) -> tuple[
+    FrameworkMode,
+    bool,
+    dict[str, Any],
+    dict[str, Any],
+]:
+    resolved_mode = coerce_framework_mode(framework_mode)
+    resolved_protocol_context = dict(protocol_context or {})
+    resolved_comparison_context = dict(comparison_context or {})
+
+    if resolved_mode == FrameworkMode.EXPLORATORY:
+        if protocol_context is not None:
+            raise ValueError(
+                "framework_mode='exploratory' cannot accept protocol_context. "
+                "Use framework_mode='confirmatory' via thesisml-run-protocol."
+            )
+        if comparison_context is not None:
+            raise ValueError(
+                "framework_mode='exploratory' cannot accept comparison_context. "
+                "Use framework_mode='locked_comparison' via thesisml-run-comparison."
+            )
+        return resolved_mode, False, {}, {}
+
+    if resolved_mode == FrameworkMode.CONFIRMATORY:
+        if not resolved_protocol_context:
+            raise ValueError("framework_mode='confirmatory' requires non-empty protocol_context.")
+        if comparison_context is not None:
+            raise ValueError("framework_mode='confirmatory' cannot accept comparison_context.")
+        required_keys = [
+            "framework_mode",
+            "protocol_id",
+            "protocol_version",
+            "protocol_schema_version",
+            "suite_id",
+            "claim_ids",
+        ]
+        missing = [key for key in required_keys if key not in resolved_protocol_context]
+        if missing:
+            raise ValueError(
+                "framework_mode='confirmatory' protocol_context is missing required keys: "
+                + ", ".join(missing)
+            )
+        if bool(resolved_protocol_context.get("canonical_run", True)) is not True:
+            raise ValueError(
+                "framework_mode='confirmatory' requires protocol_context['canonical_run']=true."
+            )
+        if str(resolved_protocol_context.get("framework_mode")) != FrameworkMode.CONFIRMATORY.value:
+            raise ValueError(
+                "framework_mode='confirmatory' requires protocol_context['framework_mode']='confirmatory'."
+            )
+        resolved_protocol_context["canonical_run"] = True
+        return resolved_mode, True, resolved_protocol_context, {}
+
+    if resolved_mode == FrameworkMode.LOCKED_COMPARISON:
+        if not resolved_comparison_context:
+            raise ValueError(
+                "framework_mode='locked_comparison' requires non-empty comparison_context."
+            )
+        if protocol_context is not None:
+            raise ValueError("framework_mode='locked_comparison' cannot accept protocol_context.")
+        required_keys = [
+            "framework_mode",
+            "comparison_id",
+            "comparison_version",
+            "variant_id",
+        ]
+        missing = [key for key in required_keys if key not in resolved_comparison_context]
+        if missing:
+            raise ValueError(
+                "framework_mode='locked_comparison' comparison_context is missing required keys: "
+                + ", ".join(missing)
+            )
+        if (
+            str(resolved_comparison_context.get("framework_mode"))
+            != FrameworkMode.LOCKED_COMPARISON.value
+        ):
+            raise ValueError(
+                "framework_mode='locked_comparison' requires comparison_context['framework_mode']='locked_comparison'."
+            )
+        return resolved_mode, False, {}, resolved_comparison_context
+
+
 def run_experiment(
     index_csv: Path,
     data_root: Path,
@@ -167,7 +255,9 @@ def run_experiment(
     primary_metric_name: str = "balanced_accuracy",
     permutation_metric_name: str | None = None,
     interpretability_enabled_override: bool | None = None,
+    framework_mode: FrameworkMode | str = FrameworkMode.EXPLORATORY,
     protocol_context: dict[str, Any] | None = None,
+    comparison_context: dict[str, Any] | None = None,
     run_id: str | None = None,
     reports_root: Path | str = DEFAULT_EXPERIMENT_REPORTS_ROOT,
     start_section: str | None = None,
@@ -213,8 +303,16 @@ def run_experiment(
         if permutation_metric_name is not None
         else resolved_primary_metric_name
     )
-    resolved_protocol_context = dict(protocol_context or {})
-    canonical_run = bool(resolved_protocol_context.get("canonical_run", False))
+    (
+        resolved_framework_mode,
+        canonical_run,
+        resolved_protocol_context,
+        resolved_comparison_context,
+    ) = _resolve_framework_context(
+        framework_mode,
+        protocol_context=protocol_context,
+        comparison_context=comparison_context,
+    )
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     resolved_run_id = run_id or f"{timestamp}_{model}_{target_column}"
@@ -322,9 +420,20 @@ def run_experiment(
         else None
     )
     claim_ids_raw = resolved_protocol_context.get("claim_ids")
-    claim_ids = (
-        [str(value) for value in claim_ids_raw]
-        if isinstance(claim_ids_raw, list)
+    claim_ids = [str(value) for value in claim_ids_raw] if isinstance(claim_ids_raw, list) else None
+    comparison_id = (
+        str(resolved_comparison_context.get("comparison_id"))
+        if resolved_comparison_context.get("comparison_id")
+        else None
+    )
+    comparison_version = (
+        str(resolved_comparison_context.get("comparison_version"))
+        if resolved_comparison_context.get("comparison_version")
+        else None
+    )
+    comparison_variant_id = (
+        str(resolved_comparison_context.get("variant_id"))
+        if resolved_comparison_context.get("variant_id")
         else None
     )
 
@@ -335,12 +444,18 @@ def run_experiment(
             persisted_metrics = None
         if isinstance(persisted_metrics, dict):
             persisted_metrics["canonical_run"] = bool(canonical_run)
+            persisted_metrics["framework_mode"] = resolved_framework_mode.value
             persisted_metrics["protocol_id"] = protocol_id
             persisted_metrics["protocol_version"] = protocol_version
             persisted_metrics["protocol_schema_version"] = protocol_schema_version
             persisted_metrics["suite_id"] = suite_id
             persisted_metrics["claim_ids"] = claim_ids
-            metrics_path.write_text(f"{json.dumps(persisted_metrics, indent=2)}\n", encoding="utf-8")
+            persisted_metrics["comparison_id"] = comparison_id
+            persisted_metrics["comparison_version"] = comparison_version
+            persisted_metrics["comparison_variant_id"] = comparison_variant_id
+            metrics_path.write_text(
+                f"{json.dumps(persisted_metrics, indent=2)}\n", encoding="utf-8"
+            )
             metrics = dict(persisted_metrics)
 
     spatial_status = str(spatial_compatibility["status"]) if spatial_compatibility else None
@@ -389,13 +504,20 @@ def run_experiment(
         "filter_task": filter_task,
         "filter_modality": filter_modality,
         "n_permutations": int(n_permutations),
+        "framework_mode": resolved_framework_mode.value,
         "canonical_run": bool(canonical_run),
         "protocol_id": protocol_id,
         "protocol_version": protocol_version,
         "protocol_schema_version": protocol_schema_version,
         "suite_id": suite_id,
         "claim_ids": claim_ids,
+        "comparison_id": comparison_id,
+        "comparison_version": comparison_version,
+        "comparison_variant_id": comparison_variant_id,
         "protocol_context": resolved_protocol_context if resolved_protocol_context else None,
+        "comparison_context": (
+            resolved_comparison_context if resolved_comparison_context else None
+        ),
         "start_section": start_section,
         "end_section": end_section,
         "base_artifact_id": base_artifact_id,
@@ -473,13 +595,20 @@ def run_experiment(
         "metrics": metrics,
         "run_status_path": str(run_status.resolve()),
         "run_mode": run_mode,
+        "framework_mode": resolved_framework_mode.value,
         "canonical_run": bool(canonical_run),
         "protocol_context": resolved_protocol_context if resolved_protocol_context else None,
+        "comparison_context": resolved_comparison_context if resolved_comparison_context else None,
     }
 
 
 def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Run leakage-safe grouped-CV fMRI experiments.")
+    parser = argparse.ArgumentParser(
+        description=(
+            "Run leakage-safe grouped-CV fMRI experiments (exploratory mode). "
+            "For locked comparisons use thesisml-run-comparison; for confirmatory runs use thesisml-run-protocol."
+        )
+    )
     parser.add_argument("--index-csv", required=True, help="Dataset index CSV.")
     parser.add_argument("--data-root", required=True, help="Root directory for relative paths.")
     parser.add_argument("--cache-dir", required=True, help="Feature cache directory.")
@@ -536,7 +665,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--reports-root",
         default=str(DEFAULT_EXPERIMENT_REPORTS_ROOT),
-        help="Root directory for experiment reports.",
+        help="Root directory for exploratory experiment reports.",
     )
     parser.add_argument(
         "--start-section",

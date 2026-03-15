@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from Thesis_ML.config.framework_mode import FrameworkMode
 from Thesis_ML.protocols.models import (
     CompiledProtocolManifest,
     CompiledRunControls,
@@ -29,7 +30,13 @@ def _load_subjects(index_csv: Path | str) -> list[str]:
         raise ValueError(
             f"Dataset index '{Path(index_csv)}' is missing required column 'subject' for protocol compilation."
         )
-    subjects = sorted({str(value).strip() for value in index_df["subject"].astype(str).tolist() if str(value).strip()})
+    subjects = sorted(
+        {
+            str(value).strip()
+            for value in index_df["subject"].astype(str).tolist()
+            if str(value).strip()
+        }
+    )
     if not subjects:
         raise ValueError(
             f"Dataset index '{Path(index_csv)}' does not contain any non-empty subject values."
@@ -50,7 +57,10 @@ def _resolve_suite_subjects(suite: SuiteSpec, all_subjects: list[str]) -> list[s
 
 def _resolve_transfer_pairs(suite: SuiteSpec, all_subjects: list[str]) -> list[TransferPair]:
     if suite.transfer_pair_source == TransferPairSource.ALL_ORDERED_PAIRS_FROM_INDEX:
-        ordered_pairs = [TransferPair(train_subject=left, test_subject=right) for left, right in permutations(all_subjects, 2)]
+        ordered_pairs = [
+            TransferPair(train_subject=left, test_subject=right)
+            for left, right in permutations(all_subjects, 2)
+        ]
         if not ordered_pairs:
             raise ValueError(
                 f"Suite '{suite.suite_id}' requires at least two subjects for transfer runs."
@@ -62,7 +72,9 @@ def _resolve_transfer_pairs(suite: SuiteSpec, all_subjects: list[str]) -> list[T
 
 
 def _resolve_suite_models(protocol: ThesisProtocol, suite: SuiteSpec) -> list[str]:
-    base_models = list(suite.models) if suite.models is not None else list(protocol.model_policy.models)
+    base_models = (
+        list(suite.models) if suite.models is not None else list(protocol.model_policy.models)
+    )
     if protocol.control_policy.dummy_baseline.enabled and suite.suite_id in set(
         protocol.control_policy.dummy_baseline.suites
     ):
@@ -134,7 +146,9 @@ def compile_protocol(
 ) -> CompiledProtocolManifest:
     all_subjects = _load_subjects(index_csv)
 
-    available_suites = {suite.suite_id: suite for suite in protocol.official_run_suites if suite.enabled}
+    available_suites = {
+        suite.suite_id: suite for suite in protocol.official_run_suites if suite.enabled
+    }
     if suite_ids is None:
         selected_suite_ids = sorted(available_suites.keys())
     else:
@@ -153,7 +167,9 @@ def compile_protocol(
     runs: list[CompiledRunSpec] = []
     claim_to_run_map: dict[str, list[str]] = {}
     permutation_enabled_suites = set(protocol.control_policy.permutation.suites)
-    permutation_metric = protocol.control_policy.permutation.metric or protocol.scientific_contract.primary_metric
+    permutation_metric = (
+        protocol.control_policy.permutation.metric or protocol.scientific_contract.primary_metric
+    )
 
     for suite_id in selected_suite_ids:
         suite = available_suites[suite_id]
@@ -215,8 +231,11 @@ def compile_protocol(
                         interpretability_enabled=_interpretability_enabled(
                             protocol, suite, model_name
                         ),
+                        framework_mode=FrameworkMode.CONFIRMATORY.value,
                         canonical_run=True,
-                        artifact_requirements=list(protocol.artifact_contract.required_run_artifacts),
+                        artifact_requirements=list(
+                            protocol.artifact_contract.required_run_artifacts
+                        ),
                         protocol_id=protocol.protocol_id,
                         protocol_version=protocol.protocol_version,
                         protocol_schema_version=protocol.protocol_schema_version,
@@ -272,8 +291,11 @@ def compile_protocol(
                         interpretability_enabled=_interpretability_enabled(
                             protocol, suite, model_name
                         ),
+                        framework_mode=FrameworkMode.CONFIRMATORY.value,
                         canonical_run=True,
-                        artifact_requirements=list(protocol.artifact_contract.required_run_artifacts),
+                        artifact_requirements=list(
+                            protocol.artifact_contract.required_run_artifacts
+                        ),
                         protocol_id=protocol.protocol_id,
                         protocol_version=protocol.protocol_version,
                         protocol_schema_version=protocol.protocol_schema_version,
@@ -286,6 +308,7 @@ def compile_protocol(
         raise ValueError("Protocol compilation produced zero concrete runs.")
 
     return CompiledProtocolManifest(
+        framework_mode=FrameworkMode.CONFIRMATORY.value,
         protocol_schema_version=protocol.protocol_schema_version,
         protocol_id=protocol.protocol_id,
         protocol_version=protocol.protocol_version,
