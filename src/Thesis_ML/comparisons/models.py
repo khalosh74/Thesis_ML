@@ -411,12 +411,26 @@ class CompiledComparisonManifest(_ComparisonModel):
     required_run_artifacts: list[str] = Field(
         default_factory=lambda: list(REQUIRED_COMPARISON_RUN_ARTIFACTS)
     )
+    required_run_metadata_fields: list[str] = Field(
+        default_factory=lambda: [
+            "framework_mode",
+            "canonical_run",
+            "methodology_policy_name",
+            "comparison_id",
+            "comparison_version",
+            "comparison_variant_id",
+        ]
+    )
 
     @model_validator(mode="after")
     def _validate_manifest(self) -> CompiledComparisonManifest:
         run_ids = [run.run_id for run in self.runs]
         if len(set(run_ids)) != len(run_ids):
             raise ValueError("CompiledComparisonManifest.runs contains duplicate run_id values.")
+        if not self.required_run_metadata_fields:
+            raise ValueError(
+                "CompiledComparisonManifest.required_run_metadata_fields must not be empty."
+            )
         return self
 
 

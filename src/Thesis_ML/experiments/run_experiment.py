@@ -6,9 +6,11 @@ import argparse
 import json
 import logging
 import platform
-import subprocess
+import tracemalloc
+import warnings
 from datetime import datetime
 from pathlib import Path
+from time import perf_counter
 from typing import Any
 
 import nibabel as nib
@@ -33,6 +35,7 @@ from Thesis_ML.config.methodology import (
 )
 from Thesis_ML.config.paths import DEFAULT_EXPERIMENT_REPORTS_ROOT
 from Thesis_ML.experiments.cache_loading import load_features_from_cache
+from Thesis_ML.experiments.errors import ThesisMLError
 from Thesis_ML.experiments.execution_policy import (
     prepare_report_dir,
     write_run_status,
@@ -44,6 +47,14 @@ from Thesis_ML.experiments.metrics import (
     scores_for_predictions,
 )
 from Thesis_ML.experiments.model_factory import MODEL_NAMES, make_model
+from Thesis_ML.experiments.official_contracts import (
+    validate_official_preflight,
+    validate_run_artifact_contract,
+)
+from Thesis_ML.experiments.provenance import (
+    collect_dataset_fingerprint,
+    collect_git_provenance,
+)
 from Thesis_ML.experiments.run_artifacts import (
     build_run_config_payload,
     build_run_result_payload,
@@ -81,17 +92,48 @@ _TARGET_ALIASES = {
 }
 
 
-def _current_git_commit() -> str | None:
-    try:
-        process = subprocess.run(
-            ["git", "rev-parse", "HEAD"],
-            check=True,
-            capture_output=True,
-            text=True,
+def _serialize_warning_records(
+    records: list[warnings.WarningMessage],
+) -> list[dict[str, Any]]:
+    payloads: list[dict[str, Any]] = []
+    for warning_record in records:
+        payloads.append(
+            {
+                "category": warning_record.category.__name__,
+                "message": str(warning_record.message),
+                "filename": str(warning_record.filename),
+                "lineno": int(warning_record.lineno),
+            }
         )
-    except Exception:
-        return None
-    return process.stdout.strip() or None
+    return payloads
+
+
+def _warning_summary(warnings_payload: list[dict[str, Any]]) -> dict[str, Any]:
+    by_category: dict[str, int] = {}
+    for payload in warnings_payload:
+        category = str(payload.get("category", "UnknownWarning"))
+        by_category[category] = int(by_category.get(category, 0)) + 1
+    return {
+        "warning_count": int(len(warnings_payload)),
+        "by_category": by_category,
+        "convergence_warning_count": int(by_category.get("ConvergenceWarning", 0)),
+    }
+
+
+def _failure_payload(exc: Exception) -> dict[str, Any]:
+    if isinstance(exc, ThesisMLError):
+        return {
+            "error_code": str(exc.code),
+            "error_type": type(exc).__name__,
+            "failure_stage": str(exc.stage),
+            "error_details": dict(exc.details or {}),
+        }
+    return {
+        "error_code": "unhandled_exception",
+        "error_type": type(exc).__name__,
+        "failure_stage": "runtime",
+        "error_details": {},
+    }
 
 
 def _make_model(name: str, seed: int, class_weight_policy: str = "none") -> Any:
@@ -275,6 +317,13 @@ def run_experiment(
     data_root = Path(data_root)
     cache_dir = Path(cache_dir)
     reports_root = Path(reports_root)
+    overall_start = perf_counter()
+    stage_timings: dict[str, float] = {}
+    warnings_payload: list[dict[str, Any]] = []
+    resource_summary: dict[str, Any] = {}
+    dataset_fingerprint: dict[str, Any] | None = None
+    required_run_artifacts: list[str] = []
+    required_run_metadata_fields: list[str] = []
 
     if cv is None or not str(cv).strip():
         allowed = ", ".join(_CV_MODES)
@@ -299,6 +348,7 @@ def run_experiment(
             raise ValueError("train_subject and test_subject must be different.")
 
     target_column = _resolve_target_column(target)
+    context_start = perf_counter()
     (
         resolved_framework_mode,
         canonical_run,
@@ -314,6 +364,9 @@ def run_experiment(
         official_context = dict(resolved_protocol_context)
     if resolved_framework_mode == FrameworkMode.LOCKED_COMPARISON:
         official_context = dict(resolved_comparison_context)
+    stage_timings["context_resolution"] = float(perf_counter() - context_start)
+
+    metric_policy_start = perf_counter()
     (
         resolved_primary_metric_name,
         resolved_permutation_metric_name,
@@ -326,6 +379,9 @@ def run_experiment(
         n_permutations=n_permutations,
         interpretability_enabled_override=interpretability_enabled_override,
     )
+    stage_timings["metric_policy_resolution"] = float(perf_counter() - metric_policy_start)
+
+    methodology_start = perf_counter()
     methodology_policy, subgroup_policy = _resolve_methodology_runtime(
         framework_mode=resolved_framework_mode,
         methodology_policy_name=methodology_policy_name,
@@ -341,6 +397,7 @@ def run_experiment(
         protocol_context=resolved_protocol_context,
         comparison_context=resolved_comparison_context,
     )
+    stage_timings["methodology_resolution"] = float(perf_counter() - methodology_start)
 
     effective_tuning_space_id = methodology_policy.tuning_search_space_id
     effective_tuning_space_version = methodology_policy.tuning_search_space_version
@@ -359,15 +416,63 @@ def run_experiment(
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     resolved_run_id = run_id or f"{timestamp}_{model}_{target_column}"
     report_dir = reports_root / resolved_run_id
+    should_reuse_completed_artifacts = bool(resume or reuse_completed_artifacts)
+    artifact_registry_path = reports_root / "artifact_registry.sqlite3"
+    git_provenance = collect_git_provenance()
+    code_ref = str(git_provenance.get("git_commit") or "") or None
+
+    if resolved_framework_mode in {
+        FrameworkMode.CONFIRMATORY,
+        FrameworkMode.LOCKED_COMPARISON,
+    }:
+        preflight_start = perf_counter()
+        preflight = validate_official_preflight(
+            framework_mode=resolved_framework_mode,
+            index_csv=index_csv,
+            data_root=data_root,
+            cache_dir=cache_dir,
+            target_column=target_column,
+            cv_mode=cv_mode,
+            subject=subject,
+            train_subject=train_subject,
+            test_subject=test_subject,
+            filter_task=filter_task,
+            filter_modality=filter_modality,
+            n_permutations=n_permutations,
+            primary_metric_name=resolved_primary_metric_name,
+            permutation_metric_name=resolved_permutation_metric_name,
+            methodology_policy_name=methodology_policy.policy_name.value,
+            model=model,
+            tuning_enabled=bool(methodology_policy.tuning_enabled),
+            tuning_search_space_id=effective_tuning_space_id,
+            tuning_search_space_version=effective_tuning_space_version,
+            tuning_inner_group_field=effective_tuning_inner_group_field,
+            subgroup_reporting_enabled=bool(subgroup_policy.enabled),
+            subgroup_dimensions=list(subgroup_policy.subgroup_dimensions),
+            official_context=official_context,
+        )
+        dataset_fingerprint = collect_dataset_fingerprint(
+            index_csv=index_csv,
+            selected_index_df=preflight.selected_index_df,
+            index_row_count=preflight.index_row_count,
+            target_column=target_column,
+            cv_mode=cv_mode,
+            subject=subject,
+            train_subject=train_subject,
+            test_subject=test_subject,
+            filter_task=filter_task,
+            filter_modality=filter_modality,
+        )
+        required_run_artifacts = list(preflight.required_run_artifacts)
+        required_run_metadata_fields = list(preflight.required_run_metadata_fields)
+        stage_timings["preflight_validation"] = float(perf_counter() - preflight_start)
+
     run_mode = prepare_report_dir(
         report_dir,
         run_id=resolved_run_id,
         force=bool(force),
         resume=bool(resume),
     )
-    should_reuse_completed_artifacts = bool(resume or reuse_completed_artifacts)
-    artifact_registry_path = reports_root / "artifact_registry.sqlite3"
-    code_ref = _current_git_commit()
 
     fold_metrics_path = report_dir / "fold_metrics.csv"
     fold_splits_path = report_dir / "fold_splits.csv"
@@ -387,76 +492,102 @@ def run_experiment(
         run_id=resolved_run_id,
         status="running",
         message=f"run_mode={run_mode}",
+        stage_timings_seconds=stage_timings,
     )
     try:
-        segment_result = execute_section_segment(
-            SegmentExecutionRequest(
-                index_csv=index_csv,
-                data_root=data_root,
-                cache_dir=cache_dir,
-                target_column=target_column,
-                cv_mode=cv_mode,
-                model=model,
-                subject=subject,
-                train_subject=train_subject,
-                test_subject=test_subject,
-                filter_task=filter_task,
-                filter_modality=filter_modality,
-                seed=seed,
-                n_permutations=n_permutations,
-                primary_metric_name=resolved_primary_metric_name,
-                permutation_metric_name=resolved_permutation_metric_name,
-                methodology_policy_name=methodology_policy.policy_name.value,
-                class_weight_policy=methodology_policy.class_weight_policy.value,
-                tuning_enabled=bool(methodology_policy.tuning_enabled),
-                tuning_search_space_id=effective_tuning_space_id,
-                tuning_search_space_version=effective_tuning_space_version,
-                tuning_inner_cv_scheme=effective_tuning_inner_cv_scheme,
-                tuning_inner_group_field=effective_tuning_inner_group_field,
-                subgroup_reporting_enabled=bool(subgroup_policy.enabled),
-                subgroup_dimensions=tuple(subgroup_policy.subgroup_dimensions),
-                subgroup_min_samples_per_group=int(subgroup_policy.min_samples_per_group),
-                interpretability_enabled_override=interpretability_enabled_override,
-                run_id=resolved_run_id,
-                config_filename=config_path.name,
-                report_dir=report_dir,
-                artifact_registry_path=artifact_registry_path,
-                code_ref=code_ref,
-                affine_atol=SPATIAL_AFFINE_ATOL,
-                fold_metrics_path=fold_metrics_path,
-                fold_splits_path=fold_splits_path,
-                predictions_path=predictions_path,
-                metrics_path=metrics_path,
-                subgroup_metrics_json_path=subgroup_metrics_json_path,
-                subgroup_metrics_csv_path=subgroup_metrics_csv_path,
-                tuning_summary_path=tuning_summary_path,
-                tuning_best_params_path=tuning_best_params_path,
-                spatial_report_path=spatial_compatibility_report_path,
-                interpretability_summary_path=interpretability_summary_path,
-                interpretability_fold_artifacts_path=interpretability_fold_artifacts_path,
-                start_section=start_section,
-                end_section=end_section,
-                base_artifact_id=base_artifact_id,
-                reuse_policy=reuse_policy,
-                reuse_completed_artifacts=should_reuse_completed_artifacts,
-                build_pipeline_fn=lambda model_name, seed: _build_pipeline(
-                    model_name=model_name,
-                    seed=seed,
-                    class_weight_policy=methodology_policy.class_weight_policy.value,
-                ),
-                load_features_from_cache_fn=_load_features_from_cache,
-                scores_for_predictions_fn=_scores_for_predictions,
-                extract_linear_coefficients_fn=_extract_linear_coefficients,
-                compute_interpretability_stability_fn=_compute_interpretability_stability,
-                evaluate_permutations_fn=_evaluate_permutations,
-            )
-        )
+        execute_start = perf_counter()
+        with warnings.catch_warnings(record=True) as warning_records:
+            warnings.simplefilter("always")
+            tracemalloc.start()
+            try:
+                segment_result = execute_section_segment(
+                    SegmentExecutionRequest(
+                        index_csv=index_csv,
+                        data_root=data_root,
+                        cache_dir=cache_dir,
+                        target_column=target_column,
+                        cv_mode=cv_mode,
+                        model=model,
+                        subject=subject,
+                        train_subject=train_subject,
+                        test_subject=test_subject,
+                        filter_task=filter_task,
+                        filter_modality=filter_modality,
+                        seed=seed,
+                        n_permutations=n_permutations,
+                        primary_metric_name=resolved_primary_metric_name,
+                        permutation_metric_name=resolved_permutation_metric_name,
+                        methodology_policy_name=methodology_policy.policy_name.value,
+                        class_weight_policy=methodology_policy.class_weight_policy.value,
+                        tuning_enabled=bool(methodology_policy.tuning_enabled),
+                        tuning_search_space_id=effective_tuning_space_id,
+                        tuning_search_space_version=effective_tuning_space_version,
+                        tuning_inner_cv_scheme=effective_tuning_inner_cv_scheme,
+                        tuning_inner_group_field=effective_tuning_inner_group_field,
+                        subgroup_reporting_enabled=bool(subgroup_policy.enabled),
+                        subgroup_dimensions=tuple(subgroup_policy.subgroup_dimensions),
+                        subgroup_min_samples_per_group=int(subgroup_policy.min_samples_per_group),
+                        interpretability_enabled_override=interpretability_enabled_override,
+                        run_id=resolved_run_id,
+                        config_filename=config_path.name,
+                        report_dir=report_dir,
+                        artifact_registry_path=artifact_registry_path,
+                        code_ref=code_ref,
+                        affine_atol=SPATIAL_AFFINE_ATOL,
+                        fold_metrics_path=fold_metrics_path,
+                        fold_splits_path=fold_splits_path,
+                        predictions_path=predictions_path,
+                        metrics_path=metrics_path,
+                        subgroup_metrics_json_path=subgroup_metrics_json_path,
+                        subgroup_metrics_csv_path=subgroup_metrics_csv_path,
+                        tuning_summary_path=tuning_summary_path,
+                        tuning_best_params_path=tuning_best_params_path,
+                        spatial_report_path=spatial_compatibility_report_path,
+                        interpretability_summary_path=interpretability_summary_path,
+                        interpretability_fold_artifacts_path=interpretability_fold_artifacts_path,
+                        start_section=start_section,
+                        end_section=end_section,
+                        base_artifact_id=base_artifact_id,
+                        reuse_policy=reuse_policy,
+                        reuse_completed_artifacts=should_reuse_completed_artifacts,
+                        build_pipeline_fn=lambda model_name, seed: _build_pipeline(
+                            model_name=model_name,
+                            seed=seed,
+                            class_weight_policy=methodology_policy.class_weight_policy.value,
+                        ),
+                        load_features_from_cache_fn=_load_features_from_cache,
+                        scores_for_predictions_fn=_scores_for_predictions,
+                        extract_linear_coefficients_fn=_extract_linear_coefficients,
+                        compute_interpretability_stability_fn=_compute_interpretability_stability,
+                        evaluate_permutations_fn=_evaluate_permutations,
+                    )
+                )
+            finally:
+                warnings_payload = _serialize_warning_records(list(warning_records))
+                if tracemalloc.is_tracing():
+                    current_bytes, peak_bytes = tracemalloc.get_traced_memory()
+                    tracemalloc.stop()
+                    resource_summary = {
+                        "memory_current_mb": round(float(current_bytes) / (1024.0 * 1024.0), 6),
+                        "memory_peak_mb": round(float(peak_bytes) / (1024.0 * 1024.0), 6),
+                    }
+        stage_timings["segment_execution"] = float(perf_counter() - execute_start)
     except Exception as exc:
+        failure = _failure_payload(exc)
+        stage_timings["total"] = float(perf_counter() - overall_start)
         write_run_status(
             report_dir,
             run_id=resolved_run_id,
             status="failed",
             error=str(exc),
+            error_code=str(failure["error_code"]),
+            error_type=str(failure["error_type"]),
+            failure_stage=str(failure["failure_stage"]),
+            error_details=dict(failure["error_details"]),
+            warnings=warnings_payload,
+            warning_summary=_warning_summary(warnings_payload),
+            stage_timings_seconds=stage_timings,
+            resource_summary=resource_summary,
         )
         raise
     artifact_ids = dict(segment_result.artifact_ids)
@@ -467,20 +598,47 @@ def run_experiment(
         protocol_context=resolved_protocol_context,
         comparison_context=resolved_comparison_context,
     )
-    persisted_metrics = stamp_metrics_artifact(
-        metrics_path=metrics_path,
-        canonical_run=canonical_run,
-        framework_mode=resolved_framework_mode.value,
-        methodology_policy_name=methodology_policy.policy_name.value,
-        class_weight_policy=methodology_policy.class_weight_policy.value,
-        tuning_enabled=bool(methodology_policy.tuning_enabled),
-        tuning_summary_path=tuning_summary_path,
-        tuning_best_params_path=tuning_best_params_path,
-        subgroup_metrics_json_path=subgroup_metrics_json_path,
-        subgroup_metrics_csv_path=subgroup_metrics_csv_path,
-        metric_policy_effective=metric_policy_effective,
-        identity=identity,
-    )
+    warning_summary = _warning_summary(warnings_payload)
+    metrics_stamp_start = perf_counter()
+    try:
+        persisted_metrics = stamp_metrics_artifact(
+            metrics_path=metrics_path,
+            canonical_run=canonical_run,
+            framework_mode=resolved_framework_mode.value,
+            methodology_policy_name=methodology_policy.policy_name.value,
+            class_weight_policy=methodology_policy.class_weight_policy.value,
+            tuning_enabled=bool(methodology_policy.tuning_enabled),
+            tuning_summary_path=tuning_summary_path,
+            tuning_best_params_path=tuning_best_params_path,
+            subgroup_metrics_json_path=subgroup_metrics_json_path,
+            subgroup_metrics_csv_path=subgroup_metrics_csv_path,
+            metric_policy_effective=metric_policy_effective,
+            identity=identity,
+            dataset_fingerprint=dataset_fingerprint,
+            git_provenance=git_provenance,
+            stage_timings_seconds=stage_timings,
+            resource_summary=resource_summary,
+            warning_summary=warning_summary,
+        )
+    except Exception as exc:
+        failure = _failure_payload(exc)
+        stage_timings["total"] = float(perf_counter() - overall_start)
+        write_run_status(
+            report_dir,
+            run_id=resolved_run_id,
+            status="failed",
+            error=str(exc),
+            error_code=str(failure["error_code"]),
+            error_type=str(failure["error_type"]),
+            failure_stage=str(failure["failure_stage"]),
+            error_details=dict(failure["error_details"]),
+            warnings=warnings_payload,
+            warning_summary=warning_summary,
+            stage_timings_seconds=stage_timings,
+            resource_summary=resource_summary,
+        )
+        raise
+    stage_timings["metrics_stamping"] = float(perf_counter() - metrics_stamp_start)
     if isinstance(persisted_metrics, dict):
         metrics = dict(persisted_metrics)
 
@@ -509,74 +667,102 @@ def run_experiment(
         interpretability_summary.get("fold_artifacts_path") if interpretability_summary else None
     )
 
-    config = build_run_config_payload(
-        run_id=resolved_run_id,
-        timestamp=timestamp,
-        index_csv=index_csv,
-        data_root=data_root,
-        cache_dir=cache_dir,
-        target_column=target_column,
-        model=model,
-        cv_mode=cv_mode,
-        subject=subject,
-        train_subject=train_subject,
-        test_subject=test_subject,
-        seed=seed,
-        primary_metric_name=resolved_primary_metric_name,
-        permutation_metric_name=resolved_permutation_metric_name,
-        metric_policy_effective=metric_policy_effective,
-        methodology_policy_name=methodology_policy.policy_name.value,
-        class_weight_policy=methodology_policy.class_weight_policy.value,
-        tuning_enabled=bool(methodology_policy.tuning_enabled),
-        tuning_search_space_id=effective_tuning_space_id,
-        tuning_search_space_version=effective_tuning_space_version,
-        tuning_inner_cv_scheme=effective_tuning_inner_cv_scheme,
-        tuning_inner_group_field=effective_tuning_inner_group_field,
-        tuning_summary_path=tuning_summary_path,
-        tuning_best_params_path=tuning_best_params_path,
-        subgroup_reporting_enabled=bool(subgroup_policy.enabled),
-        subgroup_dimensions=list(subgroup_policy.subgroup_dimensions),
-        subgroup_min_samples_per_group=int(subgroup_policy.min_samples_per_group),
-        subgroup_metrics_json_path=subgroup_metrics_json_path,
-        subgroup_metrics_csv_path=subgroup_metrics_csv_path,
-        filter_task=filter_task,
-        filter_modality=filter_modality,
-        n_permutations=n_permutations,
-        framework_mode=resolved_framework_mode.value,
-        canonical_run=bool(canonical_run),
-        identity=identity,
-        protocol_context=resolved_protocol_context,
-        comparison_context=resolved_comparison_context,
-        start_section=start_section,
-        end_section=end_section,
-        base_artifact_id=base_artifact_id,
-        reuse_policy=reuse_policy,
-        force=bool(force),
-        resume=bool(resume),
-        reuse_completed_artifacts=bool(should_reuse_completed_artifacts),
-        run_mode=run_mode,
-        segment_result=segment_result,
-        fold_splits_path=fold_splits_path,
-        spatial_compatibility_status=spatial_status,
-        spatial_compatibility_passed=spatial_passed,
-        spatial_compatibility_n_groups_checked=spatial_groups_checked,
-        spatial_compatibility_reference_group_id=spatial_reference_group,
-        spatial_compatibility_affine_atol=spatial_affine_atol,
-        spatial_compatibility_report_path=spatial_compatibility_report_path,
-        interpretability_enabled=interpretability_enabled,
-        interpretability_performed=interpretability_performed,
-        interpretability_status=interpretability_status,
-        interpretability_fold_artifacts_path=interpretability_fold_artifacts,
-        interpretability_summary_path=interpretability_summary_path,
-        python_version=platform.python_version(),
-        numpy_version=np.__version__,
-        pandas_version=pd.__version__,
-        sklearn_version=sklearn.__version__,
-        nibabel_version=nib.__version__,
-        git_commit=code_ref,
-    )
-    config_path.write_text(f"{json.dumps(config, indent=2)}\n", encoding="utf-8")
+    config_build_start = perf_counter()
+    try:
+        config = build_run_config_payload(
+            run_id=resolved_run_id,
+            timestamp=timestamp,
+            index_csv=index_csv,
+            data_root=data_root,
+            cache_dir=cache_dir,
+            target_column=target_column,
+            model=model,
+            cv_mode=cv_mode,
+            subject=subject,
+            train_subject=train_subject,
+            test_subject=test_subject,
+            seed=seed,
+            primary_metric_name=resolved_primary_metric_name,
+            permutation_metric_name=resolved_permutation_metric_name,
+            metric_policy_effective=metric_policy_effective,
+            methodology_policy_name=methodology_policy.policy_name.value,
+            class_weight_policy=methodology_policy.class_weight_policy.value,
+            tuning_enabled=bool(methodology_policy.tuning_enabled),
+            tuning_search_space_id=effective_tuning_space_id,
+            tuning_search_space_version=effective_tuning_space_version,
+            tuning_inner_cv_scheme=effective_tuning_inner_cv_scheme,
+            tuning_inner_group_field=effective_tuning_inner_group_field,
+            tuning_summary_path=tuning_summary_path,
+            tuning_best_params_path=tuning_best_params_path,
+            subgroup_reporting_enabled=bool(subgroup_policy.enabled),
+            subgroup_dimensions=list(subgroup_policy.subgroup_dimensions),
+            subgroup_min_samples_per_group=int(subgroup_policy.min_samples_per_group),
+            subgroup_metrics_json_path=subgroup_metrics_json_path,
+            subgroup_metrics_csv_path=subgroup_metrics_csv_path,
+            filter_task=filter_task,
+            filter_modality=filter_modality,
+            n_permutations=n_permutations,
+            framework_mode=resolved_framework_mode.value,
+            canonical_run=bool(canonical_run),
+            identity=identity,
+            protocol_context=resolved_protocol_context,
+            comparison_context=resolved_comparison_context,
+            start_section=start_section,
+            end_section=end_section,
+            base_artifact_id=base_artifact_id,
+            reuse_policy=reuse_policy,
+            force=bool(force),
+            resume=bool(resume),
+            reuse_completed_artifacts=bool(should_reuse_completed_artifacts),
+            run_mode=run_mode,
+            segment_result=segment_result,
+            fold_splits_path=fold_splits_path,
+            spatial_compatibility_status=spatial_status,
+            spatial_compatibility_passed=spatial_passed,
+            spatial_compatibility_n_groups_checked=spatial_groups_checked,
+            spatial_compatibility_reference_group_id=spatial_reference_group,
+            spatial_compatibility_affine_atol=spatial_affine_atol,
+            spatial_compatibility_report_path=spatial_compatibility_report_path,
+            interpretability_enabled=interpretability_enabled,
+            interpretability_performed=interpretability_performed,
+            interpretability_status=interpretability_status,
+            interpretability_fold_artifacts_path=interpretability_fold_artifacts,
+            interpretability_summary_path=interpretability_summary_path,
+            python_version=platform.python_version(),
+            numpy_version=np.__version__,
+            pandas_version=pd.__version__,
+            sklearn_version=sklearn.__version__,
+            nibabel_version=nib.__version__,
+            git_commit=str(git_provenance.get("git_commit") or "") or None,
+            git_branch=str(git_provenance.get("git_branch") or "") or None,
+            git_dirty=bool(git_provenance.get("git_dirty", False)),
+            dataset_fingerprint=dataset_fingerprint,
+            stage_timings_seconds=stage_timings,
+            resource_summary=resource_summary,
+            warning_summary=warning_summary,
+        )
+        config_path.write_text(f"{json.dumps(config, indent=2)}\n", encoding="utf-8")
+    except Exception as exc:
+        failure = _failure_payload(exc)
+        stage_timings["total"] = float(perf_counter() - overall_start)
+        write_run_status(
+            report_dir,
+            run_id=resolved_run_id,
+            status="failed",
+            error=str(exc),
+            error_code=str(failure["error_code"]),
+            error_type=str(failure["error_type"]),
+            failure_stage=str(failure["failure_stage"]),
+            error_details=dict(failure["error_details"]),
+            warnings=warnings_payload,
+            warning_summary=warning_summary,
+            stage_timings_seconds=stage_timings,
+            resource_summary=resource_summary,
+        )
+        raise
+    stage_timings["config_write"] = float(perf_counter() - config_build_start)
 
+    registry_update_start = perf_counter()
     report_upstream_candidates = [
         artifact_ids.get(ARTIFACT_TYPE_METRICS_BUNDLE),
         artifact_ids.get(ARTIFACT_TYPE_INTERPRETABILITY_BUNDLE),
@@ -584,23 +770,88 @@ def run_experiment(
     report_upstream = [
         artifact_id for artifact_id in report_upstream_candidates if isinstance(artifact_id, str)
     ]
-    experiment_report_artifact = register_artifact(
-        registry_path=artifact_registry_path,
-        artifact_type=ARTIFACT_TYPE_EXPERIMENT_REPORT,
-        run_id=resolved_run_id,
-        upstream_artifact_ids=report_upstream,
-        config_hash=compute_config_hash({"run_id": resolved_run_id, "report_dir": str(report_dir)}),
-        code_ref=code_ref,
-        path=report_dir,
-        status="created",
-    )
+    try:
+        experiment_report_artifact = register_artifact(
+            registry_path=artifact_registry_path,
+            artifact_type=ARTIFACT_TYPE_EXPERIMENT_REPORT,
+            run_id=resolved_run_id,
+            upstream_artifact_ids=report_upstream,
+            config_hash=compute_config_hash(
+                {"run_id": resolved_run_id, "report_dir": str(report_dir)}
+            ),
+            code_ref=code_ref,
+            path=report_dir,
+            status="created",
+        )
+    except Exception as exc:
+        failure = _failure_payload(exc)
+        stage_timings["total"] = float(perf_counter() - overall_start)
+        write_run_status(
+            report_dir,
+            run_id=resolved_run_id,
+            status="failed",
+            error=str(exc),
+            error_code=str(failure["error_code"]),
+            error_type=str(failure["error_type"]),
+            failure_stage=str(failure["failure_stage"]),
+            error_details=dict(failure["error_details"]),
+            warnings=warnings_payload,
+            warning_summary=warning_summary,
+            stage_timings_seconds=stage_timings,
+            resource_summary=resource_summary,
+        )
+        raise
     artifact_ids[ARTIFACT_TYPE_EXPERIMENT_REPORT] = experiment_report_artifact.artifact_id
+    stage_timings["artifact_registry_update"] = float(perf_counter() - registry_update_start)
+
+    if resolved_framework_mode in {
+        FrameworkMode.CONFIRMATORY,
+        FrameworkMode.LOCKED_COMPARISON,
+    }:
+        artifact_validation_start = perf_counter()
+        try:
+            validate_run_artifact_contract(
+                report_dir=report_dir,
+                required_run_artifacts=required_run_artifacts,
+                required_run_metadata_fields=required_run_metadata_fields,
+                framework_mode=resolved_framework_mode,
+                canonical_run=bool(canonical_run),
+                config_payload=config,
+                metrics_payload=metrics,
+            )
+        except Exception as exc:
+            failure = _failure_payload(exc)
+            stage_timings["total"] = float(perf_counter() - overall_start)
+            write_run_status(
+                report_dir,
+                run_id=resolved_run_id,
+                status="failed",
+                error=str(exc),
+                error_code=str(failure["error_code"]),
+                error_type=str(failure["error_type"]),
+                failure_stage=str(failure["failure_stage"]),
+                error_details=dict(failure["error_details"]),
+                warnings=warnings_payload,
+                warning_summary=warning_summary,
+                stage_timings_seconds=stage_timings,
+                resource_summary=resource_summary,
+            )
+            raise
+        stage_timings["official_artifact_validation"] = float(
+            perf_counter() - artifact_validation_start
+        )
+
+    stage_timings["total"] = float(perf_counter() - overall_start)
     run_status = write_run_status(
         report_dir,
         run_id=resolved_run_id,
         status="completed",
         executed_sections=segment_result.executed_sections,
         reused_sections=segment_result.reused_sections,
+        warnings=warnings_payload,
+        warning_summary=warning_summary,
+        stage_timings_seconds=stage_timings,
+        resource_summary=resource_summary,
     )
 
     return build_run_result_payload(
@@ -632,6 +883,10 @@ def run_experiment(
         tuning_enabled=bool(methodology_policy.tuning_enabled),
         protocol_context=resolved_protocol_context,
         comparison_context=resolved_comparison_context,
+        stage_timings_seconds=stage_timings,
+        resource_summary=resource_summary,
+        warning_summary=warning_summary,
+        dataset_fingerprint=dataset_fingerprint,
     )
 
 

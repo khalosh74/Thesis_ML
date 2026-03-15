@@ -37,8 +37,16 @@ def write_run_status(
     status: str,
     message: str | None = None,
     error: str | None = None,
+    error_code: str | None = None,
+    error_type: str | None = None,
+    failure_stage: str | None = None,
+    error_details: dict[str, Any] | None = None,
     executed_sections: list[str] | None = None,
     reused_sections: list[str] | None = None,
+    warnings: list[dict[str, Any]] | None = None,
+    warning_summary: dict[str, Any] | None = None,
+    stage_timings_seconds: dict[str, float] | None = None,
+    resource_summary: dict[str, Any] | None = None,
 ) -> Path:
     report_dir = Path(report_dir)
     report_dir.mkdir(parents=True, exist_ok=True)
@@ -51,10 +59,28 @@ def write_run_status(
         payload["message"] = str(message)
     if error:
         payload["error"] = str(error)
+    if error_code:
+        payload["error_code"] = str(error_code)
+    if error_type:
+        payload["error_type"] = str(error_type)
+    if failure_stage:
+        payload["failure_stage"] = str(failure_stage)
+    if error_details:
+        payload["error_details"] = dict(error_details)
     if executed_sections is not None:
         payload["executed_sections"] = [str(section) for section in executed_sections]
     if reused_sections is not None:
         payload["reused_sections"] = [str(section) for section in reused_sections]
+    if warnings is not None:
+        payload["warnings"] = [dict(item) for item in warnings]
+    if warning_summary is not None:
+        payload["warning_summary"] = dict(warning_summary)
+    if stage_timings_seconds is not None:
+        payload["stage_timings_seconds"] = {
+            str(key): float(value) for key, value in stage_timings_seconds.items()
+        }
+    if resource_summary is not None:
+        payload["resource_summary"] = dict(resource_summary)
 
     path = run_status_path(report_dir)
     path.write_text(f"{json.dumps(payload, indent=2)}\n", encoding="utf-8")

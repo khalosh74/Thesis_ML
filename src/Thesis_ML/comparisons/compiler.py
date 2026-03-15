@@ -247,4 +247,7 @@ def compile_comparison(
             comparison.artifact_contract.required_comparison_artifacts
         ),
         required_run_artifacts=list(comparison.artifact_contract.required_run_artifacts),
+        required_run_metadata_fields=list(
+            comparison.artifact_contract.required_run_metadata_fields
+        ),
     )

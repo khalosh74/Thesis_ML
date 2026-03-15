@@ -192,6 +192,19 @@ def test_official_context_rejects_metric_policy_drift(tmp_path: Path) -> None:
             "permutation_metric": "macro_f1",
             "higher_is_better": True,
         },
+        "required_run_metadata_fields": [
+            "framework_mode",
+            "canonical_run",
+            "methodology_policy_name",
+            "class_weight_policy",
+            "tuning_enabled",
+            "primary_metric_name",
+            "protocol_id",
+            "protocol_version",
+            "protocol_schema_version",
+            "suite_id",
+            "claim_ids",
+        ],
     }
 
     with pytest.raises(ValueError, match="Illegal override for official run key 'metric_policy.primary_metric'"):

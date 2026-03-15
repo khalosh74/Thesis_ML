@@ -64,6 +64,7 @@ def resolve_framework_context(
             "subgroup_dimensions",
             "subgroup_min_samples_per_group",
             "metric_policy",
+            "required_run_metadata_fields",
         ]
         missing = [key for key in required_keys if key not in resolved_protocol_context]
         if missing:
@@ -101,6 +102,7 @@ def resolve_framework_context(
             "subgroup_dimensions",
             "subgroup_min_samples_per_group",
             "metric_policy",
+            "required_run_metadata_fields",
         ]
         missing = [key for key in required_keys if key not in resolved_comparison_context]
         if missing:

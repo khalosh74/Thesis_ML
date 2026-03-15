@@ -32,6 +32,9 @@ Core package root: `src/Thesis_ML/`
   - indexing, cache extraction, SPM utilities
 - `experiments/`
   - full pipeline wrapper (`run_experiment.py`)
+  - official preflight + artifact contract validation (`official_contracts.py`)
+  - structured error taxonomy for machine-readable failures (`errors.py`)
+  - deterministic provenance helpers (git + dataset fingerprints) (`provenance.py`)
   - runtime policy/context resolution (`runtime_policies.py`)
   - run artifact payload builders/stamping (`run_artifacts.py`)
   - section contracts/runtime adapters (`sections.py`)
@@ -68,6 +71,9 @@ Core package root: `src/Thesis_ML/`
   - workbook validation layer (`template_validation.py`, `validation.py`)
   - metadata helpers (`schema_metadata.py`)
   - compatibility sheet/style helpers (`sheets/`, `styles.py`, `named_ranges.py`)
+- `verification/`
+  - official artifact invariant verifier (`official_artifacts.py`)
+  - deterministic official-output comparator (`reproducibility.py`)
 
 ## Runtime flows
 
@@ -88,6 +94,7 @@ Core package root: `src/Thesis_ML/`
 - Stamp `framework_mode=locked_comparison` and comparison identity metadata.
 - Emit comparison-level manifests/summaries under `outputs/reports/comparisons/`.
 - Emit machine-readable `comparison_decision.json` (`winner_selected`, `inconclusive`, `invalid_comparison`) via `comparisons/decision.py`.
+- Validate mode-level + run-level official artifacts via `verification/official_artifacts.py` before success return.
 
 3. Confirmatory canonical thesis protocol run (`thesisml-run-protocol`)
 - Load and validate canonical protocol JSON (`thesis-protocol-v1`).
@@ -95,6 +102,7 @@ Core package root: `src/Thesis_ML/`
 - Execute each run spec through existing `run_experiment(...)`.
 - Stamp `framework_mode=confirmatory` and `canonical_run=true`.
 - Persist protocol metadata in run artifacts and emit protocol-level manifests/summaries under `outputs/reports/confirmatory/`.
+- Validate mode-level + run-level official artifacts via `verification/official_artifacts.py` before success return.
 
 4. Decision-support campaign (`thesisml-run-decision-support`)
 - Compile JSON registry or workbook rows to internal manifest.
@@ -131,6 +139,8 @@ Framework guardrails:
 - decision metric, tuning metric, and permutation metric are resolved from primary metric and must align (drift raises validation/runtime errors).
 - secondary metrics are emitted for descriptive reporting only.
 - official artifacts (`config.json`, `metrics.json`, comparison/protocol manifests and summaries) persist `metric_policy_effective` for auditability.
+- run-level status artifacts (`run_status.json`) include structured failure diagnostics (`error_code`, `error_type`, `failure_stage`) plus warning/timing/resource summaries.
+- official run artifacts persist deterministic provenance blocks (`git_provenance`, `dataset_fingerprint`) for rerun auditability.
 
 Compatibility wrappers are still present but deprecated:
 

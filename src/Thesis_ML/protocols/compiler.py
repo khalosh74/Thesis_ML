@@ -339,4 +339,5 @@ def compile_protocol(
         claim_to_run_map=claim_to_run_map,
         required_protocol_artifacts=list(protocol.artifact_contract.required_protocol_artifacts),
         required_run_artifacts=list(protocol.artifact_contract.required_run_artifacts),
+        required_run_metadata_fields=list(protocol.artifact_contract.required_run_metadata_fields),
     )

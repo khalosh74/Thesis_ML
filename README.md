@@ -103,6 +103,12 @@ Strict metric consistency policy:
 - metric drift fallbacks are disallowed; decision-support/workbook/search-space inputs must declare explicit metric fields
 - official run artifacts persist effective metric policy in `config.json` / `metrics.json` under `metric_policy_effective`
 
+RC-1 hardening policy (official runs):
+- confirmatory and locked-comparison runs enforce strict preflight contract validation before execution
+- run artifacts now include deterministic provenance (`git_provenance` and `dataset_fingerprint`)
+- run-level `run_status.json` now exposes structured failure diagnostics (`error_code`, `error_type`, `failure_stage`) and warning/timing/resource summaries
+- mode-level runners verify official artifact completeness/invariants before returning success
+
 Modular architecture highlights:
 - `src/Thesis_ML/experiments/runtime_policies.py` owns framework-context, methodology, and official metric-policy resolution.
 - `src/Thesis_ML/experiments/run_artifacts.py` owns run identity extraction and run-level artifact payload stamping/building.
@@ -217,6 +223,9 @@ docker run --rm thesis-ml:dev
 - Gold acceptance path used by CI/release: `python scripts/acceptance_smoke.py`
 - Local release hygiene check: `python scripts/release_hygiene_check.py`
 - Lightweight performance smoke: `python scripts/performance_smoke.py`
+- Official artifact invariant check: `python scripts/verify_official_artifacts.py --output-dir <official_output_dir>`
+- Deterministic rerun check: `python scripts/verify_official_reproducibility.py --mode protocol --index-csv <...> --data-root <...> --cache-dir <...> --suite primary_controls`
+- RC wrapper gate script: `python scripts/rc1_release_gate.py --run-ruff --run-pytest --run-performance-smoke`
 
 ## Operator documentation
 

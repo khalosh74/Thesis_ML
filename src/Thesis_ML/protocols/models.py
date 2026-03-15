@@ -643,6 +643,21 @@ class CompiledProtocolManifest(_ProtocolModel):
     required_run_artifacts: list[str] = Field(
         default_factory=lambda: list(REQUIRED_RUN_ARTIFACTS_BASELINE)
     )
+    required_run_metadata_fields: list[str] = Field(
+        default_factory=lambda: [
+            "framework_mode",
+            "canonical_run",
+            "methodology_policy_name",
+            "class_weight_policy",
+            "tuning_enabled",
+            "primary_metric_name",
+            "protocol_id",
+            "protocol_version",
+            "protocol_schema_version",
+            "suite_id",
+            "claim_ids",
+        ]
+    )
 
     @model_validator(mode="after")
     def _validate_manifest(self) -> CompiledProtocolManifest:
@@ -658,6 +673,8 @@ class CompiledProtocolManifest(_ProtocolModel):
                 raise ValueError(
                     f"CompiledProtocolManifest claim_to_run_map['{claim_id}'] must list at least one run."
                 )
+        if not self.required_run_metadata_fields:
+            raise ValueError("CompiledProtocolManifest.required_run_metadata_fields must not be empty.")
         return self
 
 

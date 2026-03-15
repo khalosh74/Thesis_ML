@@ -96,6 +96,11 @@ def stamp_metrics_artifact(
     subgroup_metrics_csv_path: Path,
     metric_policy_effective: EffectiveMetricPolicy,
     identity: RunIdentity,
+    dataset_fingerprint: dict[str, Any] | None = None,
+    git_provenance: dict[str, Any] | None = None,
+    stage_timings_seconds: dict[str, float] | None = None,
+    resource_summary: dict[str, Any] | None = None,
+    warning_summary: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     if not metrics_path.exists():
         return None
@@ -137,6 +142,18 @@ def stamp_metrics_artifact(
     persisted_metrics["comparison_id"] = identity.comparison_id
     persisted_metrics["comparison_version"] = identity.comparison_version
     persisted_metrics["comparison_variant_id"] = identity.comparison_variant_id
+    if dataset_fingerprint is not None:
+        persisted_metrics["dataset_fingerprint"] = dict(dataset_fingerprint)
+    if git_provenance is not None:
+        persisted_metrics["git_provenance"] = dict(git_provenance)
+    if stage_timings_seconds is not None:
+        persisted_metrics["stage_timings_seconds"] = {
+            str(key): float(value) for key, value in stage_timings_seconds.items()
+        }
+    if resource_summary is not None:
+        persisted_metrics["resource_summary"] = dict(resource_summary)
+    if warning_summary is not None:
+        persisted_metrics["warning_summary"] = dict(warning_summary)
     metrics_path.write_text(f"{json.dumps(persisted_metrics, indent=2)}\n", encoding="utf-8")
     return persisted_metrics
 
@@ -207,6 +224,12 @@ def build_run_config_payload(
     sklearn_version: str,
     nibabel_version: str,
     git_commit: str | None,
+    git_branch: str | None,
+    git_dirty: bool,
+    dataset_fingerprint: dict[str, Any] | None = None,
+    stage_timings_seconds: dict[str, float] | None = None,
+    resource_summary: dict[str, Any] | None = None,
+    warning_summary: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     return {
         "run_id": run_id,
@@ -297,6 +320,16 @@ def build_run_config_payload(
         "sklearn_version": sklearn_version,
         "nibabel_version": nibabel_version,
         "git_commit": git_commit,
+        "git_branch": git_branch,
+        "git_dirty": bool(git_dirty),
+        "dataset_fingerprint": dict(dataset_fingerprint) if dataset_fingerprint else None,
+        "stage_timings_seconds": (
+            {str(key): float(value) for key, value in stage_timings_seconds.items()}
+            if stage_timings_seconds is not None
+            else None
+        ),
+        "resource_summary": dict(resource_summary) if resource_summary is not None else None,
+        "warning_summary": dict(warning_summary) if warning_summary is not None else None,
     }
 
 
@@ -330,6 +363,10 @@ def build_run_result_payload(
     tuning_enabled: bool,
     protocol_context: dict[str, Any],
     comparison_context: dict[str, Any],
+    stage_timings_seconds: dict[str, float] | None = None,
+    resource_summary: dict[str, Any] | None = None,
+    warning_summary: dict[str, Any] | None = None,
+    dataset_fingerprint: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     return {
         "run_id": run_id,
@@ -378,4 +415,12 @@ def build_run_result_payload(
         "tuning_enabled": bool(tuning_enabled),
         "protocol_context": protocol_context if protocol_context else None,
         "comparison_context": comparison_context if comparison_context else None,
+        "stage_timings_seconds": (
+            {str(key): float(value) for key, value in stage_timings_seconds.items()}
+            if stage_timings_seconds is not None
+            else None
+        ),
+        "resource_summary": dict(resource_summary) if resource_summary is not None else None,
+        "warning_summary": dict(warning_summary) if warning_summary is not None else None,
+        "dataset_fingerprint": dict(dataset_fingerprint) if dataset_fingerprint else None,
     }

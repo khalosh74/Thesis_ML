@@ -118,6 +118,8 @@ Policy note:
 - comparison/protocol specs must declare one methodology policy:
   `fixed_baselines_only` or `grouped_nested_tuning`.
 - locked comparison outputs include `comparison_decision.json` for machine-readable winner/inconclusive/invalid decisions.
+- official comparison/confirmatory paths enforce strict preflight contracts and fail fast on violations.
+- `run_status.json` now includes structured failure diagnostics (`error_code`, `error_type`, `failure_stage`) and warning/timing/resource summaries.
 
 Metric policy note (official runs):
 - one declared `primary_metric` governs tuning, decision selection, permutation testing, and headline reporting
@@ -125,6 +127,7 @@ Metric policy note (official runs):
 - official permutation metric must equal the primary metric
 - `config.json`, `metrics.json`, and mode-level manifests include `metric_policy_effective`
 - implicit metric fallbacks are disabled; workbook/registry/search-space inputs must explicitly declare required metric fields
+- official run artifacts include deterministic provenance blocks (`git_provenance`, `dataset_fingerprint`)
 
 Implementation ownership notes (for maintainers):
 - framework/methodology/metric runtime resolution: `src/Thesis_ML/experiments/runtime_policies.py`
@@ -236,6 +239,9 @@ Release hygiene + performance smoke:
 ```bash
 python scripts/release_hygiene_check.py
 python scripts/performance_smoke.py --output outputs/performance/performance_smoke_summary.json
+python scripts/verify_official_artifacts.py --output-dir <official_output_dir>
+python scripts/verify_official_reproducibility.py --mode protocol --index-csv <...> --data-root <...> --cache-dir <...> --suite primary_controls
+python scripts/rc1_release_gate.py --run-ruff --run-pytest --run-performance-smoke
 ```
 
 `scripts/performance_smoke.py` records timing for:

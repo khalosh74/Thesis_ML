@@ -16,6 +16,7 @@ from Thesis_ML.comparisons.models import (
 from Thesis_ML.config.framework_mode import FrameworkMode
 from Thesis_ML.config.metric_policy import resolve_effective_metric_policy
 from Thesis_ML.experiments.run_experiment import run_experiment
+from Thesis_ML.verification.official_artifacts import verify_official_artifacts
 
 
 def _comparison_output_dir(comparison: ComparisonSpec, reports_root: Path | str) -> Path:
@@ -28,6 +29,7 @@ def _comparison_context_payload(
     *,
     secondary_metrics: list[str],
     decision_metric: str,
+    required_run_metadata_fields: list[str],
 ) -> dict[str, Any]:
     metric_policy = resolve_effective_metric_policy(
         primary_metric=spec.primary_metric,
@@ -53,6 +55,7 @@ def _comparison_context_payload(
         "subgroup_dimensions": list(spec.subgroup_dimensions),
         "subgroup_min_samples_per_group": int(spec.subgroup_min_samples_per_group),
         "artifact_requirements": list(spec.artifact_requirements),
+        "required_run_metadata_fields": list(required_run_metadata_fields),
         "primary_metric": spec.primary_metric,
         "metric_policy": {
             "primary_metric": metric_policy.primary_metric,
@@ -181,6 +184,9 @@ def execute_compiled_comparison(
                     spec,
                     secondary_metrics=list(compiled_manifest.metric_policy.secondary_metrics),
                     decision_metric=compiled_manifest.decision_policy.primary_metric,
+                    required_run_metadata_fields=list(
+                        compiled_manifest.required_run_metadata_fields
+                    ),
                 ),
             )
             run_results.append(_to_run_result_success(spec, payload))
@@ -214,6 +220,19 @@ def execute_compiled_comparison(
         stage_timings=stage_timings,
     )
     stage_timings["artifact_writing"] = float(perf_counter() - artifact_write_start)
+    artifact_verification = verify_official_artifacts(
+        output_dir=comparison_output_dir,
+        mode="comparison",
+    )
+    if not bool(artifact_verification.get("passed", False)):
+        raise ValueError(
+            "Comparison artifact verification failed: "
+            + "; ".join(
+                str(issue.get("message"))
+                for issue in list(artifact_verification.get("issues", []))[:5]
+                if isinstance(issue, dict)
+            )
+        )
 
     n_completed = sum(result.status == "completed" for result in run_results)
     n_failed = sum(result.status == "failed" for result in run_results)
@@ -229,6 +248,7 @@ def execute_compiled_comparison(
         "n_planned": int(n_planned),
         "stage_timings_seconds": {key: round(value, 6) for key, value in stage_timings.items()},
         "artifact_paths": artifact_paths,
+        "artifact_verification": artifact_verification,
     }
 
 
