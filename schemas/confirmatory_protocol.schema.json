@@ -1,0 +1,360 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.org/schemas/confirmatory_protocol.schema.json",
+  "title": "Confirmatory Protocol Schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "protocol_id",
+    "analysis_status",
+    "protocol_version",
+    "sample_unit",
+    "dataset_contract",
+    "target",
+    "primary_analysis",
+    "controls",
+    "subgroups",
+    "multiplicity",
+    "interpretation_limits",
+    "secondary_analyses",
+    "reporting"
+  ],
+  "properties": {
+    "protocol_id": {
+      "type": "string",
+      "pattern": "^thesis_confirmatory_v[0-9]+$"
+    },
+    "analysis_status": {
+      "type": "string",
+      "const": "locked"
+    },
+    "protocol_version": {
+      "type": "string",
+      "pattern": "^v[0-9]+(\\.[0-9]+)?$"
+    },
+    "sample_unit": {
+      "type": "string",
+      "enum": ["beta_event"]
+    },
+    "dataset_contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "dataset_role",
+        "dataset_fingerprint_required",
+        "allowed_index_columns",
+        "require_spatial_compatibility_checks"
+      ],
+      "properties": {
+        "dataset_role": {
+          "type": "string",
+          "enum": ["confirmatory_internal_dataset"]
+        },
+        "dataset_fingerprint_required": {
+          "type": "boolean",
+          "const": true
+        },
+        "allowed_index_columns": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string" }
+        },
+        "require_spatial_compatibility_checks": {
+          "type": "boolean",
+          "const": true
+        },
+        "minimum_subjects": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "minimum_sessions_per_subject": {
+          "type": "integer",
+          "minimum": 2
+        }
+      }
+    },
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "source_column",
+        "mapping_version",
+        "mapping_hash",
+        "classes",
+        "drop_unknown"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "enum": ["coarse_affect"]
+        },
+        "source_column": {
+          "type": "string",
+          "enum": ["emotion"]
+        },
+        "mapping_version": {
+          "type": "string",
+          "pattern": "^affect_mapping_v[0-9]+$"
+        },
+        "mapping_hash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "classes": {
+          "type": "array",
+          "const": ["positive", "neutral", "negative"]
+        },
+        "drop_unknown": {
+          "type": "boolean",
+          "const": true
+        }
+      }
+    },
+    "primary_analysis": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "split",
+        "split_contract_version",
+        "metric",
+        "model_family",
+        "hyperparameter_policy",
+        "class_weight_policy",
+        "seed"
+      ],
+      "properties": {
+        "split": {
+          "type": "string",
+          "enum": [
+            "within_subject_loso_session"
+          ]
+        },
+        "split_contract_version": {
+          "type": "string",
+          "pattern": "^split_contract_v[0-9]+$"
+        },
+        "metric": {
+          "type": "string",
+          "enum": ["balanced_accuracy"]
+        },
+        "secondary_metrics": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["macro_f1", "accuracy", "precision_macro", "recall_macro"]
+          },
+          "uniqueItems": true
+        },
+        "model_family": {
+          "type": "string",
+          "enum": ["ridge"]
+        },
+        "hyperparameter_policy": {
+          "type": "string",
+          "enum": ["fixed"]
+        },
+        "class_weight_policy": {
+          "type": "string",
+          "enum": ["none"]
+        },
+        "seed": {
+          "type": "integer"
+        }
+      }
+    },
+    "controls": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "dummy_baseline",
+        "permutation_test",
+        "n_permutations",
+        "required_artifacts"
+      ],
+      "properties": {
+        "dummy_baseline": {
+          "type": "boolean",
+          "const": true
+        },
+        "permutation_test": {
+          "type": "boolean",
+          "const": true
+        },
+        "n_permutations": {
+          "type": "integer",
+          "minimum": 1000
+        },
+        "required_artifacts": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "metrics.json",
+              "fold_metrics.csv",
+              "fold_splits.csv",
+              "predictions.csv",
+              "subgroup_report.csv",
+              "spatial_report.json",
+              "run_status.json"
+            ]
+          },
+          "uniqueItems": true
+        }
+      }
+    },
+    "subgroups": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enabled",
+        "allowed",
+        "min_samples_per_group",
+        "min_classes_per_group",
+        "report_small_groups",
+        "interpretation"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "allowed": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["subject", "task", "modality"]
+          },
+          "uniqueItems": true
+        },
+        "min_samples_per_group": {
+          "type": "integer",
+          "minimum": 20
+        },
+        "min_classes_per_group": {
+          "type": "integer",
+          "minimum": 2
+        },
+        "report_small_groups": {
+          "type": "boolean",
+          "const": false
+        },
+        "interpretation": {
+          "type": "string",
+          "enum": ["descriptive_only"]
+        }
+      }
+    },
+    "multiplicity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "primary_hypotheses",
+        "primary_alpha",
+        "secondary_policy",
+        "exploratory_claims_allowed"
+      ],
+      "properties": {
+        "primary_hypotheses": {
+          "type": "integer",
+          "const": 1
+        },
+        "primary_alpha": {
+          "type": "number",
+          "const": 0.05
+        },
+        "secondary_policy": {
+          "type": "string",
+          "enum": ["descriptive_only", "fdr"]
+        },
+        "exploratory_claims_allowed": {
+          "type": "boolean",
+          "const": false
+        }
+      }
+    },
+    "interpretation_limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "no_causal_claims",
+        "no_clinical_claims",
+        "no_localization_claims_from_coefficients",
+        "no_external_generalization_claim",
+        "secondary_results_not_primary_evidence"
+      ],
+      "properties": {
+        "no_causal_claims": {
+          "type": "boolean",
+          "const": true
+        },
+        "no_clinical_claims": {
+          "type": "boolean",
+          "const": true
+        },
+        "no_localization_claims_from_coefficients": {
+          "type": "boolean",
+          "const": true
+        },
+        "no_external_generalization_claim": {
+          "type": "boolean",
+          "const": true
+        },
+        "secondary_results_not_primary_evidence": {
+          "type": "boolean",
+          "const": true
+        }
+      }
+    },
+    "secondary_analyses": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "status"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "enum": ["frozen_cross_person_transfer"]
+          },
+          "status": {
+            "type": "string",
+            "enum": ["secondary"]
+          }
+        }
+      }
+    },
+    "reporting": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "require_protocol_id",
+        "require_dataset_fingerprint",
+        "require_mapping_hash",
+        "require_interpretation_limits",
+        "require_deviation_log"
+      ],
+      "properties": {
+        "require_protocol_id": {
+          "type": "boolean",
+          "const": true
+        },
+        "require_dataset_fingerprint": {
+          "type": "boolean",
+          "const": true
+        },
+        "require_mapping_hash": {
+          "type": "boolean",
+          "const": true
+        },
+        "require_interpretation_limits": {
+          "type": "boolean",
+          "const": true
+        },
+        "require_deviation_log": {
+          "type": "boolean",
+          "const": true
+        }
+      }
+    }
+  }
+}

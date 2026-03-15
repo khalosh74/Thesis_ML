@@ -97,6 +97,11 @@ class SegmentExecutionRequest:
         "subject",
     )
     subgroup_min_samples_per_group: int = 1
+    subgroup_min_classes_per_group: int = 1
+    subgroup_report_small_groups: bool = False
+    confirmatory_guardrails_enabled: bool = False
+    subgroup_evidence_role: str = "exploratory"
+    subgroup_primary_evidence_allowed: bool = True
     interpretability_enabled_override: bool | None = None
     start_section: str | SectionName | None = None
     end_section: str | SectionName | None = None
@@ -493,6 +498,15 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
                     subgroup_reporting_enabled=request.subgroup_reporting_enabled,
                     subgroup_dimensions=list(request.subgroup_dimensions),
                     subgroup_min_samples_per_group=request.subgroup_min_samples_per_group,
+                    subgroup_min_classes_per_group=request.subgroup_min_classes_per_group,
+                    subgroup_report_small_groups=request.subgroup_report_small_groups,
+                    confirmatory_guardrails_enabled=bool(
+                        request.confirmatory_guardrails_enabled
+                    ),
+                    subgroup_evidence_role=str(request.subgroup_evidence_role),
+                    subgroup_primary_evidence_allowed=bool(
+                        request.subgroup_primary_evidence_allowed
+                    ),
                     subgroup_metrics_json_path=request.subgroup_metrics_json_path,
                     subgroup_metrics_csv_path=request.subgroup_metrics_csv_path,
                     tuning_summary_path=request.tuning_summary_path,

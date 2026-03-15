@@ -372,6 +372,7 @@ class ThesisProtocol(_ProtocolModel):
     status: ProtocolStatus
     description: str = Field(min_length=1)
     notes: str | None = None
+    confirmatory_lock: dict[str, Any] | None = None
     scientific_contract: ScientificContract
     split_policy: SplitPolicy
     model_policy: ModelPolicy
@@ -503,6 +504,13 @@ class ThesisProtocol(_ProtocolModel):
                     f"Suite '{suite.suite_id}' uses secondary split_mode "
                     f"'{self.split_policy.secondary_mode}' but suite_type='{suite.suite_type.value}'."
                 )
+
+        if self.protocol_id == "thesis_confirmatory_v1" and not isinstance(
+            self.confirmatory_lock, dict
+        ):
+            raise ValueError(
+                "thesis_confirmatory_v1 requires confirmatory_lock metadata for hard-gate enforcement."
+            )
 
         return self
 

@@ -32,6 +32,9 @@ _SUBGROUP_COLUMN_MAP = {
     "session": "session",
     "subject": "subject",
 }
+_TARGET_SOURCE_COLUMN_MAP = {
+    "coarse_affect": "emotion",
+}
 _REQUIRED_RUN_ARTIFACT_MINIMUM = {"config.json", "metrics.json"}
 _REQUIRED_RUN_METADATA_MINIMUM = {"framework_mode", "canonical_run"}
 
@@ -107,6 +110,7 @@ def validate_official_preflight(
     primary_metric_name: str,
     permutation_metric_name: str,
     methodology_policy_name: str,
+    class_weight_policy: str,
     model: str,
     tuning_enabled: bool,
     tuning_search_space_id: str | None,
@@ -114,6 +118,9 @@ def validate_official_preflight(
     tuning_inner_group_field: str | None,
     subgroup_reporting_enabled: bool,
     subgroup_dimensions: list[str],
+    subgroup_min_samples_per_group: int,
+    subgroup_min_classes_per_group: int,
+    subgroup_report_small_groups: bool,
     official_context: dict[str, Any],
 ) -> OfficialPreflightResult:
     if framework_mode not in {FrameworkMode.CONFIRMATORY, FrameworkMode.LOCKED_COMPARISON}:
@@ -152,12 +159,17 @@ def validate_official_preflight(
 
     frame = with_coarse_affect(frame, emotion_column="emotion", coarse_column="coarse_affect")
     _require_columns(frame, required=_REQUIRED_INDEX_COLUMNS | {target_column}, label="Dataset index")
-
-    selected = frame.copy()
+    filtered_frame = frame.copy()
     if filter_task is not None:
-        selected = selected[selected["task"].astype(str) == str(filter_task)].copy()
+        filtered_frame = filtered_frame[
+            filtered_frame["task"].astype(str) == str(filter_task)
+        ].copy()
     if filter_modality is not None:
-        selected = selected[selected["modality"].astype(str) == str(filter_modality)].copy()
+        filtered_frame = filtered_frame[
+            filtered_frame["modality"].astype(str) == str(filter_modality)
+        ].copy()
+
+    selected = filtered_frame.copy()
 
     if cv_mode == "within_subject_loso_session":
         selected = selected[selected["subject"].astype(str) == str(subject)].copy()
@@ -239,6 +251,241 @@ def validate_official_preflight(
                 + ", ".join(sorted(set(missing_subgroup_columns))),
                 details={"subgroup_dimensions": subgroup_dimensions},
             )
+
+    if framework_mode == FrameworkMode.CONFIRMATORY:
+        confirmatory_lock = official_context.get("confirmatory_lock")
+        if isinstance(confirmatory_lock, dict):
+            analysis_status = str(confirmatory_lock.get("analysis_status", "")).strip().lower()
+            if analysis_status != "locked":
+                raise OfficialContractValidationError(
+                    "Confirmatory freeze requires analysis_status='locked'.",
+                    details={"analysis_status": analysis_status},
+                )
+
+            expected_target = str(confirmatory_lock.get("target_name", "")).strip()
+            if expected_target and expected_target != str(target_column):
+                raise OfficialContractValidationError(
+                    "Confirmatory runtime target differs from locked protocol target.",
+                    details={"expected_target": expected_target, "actual_target": target_column},
+                )
+
+            expected_source_column = str(
+                confirmatory_lock.get("target_source_column", "")
+            ).strip()
+            actual_source_column = _TARGET_SOURCE_COLUMN_MAP.get(str(target_column))
+            if expected_source_column and actual_source_column != expected_source_column:
+                raise OfficialContractValidationError(
+                    "Confirmatory runtime source column differs from locked protocol source column.",
+                    details={
+                        "expected_source_column": expected_source_column,
+                        "actual_source_column": actual_source_column,
+                    },
+                )
+            if expected_source_column and expected_source_column not in frame.columns:
+                raise OfficialContractValidationError(
+                    "Confirmatory locked source column is missing from dataset index.",
+                    details={"source_column": expected_source_column},
+                )
+            expected_mapping_version = str(
+                confirmatory_lock.get("target_mapping_version", "")
+            ).strip()
+            context_mapping_version = str(
+                official_context.get("target_mapping_version", "")
+            ).strip()
+            if expected_mapping_version and context_mapping_version != expected_mapping_version:
+                raise OfficialContractValidationError(
+                    "Confirmatory runtime target mapping version differs from locked protocol mapping version.",
+                    details={
+                        "expected_target_mapping_version": expected_mapping_version,
+                        "actual_target_mapping_version": context_mapping_version,
+                    },
+                )
+
+            expected_split = str(confirmatory_lock.get("split", "")).strip()
+            if expected_split and expected_split != str(cv_mode):
+                raise OfficialContractValidationError(
+                    "Confirmatory runtime split differs from locked protocol split.",
+                    details={"expected_split": expected_split, "actual_split": cv_mode},
+                )
+
+            expected_primary_metric = str(
+                confirmatory_lock.get("primary_metric", "")
+            ).strip()
+            if expected_primary_metric and validate_metric_name(
+                expected_primary_metric
+            ) != validate_metric_name(primary_metric_name):
+                raise OfficialContractValidationError(
+                    "Confirmatory runtime primary metric differs from locked protocol metric.",
+                    details={
+                        "expected_primary_metric": expected_primary_metric,
+                        "actual_primary_metric": primary_metric_name,
+                    },
+                )
+
+            controls_payload = official_context.get("controls")
+            dummy_baseline_run = (
+                isinstance(controls_payload, dict)
+                and bool(controls_payload.get("dummy_baseline_run", False))
+            )
+            expected_model = str(confirmatory_lock.get("model_family", "")).strip()
+            if dummy_baseline_run:
+                if str(model) != "dummy":
+                    raise OfficialContractValidationError(
+                        "Confirmatory dummy baseline control run must use model='dummy'.",
+                        details={"actual_model": model},
+                    )
+            elif expected_model and expected_model != str(model):
+                raise OfficialContractValidationError(
+                    "Confirmatory runtime model differs from locked protocol model family.",
+                    details={"expected_model": expected_model, "actual_model": model},
+                )
+
+            expected_hyperparameter_policy = str(
+                confirmatory_lock.get("hyperparameter_policy", "")
+            ).strip()
+            if expected_hyperparameter_policy == "fixed":
+                if methodology_policy_name != "fixed_baselines_only" or tuning_enabled:
+                    raise OfficialContractValidationError(
+                        "Confirmatory runtime hyperparameter policy differs from locked policy.",
+                        details={
+                            "expected_hyperparameter_policy": expected_hyperparameter_policy,
+                            "methodology_policy_name": methodology_policy_name,
+                            "tuning_enabled": bool(tuning_enabled),
+                        },
+                    )
+            if expected_hyperparameter_policy == "grouped_nested_tuning":
+                if methodology_policy_name != "grouped_nested_tuning" or not tuning_enabled:
+                    raise OfficialContractValidationError(
+                        "Confirmatory runtime hyperparameter policy differs from locked policy.",
+                        details={
+                            "expected_hyperparameter_policy": expected_hyperparameter_policy,
+                            "methodology_policy_name": methodology_policy_name,
+                            "tuning_enabled": bool(tuning_enabled),
+                        },
+                    )
+
+            expected_class_weight_policy = str(
+                confirmatory_lock.get("class_weight_policy", "")
+            ).strip()
+            if expected_class_weight_policy and expected_class_weight_policy != str(
+                class_weight_policy
+            ):
+                raise OfficialContractValidationError(
+                    "Confirmatory runtime class-weight policy differs from locked protocol.",
+                    details={
+                        "expected_class_weight_policy": expected_class_weight_policy,
+                        "actual_class_weight_policy": class_weight_policy,
+                    },
+                )
+
+            expected_required_columns = [
+                str(value)
+                for value in list(confirmatory_lock.get("required_index_columns", []))
+            ]
+            if expected_required_columns:
+                _require_columns(
+                    frame,
+                    required=set(expected_required_columns),
+                    label="Confirmatory dataset index",
+                )
+
+            minimum_subjects = int(confirmatory_lock.get("minimum_subjects", 1))
+            subjects_in_scope = sorted(filtered_frame["subject"].astype(str).unique().tolist())
+            if len(subjects_in_scope) < minimum_subjects:
+                raise OfficialContractValidationError(
+                    "Confirmatory dataset scope does not meet minimum_subjects.",
+                    details={
+                        "minimum_subjects": minimum_subjects,
+                        "subjects_in_scope": subjects_in_scope,
+                    },
+                )
+
+            minimum_sessions_per_subject = int(
+                confirmatory_lock.get("minimum_sessions_per_subject", 1)
+            )
+            session_counts = (
+                filtered_frame.groupby(filtered_frame["subject"].astype(str))["session"]
+                .nunique(dropna=False)
+                .astype(int)
+                .to_dict()
+            )
+            subjects_below_min = [
+                subject_id
+                for subject_id, count in session_counts.items()
+                if int(count) < minimum_sessions_per_subject
+            ]
+            if subjects_below_min:
+                raise OfficialContractValidationError(
+                    "Confirmatory dataset scope does not meet minimum_sessions_per_subject.",
+                    details={
+                        "minimum_sessions_per_subject": minimum_sessions_per_subject,
+                        "subjects_below_min_sessions": sorted(subjects_below_min),
+                    },
+                )
+
+            if bool(confirmatory_lock.get("permutation_required", False)):
+                minimum_permutations = int(confirmatory_lock.get("minimum_permutations", 0))
+                if int(n_permutations) < minimum_permutations:
+                    raise OfficialContractValidationError(
+                        "Confirmatory run permutations are below locked minimum.",
+                        details={
+                            "minimum_permutations": minimum_permutations,
+                            "actual_n_permutations": int(n_permutations),
+                        },
+                    )
+
+            if subgroup_reporting_enabled:
+                allowed_axes = {
+                    str(value)
+                    for value in list(confirmatory_lock.get("allowed_subgroup_axes", []))
+                }
+                if allowed_axes:
+                    invalid_axes = [
+                        axis for axis in subgroup_dimensions if axis not in allowed_axes
+                    ]
+                    if invalid_axes:
+                        raise OfficialContractValidationError(
+                            "Confirmatory subgroup axis outside locked allowed subgroup axes.",
+                            details={
+                                "invalid_subgroup_axes": sorted(set(invalid_axes)),
+                                "allowed_subgroup_axes": sorted(allowed_axes),
+                            },
+                        )
+                locked_min_samples = int(
+                    confirmatory_lock.get("subgroup_min_samples_per_group", 1)
+                )
+                context_min_samples = int(subgroup_min_samples_per_group)
+                if context_min_samples < locked_min_samples:
+                    raise OfficialContractValidationError(
+                        "Confirmatory subgroup minimum samples is below locked threshold.",
+                        details={
+                            "locked_min_samples": locked_min_samples,
+                            "actual_min_samples": context_min_samples,
+                        },
+                    )
+                locked_min_classes = int(
+                    confirmatory_lock.get("subgroup_min_classes_per_group", 1)
+                )
+                context_min_classes = int(subgroup_min_classes_per_group)
+                if context_min_classes < locked_min_classes:
+                    raise OfficialContractValidationError(
+                        "Confirmatory subgroup minimum classes is below locked threshold.",
+                        details={
+                            "locked_min_classes": locked_min_classes,
+                            "actual_min_classes": context_min_classes,
+                        },
+                    )
+                locked_report_small_groups = bool(
+                    confirmatory_lock.get("subgroup_report_small_groups", False)
+                )
+                if bool(subgroup_report_small_groups) is not locked_report_small_groups:
+                    raise OfficialContractValidationError(
+                        "Confirmatory subgroup small-group reporting differs from locked policy.",
+                        details={
+                            "locked_report_small_groups": locked_report_small_groups,
+                            "actual_report_small_groups": bool(subgroup_report_small_groups),
+                        },
+                    )
 
     resolved_primary_metric = validate_metric_name(primary_metric_name)
     resolved_permutation_metric = validate_metric_name(permutation_metric_name)
@@ -356,7 +603,19 @@ def validate_run_artifact_contract(
                 "config_metric_policy_type": type(config_metric_policy).__name__,
                 "metrics_metric_policy_type": type(metrics_metric_policy).__name__,
             },
-        )
+            )
+
+    if framework_mode == FrameworkMode.CONFIRMATORY:
+        config_fingerprint = config_payload.get("dataset_fingerprint")
+        metrics_fingerprint = metrics_payload.get("dataset_fingerprint")
+        if not isinstance(config_fingerprint, dict) or not isinstance(metrics_fingerprint, dict):
+            raise OfficialArtifactContractError(
+                "Confirmatory runs require dataset_fingerprint in both config and metrics artifacts.",
+                details={
+                    "config_dataset_fingerprint_type": type(config_fingerprint).__name__,
+                    "metrics_dataset_fingerprint_type": type(metrics_fingerprint).__name__,
+                },
+            )
 
     primary_metric = config_metric_policy.get("primary_metric")
     permutation_payload = metrics_payload.get("permutation_test")

@@ -12,6 +12,7 @@ _REQUIRED_PROTOCOL_ARTIFACTS = (
     "claim_to_run_map.json",
     "suite_summary.json",
     "execution_status.json",
+    "deviation_log.json",
     "report_index.csv",
 )
 _REQUIRED_COMPARISON_ARTIFACTS = (
@@ -155,6 +156,197 @@ def _verify_metric_policy(
                 )
 
 
+def _verify_confirmatory_reporting_contract(
+    *,
+    suite_summary: dict[str, Any] | None,
+    execution_status: dict[str, Any],
+    deviation_log: dict[str, Any] | None,
+    source_contract: dict[str, Any] | None,
+    issues: list[dict[str, Any]],
+    root: Path,
+) -> None:
+    if not isinstance(suite_summary, dict):
+        _add_issue(
+            issues,
+            code="suite_summary_missing",
+            message="Missing or invalid suite_summary.json for confirmatory reporting contract.",
+            path=root / "suite_summary.json",
+        )
+        return
+    if not isinstance(deviation_log, dict):
+        _add_issue(
+            issues,
+            code="deviation_log_missing",
+            message="Missing or invalid deviation_log.json for confirmatory reporting contract.",
+            path=root / "deviation_log.json",
+        )
+        return
+
+    contract = suite_summary.get("confirmatory_reporting_contract")
+    if not isinstance(contract, dict):
+        _add_issue(
+            issues,
+            code="confirmatory_reporting_contract_missing",
+            message="suite_summary.json must include confirmatory_reporting_contract.",
+            path=root / "suite_summary.json",
+        )
+        return
+
+    source_protocol_id = (
+        str(source_contract.get("protocol_id"))
+        if isinstance(source_contract, dict) and source_contract.get("protocol_id") is not None
+        else ""
+    )
+    strict_confirmatory_freeze = source_protocol_id == "thesis_confirmatory_v1"
+
+    for key in (
+        "protocol_id",
+        "protocol_version",
+        "dataset_fingerprint",
+        "target_mapping_version",
+        "target_mapping_hash",
+        "primary_split",
+        "primary_metric",
+        "model_family",
+        "controls_status",
+        "interpretation_limits",
+        "subgroup_evidence_policy",
+        "deviations_from_protocol",
+    ):
+        if key not in contract:
+            _add_issue(
+                issues,
+                code="confirmatory_reporting_field_missing",
+                message=f"confirmatory_reporting_contract missing required field '{key}'.",
+                path=root / "suite_summary.json",
+            )
+
+    deviations_payload = contract.get("deviations_from_protocol")
+    if not isinstance(deviations_payload, dict):
+        _add_issue(
+            issues,
+            code="deviation_summary_missing",
+            message="confirmatory_reporting_contract.deviations_from_protocol must be an object.",
+            path=root / "suite_summary.json",
+        )
+    else:
+        for key in (
+            "n_total_deviations",
+            "n_science_critical_deviations",
+            "science_critical_deviation_detected",
+            "controls_valid_for_confirmatory",
+            "confirmatory_status",
+            "explicit_no_deviation_record",
+        ):
+            if key not in deviations_payload:
+                _add_issue(
+                    issues,
+                    code="deviation_summary_field_missing",
+                    message=f"deviations_from_protocol missing required field '{key}'.",
+                    path=root / "suite_summary.json",
+                )
+
+    subgroup_policy = contract.get("subgroup_evidence_policy")
+    if not isinstance(subgroup_policy, dict):
+        _add_issue(
+            issues,
+            code="subgroup_evidence_policy_missing",
+            message="confirmatory_reporting_contract.subgroup_evidence_policy must be an object.",
+            path=root / "suite_summary.json",
+        )
+    elif strict_confirmatory_freeze:
+        if bool(subgroup_policy.get("primary_evidence_substitution_allowed", True)):
+            _add_issue(
+                issues,
+                code="subgroup_primary_evidence_guardrail_missing",
+                message=(
+                    "Confirmatory subgroup evidence must not be eligible as primary-evidence "
+                    "substitute."
+                ),
+                path=root / "suite_summary.json",
+            )
+
+    controls_status = contract.get("controls_status")
+    if strict_confirmatory_freeze and isinstance(controls_status, dict):
+        if not bool(controls_status.get("controls_valid_for_confirmatory", False)):
+            _add_issue(
+                issues,
+                code="confirmatory_controls_invalid",
+                message=(
+                    "Confirmatory controls are required for run validity and are not fully "
+                    "satisfied."
+                ),
+                path=root / "suite_summary.json",
+                details={"controls_status": controls_status},
+            )
+
+    deviation_entries = deviation_log.get("deviations")
+    if not isinstance(deviation_entries, list) or not deviation_entries:
+        _add_issue(
+            issues,
+            code="deviation_log_entries_missing",
+            message="deviation_log.json must contain a non-empty deviations list.",
+            path=root / "deviation_log.json",
+        )
+    else:
+        if all(str(entry.get("status")) != "no_deviation" for entry in deviation_entries):
+            total_deviations = int(deviation_log.get("n_total_deviations", 0))
+            if total_deviations == 0:
+                _add_issue(
+                    issues,
+                    code="deviation_log_no_explicit_no_deviation",
+                    message=(
+                        "deviation_log.json must include an explicit no_deviation record "
+                        "when no deviations occurred."
+                    ),
+                    path=root / "deviation_log.json",
+                )
+
+    status_in_log = str(deviation_log.get("confirmatory_status", ""))
+    status_in_execution = str(execution_status.get("confirmatory_status", ""))
+    if status_in_log and status_in_execution and status_in_log != status_in_execution:
+        _add_issue(
+            issues,
+            code="confirmatory_status_drift",
+            message="confirmatory_status differs between execution_status and deviation_log.",
+            path=root / "execution_status.json",
+            details={
+                "execution_status_confirmatory_status": status_in_execution,
+                "deviation_log_confirmatory_status": status_in_log,
+            },
+        )
+
+    if strict_confirmatory_freeze:
+        for key in (
+            "target_mapping_version",
+            "target_mapping_hash",
+            "primary_split",
+            "primary_metric",
+            "model_family",
+        ):
+            value = contract.get(key)
+            if not isinstance(value, str) or not value.strip():
+                _add_issue(
+                    issues,
+                    code="confirmatory_freeze_reporting_field_invalid",
+                    message=f"confirmatory_reporting_contract field '{key}' must be non-empty.",
+                    path=root / "suite_summary.json",
+                )
+        if not isinstance(contract.get("controls_status"), dict):
+            _add_issue(
+                issues,
+                code="confirmatory_freeze_controls_status_missing",
+                message="confirmatory_reporting_contract.controls_status must be an object.",
+                path=root / "suite_summary.json",
+            )
+        if not isinstance(contract.get("interpretation_limits"), dict):
+            _add_issue(
+                issues,
+                code="confirmatory_freeze_interpretation_limits_missing",
+                message="confirmatory_reporting_contract.interpretation_limits must be an object.",
+                path=root / "suite_summary.json",
+            )
+
 def verify_official_artifacts(
     *,
     output_dir: Path | str,
@@ -229,6 +421,19 @@ def verify_official_artifacts(
 
     compiled_manifest = _load_json(manifest_path, issues, code_prefix="compiled_manifest")
     source_contract = _load_json(source_path, issues, code_prefix="source_contract")
+    suite_summary_payload: dict[str, Any] | None = None
+    deviation_log_payload: dict[str, Any] | None = None
+    if framework_mode == "confirmatory":
+        suite_summary_payload = _load_json(
+            root / "suite_summary.json",
+            issues,
+            code_prefix="suite_summary",
+        )
+        deviation_log_payload = _load_json(
+            root / "deviation_log.json",
+            issues,
+            code_prefix="deviation_log",
+        )
 
     required_run_artifacts: list[str] = ["config.json", "metrics.json"]
     required_run_metadata_fields: list[str] = ["framework_mode", "canonical_run"]
@@ -247,6 +452,16 @@ def verify_official_artifacts(
             raw_metadata = artifact_contract.get("required_run_metadata_fields")
             if isinstance(raw_metadata, list) and raw_metadata:
                 required_run_metadata_fields = [str(value) for value in raw_metadata]
+
+    if framework_mode == "confirmatory":
+        _verify_confirmatory_reporting_contract(
+            suite_summary=suite_summary_payload,
+            execution_status=execution_status,
+            deviation_log=deviation_log_payload,
+            source_contract=source_contract,
+            issues=issues,
+            root=root,
+        )
 
     report_rows = _load_report_index(root / "report_index.csv", issues)
     n_completed_runs_checked = 0
@@ -332,6 +547,24 @@ def verify_official_artifacts(
                     "metrics_canonical": metrics_canonical,
                 },
             )
+
+        if framework_mode == "confirmatory":
+            if not isinstance(config_payload.get("dataset_fingerprint"), dict):
+                _add_issue(
+                    issues,
+                    code="confirmatory_dataset_fingerprint_missing_config",
+                    message="Confirmatory run config.json must include dataset_fingerprint.",
+                    path=report_dir / "config.json",
+                    details={"run_id": row.get("run_id")},
+                )
+            if not isinstance(metrics_payload.get("dataset_fingerprint"), dict):
+                _add_issue(
+                    issues,
+                    code="confirmatory_dataset_fingerprint_missing_metrics",
+                    message="Confirmatory run metrics.json must include dataset_fingerprint.",
+                    path=report_dir / "metrics.json",
+                    details={"run_id": row.get("run_id")},
+                )
 
         _verify_metric_policy(
             config_payload=config_payload,

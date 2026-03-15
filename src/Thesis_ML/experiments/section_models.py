@@ -190,6 +190,11 @@ class EvaluationInput(_SectionModel):
         default_factory=lambda: ["label", "task", "modality", "session", "subject"]
     )
     subgroup_min_samples_per_group: int = 1
+    subgroup_min_classes_per_group: int = 1
+    subgroup_report_small_groups: bool = False
+    confirmatory_guardrails_enabled: bool = False
+    subgroup_evidence_role: str = "exploratory"
+    subgroup_primary_evidence_allowed: bool = True
     subgroup_metrics_json_path: Path | None = None
     subgroup_metrics_csv_path: Path | None = None
     tuning_summary_path: Path | None = None

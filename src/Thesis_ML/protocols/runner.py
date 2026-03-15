@@ -29,6 +29,7 @@ def _protocol_context_payload(
     *,
     secondary_metrics: list[str],
     required_run_metadata_fields: list[str],
+    confirmatory_lock: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     metric_policy = resolve_effective_metric_policy(
         primary_metric=spec.primary_metric,
@@ -37,7 +38,7 @@ def _protocol_context_payload(
         tuning_metric=spec.primary_metric,
         permutation_metric=spec.controls.permutation_metric or spec.primary_metric,
     )
-    return {
+    payload = {
         "framework_mode": FrameworkMode.CONFIRMATORY.value,
         "canonical_run": bool(spec.canonical_run),
         "protocol_id": spec.protocol_id,
@@ -69,6 +70,56 @@ def _protocol_context_payload(
         "controls": spec.controls.model_dump(mode="json"),
         "interpretability_enabled": bool(spec.interpretability_enabled),
     }
+    if isinstance(confirmatory_lock, dict):
+        payload["confirmatory_lock"] = dict(confirmatory_lock)
+        payload["target_mapping_version"] = str(
+            confirmatory_lock.get("target_mapping_version", "")
+        )
+    return payload
+
+
+def _validate_confirmatory_lock_controls(
+    protocol: ThesisProtocol,
+    compiled_manifest: CompiledProtocolManifest,
+) -> None:
+    lock_payload = protocol.confirmatory_lock
+    if not isinstance(lock_payload, dict):
+        return
+    if str(lock_payload.get("protocol_id")) != "thesis_confirmatory_v1":
+        return
+
+    runs_by_suite: dict[str, list[CompiledRunSpec]] = {}
+    for run_spec in compiled_manifest.runs:
+        runs_by_suite.setdefault(run_spec.suite_id, []).append(run_spec)
+
+    if bool(lock_payload.get("dummy_baseline_required", False)):
+        suites_missing_dummy = [
+            suite_id
+            for suite_id, suite_runs in runs_by_suite.items()
+            if all(run_spec.model != "dummy" for run_spec in suite_runs)
+        ]
+        if suites_missing_dummy:
+            raise ValueError(
+                "Confirmatory freeze hard-gate failed: dummy baseline is required but missing for suite(s): "
+                + ", ".join(sorted(suites_missing_dummy))
+            )
+
+    if bool(lock_payload.get("permutation_required", False)):
+        minimum_permutations = int(lock_payload.get("minimum_permutations", 0))
+        invalid_runs = [
+            run_spec.run_id
+            for run_spec in compiled_manifest.runs
+            if (
+                not run_spec.controls.permutation_enabled
+                or int(run_spec.controls.n_permutations) < minimum_permutations
+            )
+        ]
+        if invalid_runs:
+            raise ValueError(
+                "Confirmatory freeze hard-gate failed: permutation control is required "
+                f"with n_permutations >= {minimum_permutations}. "
+                "Invalid run(s): " + ", ".join(sorted(invalid_runs))
+            )
 
 
 def _to_run_result_success(
@@ -175,6 +226,11 @@ def execute_compiled_protocol(
                     required_run_metadata_fields=list(
                         compiled_manifest.required_run_metadata_fields
                     ),
+                    confirmatory_lock=(
+                        dict(protocol.confirmatory_lock)
+                        if isinstance(protocol.confirmatory_lock, dict)
+                        else None
+                    ),
                 ),
             )
             run_results.append(_to_run_result_success(spec, payload))
@@ -250,6 +306,13 @@ def compile_and_run_protocol(
     resume: bool = False,
     dry_run: bool = False,
 ) -> dict[str, Any]:
+    if isinstance(protocol.confirmatory_lock, dict):
+        analysis_status = str(protocol.confirmatory_lock.get("analysis_status", "")).strip().lower()
+        if analysis_status and analysis_status != "locked":
+            raise ValueError(
+                "Confirmatory freeze execution requires analysis_status='locked'. "
+                f"Received '{analysis_status}'."
+            )
     if protocol.status == ProtocolStatus.DRAFT:
         raise ValueError(
             "Confirmatory protocol execution rejects status='draft'. "
@@ -261,6 +324,7 @@ def compile_and_run_protocol(
         index_csv=index_csv,
         suite_ids=suite_ids,
     )
+    _validate_confirmatory_lock_controls(protocol, compiled_manifest)
     compile_duration_seconds = perf_counter() - compile_start
     return execute_compiled_protocol(
         protocol=protocol,

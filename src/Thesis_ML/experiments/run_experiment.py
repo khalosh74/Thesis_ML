@@ -364,6 +364,28 @@ def run_experiment(
         official_context = dict(resolved_protocol_context)
     if resolved_framework_mode == FrameworkMode.LOCKED_COMPARISON:
         official_context = dict(resolved_comparison_context)
+    confirmatory_lock_payload = (
+        dict(official_context.get("confirmatory_lock"))
+        if isinstance(official_context.get("confirmatory_lock"), dict)
+        else {}
+    )
+    confirmatory_subgroup_min_classes = int(
+        confirmatory_lock_payload.get("subgroup_min_classes_per_group", 1)
+    )
+    confirmatory_subgroup_report_small_groups = bool(
+        confirmatory_lock_payload.get("subgroup_report_small_groups", False)
+    )
+    confirmatory_guardrails_enabled = bool(
+        resolved_framework_mode == FrameworkMode.CONFIRMATORY
+        and str(confirmatory_lock_payload.get("protocol_id", "")).strip()
+        == "thesis_confirmatory_v1"
+    )
+    subgroup_evidence_role = (
+        str(confirmatory_lock_payload.get("subgroup_interpretation", "descriptive_only"))
+        if confirmatory_guardrails_enabled
+        else "exploratory"
+    )
+    subgroup_primary_evidence_allowed = bool(not confirmatory_guardrails_enabled)
     stage_timings["context_resolution"] = float(perf_counter() - context_start)
 
     metric_policy_start = perf_counter()
@@ -442,6 +464,7 @@ def run_experiment(
             primary_metric_name=resolved_primary_metric_name,
             permutation_metric_name=resolved_permutation_metric_name,
             methodology_policy_name=methodology_policy.policy_name.value,
+            class_weight_policy=methodology_policy.class_weight_policy.value,
             model=model,
             tuning_enabled=bool(methodology_policy.tuning_enabled),
             tuning_search_space_id=effective_tuning_space_id,
@@ -449,6 +472,9 @@ def run_experiment(
             tuning_inner_group_field=effective_tuning_inner_group_field,
             subgroup_reporting_enabled=bool(subgroup_policy.enabled),
             subgroup_dimensions=list(subgroup_policy.subgroup_dimensions),
+            subgroup_min_samples_per_group=int(subgroup_policy.min_samples_per_group),
+            subgroup_min_classes_per_group=int(confirmatory_subgroup_min_classes),
+            subgroup_report_small_groups=bool(confirmatory_subgroup_report_small_groups),
             official_context=official_context,
         )
         dataset_fingerprint = collect_dataset_fingerprint(
@@ -527,6 +553,15 @@ def run_experiment(
                         subgroup_reporting_enabled=bool(subgroup_policy.enabled),
                         subgroup_dimensions=tuple(subgroup_policy.subgroup_dimensions),
                         subgroup_min_samples_per_group=int(subgroup_policy.min_samples_per_group),
+                        subgroup_min_classes_per_group=int(confirmatory_subgroup_min_classes),
+                        subgroup_report_small_groups=bool(
+                            confirmatory_subgroup_report_small_groups
+                        ),
+                        confirmatory_guardrails_enabled=bool(confirmatory_guardrails_enabled),
+                        subgroup_evidence_role=str(subgroup_evidence_role),
+                        subgroup_primary_evidence_allowed=bool(
+                            subgroup_primary_evidence_allowed
+                        ),
                         interpretability_enabled_override=interpretability_enabled_override,
                         run_id=resolved_run_id,
                         config_filename=config_path.name,

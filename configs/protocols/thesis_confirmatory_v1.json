@@ -1,0 +1,92 @@
+{
+  "protocol_id": "thesis_confirmatory_v1",
+  "analysis_status": "locked",
+  "protocol_version": "v1.0",
+  "sample_unit": "beta_event",
+  "dataset_contract": {
+    "dataset_role": "confirmatory_internal_dataset",
+    "dataset_fingerprint_required": true,
+    "allowed_index_columns": [
+      "sample_id",
+      "subject",
+      "session",
+      "task",
+      "modality",
+      "emotion",
+      "coarse_affect",
+      "beta_path",
+      "mask_path",
+      "subject_session",
+      "subject_session_bas"
+    ],
+    "require_spatial_compatibility_checks": true,
+    "minimum_subjects": 2,
+    "minimum_sessions_per_subject": 2
+  },
+  "target": {
+    "name": "coarse_affect",
+    "source_column": "emotion",
+    "mapping_version": "affect_mapping_v1",
+    "mapping_hash": "80b1db02e41c2d5da9f79fa030421181c82c4d219e3dba0f80f8e8bebd9f8c76",
+    "classes": ["positive", "neutral", "negative"],
+    "drop_unknown": true
+  },
+  "primary_analysis": {
+    "split": "within_subject_loso_session",
+    "split_contract_version": "split_contract_v1",
+    "metric": "balanced_accuracy",
+    "secondary_metrics": ["macro_f1", "accuracy", "recall_macro"],
+    "model_family": "ridge",
+    "hyperparameter_policy": "fixed",
+    "class_weight_policy": "none",
+    "seed": 42
+  },
+  "controls": {
+    "dummy_baseline": true,
+    "permutation_test": true,
+    "n_permutations": 1000,
+    "required_artifacts": [
+      "metrics.json",
+      "fold_metrics.csv",
+      "fold_splits.csv",
+      "predictions.csv",
+      "subgroup_report.csv",
+      "spatial_report.json",
+      "run_status.json"
+    ]
+  },
+  "subgroups": {
+    "enabled": true,
+    "allowed": ["subject", "task", "modality"],
+    "min_samples_per_group": 20,
+    "min_classes_per_group": 2,
+    "report_small_groups": false,
+    "interpretation": "descriptive_only"
+  },
+  "multiplicity": {
+    "primary_hypotheses": 1,
+    "primary_alpha": 0.05,
+    "secondary_policy": "descriptive_only",
+    "exploratory_claims_allowed": false
+  },
+  "interpretation_limits": {
+    "no_causal_claims": true,
+    "no_clinical_claims": true,
+    "no_localization_claims_from_coefficients": true,
+    "no_external_generalization_claim": true,
+    "secondary_results_not_primary_evidence": true
+  },
+  "secondary_analyses": [
+    {
+      "name": "frozen_cross_person_transfer",
+      "status": "secondary"
+    }
+  ],
+  "reporting": {
+    "require_protocol_id": true,
+    "require_dataset_fingerprint": true,
+    "require_mapping_hash": true,
+    "require_interpretation_limits": true,
+    "require_deviation_log": true
+  }
+}

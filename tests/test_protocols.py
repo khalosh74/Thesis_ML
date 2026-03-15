@@ -26,6 +26,10 @@ def _nested_protocol_path() -> Path:
     return _repo_root() / "configs" / "protocols" / "thesis_canonical_nested_v1.json"
 
 
+def _confirmatory_freeze_protocol_path() -> Path:
+    return _repo_root() / "configs" / "protocols" / "thesis_confirmatory_v1.json"
+
+
 def _write_nifti(path: Path, data: np.ndarray) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     image = nib.Nifti1Image(data.astype(np.float32), affine=np.eye(4, dtype=np.float64))
@@ -94,6 +98,219 @@ def test_load_canonical_protocol_validates() -> None:
         "secondary_cross_person_transfer",
         "primary_controls",
     }
+
+
+def test_load_confirmatory_freeze_protocol_validates_and_adapts() -> None:
+    protocol = load_protocol(_confirmatory_freeze_protocol_path())
+    assert protocol.protocol_schema_version == "thesis-protocol-v1"
+    assert protocol.framework_mode == "confirmatory"
+    assert protocol.protocol_id == "thesis_confirmatory_v1"
+    assert protocol.status.value == "locked"
+    assert protocol.scientific_contract.target == "coarse_affect"
+    assert protocol.scientific_contract.primary_metric == "balanced_accuracy"
+    assert protocol.control_policy.dummy_baseline.enabled is True
+    assert protocol.control_policy.permutation.enabled is True
+
+
+def test_confirmatory_freeze_preflight_rejects_invalid_schema_payload(
+    tmp_path: Path,
+) -> None:
+    payload = json.loads(_confirmatory_freeze_protocol_path().read_text(encoding="utf-8"))
+    payload["target"]["mapping_hash"] = "NOT_A_SHA"
+    protocol_path = tmp_path / "invalid_confirmatory_freeze.json"
+    protocol_path.write_text(f"{json.dumps(payload, indent=2)}\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="preflight schema validation failed"):
+        load_protocol(protocol_path)
+
+
+def test_confirmatory_freeze_preflight_rejects_mapping_hash_mismatch(
+    tmp_path: Path,
+) -> None:
+    payload = json.loads(_confirmatory_freeze_protocol_path().read_text(encoding="utf-8"))
+    payload["target"]["mapping_hash"] = "0" * 64
+    protocol_path = tmp_path / "invalid_confirmatory_freeze_hash.json"
+    protocol_path.write_text(f"{json.dumps(payload, indent=2)}\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="target.mapping_hash mismatch"):
+        load_protocol(protocol_path)
+
+
+def test_confirmatory_freeze_protocol_dry_run_executes_with_locked_gates(
+    protocol_dataset: dict[str, Path],
+) -> None:
+    protocol = load_protocol(_confirmatory_freeze_protocol_path())
+    suite_id = protocol.official_run_suites[0].suite_id
+    result = compile_and_run_protocol(
+        protocol=protocol,
+        index_csv=protocol_dataset["index_csv"],
+        data_root=protocol_dataset["data_root"],
+        cache_dir=protocol_dataset["cache_dir"],
+        reports_root=protocol_dataset["reports_root"],
+        suite_ids=[suite_id],
+        dry_run=True,
+    )
+
+    assert result["n_failed"] == 0
+    assert result["n_planned"] > 0
+    deviation_log = json.loads(
+        Path(result["artifact_paths"]["deviation_log"]).read_text(encoding="utf-8")
+    )
+    suite_summary = json.loads(
+        Path(result["artifact_paths"]["suite_summary"]).read_text(encoding="utf-8")
+    )
+    assert deviation_log["confirmatory_status"] == "confirmatory"
+    assert deviation_log["science_critical_deviation_detected"] is False
+    assert deviation_log["deviations"][0]["status"] == "no_deviation"
+    contract = suite_summary["confirmatory_reporting_contract"]
+    assert contract["protocol_id"] == "thesis_confirmatory_v1"
+    assert contract["target_mapping_version"] == "affect_mapping_v1"
+    assert isinstance(contract["target_mapping_hash"], str) and contract["target_mapping_hash"]
+    assert contract["primary_split"] == "within_subject_loso_session"
+    assert contract["primary_metric"] == "balanced_accuracy"
+    assert contract["model_family"] == "ridge"
+    assert isinstance(contract["controls_status"], dict)
+    assert isinstance(contract["interpretation_limits"], dict)
+    assert contract["subgroup_evidence_policy"]["evidence_role"] == "descriptive_only"
+    assert (
+        contract["subgroup_evidence_policy"]["primary_evidence_substitution_allowed"]
+        is False
+    )
+    assert contract["deviations_from_protocol"]["controls_valid_for_confirmatory"] is True
+
+
+def test_confirmatory_freeze_execution_rejects_unlocked_analysis_status(
+    protocol_dataset: dict[str, Path],
+) -> None:
+    protocol = load_protocol(_confirmatory_freeze_protocol_path()).model_copy(deep=True)
+    assert isinstance(protocol.confirmatory_lock, dict)
+    protocol.confirmatory_lock["analysis_status"] = "draft"
+
+    with pytest.raises(ValueError, match="analysis_status='locked'"):
+        compile_and_run_protocol(
+            protocol=protocol,
+            index_csv=protocol_dataset["index_csv"],
+            data_root=protocol_dataset["data_root"],
+            cache_dir=protocol_dataset["cache_dir"],
+            reports_root=protocol_dataset["reports_root"],
+            suite_ids=[protocol.official_run_suites[0].suite_id],
+            dry_run=True,
+        )
+
+
+def test_confirmatory_freeze_execution_rejects_missing_dummy_controls(
+    protocol_dataset: dict[str, Path],
+) -> None:
+    protocol = load_protocol(_confirmatory_freeze_protocol_path()).model_copy(deep=True)
+    protocol.control_policy.dummy_baseline.enabled = False
+    protocol.control_policy.dummy_baseline.suites = []
+
+    with pytest.raises(ValueError, match="dummy baseline is required"):
+        compile_and_run_protocol(
+            protocol=protocol,
+            index_csv=protocol_dataset["index_csv"],
+            data_root=protocol_dataset["data_root"],
+            cache_dir=protocol_dataset["cache_dir"],
+            reports_root=protocol_dataset["reports_root"],
+            suite_ids=[protocol.official_run_suites[0].suite_id],
+            dry_run=True,
+        )
+
+
+def test_confirmatory_freeze_execution_rejects_permutation_minimum_drift(
+    protocol_dataset: dict[str, Path],
+) -> None:
+    protocol = load_protocol(_confirmatory_freeze_protocol_path()).model_copy(deep=True)
+    protocol.control_policy.permutation.n_permutations = 10
+
+    with pytest.raises(ValueError, match="n_permutations >= 1000"):
+        compile_and_run_protocol(
+            protocol=protocol,
+            index_csv=protocol_dataset["index_csv"],
+            data_root=protocol_dataset["data_root"],
+            cache_dir=protocol_dataset["cache_dir"],
+            reports_root=protocol_dataset["reports_root"],
+            suite_ids=[protocol.official_run_suites[0].suite_id],
+            dry_run=True,
+        )
+
+
+def test_confirmatory_freeze_execution_records_downgrade_on_science_critical_deviation(
+    protocol_dataset: dict[str, Path],
+) -> None:
+    protocol = load_protocol(_confirmatory_freeze_protocol_path()).model_copy(deep=True)
+    assert isinstance(protocol.confirmatory_lock, dict)
+    protocol.confirmatory_lock["target_source_column"] = "emotion_missing"
+
+    with pytest.raises(ValueError, match="Protocol artifact verification failed"):
+        compile_and_run_protocol(
+            protocol=protocol,
+            index_csv=protocol_dataset["index_csv"],
+            data_root=protocol_dataset["data_root"],
+            cache_dir=protocol_dataset["cache_dir"],
+            reports_root=protocol_dataset["reports_root"],
+            suite_ids=[protocol.official_run_suites[0].suite_id],
+            dry_run=False,
+        )
+
+    output_dir = (
+        protocol_dataset["reports_root"]
+        / "protocol_runs"
+        / f"{protocol.protocol_id}__{protocol.protocol_version}"
+    )
+
+    deviation_log = json.loads(
+        (output_dir / "deviation_log.json").read_text(encoding="utf-8")
+    )
+    execution_status = json.loads(
+        (output_dir / "execution_status.json").read_text(encoding="utf-8")
+    )
+    suite_summary = json.loads((output_dir / "suite_summary.json").read_text(encoding="utf-8"))
+    assert deviation_log["science_critical_deviation_detected"] is True
+    assert deviation_log["confirmatory_status"] == "downgraded"
+    assert any(
+        bool(row.get("science_critical", False)) for row in deviation_log["deviations"]
+    )
+    assert execution_status["confirmatory_status"] == "downgraded"
+    assert (
+        suite_summary["confirmatory_reporting_contract"]["deviations_from_protocol"][
+            "controls_valid_for_confirmatory"
+        ]
+        is False
+    )
+
+
+def test_confirmatory_freeze_subgroup_rows_mark_insufficient_data(
+    protocol_dataset: dict[str, Path],
+) -> None:
+    protocol = load_protocol(_confirmatory_freeze_protocol_path()).model_copy(deep=True)
+    assert isinstance(protocol.confirmatory_lock, dict)
+    protocol.control_policy.permutation.n_permutations = 1
+    protocol.confirmatory_lock["minimum_permutations"] = 1
+
+    result = compile_and_run_protocol(
+        protocol=protocol,
+        index_csv=protocol_dataset["index_csv"],
+        data_root=protocol_dataset["data_root"],
+        cache_dir=protocol_dataset["cache_dir"],
+        reports_root=protocol_dataset["reports_root"],
+        suite_ids=[protocol.official_run_suites[0].suite_id],
+        dry_run=False,
+    )
+    assert result["n_failed"] == 0
+    completed = [row for row in result["run_results"] if row["status"] == "completed"]
+    assert completed
+    config = json.loads(Path(str(completed[0]["config_path"])).read_text(encoding="utf-8"))
+    subgroup_payload = json.loads(
+        Path(str(config["subgroup_metrics_json_path"])).read_text(encoding="utf-8")
+    )
+    assert subgroup_payload["confirmatory_guardrails_enabled"] is True
+    assert subgroup_payload["evidence_role"] == "descriptive_only"
+    assert subgroup_payload["primary_evidence_substitution_allowed"] is False
+    assert subgroup_payload["n_rows"] > 0
+    assert all(row["status"] == "insufficient_data" for row in subgroup_payload["rows"])
+    assert all(row["interpretable"] is False for row in subgroup_payload["rows"])
+    assert all(row["balanced_accuracy"] is None for row in subgroup_payload["rows"])
 
 
 def test_load_protocol_rejects_invalid_schema_version(tmp_path: Path) -> None:

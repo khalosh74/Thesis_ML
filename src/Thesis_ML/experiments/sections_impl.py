@@ -491,6 +491,9 @@ def _compute_subgroup_metrics(
     *,
     subgroup_dimensions: list[str],
     min_samples_per_group: int,
+    min_classes_per_group: int,
+    report_small_groups: bool,
+    strict_insufficient_data_rows: bool,
 ) -> list[dict[str, Any]]:
     if not prediction_rows:
         return []
@@ -505,29 +508,68 @@ def _compute_subgroup_metrics(
             continue
         for group_value, subset in frame.groupby(group_column, dropna=False):
             n_samples = int(len(subset))
-            if n_samples < int(min_samples_per_group):
-                continue
             y_true = subset["y_true"].astype(str).tolist()
             y_pred = subset["y_pred"].astype(str).tolist()
+            n_classes = int(pd.Series(y_true).nunique(dropna=False))
+            class_distribution = (
+                pd.Series(y_true)
+                .value_counts(dropna=False)
+                .sort_index()
+                .astype(int)
+                .to_dict()
+            )
+            interpretable = (
+                n_samples >= int(min_samples_per_group)
+                and n_classes >= int(min_classes_per_group)
+            )
+            insufficient_reasons: list[str] = []
+            if n_samples < int(min_samples_per_group):
+                insufficient_reasons.append("min_samples")
+            if n_classes < int(min_classes_per_group):
+                insufficient_reasons.append("min_classes")
+            if not interpretable and not (
+                bool(report_small_groups) or bool(strict_insufficient_data_rows)
+            ):
+                continue
+            # For single-class or undersized slices, classification scores are not
+            # scientifically stable. Emit descriptive rows with null metrics.
+            can_compute_metrics = bool(interpretable)
             subgroup_rows.append(
                 {
                     "subgroup_key": requested_dimension,
                     "subgroup_value": str(group_value),
                     "n_samples": n_samples,
-                    "balanced_accuracy": classification_metric_score(
-                        y_true=y_true,
-                        y_pred=y_pred,
-                        metric_name="balanced_accuracy",
+                    "n_classes": n_classes,
+                    "class_distribution_json": json.dumps(class_distribution, sort_keys=True),
+                    "insufficient_data_reasons": "|".join(insufficient_reasons),
+                    "status": "ok" if interpretable else "insufficient_data",
+                    "interpretable": bool(interpretable),
+                    "balanced_accuracy": (
+                        classification_metric_score(
+                            y_true=y_true,
+                            y_pred=y_pred,
+                            metric_name="balanced_accuracy",
+                        )
+                        if can_compute_metrics
+                        else None
                     ),
-                    "macro_f1": classification_metric_score(
-                        y_true=y_true,
-                        y_pred=y_pred,
-                        metric_name="macro_f1",
+                    "macro_f1": (
+                        classification_metric_score(
+                            y_true=y_true,
+                            y_pred=y_pred,
+                            metric_name="macro_f1",
+                        )
+                        if can_compute_metrics
+                        else None
                     ),
-                    "accuracy": classification_metric_score(
-                        y_true=y_true,
-                        y_pred=y_pred,
-                        metric_name="accuracy",
+                    "accuracy": (
+                        classification_metric_score(
+                            y_true=y_true,
+                            y_pred=y_pred,
+                            metric_name="accuracy",
+                        )
+                        if can_compute_metrics
+                        else None
                     ),
                 }
             )
@@ -663,14 +705,24 @@ def execute_evaluation(section_input: EvaluationInput) -> dict[str, Any]:
             prediction_rows=section_input.prediction_rows,
             subgroup_dimensions=list(section_input.subgroup_dimensions),
             min_samples_per_group=int(section_input.subgroup_min_samples_per_group),
+            min_classes_per_group=int(section_input.subgroup_min_classes_per_group),
+            report_small_groups=bool(section_input.subgroup_report_small_groups),
+            strict_insufficient_data_rows=bool(section_input.confirmatory_guardrails_enabled),
         )
         if section_input.subgroup_reporting_enabled
         else []
     )
     subgroup_payload = {
         "enabled": bool(section_input.subgroup_reporting_enabled),
+        "confirmatory_guardrails_enabled": bool(section_input.confirmatory_guardrails_enabled),
+        "evidence_role": str(section_input.subgroup_evidence_role),
+        "primary_evidence_substitution_allowed": bool(
+            section_input.subgroup_primary_evidence_allowed
+        ),
         "dimensions_requested": list(section_input.subgroup_dimensions),
         "min_samples_per_group": int(section_input.subgroup_min_samples_per_group),
+        "min_classes_per_group": int(section_input.subgroup_min_classes_per_group),
+        "report_small_groups": bool(section_input.subgroup_report_small_groups),
         "generated": bool(subgroup_rows),
         "n_rows": int(len(subgroup_rows)),
         "json_path": str(subgroup_metrics_json_path.resolve()),
@@ -688,6 +740,11 @@ def execute_evaluation(section_input: EvaluationInput) -> dict[str, Any]:
                 "subgroup_key",
                 "subgroup_value",
                 "n_samples",
+                "n_classes",
+                "class_distribution_json",
+                "insufficient_data_reasons",
+                "status",
+                "interpretable",
                 "balanced_accuracy",
                 "macro_f1",
                 "accuracy",
