@@ -109,6 +109,16 @@ class ModelFitInput(_SectionModel):
     train_subject: str | None = None
     test_subject: str | None = None
     seed: int
+    primary_metric_name: str = "balanced_accuracy"
+    methodology_policy_name: str = "fixed_baselines_only"
+    class_weight_policy: str = "none"
+    tuning_enabled: bool = False
+    tuning_search_space_id: str | None = None
+    tuning_search_space_version: str | None = None
+    tuning_inner_cv_scheme: str | None = None
+    tuning_inner_group_field: str | None = None
+    tuning_summary_path: Path | None = None
+    tuning_best_params_path: Path | None = None
     interpretability_enabled: bool | None = None
     run_id: str = Field(min_length=1)
     config_filename: str = Field(min_length=1)
@@ -131,6 +141,10 @@ class ModelFitOutput(_SectionModel):
     interpretability_vectors: list[np.ndarray]
     interpretability_fold_artifacts_path: Path
     interpretability_summary_path: Path
+    tuning_summary: dict[str, Any]
+    tuning_records: list[dict[str, Any]]
+    tuning_summary_path: Path
+    tuning_best_params_path: Path
 
 
 class InterpretabilityInput(_SectionModel):
@@ -170,6 +184,16 @@ class EvaluationInput(_SectionModel):
     n_permutations: int = 0
     primary_metric_name: str = "balanced_accuracy"
     permutation_metric_name: str | None = None
+    methodology_policy_name: str = "fixed_baselines_only"
+    subgroup_reporting_enabled: bool = True
+    subgroup_dimensions: list[str] = Field(
+        default_factory=lambda: ["label", "task", "modality", "session", "subject"]
+    )
+    subgroup_min_samples_per_group: int = 1
+    subgroup_metrics_json_path: Path | None = None
+    subgroup_metrics_csv_path: Path | None = None
+    tuning_summary_path: Path | None = None
+    tuning_best_params_path: Path | None = None
     spatial_compatibility: dict[str, Any]
     spatial_report_path: Path
     interpretability_summary: dict[str, Any]

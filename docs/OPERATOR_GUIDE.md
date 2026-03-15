@@ -71,11 +71,23 @@ thesisml-run-comparison \
   --reports-root outputs/reports/comparisons
 ```
 
+Grouped nested comparison execution:
+
+```bash
+thesisml-run-comparison \
+  --comparison configs/comparisons/model_family_grouped_nested_comparison_v1.json \
+  --variant ridge \
+  --reports-root outputs/reports/comparisons
+```
+
 Official-policy note:
 - exploratory mode (`thesisml-run-experiment`) is ad hoc and non-confirmatory.
 - locked comparison mode (`thesisml-run-comparison`) is restricted to registered variants.
 - confirmatory mode (`thesisml-run-protocol`) is the final thesis evidence path.
 - default mode roots are `outputs/reports/exploratory`, `outputs/reports/comparisons`, and `outputs/reports/confirmatory`.
+- comparison/protocol contracts must choose exactly one methodology policy:
+  `fixed_baselines_only` or `grouped_nested_tuning`.
+- locked comparison runs emit `comparison_decision.json` for machine-readable selection outcomes.
 
 Generate workbook template:
 

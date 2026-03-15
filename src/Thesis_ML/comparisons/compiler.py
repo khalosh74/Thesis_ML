@@ -16,6 +16,7 @@ from Thesis_ML.comparisons.models import (
     TransferPairSource,
 )
 from Thesis_ML.config.framework_mode import FrameworkMode
+from Thesis_ML.config.methodology import MethodologyPolicyName
 
 
 def _slug(value: str) -> str:
@@ -121,19 +122,22 @@ def compile_comparison(
         raise ValueError("No comparison variants selected for compilation.")
 
     contract = comparison.scientific_contract
+    control_policy = comparison.control_policy
     controls = CompiledComparisonRunControls(
-        permutation_enabled=bool(contract.control_policy.permutation_enabled),
-        permutation_metric=str(contract.control_policy.permutation_metric),
-        n_permutations=int(contract.control_policy.n_permutations),
-        dummy_baseline_enabled=bool(contract.control_policy.dummy_baseline_enabled),
+        permutation_enabled=bool(control_policy.permutation_enabled),
+        permutation_metric=str(
+            control_policy.permutation_metric or comparison.metric_policy.primary_metric
+        ),
+        n_permutations=int(control_policy.n_permutations),
+        dummy_baseline_enabled=bool(control_policy.dummy_baseline_enabled),
     )
 
     runs: list[CompiledComparisonRunSpec] = []
     claim_to_run_map: dict[str, list[str]] = {}
     for variant_id in selected_variant_ids:
         variant = allowed_variants[variant_id]
-        interpretability_enabled = bool(contract.interpretability_policy.enabled) and (
-            variant.model in set(contract.interpretability_policy.allowed_models)
+        interpretability_enabled = bool(comparison.interpretability_policy.enabled) and (
+            variant.model in set(comparison.interpretability_policy.allowed_models)
         )
 
         if contract.split_mode == "within_subject_loso_session":
@@ -154,9 +158,21 @@ def compile_comparison(
                     filter_task=contract.filter_task,
                     filter_modality=contract.filter_modality,
                     seed=int(contract.seed_policy.global_seed),
-                    primary_metric=contract.primary_metric,
+                    primary_metric=comparison.metric_policy.primary_metric,
                     controls=controls,
                     interpretability_enabled=interpretability_enabled,
+                    methodology_policy_name=comparison.methodology_policy.policy_name,
+                    class_weight_policy=comparison.methodology_policy.class_weight_policy,
+                    tuning_enabled=bool(comparison.methodology_policy.tuning_enabled),
+                    tuning_search_space_id=comparison.methodology_policy.tuning_search_space_id,
+                    tuning_search_space_version=comparison.methodology_policy.tuning_search_space_version,
+                    tuning_inner_cv_scheme=comparison.methodology_policy.inner_cv_scheme,
+                    tuning_inner_group_field=comparison.methodology_policy.inner_group_field,
+                    subgroup_reporting_enabled=bool(comparison.subgroup_reporting_policy.enabled),
+                    subgroup_dimensions=list(comparison.subgroup_reporting_policy.subgroup_dimensions),
+                    subgroup_min_samples_per_group=int(
+                        comparison.subgroup_reporting_policy.min_samples_per_group
+                    ),
                     artifact_requirements=list(comparison.artifact_contract.required_run_artifacts),
                 )
                 runs.append(run)
@@ -187,9 +203,21 @@ def compile_comparison(
                     filter_task=contract.filter_task,
                     filter_modality=contract.filter_modality,
                     seed=int(contract.seed_policy.global_seed),
-                    primary_metric=contract.primary_metric,
+                    primary_metric=comparison.metric_policy.primary_metric,
                     controls=controls,
                     interpretability_enabled=interpretability_enabled,
+                    methodology_policy_name=comparison.methodology_policy.policy_name,
+                    class_weight_policy=comparison.methodology_policy.class_weight_policy,
+                    tuning_enabled=bool(comparison.methodology_policy.tuning_enabled),
+                    tuning_search_space_id=comparison.methodology_policy.tuning_search_space_id,
+                    tuning_search_space_version=comparison.methodology_policy.tuning_search_space_version,
+                    tuning_inner_cv_scheme=comparison.methodology_policy.inner_cv_scheme,
+                    tuning_inner_group_field=comparison.methodology_policy.inner_group_field,
+                    subgroup_reporting_enabled=bool(comparison.subgroup_reporting_policy.enabled),
+                    subgroup_dimensions=list(comparison.subgroup_reporting_policy.subgroup_dimensions),
+                    subgroup_min_samples_per_group=int(
+                        comparison.subgroup_reporting_policy.min_samples_per_group
+                    ),
                     artifact_requirements=list(comparison.artifact_contract.required_run_artifacts),
                 )
                 runs.append(run)
@@ -198,6 +226,9 @@ def compile_comparison(
 
     if not runs:
         raise ValueError("Comparison compilation produced zero concrete runs.")
+    if comparison.methodology_policy.policy_name == MethodologyPolicyName.GROUPED_NESTED_TUNING:
+        if all(run.model == "dummy" for run in runs):
+            raise ValueError("grouped_nested_tuning requires at least one non-dummy model run.")
 
     return CompiledComparisonManifest(
         framework_mode=FrameworkMode.LOCKED_COMPARISON.value,
@@ -205,6 +236,10 @@ def compile_comparison(
         comparison_version=comparison.comparison_version,
         status=comparison.status,
         comparison_dimension=comparison.comparison_dimension,
+        methodology_policy=comparison.methodology_policy,
+        metric_policy=comparison.metric_policy,
+        subgroup_reporting_policy=comparison.subgroup_reporting_policy,
+        decision_policy=comparison.decision_policy,
         variant_ids=selected_variant_ids,
         runs=runs,
         claim_to_run_map=claim_to_run_map,

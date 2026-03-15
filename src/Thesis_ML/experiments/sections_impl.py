@@ -7,15 +7,12 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 import pandas as pd
 from sklearn.base import clone
-from sklearn.metrics import (
-    accuracy_score,
-    balanced_accuracy_score,
-    confusion_matrix,
-    f1_score,
-)
-from sklearn.model_selection import LeaveOneGroupOut
+from sklearn.metrics import confusion_matrix
+from sklearn.model_selection import GridSearchCV, LeaveOneGroupOut
 
+from Thesis_ML.config.metric_policy import metric_bundle, metric_scorer
 from Thesis_ML.experiments.metrics import classification_metric_score
+from Thesis_ML.experiments.tuning_search_spaces import get_search_space
 
 if TYPE_CHECKING:
     from Thesis_ML.experiments.section_models import (
@@ -92,6 +89,27 @@ def execute_model_fit(section_input: ModelFitInput) -> dict[str, Any]:
         model_name=section_input.model,
         seed=section_input.seed,
     )
+    tuning_summary_path = (
+        section_input.tuning_summary_path
+        if section_input.tuning_summary_path is not None
+        else section_input.report_dir / "tuning_summary.json"
+    )
+    tuning_best_params_path = (
+        section_input.tuning_best_params_path
+        if section_input.tuning_best_params_path is not None
+        else section_input.report_dir / "best_params_per_fold.csv"
+    )
+    methodology_policy_name = str(section_input.methodology_policy_name).strip()
+    tuning_enabled = bool(section_input.tuning_enabled)
+    if methodology_policy_name == "fixed_baselines_only" and tuning_enabled:
+        raise ValueError(
+            "methodology_policy_name='fixed_baselines_only' forbids tuning_enabled=true."
+        )
+    if methodology_policy_name not in {"fixed_baselines_only", "grouped_nested_tuning"}:
+        raise ValueError(
+            "Unsupported methodology_policy_name. "
+            "Allowed values: fixed_baselines_only, grouped_nested_tuning."
+        )
 
     if section_input.interpretability_enabled is None:
         interpretability_enabled = section_input.cv_mode == "within_subject_loso_session"
@@ -107,6 +125,7 @@ def execute_model_fit(section_input: ModelFitInput) -> dict[str, Any]:
     fold_rows: list[dict[str, Any]] = []
     split_rows: list[dict[str, Any]] = []
     prediction_rows: list[dict[str, Any]] = []
+    tuning_rows: list[dict[str, Any]] = []
     y_true_all: list[str] = []
     y_pred_all: list[str] = []
 
@@ -139,7 +158,70 @@ def execute_model_fit(section_input: ModelFitInput) -> dict[str, Any]:
                 )
 
         estimator = clone(pipeline_template)
-        estimator.fit(section_input.x_matrix[train_idx], y[train_idx])
+        if tuning_enabled and methodology_policy_name == "grouped_nested_tuning":
+            if section_input.model == "dummy":
+                estimator.fit(section_input.x_matrix[train_idx], y[train_idx])
+                tuning_rows.append(
+                    {
+                        "fold": int(fold_index),
+                        "status": "skipped_control_model",
+                        "model": section_input.model,
+                        "best_score": pd.NA,
+                        "best_params_json": "{}",
+                        "n_candidates": 0,
+                        "search_space_id": section_input.tuning_search_space_id,
+                        "search_space_version": section_input.tuning_search_space_version,
+                        "primary_metric_name": section_input.primary_metric_name,
+                        "inner_group_field": section_input.tuning_inner_group_field,
+                    }
+                )
+            else:
+                if section_input.tuning_search_space_id is None:
+                    raise ValueError("grouped_nested_tuning requires tuning_search_space_id.")
+                resolved_space_version, param_grid = get_search_space(
+                    section_input.tuning_search_space_id,
+                    section_input.model,
+                )
+                declared_space_version = section_input.tuning_search_space_version
+                if declared_space_version and declared_space_version != resolved_space_version:
+                    raise ValueError(
+                        "Declared tuning_search_space_version does not match search-space registry version."
+                    )
+                inner_groups = groups[train_idx]
+                if len(np.unique(inner_groups)) < 2:
+                    raise ValueError(
+                        "Grouped nested tuning requires at least two inner groups in training data."
+                    )
+                search = GridSearchCV(
+                    estimator=clone(pipeline_template),
+                    param_grid=param_grid,
+                    scoring=metric_scorer(section_input.primary_metric_name),
+                    cv=LeaveOneGroupOut(),
+                    refit=True,
+                    n_jobs=1,
+                )
+                search.fit(
+                    section_input.x_matrix[train_idx],
+                    y[train_idx],
+                    groups=inner_groups,
+                )
+                estimator = search.best_estimator_
+                tuning_rows.append(
+                    {
+                        "fold": int(fold_index),
+                        "status": "tuned",
+                        "model": section_input.model,
+                        "best_score": float(search.best_score_),
+                        "best_params_json": json.dumps(search.best_params_, sort_keys=True),
+                        "n_candidates": int(len(search.cv_results_["params"])),
+                        "search_space_id": section_input.tuning_search_space_id,
+                        "search_space_version": resolved_space_version,
+                        "primary_metric_name": section_input.primary_metric_name,
+                        "inner_group_field": section_input.tuning_inner_group_field,
+                    }
+                )
+        else:
+            estimator.fit(section_input.x_matrix[train_idx], y[train_idx])
 
         if interpretability_enabled:
             if interpretability_dir is None:
@@ -211,9 +293,21 @@ def execute_model_fit(section_input: ModelFitInput) -> dict[str, Any]:
                 "target": section_input.target_column,
                 "model": section_input.model,
                 "seed": int(section_input.seed),
-                "accuracy": float(accuracy_score(y_true, y_pred)),
-                "balanced_accuracy": float(balanced_accuracy_score(y_true, y_pred)),
-                "macro_f1": float(f1_score(y_true, y_pred, average="macro", zero_division=0)),
+                "accuracy": classification_metric_score(
+                    y_true=y_true,
+                    y_pred=y_pred,
+                    metric_name="accuracy",
+                ),
+                "balanced_accuracy": classification_metric_score(
+                    y_true=y_true,
+                    y_pred=y_pred,
+                    metric_name="balanced_accuracy",
+                ),
+                "macro_f1": classification_metric_score(
+                    y_true=y_true,
+                    y_pred=y_pred,
+                    metric_name="macro_f1",
+                ),
             }
         )
 
@@ -284,6 +378,46 @@ def execute_model_fit(section_input: ModelFitInput) -> dict[str, Any]:
         y_true_all.extend(y_true.tolist())
         y_pred_all.extend(y_pred.tolist())
 
+    tuning_summary = {
+        "methodology_policy_name": methodology_policy_name,
+        "tuning_enabled": bool(tuning_enabled),
+        "status": (
+            "performed"
+            if tuning_enabled and any(row["status"] == "tuned" for row in tuning_rows)
+            else "disabled"
+        ),
+        "primary_metric_name": section_input.primary_metric_name,
+        "search_space_id": section_input.tuning_search_space_id,
+        "search_space_version": section_input.tuning_search_space_version,
+        "inner_cv_scheme": section_input.tuning_inner_cv_scheme,
+        "inner_group_field": section_input.tuning_inner_group_field,
+        "total_outer_folds": int(len(splits)),
+        "n_tuned_folds": int(sum(row["status"] == "tuned" for row in tuning_rows)),
+        "n_skipped_folds": int(sum(row["status"] != "tuned" for row in tuning_rows)),
+        "best_params_path": str(tuning_best_params_path.resolve()),
+    }
+    tuning_summary_path.write_text(
+        f"{json.dumps(tuning_summary, indent=2)}\n",
+        encoding="utf-8",
+    )
+    tuning_frame = pd.DataFrame(tuning_rows)
+    if tuning_frame.empty:
+        tuning_frame = pd.DataFrame(
+            columns=[
+                "fold",
+                "status",
+                "model",
+                "best_score",
+                "best_params_json",
+                "n_candidates",
+                "search_space_id",
+                "search_space_version",
+                "primary_metric_name",
+                "inner_group_field",
+            ]
+        )
+    tuning_frame.to_csv(tuning_best_params_path, index=False)
+
     return {
         "y": y,
         "splits": splits,
@@ -298,6 +432,10 @@ def execute_model_fit(section_input: ModelFitInput) -> dict[str, Any]:
         "interpretability_fold_artifacts_path": section_input.report_dir
         / "interpretability_fold_explanations.csv",
         "interpretability_summary_path": section_input.report_dir / "interpretability_summary.json",
+        "tuning_summary": tuning_summary,
+        "tuning_records": tuning_rows,
+        "tuning_summary_path": tuning_summary_path,
+        "tuning_best_params_path": tuning_best_params_path,
     }
 
 
@@ -348,19 +486,84 @@ def execute_interpretability(section_input: InterpretabilityInput) -> dict[str, 
     return interpretability_summary
 
 
+def _compute_subgroup_metrics(
+    prediction_rows: list[dict[str, Any]],
+    *,
+    subgroup_dimensions: list[str],
+    min_samples_per_group: int,
+) -> list[dict[str, Any]]:
+    if not prediction_rows:
+        return []
+    frame = pd.DataFrame(prediction_rows)
+    subgroup_rows: list[dict[str, Any]] = []
+    for requested_dimension in subgroup_dimensions:
+        if requested_dimension == "label":
+            group_column = "y_true"
+        else:
+            group_column = requested_dimension
+        if group_column not in frame.columns:
+            continue
+        for group_value, subset in frame.groupby(group_column, dropna=False):
+            n_samples = int(len(subset))
+            if n_samples < int(min_samples_per_group):
+                continue
+            y_true = subset["y_true"].astype(str).tolist()
+            y_pred = subset["y_pred"].astype(str).tolist()
+            subgroup_rows.append(
+                {
+                    "subgroup_key": requested_dimension,
+                    "subgroup_value": str(group_value),
+                    "n_samples": n_samples,
+                    "balanced_accuracy": classification_metric_score(
+                        y_true=y_true,
+                        y_pred=y_pred,
+                        metric_name="balanced_accuracy",
+                    ),
+                    "macro_f1": classification_metric_score(
+                        y_true=y_true,
+                        y_pred=y_pred,
+                        metric_name="macro_f1",
+                    ),
+                    "accuracy": classification_metric_score(
+                        y_true=y_true,
+                        y_pred=y_pred,
+                        metric_name="accuracy",
+                    ),
+                }
+            )
+    return subgroup_rows
+
+
 def execute_evaluation(section_input: EvaluationInput) -> dict[str, Any]:
-    overall_accuracy = float(accuracy_score(section_input.y_true_all, section_input.y_pred_all))
-    overall_balanced = float(
-        balanced_accuracy_score(section_input.y_true_all, section_input.y_pred_all)
+    report_dir = section_input.metrics_path.parent
+    subgroup_metrics_json_path = (
+        section_input.subgroup_metrics_json_path
+        if section_input.subgroup_metrics_json_path is not None
+        else report_dir / "subgroup_metrics.json"
     )
-    overall_macro_f1 = float(
-        f1_score(
-            section_input.y_true_all,
-            section_input.y_pred_all,
-            average="macro",
-            zero_division=0,
-        )
+    subgroup_metrics_csv_path = (
+        section_input.subgroup_metrics_csv_path
+        if section_input.subgroup_metrics_csv_path is not None
+        else report_dir / "subgroup_metrics.csv"
     )
+    tuning_summary_path = (
+        section_input.tuning_summary_path
+        if section_input.tuning_summary_path is not None
+        else report_dir / "tuning_summary.json"
+    )
+    tuning_best_params_path = (
+        section_input.tuning_best_params_path
+        if section_input.tuning_best_params_path is not None
+        else report_dir / "best_params_per_fold.csv"
+    )
+    metric_values = metric_bundle(
+        section_input.y_true_all,
+        section_input.y_pred_all,
+        metric_names=("accuracy", "balanced_accuracy", "macro_f1"),
+    )
+    overall_accuracy = float(metric_values["accuracy"])
+    overall_balanced = float(metric_values["balanced_accuracy"])
+    overall_macro_f1 = float(metric_values["macro_f1"])
     primary_metric_name = str(section_input.primary_metric_name)
     primary_metric_value = classification_metric_score(
         section_input.y_true_all,
@@ -406,8 +609,12 @@ def execute_evaluation(section_input: EvaluationInput) -> dict[str, Any]:
         "accuracy": overall_accuracy,
         "balanced_accuracy": overall_balanced,
         "macro_f1": overall_macro_f1,
+        "methodology_policy_name": section_input.methodology_policy_name,
         "primary_metric_name": primary_metric_name,
         "primary_metric_value": primary_metric_value,
+        "tuning_enabled": bool(section_input.methodology_policy_name == "grouped_nested_tuning"),
+        "tuning_summary_path": str(tuning_summary_path.resolve()),
+        "tuning_best_params_path": str(tuning_best_params_path.resolve()),
         "labels": labels_sorted,
         "confusion_matrix": cmatrix.tolist(),
         "spatial_compatibility": {
@@ -449,6 +656,46 @@ def execute_evaluation(section_input: EvaluationInput) -> dict[str, Any]:
         "summary_path": str(section_input.interpretability_summary_path.resolve()),
         "fold_artifacts_path": section_input.interpretability_summary["fold_artifacts_path"],
         "stability": section_input.interpretability_summary["stability"],
+    }
+
+    subgroup_rows = (
+        _compute_subgroup_metrics(
+            prediction_rows=section_input.prediction_rows,
+            subgroup_dimensions=list(section_input.subgroup_dimensions),
+            min_samples_per_group=int(section_input.subgroup_min_samples_per_group),
+        )
+        if section_input.subgroup_reporting_enabled
+        else []
+    )
+    subgroup_payload = {
+        "enabled": bool(section_input.subgroup_reporting_enabled),
+        "dimensions_requested": list(section_input.subgroup_dimensions),
+        "min_samples_per_group": int(section_input.subgroup_min_samples_per_group),
+        "generated": bool(subgroup_rows),
+        "n_rows": int(len(subgroup_rows)),
+        "json_path": str(subgroup_metrics_json_path.resolve()),
+        "csv_path": str(subgroup_metrics_csv_path.resolve()),
+        "rows": subgroup_rows,
+    }
+    subgroup_metrics_json_path.write_text(
+        f"{json.dumps(subgroup_payload, indent=2)}\n",
+        encoding="utf-8",
+    )
+    subgroup_frame = pd.DataFrame(subgroup_rows)
+    if subgroup_frame.empty:
+        subgroup_frame = pd.DataFrame(
+            columns=[
+                "subgroup_key",
+                "subgroup_value",
+                "n_samples",
+                "balanced_accuracy",
+                "macro_f1",
+                "accuracy",
+            ]
+        )
+    subgroup_frame.to_csv(subgroup_metrics_csv_path, index=False)
+    metrics["subgroup_reporting"] = {
+        key: value for key, value in subgroup_payload.items() if key != "rows"
     }
 
     fold_rows = [dict(row) for row in section_input.fold_rows]

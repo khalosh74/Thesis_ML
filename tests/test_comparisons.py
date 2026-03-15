@@ -23,6 +23,12 @@ def _comparison_spec_path() -> Path:
     return _repo_root() / "configs" / "comparisons" / "model_family_comparison_v1.json"
 
 
+def _nested_comparison_spec_path() -> Path:
+    return (
+        _repo_root() / "configs" / "comparisons" / "model_family_grouped_nested_comparison_v1.json"
+    )
+
+
 def _write_nifti(path: Path, data: np.ndarray) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     image = nib.Nifti1Image(data.astype(np.float32), affine=np.eye(4, dtype=np.float64))
@@ -83,6 +89,8 @@ def test_load_comparison_spec_validates() -> None:
     assert spec.framework_mode == "locked_comparison"
     assert spec.scientific_contract.target == "coarse_affect"
     assert spec.scientific_contract.split_mode == "within_subject_loso_session"
+    assert spec.methodology_policy.policy_name.value == "fixed_baselines_only"
+    assert spec.metric_policy.primary_metric == "balanced_accuracy"
     assert {variant.variant_id for variant in spec.allowed_variants} == {
         "ridge",
         "logreg",
@@ -101,6 +109,7 @@ def test_compile_comparison_expands_variants_and_subjects(
     assert all(run.framework_mode == "locked_comparison" for run in manifest.runs)
     assert all(run.canonical_run is False for run in manifest.runs)
     assert all(run.subject in {"sub-001", "sub-002"} for run in manifest.runs)
+    assert all(run.methodology_policy_name.value == "fixed_baselines_only" for run in manifest.runs)
 
 
 def test_compile_comparison_rejects_unknown_variant(
@@ -113,6 +122,15 @@ def test_compile_comparison_rejects_unknown_variant(
             index_csv=comparison_dataset["index_csv"],
             variant_ids=["not_registered_variant"],
         )
+
+
+def test_comparison_requires_explicit_methodology_policy(tmp_path: Path) -> None:
+    payload = json.loads(_comparison_spec_path().read_text(encoding="utf-8"))
+    payload.pop("methodology_policy", None)
+    spec_path = tmp_path / "missing_methodology_comparison.json"
+    spec_path.write_text(f"{json.dumps(payload, indent=2)}\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="methodology_policy"):
+        load_comparison_spec(spec_path)
 
 
 def test_comparison_runner_dry_run_emits_artifacts(
@@ -133,6 +151,7 @@ def test_comparison_runner_dry_run_emits_artifacts(
     assert result["n_planned"] == 2
     for artifact_path in result["artifact_paths"].values():
         assert Path(artifact_path).exists()
+    assert Path(result["artifact_paths"]["comparison_decision"]).exists()
 
     status_payload = json.loads(
         Path(result["artifact_paths"]["execution_status"]).read_text(encoding="utf-8")
@@ -169,12 +188,16 @@ def test_comparison_runner_real_run_stamps_metadata(
     assert config["comparison_id"] == spec.comparison_id
     assert config["comparison_version"] == spec.comparison_version
     assert config["comparison_variant_id"] == "ridge"
+    assert config["methodology_policy_name"] == "fixed_baselines_only"
+    assert config["subgroup_reporting_enabled"] is True
 
     assert metrics["framework_mode"] == "locked_comparison"
     assert metrics["canonical_run"] is False
     assert metrics["comparison_id"] == spec.comparison_id
     assert metrics["comparison_version"] == spec.comparison_version
     assert metrics["comparison_variant_id"] == "ridge"
+    assert metrics["methodology_policy_name"] == "fixed_baselines_only"
+    assert "subgroup_reporting" in metrics
 
 
 def test_comparison_runner_rejects_draft_or_retired_status(
@@ -204,3 +227,27 @@ def test_comparison_runner_rejects_draft_or_retired_status(
             dry_run=True,
         )
 
+
+def test_grouped_nested_comparison_spec_supports_dry_run(
+    comparison_dataset: dict[str, Path],
+) -> None:
+    spec = load_comparison_spec(_nested_comparison_spec_path())
+    assert spec.methodology_policy.policy_name.value == "grouped_nested_tuning"
+    result = compile_and_run_comparison(
+        comparison=spec,
+        index_csv=comparison_dataset["index_csv"],
+        data_root=comparison_dataset["data_root"],
+        cache_dir=comparison_dataset["cache_dir"],
+        reports_root=comparison_dataset["reports_root"],
+        variant_ids=["ridge"],
+        dry_run=True,
+    )
+    assert result["n_failed"] == 0
+    decision_payload = json.loads(
+        Path(result["artifact_paths"]["comparison_decision"]).read_text(encoding="utf-8")
+    )
+    assert decision_payload["decision_status"] in {
+        "winner_selected",
+        "inconclusive",
+        "invalid_comparison",
+    }

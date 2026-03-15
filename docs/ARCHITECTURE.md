@@ -24,6 +24,8 @@ Core package root: `src/Thesis_ML/`
 - `config/`
   - default paths (`paths.py`)
   - framework lifecycle mode enum (`framework_mode.py`)
+  - methodology + decision policy contracts (`methodology.py`)
+  - centralized metric policy registry/scorers (`metric_policy.py`)
   - schema/version constants (`schema_versions.py`)
 - `data/`, `features/`, `spm/`
   - indexing, cache extraction, SPM utilities
@@ -34,6 +36,7 @@ Core package root: `src/Thesis_ML/`
   - segment helper layer (`segment_execution_helpers.py`)
   - segment planner/executor (`segment_execution.py`)
   - idempotency/run-state policy (`execution_policy.py`)
+  - grouped nested tuning search-space registry (`tuning_search_spaces.py`)
 - `protocols/`
   - strict thesis protocol schema (`models.py`)
   - protocol JSON loader/validation (`loader.py`)
@@ -72,6 +75,7 @@ Core package root: `src/Thesis_ML/`
 - Execute each run spec through existing `run_experiment(...)`.
 - Stamp `framework_mode=locked_comparison` and comparison identity metadata.
 - Emit comparison-level manifests/summaries under `outputs/reports/comparisons/`.
+- Emit machine-readable `comparison_decision.json` (`winner_selected`, `inconclusive`, `invalid_comparison`).
 
 3. Confirmatory canonical thesis protocol run (`thesisml-run-protocol`)
 - Load and validate canonical protocol JSON (`thesis-protocol-v1`).
@@ -110,6 +114,8 @@ Framework guardrails:
 - `thesisml-run-experiment` cannot label outputs as confirmatory or accept protocol/comparison contexts.
 - `thesisml-run-comparison` can execute only registered variants from a comparison spec.
 - `thesisml-run-protocol` can execute only canonical protocol suites and cannot accept ad hoc science overrides.
+- comparison/protocol contracts must explicitly declare methodology policy (`fixed_baselines_only` or `grouped_nested_tuning`).
+- primary metric is centralized and drives reporting, tuning objective, and permutation controls.
 
 Compatibility wrappers are still present but deprecated:
 

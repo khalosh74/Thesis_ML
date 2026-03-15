@@ -7,10 +7,9 @@ from typing import Any
 import numpy as np
 import pandas as pd
 from sklearn.base import clone
-from sklearn.metrics import accuracy_score, balanced_accuracy_score, f1_score
 from sklearn.pipeline import Pipeline
 
-SUPPORTED_CLASSIFICATION_METRICS = frozenset({"accuracy", "balanced_accuracy", "macro_f1"})
+from Thesis_ML.config.metric_policy import classification_metric_score as policy_metric_score
 
 
 def classification_metric_score(
@@ -18,14 +17,7 @@ def classification_metric_score(
     y_pred: list[str] | np.ndarray,
     metric_name: str,
 ) -> float:
-    if metric_name == "accuracy":
-        return float(accuracy_score(y_true, y_pred))
-    if metric_name == "balanced_accuracy":
-        return float(balanced_accuracy_score(y_true, y_pred))
-    if metric_name == "macro_f1":
-        return float(f1_score(y_true, y_pred, average="macro", zero_division=0))
-    allowed = ", ".join(sorted(SUPPORTED_CLASSIFICATION_METRICS))
-    raise ValueError(f"Unsupported metric_name '{metric_name}'. Allowed values: {allowed}")
+    return policy_metric_score(y_true=y_true, y_pred=y_pred, metric_name=metric_name)
 
 
 def scores_for_predictions(estimator: Pipeline, x_test: np.ndarray) -> dict[str, list[Any]]:
@@ -94,14 +86,25 @@ def evaluate_permutations(
     payload: dict[str, Any] = {
         "n_permutations": int(n_permutations),
         "metric_name": metric_name,
-        "observed_metric": float(observed_metric),
-        "permutation_metric_mean": float(np.mean(permutation_scores)),
-        "permutation_metric_std": float(np.std(permutation_scores)),
-        "permutation_p_value": float(p_value),
+        "observed_score": float(observed_metric),
+        "permutation_seed": int(seed),
+        "p_value": float(p_value),
+        "null_summary": {
+            "mean": float(np.mean(permutation_scores)),
+            "std": float(np.std(permutation_scores)),
+            "min": float(np.min(permutation_scores)),
+            "max": float(np.max(permutation_scores)),
+            "q25": float(np.quantile(permutation_scores, 0.25)),
+            "q50": float(np.quantile(permutation_scores, 0.50)),
+            "q75": float(np.quantile(permutation_scores, 0.75)),
+        },
+        "null_scores": [float(value) for value in permutation_scores],
     }
-    if metric_name == "accuracy":
-        payload["permutation_accuracy_mean"] = payload["permutation_metric_mean"]
-        payload["permutation_accuracy_std"] = payload["permutation_metric_std"]
+    # Backward-compatible fields retained for existing consumers.
+    payload["observed_metric"] = payload["observed_score"]
+    payload["permutation_metric_mean"] = payload["null_summary"]["mean"]
+    payload["permutation_metric_std"] = payload["null_summary"]["std"]
+    payload["permutation_p_value"] = payload["p_value"]
     return payload
 
 

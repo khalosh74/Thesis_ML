@@ -1,10 +1,10 @@
 {
   "comparison_schema_version": "comparison-spec-v1",
   "framework_mode": "locked_comparison",
-  "comparison_id": "model-family-within-subject",
+  "comparison_id": "model-family-grouped-nested",
   "comparison_version": "1.0.0",
   "status": "locked",
-  "description": "Locked comparison of fixed linear model families under within-subject LOSO-session split.",
+  "description": "Locked grouped-nested-tuning comparison of linear model families under within-subject LOSO-session split.",
   "comparison_dimension": "model_family",
   "scientific_contract": {
     "target": "coarse_affect",
@@ -25,9 +25,13 @@
     "filter_modality": null
   },
   "methodology_policy": {
-    "policy_name": "fixed_baselines_only",
+    "policy_name": "grouped_nested_tuning",
     "class_weight_policy": "none",
-    "tuning_enabled": false
+    "tuning_enabled": true,
+    "inner_cv_scheme": "grouped_leave_one_group_out",
+    "inner_group_field": "session",
+    "tuning_search_space_id": "linear-grouped-nested-v1",
+    "tuning_search_space_version": "1.0.0"
   },
   "metric_policy": {
     "primary_metric": "balanced_accuracy",
@@ -73,25 +77,25 @@
       "variant_id": "ridge",
       "model": "ridge",
       "claim_ids": [
-        "CMP_C01_model_family_ridge"
+        "CMP_N01_model_family_ridge"
       ],
-      "notes": "Fixed RidgeClassifier baseline."
+      "notes": "Ridge under grouped nested tuning."
     },
     {
       "variant_id": "logreg",
       "model": "logreg",
       "claim_ids": [
-        "CMP_C01_model_family_logreg"
+        "CMP_N01_model_family_logreg"
       ],
-      "notes": "Fixed LogisticRegression baseline."
+      "notes": "Logistic regression under grouped nested tuning."
     },
     {
       "variant_id": "linearsvc",
       "model": "linearsvc",
       "claim_ids": [
-        "CMP_C01_model_family_linearsvc"
+        "CMP_N01_model_family_linearsvc"
       ],
-      "notes": "Fixed LinearSVC baseline."
+      "notes": "LinearSVC under grouped nested tuning."
     }
   ],
   "artifact_contract": {

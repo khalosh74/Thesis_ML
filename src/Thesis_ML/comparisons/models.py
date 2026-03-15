@@ -1,13 +1,22 @@
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from Thesis_ML.config.framework_mode import FrameworkMode
-from Thesis_ML.experiments.model_factory import MODEL_NAMES
-from Thesis_ML.protocols.models import SUPPORTED_CV_MODES, SUPPORTED_PRIMARY_METRICS
+from Thesis_ML.config.methodology import (
+    ClassWeightPolicy,
+    ComparisonDecisionPolicy,
+    MethodologyPolicy,
+    MethodologyPolicyName,
+    MetricPolicy,
+    SubgroupReportingPolicy,
+)
+from Thesis_ML.config.metric_policy import SUPPORTED_CLASSIFICATION_METRICS, validate_metric_name
+from Thesis_ML.experiments.model_factory import ALL_MODEL_NAMES
+from Thesis_ML.protocols.models import SUPPORTED_CV_MODES
 
 COMPARISON_SCHEMA_VERSION = "comparison-spec-v1"
 SUPPORTED_COMPARISON_SCHEMA_VERSIONS = frozenset({COMPARISON_SCHEMA_VERSION})
@@ -15,6 +24,7 @@ REQUIRED_COMPARISON_ARTIFACTS = (
     "comparison.json",
     "compiled_comparison_manifest.json",
     "comparison_summary.json",
+    "comparison_decision.json",
     "execution_status.json",
     "report_index.csv",
 )
@@ -24,9 +34,14 @@ REQUIRED_COMPARISON_RUN_ARTIFACTS = (
     "fold_metrics.csv",
     "fold_splits.csv",
     "predictions.csv",
+    "subgroup_metrics.json",
+    "subgroup_metrics.csv",
+    "tuning_summary.json",
+    "best_params_per_fold.csv",
     "spatial_compatibility_report.json",
     "interpretability_summary.json",
 )
+SUPPORTED_PRIMARY_METRICS = SUPPORTED_CLASSIFICATION_METRICS
 
 
 class _ComparisonModel(BaseModel):
@@ -38,6 +53,12 @@ class ComparisonStatus(StrEnum):
     LOCKED = "locked"
     EXECUTED = "executed"
     RETIRED = "retired"
+
+
+class ComparisonDecisionStatus(StrEnum):
+    WINNER_SELECTED = "winner_selected"
+    INCONCLUSIVE = "inconclusive"
+    INVALID_COMPARISON = "invalid_comparison"
 
 
 class SubjectSource(StrEnum):
@@ -56,27 +77,24 @@ class ComparisonSeedPolicy(_ComparisonModel):
     @model_validator(mode="after")
     def _validate_seed(self) -> ComparisonSeedPolicy:
         if int(self.global_seed) < 0:
-            raise ValueError("seed_policy.global_seed must be >= 0.")
+            raise ValueError("scientific_contract.seed_policy.global_seed must be >= 0.")
         return self
 
 
 class ComparisonControlPolicy(_ComparisonModel):
     permutation_enabled: bool = False
-    permutation_metric: str = "balanced_accuracy"
+    permutation_metric: str | None = None
     n_permutations: int = 0
     dummy_baseline_enabled: bool = False
 
     @model_validator(mode="after")
     def _validate_controls(self) -> ComparisonControlPolicy:
-        if self.permutation_metric not in SUPPORTED_PRIMARY_METRICS:
-            allowed = ", ".join(sorted(SUPPORTED_PRIMARY_METRICS))
-            raise ValueError(
-                f"Unsupported permutation_metric '{self.permutation_metric}'. Allowed values: {allowed}."
-            )
+        if self.permutation_metric is not None:
+            validate_metric_name(self.permutation_metric)
         if self.permutation_enabled and int(self.n_permutations) <= 0:
-            raise ValueError("n_permutations must be > 0 when permutation_enabled is true.")
+            raise ValueError("control_policy.n_permutations must be > 0 when permutation_enabled is true.")
         if not self.permutation_enabled and int(self.n_permutations) < 0:
-            raise ValueError("n_permutations must be >= 0.")
+            raise ValueError("control_policy.n_permutations must be >= 0.")
         return self
 
 
@@ -91,7 +109,7 @@ class ComparisonInterpretabilityPolicy(_ComparisonModel):
                 raise ValueError(
                     "interpretability_policy.allowed_models must be non-empty when interpretability is enabled."
                 )
-            supported = set(MODEL_NAMES)
+            supported = set(ALL_MODEL_NAMES)
             for model_name in self.allowed_models:
                 if model_name not in supported:
                     allowed = ", ".join(sorted(supported))
@@ -138,12 +156,7 @@ class ComparisonScientificContract(_ComparisonModel):
     target: str = Field(min_length=1)
     split_mode: Literal["within_subject_loso_session", "frozen_cross_person_transfer"]
     grouping_policy: str = Field(min_length=1)
-    primary_metric: str = "balanced_accuracy"
     seed_policy: ComparisonSeedPolicy = Field(default_factory=ComparisonSeedPolicy)
-    control_policy: ComparisonControlPolicy = Field(default_factory=ComparisonControlPolicy)
-    interpretability_policy: ComparisonInterpretabilityPolicy = Field(
-        default_factory=ComparisonInterpretabilityPolicy
-    )
     subject_policy: ComparisonSubjectPolicy = Field(default_factory=ComparisonSubjectPolicy)
     transfer_policy: ComparisonTransferPolicy = Field(default_factory=ComparisonTransferPolicy)
     filter_task: str | None = None
@@ -155,18 +168,6 @@ class ComparisonScientificContract(_ComparisonModel):
             allowed = ", ".join(sorted(SUPPORTED_CV_MODES))
             raise ValueError(
                 f"Unsupported split_mode '{self.split_mode}'. Allowed values: {allowed}."
-            )
-        if self.primary_metric not in SUPPORTED_PRIMARY_METRICS:
-            allowed = ", ".join(sorted(SUPPORTED_PRIMARY_METRICS))
-            raise ValueError(
-                f"Unsupported primary_metric '{self.primary_metric}'. Allowed values: {allowed}."
-            )
-        if (
-            self.control_policy.permutation_enabled
-            and self.control_policy.permutation_metric != self.primary_metric
-        ):
-            raise ValueError(
-                "permutation_metric must match primary_metric for locked comparison runs."
             )
         if self.split_mode == "within_subject_loso_session":
             if self.transfer_policy.pairs:
@@ -189,8 +190,8 @@ class ComparisonVariant(_ComparisonModel):
 
     @model_validator(mode="after")
     def _validate_variant(self) -> ComparisonVariant:
-        if self.model not in set(MODEL_NAMES):
-            allowed = ", ".join(sorted(MODEL_NAMES))
+        if self.model not in set(ALL_MODEL_NAMES):
+            allowed = ", ".join(sorted(ALL_MODEL_NAMES))
             raise ValueError(
                 f"Unsupported variant model '{self.model}'. Allowed values: {allowed}."
             )
@@ -210,6 +211,7 @@ class ComparisonArtifactContract(_ComparisonModel):
         default_factory=lambda: [
             "framework_mode",
             "canonical_run",
+            "methodology_policy_name",
             "comparison_id",
             "comparison_version",
             "comparison_variant_id",
@@ -239,6 +241,16 @@ class ComparisonSpec(_ComparisonModel):
     description: str = Field(min_length=1)
     comparison_dimension: str = Field(min_length=1)
     scientific_contract: ComparisonScientificContract
+    methodology_policy: MethodologyPolicy
+    metric_policy: MetricPolicy = Field(default_factory=MetricPolicy)
+    control_policy: ComparisonControlPolicy = Field(default_factory=ComparisonControlPolicy)
+    subgroup_reporting_policy: SubgroupReportingPolicy = Field(
+        default_factory=SubgroupReportingPolicy
+    )
+    decision_policy: ComparisonDecisionPolicy = Field(default_factory=ComparisonDecisionPolicy)
+    interpretability_policy: ComparisonInterpretabilityPolicy = Field(
+        default_factory=ComparisonInterpretabilityPolicy
+    )
     allowed_variants: list[ComparisonVariant] = Field(min_length=1)
     artifact_contract: ComparisonArtifactContract = Field(
         default_factory=ComparisonArtifactContract
@@ -259,6 +271,37 @@ class ComparisonSpec(_ComparisonModel):
             raise ValueError(
                 "ComparisonSpec.allowed_variants contains duplicate variant_id values."
             )
+
+        validate_metric_name(self.metric_policy.primary_metric)
+        for metric_name in self.metric_policy.secondary_metrics:
+            validate_metric_name(metric_name)
+
+        resolved_permutation_metric = (
+            self.control_policy.permutation_metric or self.metric_policy.primary_metric
+        )
+        if (
+            self.control_policy.permutation_enabled
+            and resolved_permutation_metric != self.metric_policy.primary_metric
+        ):
+            raise ValueError(
+                "control_policy.permutation_metric must match metric_policy.primary_metric for locked comparisons."
+            )
+
+        if self.control_policy.dummy_baseline_enabled:
+            if not any(variant.model == "dummy" for variant in self.allowed_variants):
+                raise ValueError(
+                    "control_policy.dummy_baseline_enabled=true requires at least one 'dummy' variant."
+                )
+
+        if (
+            self.methodology_policy.policy_name == MethodologyPolicyName.FIXED_BASELINES_ONLY
+            and self.comparison_dimension == "model_family"
+            and len({variant.model for variant in self.allowed_variants}) < 2
+        ):
+            raise ValueError(
+                "model_family comparison with fixed_baselines_only requires at least two distinct models."
+            )
+
         return self
 
 
@@ -289,6 +332,18 @@ class CompiledComparisonRunSpec(_ComparisonModel):
     primary_metric: str = "balanced_accuracy"
     controls: CompiledComparisonRunControls = Field(default_factory=CompiledComparisonRunControls)
     interpretability_enabled: bool = False
+    methodology_policy_name: MethodologyPolicyName = MethodologyPolicyName.FIXED_BASELINES_ONLY
+    class_weight_policy: ClassWeightPolicy = ClassWeightPolicy.NONE
+    tuning_enabled: bool = False
+    tuning_search_space_id: str | None = None
+    tuning_search_space_version: str | None = None
+    tuning_inner_cv_scheme: Literal["grouped_leave_one_group_out"] | None = None
+    tuning_inner_group_field: str | None = None
+    subgroup_reporting_enabled: bool = True
+    subgroup_dimensions: list[str] = Field(
+        default_factory=lambda: ["label", "task", "modality", "session", "subject"]
+    )
+    subgroup_min_samples_per_group: int = 1
     artifact_requirements: list[str] = Field(
         default_factory=lambda: list(REQUIRED_COMPARISON_RUN_ARTIFACTS)
     )
@@ -303,14 +358,28 @@ class CompiledComparisonRunSpec(_ComparisonModel):
             raise ValueError(
                 f"CompiledComparisonRunSpec '{self.run_id}' must set canonical_run=false."
             )
-        if self.cv_mode == "within_subject_loso_session":
-            if self.subject is None:
-                raise ValueError(f"CompiledComparisonRunSpec '{self.run_id}' requires subject.")
+        if self.cv_mode == "within_subject_loso_session" and self.subject is None:
+            raise ValueError(f"CompiledComparisonRunSpec '{self.run_id}' requires subject.")
         if self.cv_mode == "frozen_cross_person_transfer":
             if self.train_subject is None or self.test_subject is None:
                 raise ValueError(
                     f"CompiledComparisonRunSpec '{self.run_id}' requires train_subject and test_subject."
                 )
+        validate_metric_name(self.primary_metric)
+        MethodologyPolicy(
+            policy_name=self.methodology_policy_name,
+            class_weight_policy=self.class_weight_policy,
+            tuning_enabled=self.tuning_enabled,
+            inner_cv_scheme=self.tuning_inner_cv_scheme,
+            inner_group_field=self.tuning_inner_group_field,
+            tuning_search_space_id=self.tuning_search_space_id,
+            tuning_search_space_version=self.tuning_search_space_version,
+        )
+        SubgroupReportingPolicy(
+            enabled=self.subgroup_reporting_enabled,
+            subgroup_dimensions=self.subgroup_dimensions,
+            min_samples_per_group=self.subgroup_min_samples_per_group,
+        )
         return self
 
 
@@ -321,6 +390,10 @@ class CompiledComparisonManifest(_ComparisonModel):
     comparison_version: str = Field(min_length=1)
     status: ComparisonStatus
     comparison_dimension: str = Field(min_length=1)
+    methodology_policy: MethodologyPolicy
+    metric_policy: MetricPolicy
+    subgroup_reporting_policy: SubgroupReportingPolicy
+    decision_policy: ComparisonDecisionPolicy
     variant_ids: list[str] = Field(min_length=1)
     runs: list[CompiledComparisonRunSpec] = Field(min_length=1)
     claim_to_run_map: dict[str, list[str]]
@@ -350,4 +423,4 @@ class ComparisonRunResult(_ComparisonModel):
     config_path: str | None = None
     metrics_path: str | None = None
     error: str | None = None
-    metrics: dict[str, float | int | str | bool | None] | None = None
+    metrics: dict[str, float | int | str | bool | None | dict[str, Any]] | None = None

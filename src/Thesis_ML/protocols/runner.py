@@ -30,6 +30,16 @@ def _protocol_context_payload(spec: CompiledRunSpec) -> dict[str, Any]:
         "protocol_schema_version": spec.protocol_schema_version,
         "suite_id": spec.suite_id,
         "claim_ids": list(spec.claim_ids),
+        "methodology_policy_name": spec.methodology_policy_name.value,
+        "class_weight_policy": spec.class_weight_policy.value,
+        "tuning_enabled": bool(spec.tuning_enabled),
+        "tuning_search_space_id": spec.tuning_search_space_id,
+        "tuning_search_space_version": spec.tuning_search_space_version,
+        "tuning_inner_cv_scheme": spec.tuning_inner_cv_scheme,
+        "tuning_inner_group_field": spec.tuning_inner_group_field,
+        "subgroup_reporting_enabled": bool(spec.subgroup_reporting_enabled),
+        "subgroup_dimensions": list(spec.subgroup_dimensions),
+        "subgroup_min_samples_per_group": int(spec.subgroup_min_samples_per_group),
         "artifact_requirements": list(spec.artifact_requirements),
         "primary_metric": spec.primary_metric,
         "controls": spec.controls.model_dump(mode="json"),
@@ -42,7 +52,7 @@ def _to_run_result_success(
     run_payload: dict[str, Any],
 ) -> ProtocolRunResult:
     metrics_payload = run_payload.get("metrics", {}) if isinstance(run_payload, dict) else {}
-    metrics: dict[str, float | int | str | bool | None] = {}
+    metrics: dict[str, float | int | str | bool | None | dict[str, Any]] = {}
     if isinstance(metrics_payload, dict):
         for key in ("balanced_accuracy", "macro_f1", "accuracy", "n_folds"):
             value = metrics_payload.get(key)
@@ -115,6 +125,16 @@ def execute_compiled_protocol(
                 framework_mode=FrameworkMode.CONFIRMATORY,
                 primary_metric_name=spec.primary_metric,
                 permutation_metric_name=spec.controls.permutation_metric,
+                methodology_policy_name=spec.methodology_policy_name.value,
+                class_weight_policy=spec.class_weight_policy.value,
+                tuning_enabled=bool(spec.tuning_enabled),
+                tuning_search_space_id=spec.tuning_search_space_id,
+                tuning_search_space_version=spec.tuning_search_space_version,
+                tuning_inner_cv_scheme=spec.tuning_inner_cv_scheme,
+                tuning_inner_group_field=spec.tuning_inner_group_field,
+                subgroup_reporting_enabled=bool(spec.subgroup_reporting_enabled),
+                subgroup_dimensions=list(spec.subgroup_dimensions),
+                subgroup_min_samples_per_group=int(spec.subgroup_min_samples_per_group),
                 interpretability_enabled_override=bool(spec.interpretability_enabled),
                 protocol_context=_protocol_context_payload(spec),
             )

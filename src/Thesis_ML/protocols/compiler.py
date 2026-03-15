@@ -7,6 +7,7 @@ from pathlib import Path
 import pandas as pd
 
 from Thesis_ML.config.framework_mode import FrameworkMode
+from Thesis_ML.config.methodology import MethodologyPolicyName
 from Thesis_ML.protocols.models import (
     CompiledProtocolManifest,
     CompiledRunControls,
@@ -167,9 +168,7 @@ def compile_protocol(
     runs: list[CompiledRunSpec] = []
     claim_to_run_map: dict[str, list[str]] = {}
     permutation_enabled_suites = set(protocol.control_policy.permutation.suites)
-    permutation_metric = (
-        protocol.control_policy.permutation.metric or protocol.scientific_contract.primary_metric
-    )
+    permutation_metric = protocol.control_policy.permutation.metric or protocol.metric_policy.primary_metric
 
     for suite_id in selected_suite_ids:
         suite = available_suites[suite_id]
@@ -190,12 +189,7 @@ def compile_protocol(
         if suite.split_mode == "within_subject_loso_session":
             for subject in _resolve_suite_subjects(suite, all_subjects):
                 for model_name in suite_models:
-                    run_id = _build_run_id(
-                        protocol,
-                        suite,
-                        model_name,
-                        subject=subject,
-                    )
+                    run_id = _build_run_id(protocol, suite, model_name, subject=subject)
                     controls = CompiledRunControls(
                         dummy_baseline_run=(model_name == "dummy"),
                         permutation_enabled=(
@@ -223,19 +217,29 @@ def compile_protocol(
                         model=model_name,
                         cv_mode=suite.split_mode,
                         subject=subject,
-                        seed=suite_seed,
                         filter_task=suite.filter_task,
                         filter_modality=suite.filter_modality,
-                        primary_metric=protocol.scientific_contract.primary_metric,
+                        seed=suite_seed,
+                        primary_metric=protocol.metric_policy.primary_metric,
                         controls=controls,
                         interpretability_enabled=_interpretability_enabled(
                             protocol, suite, model_name
                         ),
+                        methodology_policy_name=protocol.methodology_policy.policy_name,
+                        class_weight_policy=protocol.methodology_policy.class_weight_policy,
+                        tuning_enabled=bool(protocol.methodology_policy.tuning_enabled),
+                        tuning_search_space_id=protocol.methodology_policy.tuning_search_space_id,
+                        tuning_search_space_version=protocol.methodology_policy.tuning_search_space_version,
+                        tuning_inner_cv_scheme=protocol.methodology_policy.inner_cv_scheme,
+                        tuning_inner_group_field=protocol.methodology_policy.inner_group_field,
+                        subgroup_reporting_enabled=bool(protocol.subgroup_reporting_policy.enabled),
+                        subgroup_dimensions=list(protocol.subgroup_reporting_policy.subgroup_dimensions),
+                        subgroup_min_samples_per_group=int(
+                            protocol.subgroup_reporting_policy.min_samples_per_group
+                        ),
                         framework_mode=FrameworkMode.CONFIRMATORY.value,
                         canonical_run=True,
-                        artifact_requirements=list(
-                            protocol.artifact_contract.required_run_artifacts
-                        ),
+                        artifact_requirements=list(protocol.artifact_contract.required_run_artifacts),
                         protocol_id=protocol.protocol_id,
                         protocol_version=protocol.protocol_version,
                         protocol_schema_version=protocol.protocol_schema_version,
@@ -283,19 +287,29 @@ def compile_protocol(
                         cv_mode=suite.split_mode,
                         train_subject=pair.train_subject,
                         test_subject=pair.test_subject,
-                        seed=suite_seed,
                         filter_task=suite.filter_task,
                         filter_modality=suite.filter_modality,
-                        primary_metric=protocol.scientific_contract.primary_metric,
+                        seed=suite_seed,
+                        primary_metric=protocol.metric_policy.primary_metric,
                         controls=controls,
                         interpretability_enabled=_interpretability_enabled(
                             protocol, suite, model_name
                         ),
+                        methodology_policy_name=protocol.methodology_policy.policy_name,
+                        class_weight_policy=protocol.methodology_policy.class_weight_policy,
+                        tuning_enabled=bool(protocol.methodology_policy.tuning_enabled),
+                        tuning_search_space_id=protocol.methodology_policy.tuning_search_space_id,
+                        tuning_search_space_version=protocol.methodology_policy.tuning_search_space_version,
+                        tuning_inner_cv_scheme=protocol.methodology_policy.inner_cv_scheme,
+                        tuning_inner_group_field=protocol.methodology_policy.inner_group_field,
+                        subgroup_reporting_enabled=bool(protocol.subgroup_reporting_policy.enabled),
+                        subgroup_dimensions=list(protocol.subgroup_reporting_policy.subgroup_dimensions),
+                        subgroup_min_samples_per_group=int(
+                            protocol.subgroup_reporting_policy.min_samples_per_group
+                        ),
                         framework_mode=FrameworkMode.CONFIRMATORY.value,
                         canonical_run=True,
-                        artifact_requirements=list(
-                            protocol.artifact_contract.required_run_artifacts
-                        ),
+                        artifact_requirements=list(protocol.artifact_contract.required_run_artifacts),
                         protocol_id=protocol.protocol_id,
                         protocol_version=protocol.protocol_version,
                         protocol_schema_version=protocol.protocol_schema_version,
@@ -307,12 +321,19 @@ def compile_protocol(
     if not runs:
         raise ValueError("Protocol compilation produced zero concrete runs.")
 
+    if protocol.methodology_policy.policy_name == MethodologyPolicyName.GROUPED_NESTED_TUNING:
+        if all(run.model == "dummy" for run in runs):
+            raise ValueError("grouped_nested_tuning requires at least one non-dummy model run.")
+
     return CompiledProtocolManifest(
         framework_mode=FrameworkMode.CONFIRMATORY.value,
         protocol_schema_version=protocol.protocol_schema_version,
         protocol_id=protocol.protocol_id,
         protocol_version=protocol.protocol_version,
         status=protocol.status,
+        methodology_policy=protocol.methodology_policy,
+        metric_policy=protocol.metric_policy,
+        subgroup_reporting_policy=protocol.subgroup_reporting_policy,
         suite_ids=selected_suite_ids,
         runs=runs,
         claim_to_run_map=claim_to_run_map,

@@ -72,11 +72,31 @@ class SegmentExecutionRequest:
     fold_splits_path: Path
     predictions_path: Path
     metrics_path: Path
+    subgroup_metrics_json_path: Path
+    subgroup_metrics_csv_path: Path
+    tuning_summary_path: Path
+    tuning_best_params_path: Path
     spatial_report_path: Path
     interpretability_summary_path: Path
     interpretability_fold_artifacts_path: Path
     primary_metric_name: str = "balanced_accuracy"
     permutation_metric_name: str | None = None
+    methodology_policy_name: str = "fixed_baselines_only"
+    class_weight_policy: str = "none"
+    tuning_enabled: bool = False
+    tuning_search_space_id: str | None = None
+    tuning_search_space_version: str | None = None
+    tuning_inner_cv_scheme: str | None = None
+    tuning_inner_group_field: str | None = None
+    subgroup_reporting_enabled: bool = True
+    subgroup_dimensions: tuple[str, ...] = (
+        "label",
+        "task",
+        "modality",
+        "session",
+        "subject",
+    )
+    subgroup_min_samples_per_group: int = 1
     interpretability_enabled_override: bool | None = None
     start_section: str | SectionName | None = None
     end_section: str | SectionName | None = None
@@ -349,6 +369,16 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
                     train_subject=request.train_subject,
                     test_subject=request.test_subject,
                     seed=request.seed,
+                    primary_metric_name=request.primary_metric_name,
+                    methodology_policy_name=request.methodology_policy_name,
+                    class_weight_policy=request.class_weight_policy,
+                    tuning_enabled=request.tuning_enabled,
+                    tuning_search_space_id=request.tuning_search_space_id,
+                    tuning_search_space_version=request.tuning_search_space_version,
+                    tuning_inner_cv_scheme=request.tuning_inner_cv_scheme,
+                    tuning_inner_group_field=request.tuning_inner_group_field,
+                    tuning_summary_path=request.tuning_summary_path,
+                    tuning_best_params_path=request.tuning_best_params_path,
                     interpretability_enabled=request.interpretability_enabled_override,
                     run_id=request.run_id,
                     config_filename=request.config_filename,
@@ -459,6 +489,14 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
                     n_permutations=request.n_permutations,
                     primary_metric_name=request.primary_metric_name,
                     permutation_metric_name=request.permutation_metric_name,
+                    methodology_policy_name=request.methodology_policy_name,
+                    subgroup_reporting_enabled=request.subgroup_reporting_enabled,
+                    subgroup_dimensions=list(request.subgroup_dimensions),
+                    subgroup_min_samples_per_group=request.subgroup_min_samples_per_group,
+                    subgroup_metrics_json_path=request.subgroup_metrics_json_path,
+                    subgroup_metrics_csv_path=request.subgroup_metrics_csv_path,
+                    tuning_summary_path=request.tuning_summary_path,
+                    tuning_best_params_path=request.tuning_best_params_path,
                     spatial_compatibility=spatial_compatibility,
                     spatial_report_path=request.spatial_report_path,
                     interpretability_summary=interpretability_summary,

@@ -1,11 +1,11 @@
 {
   "protocol_schema_version": "thesis-protocol-v1",
   "framework_mode": "confirmatory",
-  "protocol_id": "thesis-canonical",
+  "protocol_id": "thesis-canonical-nested",
   "protocol_version": "1.0.0",
   "status": "locked",
-  "description": "Canonical thesis protocol for official confirmatory runs. This file is the single source of truth for thesis-critical settings.",
-  "notes": "Official thesis runs must be executed via thesisml-run-protocol using this protocol.",
+  "description": "Canonical confirmatory protocol variant using grouped nested tuning under the same scientific contract.",
+  "notes": "This protocol demonstrates the grouped_nested_tuning methodology policy in the confirmatory path.",
   "scientific_contract": {
     "sample_unit": "beta_event",
     "target": "coarse_affect",
@@ -27,18 +27,24 @@
     "transfer_constraints": "Directional transfer pairs are evaluated separately and train_subject/test_subject must differ."
   },
   "model_policy": {
-    "selection_strategy": "fixed_baselines",
+    "selection_strategy": "nested_tuned",
     "models": [
-      "ridge"
+      "ridge",
+      "logreg",
+      "linearsvc"
     ],
-    "tuning_enabled": false,
-    "nested_grouped_cv": false,
+    "tuning_enabled": true,
+    "nested_grouped_cv": true,
     "class_weight_policy": "none"
   },
   "methodology_policy": {
-    "policy_name": "fixed_baselines_only",
+    "policy_name": "grouped_nested_tuning",
     "class_weight_policy": "none",
-    "tuning_enabled": false
+    "tuning_enabled": true,
+    "inner_cv_scheme": "grouped_leave_one_group_out",
+    "inner_group_field": "session",
+    "tuning_search_space_id": "linear-grouped-nested-v1",
+    "tuning_search_space_version": "1.0.0"
   },
   "metric_policy": {
     "primary_metric": "balanced_accuracy",
@@ -83,7 +89,9 @@
       "within_subject_loso_session"
     ],
     "models": [
-      "ridge"
+      "ridge",
+      "logreg",
+      "linearsvc"
     ],
     "supporting_evidence_only": true
   },

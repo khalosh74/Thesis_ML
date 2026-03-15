@@ -1,6 +1,22 @@
 """Central configuration helpers for paths and defaults."""
 
 from .framework_mode import FrameworkMode, coerce_framework_mode
+from .methodology import (
+    ALLOWED_SUBGROUP_DIMENSIONS,
+    ClassWeightPolicy,
+    ComparisonDecisionPolicy,
+    MethodologyPolicy,
+    MethodologyPolicyName,
+    MetricPolicy,
+    SubgroupReportingPolicy,
+)
+from .metric_policy import (
+    SUPPORTED_CLASSIFICATION_METRICS,
+    classification_metric_score,
+    metric_bundle,
+    metric_scorer,
+    validate_metric_name,
+)
 from .paths import (
     DEFAULT_BASELINE_MODELS_DIR,
     DEFAULT_BASELINE_REPORTS_DIR,
@@ -15,6 +31,7 @@ from .paths import (
     DEFAULT_PROTOCOL_REPORTS_ROOT,
     DEFAULT_REPORTS_ROOT,
     DEFAULT_SPM_GLM_EXTRACTION_OUT,
+    DEFAULT_THESIS_NESTED_PROTOCOL_PATH,
     DEFAULT_WORKBOOK_OUTPUT_DIR,
     DEFAULT_WORKBOOK_TEMPLATE,
     OUTPUTS_ROOT,
@@ -63,6 +80,7 @@ __all__ = [
     "DEFAULT_BASELINE_REPORTS_DIR",
     "DEFAULT_BASELINE_MODELS_DIR",
     "DEFAULT_SPM_GLM_EXTRACTION_OUT",
+    "DEFAULT_THESIS_NESTED_PROTOCOL_PATH",
     "DEFAULT_WORKBOOK_OUTPUT_DIR",
     "ensure_default_output_dirs",
     "WORKBOOK_SCHEMA_VERSION",
@@ -85,4 +103,16 @@ __all__ = [
     "WORKBOOK_SCHEMA_METADATA_ROWS",
     "FrameworkMode",
     "coerce_framework_mode",
+    "MethodologyPolicyName",
+    "ClassWeightPolicy",
+    "MethodologyPolicy",
+    "MetricPolicy",
+    "SubgroupReportingPolicy",
+    "ComparisonDecisionPolicy",
+    "ALLOWED_SUBGROUP_DIMENSIONS",
+    "SUPPORTED_CLASSIFICATION_METRICS",
+    "validate_metric_name",
+    "classification_metric_score",
+    "metric_bundle",
+    "metric_scorer",
 ]

@@ -1,11 +1,22 @@
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from Thesis_ML.config.framework_mode import FrameworkMode
+from Thesis_ML.config.methodology import (
+    ClassWeightPolicy,
+    MethodologyPolicy,
+    MethodologyPolicyName,
+    MetricPolicy,
+    SubgroupReportingPolicy,
+)
+from Thesis_ML.config.metric_policy import (
+    SUPPORTED_CLASSIFICATION_METRICS,
+    validate_metric_name,
+)
 from Thesis_ML.config.schema_versions import (
     SUPPORTED_THESIS_PROTOCOL_SCHEMA_VERSIONS,
     THESIS_PROTOCOL_SCHEMA_VERSION,
@@ -13,7 +24,7 @@ from Thesis_ML.config.schema_versions import (
 from Thesis_ML.experiments.model_factory import ALL_MODEL_NAMES
 
 SUPPORTED_CV_MODES = frozenset({"within_subject_loso_session", "frozen_cross_person_transfer"})
-SUPPORTED_PRIMARY_METRICS = frozenset({"balanced_accuracy", "macro_f1", "accuracy"})
+SUPPORTED_PRIMARY_METRICS = SUPPORTED_CLASSIFICATION_METRICS
 REQUIRED_PROTOCOL_ARTIFACTS = (
     "protocol.json",
     "compiled_protocol_manifest.json",
@@ -28,6 +39,10 @@ REQUIRED_RUN_ARTIFACTS_BASELINE = (
     "fold_metrics.csv",
     "fold_splits.csv",
     "predictions.csv",
+    "subgroup_metrics.json",
+    "subgroup_metrics.csv",
+    "tuning_summary.json",
+    "best_params_per_fold.csv",
     "spatial_compatibility_report.json",
     "interpretability_summary.json",
 )
@@ -63,11 +78,6 @@ class TransferPairSource(StrEnum):
 class ModelSelectionStrategy(StrEnum):
     FIXED_BASELINES = "fixed_baselines"
     NESTED_TUNED = "nested_tuned"
-
-
-class ClassWeightPolicy(StrEnum):
-    NONE = "none"
-    BALANCED = "balanced"
 
 
 class SensitivityRole(StrEnum):
@@ -107,18 +117,9 @@ class ScientificContract(_ProtocolModel):
 
     @model_validator(mode="after")
     def _validate_metrics(self) -> ScientificContract:
-        if self.primary_metric not in SUPPORTED_PRIMARY_METRICS:
-            allowed = ", ".join(sorted(SUPPORTED_PRIMARY_METRICS))
-            raise ValueError(
-                f"Unsupported scientific_contract.primary_metric '{self.primary_metric}'. "
-                f"Allowed values: {allowed}."
-            )
+        validate_metric_name(self.primary_metric)
         for metric in self.secondary_metrics:
-            if metric not in SUPPORTED_PRIMARY_METRICS:
-                allowed = ", ".join(sorted(SUPPORTED_PRIMARY_METRICS))
-                raise ValueError(
-                    f"Unsupported secondary metric '{metric}'. Allowed values: {allowed}."
-                )
+            validate_metric_name(metric)
         if len(set(self.secondary_metrics)) != len(self.secondary_metrics):
             raise ValueError("scientific_contract.secondary_metrics must be unique.")
         return self
@@ -154,10 +155,10 @@ class ModelPolicy(_ProtocolModel):
             and self.tuning_enabled
         ):
             raise ValueError(
-                "model_policy.selection_strategy='fixed_baselines' forbids tuning_enabled=True."
+                "model_policy.selection_strategy='fixed_baselines' forbids tuning_enabled=true."
             )
         if self.nested_grouped_cv and not self.tuning_enabled:
-            raise ValueError("model_policy.nested_grouped_cv=True requires tuning_enabled=True.")
+            raise ValueError("model_policy.nested_grouped_cv=true requires tuning_enabled=true.")
         return self
 
 
@@ -175,12 +176,8 @@ class PermutationPolicy(_ProtocolModel):
 
     @model_validator(mode="after")
     def _validate_permutation_policy(self) -> PermutationPolicy:
-        if self.metric is not None and self.metric not in SUPPORTED_PRIMARY_METRICS:
-            allowed = ", ".join(sorted(SUPPORTED_PRIMARY_METRICS))
-            raise ValueError(
-                f"Unsupported control_policy.permutation.metric '{self.metric}'. "
-                f"Allowed values: {allowed}."
-            )
+        if self.metric is not None:
+            validate_metric_name(self.metric)
         if self.enabled and int(self.n_permutations) <= 0:
             raise ValueError(
                 "control_policy.permutation.n_permutations must be > 0 when permutations are enabled."
@@ -249,6 +246,10 @@ class ArtifactContract(_ProtocolModel):
         default_factory=lambda: [
             "framework_mode",
             "canonical_run",
+            "methodology_policy_name",
+            "class_weight_policy",
+            "tuning_enabled",
+            "primary_metric_name",
             "protocol_id",
             "protocol_version",
             "protocol_schema_version",
@@ -288,6 +289,10 @@ class ArtifactContract(_ProtocolModel):
         for key in (
             "framework_mode",
             "canonical_run",
+            "methodology_policy_name",
+            "class_weight_policy",
+            "tuning_enabled",
+            "primary_metric_name",
             "protocol_id",
             "protocol_version",
             "suite_id",
@@ -371,6 +376,11 @@ class ThesisProtocol(_ProtocolModel):
     scientific_contract: ScientificContract
     split_policy: SplitPolicy
     model_policy: ModelPolicy
+    methodology_policy: MethodologyPolicy
+    metric_policy: MetricPolicy = Field(default_factory=MetricPolicy)
+    subgroup_reporting_policy: SubgroupReportingPolicy = Field(
+        default_factory=SubgroupReportingPolicy
+    )
     control_policy: ControlPolicy
     interpretability_policy: InterpretabilityPolicy
     sensitivity_policy: SensitivityPolicy
@@ -385,6 +395,40 @@ class ThesisProtocol(_ProtocolModel):
                 f"Unsupported protocol_schema_version '{self.protocol_schema_version}'. "
                 f"Allowed values: {allowed}."
             )
+
+        if self.metric_policy.primary_metric != self.scientific_contract.primary_metric:
+            raise ValueError(
+                "metric_policy.primary_metric must match scientific_contract.primary_metric."
+            )
+        if set(self.metric_policy.secondary_metrics) != set(
+            self.scientific_contract.secondary_metrics
+        ):
+            raise ValueError(
+                "metric_policy.secondary_metrics must match scientific_contract.secondary_metrics."
+            )
+
+        if self.model_policy.class_weight_policy != self.methodology_policy.class_weight_policy:
+            raise ValueError(
+                "model_policy.class_weight_policy must match methodology_policy.class_weight_policy."
+            )
+        if self.methodology_policy.policy_name == MethodologyPolicyName.FIXED_BASELINES_ONLY:
+            if self.model_policy.selection_strategy != ModelSelectionStrategy.FIXED_BASELINES:
+                raise ValueError(
+                    "fixed_baselines_only requires model_policy.selection_strategy='fixed_baselines'."
+                )
+            if self.model_policy.tuning_enabled:
+                raise ValueError("fixed_baselines_only requires model_policy.tuning_enabled=false.")
+            if self.model_policy.nested_grouped_cv:
+                raise ValueError("fixed_baselines_only requires model_policy.nested_grouped_cv=false.")
+        if self.methodology_policy.policy_name == MethodologyPolicyName.GROUPED_NESTED_TUNING:
+            if self.model_policy.selection_strategy != ModelSelectionStrategy.NESTED_TUNED:
+                raise ValueError(
+                    "grouped_nested_tuning requires model_policy.selection_strategy='nested_tuned'."
+                )
+            if not self.model_policy.tuning_enabled:
+                raise ValueError("grouped_nested_tuning requires model_policy.tuning_enabled=true.")
+            if not self.model_policy.nested_grouped_cv:
+                raise ValueError("grouped_nested_tuning requires model_policy.nested_grouped_cv=true.")
 
         suite_ids = [suite.suite_id for suite in self.official_run_suites]
         if len(set(suite_ids)) != len(suite_ids):
@@ -411,15 +455,15 @@ class ThesisProtocol(_ProtocolModel):
                 raise ValueError(f"sensitivity_policy references unknown suite '{listed_suite}'.")
 
         permutation_metric = (
-            self.control_policy.permutation.metric or self.scientific_contract.primary_metric
+            self.control_policy.permutation.metric or self.metric_policy.primary_metric
         )
         if (
             self.control_policy.permutation.enabled
-            and permutation_metric != self.scientific_contract.primary_metric
+            and permutation_metric != self.metric_policy.primary_metric
             and not self.control_policy.permutation.metric_conflict_justification
         ):
             raise ValueError(
-                "control_policy.permutation.metric conflicts with scientific_contract.primary_metric "
+                "control_policy.permutation.metric conflicts with metric_policy.primary_metric "
                 "without metric_conflict_justification."
             )
 
@@ -427,7 +471,7 @@ class ThesisProtocol(_ProtocolModel):
             suite_models = suite.models if suite.models is not None else self.model_policy.models
             if suite.controls_required and suite.suite_type != SuiteType.CONTROL:
                 raise ValueError(
-                    f"Suite '{suite.suite_id}' sets controls_required=True but suite_type is not 'control'."
+                    f"Suite '{suite.suite_id}' sets controls_required=true but suite_type is not 'control'."
                 )
             if suite.interpretability_requested:
                 if not self.interpretability_policy.enabled:
@@ -476,6 +520,7 @@ class CompiledRunControls(_ProtocolModel):
         if self.permutation_enabled:
             if self.permutation_metric is None:
                 raise ValueError("CompiledRunControls.permutation_metric is required when enabled.")
+            validate_metric_name(self.permutation_metric)
             if int(self.n_permutations) <= 0:
                 raise ValueError("CompiledRunControls.n_permutations must be > 0 when enabled.")
         return self
@@ -497,6 +542,18 @@ class CompiledRunSpec(_ProtocolModel):
     primary_metric: str = "balanced_accuracy"
     controls: CompiledRunControls = Field(default_factory=CompiledRunControls)
     interpretability_enabled: bool = False
+    methodology_policy_name: MethodologyPolicyName = MethodologyPolicyName.FIXED_BASELINES_ONLY
+    class_weight_policy: ClassWeightPolicy = ClassWeightPolicy.NONE
+    tuning_enabled: bool = False
+    tuning_search_space_id: str | None = None
+    tuning_search_space_version: str | None = None
+    tuning_inner_cv_scheme: Literal["grouped_leave_one_group_out"] | None = None
+    tuning_inner_group_field: str | None = None
+    subgroup_reporting_enabled: bool = True
+    subgroup_dimensions: list[str] = Field(
+        default_factory=lambda: ["label", "task", "modality", "session", "subject"]
+    )
+    subgroup_min_samples_per_group: int = 1
     framework_mode: Literal["confirmatory"] = FrameworkMode.CONFIRMATORY.value
     canonical_run: bool = True
     artifact_requirements: list[str] = Field(
@@ -537,12 +594,21 @@ class CompiledRunSpec(_ProtocolModel):
                 )
         if int(self.seed) < 0:
             raise ValueError("CompiledRunSpec.seed must be >= 0.")
-        if self.primary_metric not in SUPPORTED_PRIMARY_METRICS:
-            allowed = ", ".join(sorted(SUPPORTED_PRIMARY_METRICS))
-            raise ValueError(
-                f"CompiledRunSpec '{self.run_id}' primary_metric '{self.primary_metric}' is unsupported. "
-                f"Allowed values: {allowed}."
-            )
+        validate_metric_name(self.primary_metric)
+        MethodologyPolicy(
+            policy_name=self.methodology_policy_name,
+            class_weight_policy=self.class_weight_policy,
+            tuning_enabled=self.tuning_enabled,
+            inner_cv_scheme=self.tuning_inner_cv_scheme,
+            inner_group_field=self.tuning_inner_group_field,
+            tuning_search_space_id=self.tuning_search_space_id,
+            tuning_search_space_version=self.tuning_search_space_version,
+        )
+        SubgroupReportingPolicy(
+            enabled=self.subgroup_reporting_enabled,
+            subgroup_dimensions=self.subgroup_dimensions,
+            min_samples_per_group=self.subgroup_min_samples_per_group,
+        )
         if self.framework_mode != FrameworkMode.CONFIRMATORY.value:
             raise ValueError(
                 f"CompiledRunSpec '{self.run_id}' must use framework_mode='confirmatory'."
@@ -561,6 +627,9 @@ class CompiledProtocolManifest(_ProtocolModel):
     protocol_id: str = Field(min_length=1)
     protocol_version: str = Field(min_length=1)
     status: ProtocolStatus
+    methodology_policy: MethodologyPolicy
+    metric_policy: MetricPolicy
+    subgroup_reporting_policy: SubgroupReportingPolicy
     suite_ids: list[str] = Field(min_length=1)
     runs: list[CompiledRunSpec] = Field(min_length=1)
     claim_to_run_map: dict[str, list[str]]
@@ -597,7 +666,7 @@ class ProtocolRunResult(_ProtocolModel):
     metrics_path: str | None = None
     config_path: str | None = None
     error: str | None = None
-    metrics: dict[str, float | int | str | bool | None] | None = None
+    metrics: dict[str, float | int | str | bool | None | dict[str, Any]] | None = None
 
     @model_validator(mode="after")
     def _validate_result(self) -> ProtocolRunResult:

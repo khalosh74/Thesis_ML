@@ -90,6 +90,11 @@ Locked comparison source of truth:
 
 For confirmatory and comparison runs, parameters such as target, split mode, model selection,
 metric policy, controls, and interpretability policy are loaded from JSON contracts, not ad hoc CLI flags.
+Each comparison/protocol contract must choose exactly one methodology policy:
+- `fixed_baselines_only`
+- `grouped_nested_tuning`
+Thesis-facing active contracts do not include ROI-switch, dimensionality-reduction, or scaling-policy
+variation dimensions; those remain out of scope unless explicitly introduced as new locked specs/protocols.
 
 ## Artifacts by mode
 
@@ -99,6 +104,10 @@ Run-level artifacts (all modes):
 - `fold_metrics.csv`
 - `fold_splits.csv`
 - `predictions.csv`
+- `subgroup_metrics.json`
+- `subgroup_metrics.csv`
+- `tuning_summary.json`
+- `best_params_per_fold.csv`
 - `spatial_compatibility_report.json`
 - `interpretability_summary.json`
 
@@ -106,6 +115,7 @@ Locked comparison execution artifacts:
 - `comparison.json`
 - `compiled_comparison_manifest.json`
 - `comparison_summary.json`
+- `comparison_decision.json`
 - `execution_status.json`
 - `report_index.csv`
 

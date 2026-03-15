@@ -83,6 +83,15 @@ thesisml-run-comparison \
   --reports-root outputs/reports/comparisons
 ```
 
+Grouped nested comparison execution:
+
+```bash
+thesisml-run-comparison \
+  --comparison configs/comparisons/model_family_grouped_nested_comparison_v1.json \
+  --variant ridge \
+  --reports-root outputs/reports/comparisons
+```
+
 Confirmatory canonical protocol run:
 
 ```bash
@@ -106,6 +115,9 @@ Policy note:
 - exploratory mode is flexible and not confirmatory evidence.
 - locked comparison mode allows only declared variants from comparison specs.
 - confirmatory mode must load thesis-critical settings from protocol JSON, not ad hoc CLI flags.
+- comparison/protocol specs must declare one methodology policy:
+  `fixed_baselines_only` or `grouped_nested_tuning`.
+- locked comparison outputs include `comparison_decision.json` for machine-readable winner/inconclusive/invalid decisions.
 
 ## 4) Rerun / resume behavior
 

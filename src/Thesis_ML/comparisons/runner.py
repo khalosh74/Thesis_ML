@@ -28,6 +28,16 @@ def _comparison_context_payload(spec: CompiledComparisonRunSpec) -> dict[str, An
         "comparison_version": spec.comparison_version,
         "variant_id": spec.variant_id,
         "claim_ids": list(spec.claim_ids),
+        "methodology_policy_name": spec.methodology_policy_name.value,
+        "class_weight_policy": spec.class_weight_policy.value,
+        "tuning_enabled": bool(spec.tuning_enabled),
+        "tuning_search_space_id": spec.tuning_search_space_id,
+        "tuning_search_space_version": spec.tuning_search_space_version,
+        "tuning_inner_cv_scheme": spec.tuning_inner_cv_scheme,
+        "tuning_inner_group_field": spec.tuning_inner_group_field,
+        "subgroup_reporting_enabled": bool(spec.subgroup_reporting_enabled),
+        "subgroup_dimensions": list(spec.subgroup_dimensions),
+        "subgroup_min_samples_per_group": int(spec.subgroup_min_samples_per_group),
         "artifact_requirements": list(spec.artifact_requirements),
         "primary_metric": spec.primary_metric,
         "controls": spec.controls.model_dump(mode="json"),
@@ -40,12 +50,27 @@ def _to_run_result_success(
     run_payload: dict[str, Any],
 ) -> ComparisonRunResult:
     metrics_payload = run_payload.get("metrics", {}) if isinstance(run_payload, dict) else {}
-    metrics: dict[str, float | int | str | bool | None] = {}
+    metrics: dict[str, float | int | str | bool | None | dict[str, Any]] = {}
     if isinstance(metrics_payload, dict):
-        for key in ("balanced_accuracy", "macro_f1", "accuracy", "n_folds"):
+        for key in (
+            "balanced_accuracy",
+            "macro_f1",
+            "accuracy",
+            "n_folds",
+            "primary_metric_name",
+            "primary_metric_value",
+        ):
             value = metrics_payload.get(key)
             if isinstance(value, (float, int, str, bool)) or value is None:
                 metrics[key] = value
+        permutation_payload = metrics_payload.get("permutation_test")
+        if isinstance(permutation_payload, dict):
+            p_value = permutation_payload.get("p_value")
+            if isinstance(p_value, (float, int)):
+                metrics["permutation_p_value"] = float(p_value)
+            metric_name = permutation_payload.get("metric_name")
+            if isinstance(metric_name, str):
+                metrics["permutation_metric_name"] = metric_name
 
     return ComparisonRunResult(
         run_id=spec.run_id,
@@ -117,6 +142,16 @@ def execute_compiled_comparison(
                 framework_mode=FrameworkMode.LOCKED_COMPARISON,
                 primary_metric_name=spec.primary_metric,
                 permutation_metric_name=spec.controls.permutation_metric,
+                methodology_policy_name=spec.methodology_policy_name.value,
+                class_weight_policy=spec.class_weight_policy.value,
+                tuning_enabled=bool(spec.tuning_enabled),
+                tuning_search_space_id=spec.tuning_search_space_id,
+                tuning_search_space_version=spec.tuning_search_space_version,
+                tuning_inner_cv_scheme=spec.tuning_inner_cv_scheme,
+                tuning_inner_group_field=spec.tuning_inner_group_field,
+                subgroup_reporting_enabled=bool(spec.subgroup_reporting_enabled),
+                subgroup_dimensions=list(spec.subgroup_dimensions),
+                subgroup_min_samples_per_group=int(spec.subgroup_min_samples_per_group),
                 interpretability_enabled_override=bool(spec.interpretability_enabled),
                 comparison_context=_comparison_context_payload(spec),
             )

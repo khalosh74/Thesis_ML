@@ -12,7 +12,7 @@ def _repo_root() -> Path:
     return Path(__file__).resolve().parents[2]
 
 
-def test_comparison_cli_dry_run_acceptance(
+def test_grouped_nested_comparison_cli_dry_run_acceptance(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -22,7 +22,9 @@ def test_comparison_cli_dry_run_acceptance(
     data_root = tmp_path / "Data"
     cache_dir = tmp_path / "cache"
     reports_root = tmp_path / "reports" / "comparisons"
-    comparison_path = _repo_root() / "configs" / "comparisons" / "model_family_comparison_v1.json"
+    comparison_path = (
+        _repo_root() / "configs" / "comparisons" / "model_family_grouped_nested_comparison_v1.json"
+    )
 
     monkeypatch.setenv("THESIS_ML_INDEX_CSV", str(index_csv))
     monkeypatch.setenv("THESIS_ML_DATA_ROOT", str(data_root))
@@ -32,7 +34,8 @@ def test_comparison_cli_dry_run_acceptance(
         [
             "--comparison",
             str(comparison_path),
-            "--all-variants",
+            "--variant",
+            "ridge",
             "--reports-root",
             str(reports_root),
             "--dry-run",
@@ -40,7 +43,7 @@ def test_comparison_cli_dry_run_acceptance(
     )
     assert exit_code == 0
 
-    comparison_output_dir = reports_root / "comparison_runs" / "model-family-within-subject__1.0.0"
+    comparison_output_dir = reports_root / "comparison_runs" / "model-family-grouped-nested__1.0.0"
     assert (comparison_output_dir / "comparison.json").exists()
     assert (comparison_output_dir / "compiled_comparison_manifest.json").exists()
     assert (comparison_output_dir / "comparison_summary.json").exists()

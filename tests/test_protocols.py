@@ -22,6 +22,10 @@ def _canonical_protocol_path() -> Path:
     return _repo_root() / "configs" / "protocols" / "thesis_canonical_v1.json"
 
 
+def _nested_protocol_path() -> Path:
+    return _repo_root() / "configs" / "protocols" / "thesis_canonical_nested_v1.json"
+
+
 def _write_nifti(path: Path, data: np.ndarray) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     image = nib.Nifti1Image(data.astype(np.float32), affine=np.eye(4, dtype=np.float64))
@@ -82,6 +86,9 @@ def test_load_canonical_protocol_validates() -> None:
     assert protocol.framework_mode == "confirmatory"
     assert protocol.scientific_contract.target == "coarse_affect"
     assert protocol.scientific_contract.primary_metric == "balanced_accuracy"
+    assert protocol.methodology_policy.policy_name.value == "fixed_baselines_only"
+    assert protocol.metric_policy.primary_metric == "balanced_accuracy"
+    assert protocol.subgroup_reporting_policy.enabled is True
     assert {suite.suite_id for suite in protocol.official_run_suites} == {
         "primary_within_subject",
         "secondary_cross_person_transfer",
@@ -99,6 +106,15 @@ def test_load_protocol_rejects_invalid_schema_version(tmp_path: Path) -> None:
         load_protocol(protocol_path)
 
 
+def test_protocol_requires_explicit_methodology_policy(tmp_path: Path) -> None:
+    payload = json.loads(_canonical_protocol_path().read_text(encoding="utf-8"))
+    payload.pop("methodology_policy", None)
+    protocol_path = tmp_path / "missing_methodology_protocol.json"
+    protocol_path.write_text(f"{json.dumps(payload, indent=2)}\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="methodology_policy"):
+        load_protocol(protocol_path)
+
+
 def test_protocol_validation_rejects_permutation_metric_conflict_without_justification(
     tmp_path: Path,
 ) -> None:
@@ -108,7 +124,7 @@ def test_protocol_validation_rejects_permutation_metric_conflict_without_justifi
     protocol_path = tmp_path / "invalid_metric_conflict_protocol.json"
     protocol_path.write_text(f"{json.dumps(payload, indent=2)}\n", encoding="utf-8")
 
-    with pytest.raises(ValueError, match="metric conflicts with scientific_contract.primary_metric"):
+    with pytest.raises(ValueError, match="metric conflicts with metric_policy.primary_metric"):
         load_protocol(protocol_path)
 
 
@@ -203,6 +219,8 @@ def test_protocol_run_records_metadata_in_run_artifacts(
     assert config["protocol_id"] == protocol.protocol_id
     assert config["protocol_version"] == protocol.protocol_version
     assert config["suite_id"] == "primary_within_subject"
+    assert config["methodology_policy_name"] == "fixed_baselines_only"
+    assert config["subgroup_reporting_enabled"] is True
     assert isinstance(config["claim_ids"], list) and config["claim_ids"]
 
     assert metrics["canonical_run"] is True
@@ -210,7 +228,13 @@ def test_protocol_run_records_metadata_in_run_artifacts(
     assert metrics["protocol_id"] == protocol.protocol_id
     assert metrics["protocol_version"] == protocol.protocol_version
     assert metrics["suite_id"] == "primary_within_subject"
+    assert metrics["methodology_policy_name"] == "fixed_baselines_only"
+    assert "subgroup_reporting" in metrics
     assert isinstance(metrics["claim_ids"], list) and metrics["claim_ids"]
+    assert Path(str(config["subgroup_metrics_json_path"])).exists()
+    assert Path(str(config["subgroup_metrics_csv_path"])).exists()
+    assert Path(str(config["tuning_summary_path"])).exists()
+    assert Path(str(config["tuning_best_params_path"])).exists()
 
 
 def test_permutation_control_uses_primary_metric(
@@ -241,6 +265,8 @@ def test_permutation_control_uses_primary_metric(
         assert permutation["observed_metric"] == metrics["primary_metric_value"]
         assert "permutation_metric_mean" in permutation
         assert "permutation_metric_std" in permutation
+        assert "observed_score" in permutation
+        assert "p_value" in permutation
 
 
 def test_protocol_level_report_index_is_emitted_for_completed_runs(
@@ -263,3 +289,24 @@ def test_protocol_level_report_index_is_emitted_for_completed_runs(
     assert len(report_index) == 2
     assert set(report_index["suite_id"].astype(str)) == {"secondary_cross_person_transfer"}
     assert set(report_index["status"].astype(str)) == {"completed"}
+
+
+def test_nested_protocol_supports_grouped_nested_methodology(
+    protocol_dataset: dict[str, Path],
+) -> None:
+    protocol = load_protocol(_nested_protocol_path())
+    assert protocol.methodology_policy.policy_name.value == "grouped_nested_tuning"
+    assert protocol.model_policy.selection_strategy.value == "nested_tuned"
+    assert protocol.model_policy.tuning_enabled is True
+
+    result = compile_and_run_protocol(
+        protocol=protocol,
+        index_csv=protocol_dataset["index_csv"],
+        data_root=protocol_dataset["data_root"],
+        cache_dir=protocol_dataset["cache_dir"],
+        reports_root=protocol_dataset["reports_root"],
+        suite_ids=["primary_within_subject"],
+        dry_run=True,
+    )
+    assert result["n_failed"] == 0
+    assert result["n_planned"] > 0

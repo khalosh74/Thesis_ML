@@ -9,7 +9,7 @@ import platform
 import subprocess
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal, cast
 
 import nibabel as nib
 import numpy as np
@@ -26,6 +26,13 @@ from Thesis_ML.artifacts.registry import (
     register_artifact,
 )
 from Thesis_ML.config.framework_mode import FrameworkMode, coerce_framework_mode
+from Thesis_ML.config.methodology import (
+    ClassWeightPolicy,
+    MethodologyPolicy,
+    MethodologyPolicyName,
+    SubgroupReportingPolicy,
+)
+from Thesis_ML.config.metric_policy import validate_metric_name
 from Thesis_ML.config.paths import DEFAULT_EXPERIMENT_REPORTS_ROOT
 from Thesis_ML.experiments.cache_loading import load_features_from_cache
 from Thesis_ML.experiments.execution_policy import (
@@ -44,6 +51,10 @@ from Thesis_ML.experiments.segment_execution import (
     execute_section_segment,
 )
 from Thesis_ML.experiments.spatial_validation import SPATIAL_AFFINE_ATOL
+from Thesis_ML.experiments.tuning_search_spaces import (
+    LINEAR_GROUPED_NESTED_SEARCH_SPACE_ID,
+    LINEAR_GROUPED_NESTED_SEARCH_SPACE_VERSION,
+)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -70,12 +81,20 @@ def _current_git_commit() -> str | None:
     return process.stdout.strip() or None
 
 
-def _make_model(name: str, seed: int) -> Any:
-    return make_model(name=name, seed=seed)
+def _make_model(name: str, seed: int, class_weight_policy: str = "none") -> Any:
+    return make_model(
+        name=name,
+        seed=seed,
+        class_weight_policy=class_weight_policy,
+    )
 
 
-def _build_pipeline(model_name: str, seed: int):
-    model = _make_model(name=model_name, seed=seed)
+def _build_pipeline(model_name: str, seed: int, class_weight_policy: str = "none"):
+    model = _make_model(
+        name=model_name,
+        seed=seed,
+        class_weight_policy=class_weight_policy,
+    )
     # fMRI voxel vectors are dense numeric arrays; centered scaling is appropriate.
     return Pipeline(
         steps=[
@@ -191,6 +210,12 @@ def _resolve_framework_context(
             "protocol_schema_version",
             "suite_id",
             "claim_ids",
+            "methodology_policy_name",
+            "class_weight_policy",
+            "tuning_enabled",
+            "subgroup_reporting_enabled",
+            "subgroup_dimensions",
+            "subgroup_min_samples_per_group",
         ]
         missing = [key for key in required_keys if key not in resolved_protocol_context]
         if missing:
@@ -221,6 +246,12 @@ def _resolve_framework_context(
             "comparison_id",
             "comparison_version",
             "variant_id",
+            "methodology_policy_name",
+            "class_weight_policy",
+            "tuning_enabled",
+            "subgroup_reporting_enabled",
+            "subgroup_dimensions",
+            "subgroup_min_samples_per_group",
         ]
         missing = [key for key in required_keys if key not in resolved_comparison_context]
         if missing:
@@ -236,6 +267,126 @@ def _resolve_framework_context(
                 "framework_mode='locked_comparison' requires comparison_context['framework_mode']='locked_comparison'."
             )
         return resolved_mode, False, {}, resolved_comparison_context
+
+
+def _resolve_methodology_runtime(
+    *,
+    framework_mode: FrameworkMode,
+    methodology_policy_name: str,
+    class_weight_policy: str,
+    tuning_enabled: bool,
+    tuning_search_space_id: str | None,
+    tuning_search_space_version: str | None,
+    tuning_inner_cv_scheme: str | None,
+    tuning_inner_group_field: str | None,
+    subgroup_reporting_enabled: bool,
+    subgroup_dimensions: list[str] | None,
+    subgroup_min_samples_per_group: int,
+    protocol_context: dict[str, Any],
+    comparison_context: dict[str, Any],
+) -> tuple[MethodologyPolicy, SubgroupReportingPolicy]:
+    source_context: dict[str, Any] = {}
+    if framework_mode == FrameworkMode.CONFIRMATORY:
+        source_context = dict(protocol_context)
+    if framework_mode == FrameworkMode.LOCKED_COMPARISON:
+        source_context = dict(comparison_context)
+
+    if framework_mode in {FrameworkMode.CONFIRMATORY, FrameworkMode.LOCKED_COMPARISON}:
+        required_context_keys = {
+            "methodology_policy_name",
+            "class_weight_policy",
+            "tuning_enabled",
+            "subgroup_reporting_enabled",
+            "subgroup_dimensions",
+            "subgroup_min_samples_per_group",
+        }
+        missing = [key for key in sorted(required_context_keys) if key not in source_context]
+        if missing:
+            raise ValueError(
+                "Official run context is missing methodology/subgroup keys: "
+                + ", ".join(missing)
+            )
+        mismatch_checks = {
+            "methodology_policy_name": str(methodology_policy_name),
+            "class_weight_policy": str(class_weight_policy),
+            "tuning_enabled": bool(tuning_enabled),
+        }
+        for key, local_value in mismatch_checks.items():
+            context_value = source_context.get(key)
+            if context_value is None:
+                continue
+            if key == "tuning_enabled":
+                if bool(context_value) != bool(local_value):
+                    raise ValueError(
+                        f"Illegal override for official run key '{key}'. "
+                        "Use protocol/comparison spec values only."
+                    )
+                continue
+            if str(context_value) != str(local_value):
+                raise ValueError(
+                    f"Illegal override for official run key '{key}'. "
+                    "Use protocol/comparison spec values only."
+                )
+
+    resolved_policy_name = str(
+        source_context.get("methodology_policy_name", methodology_policy_name)
+    )
+    resolved_class_weight_policy = str(
+        source_context.get("class_weight_policy", class_weight_policy)
+    )
+    resolved_tuning_enabled = bool(source_context.get("tuning_enabled", tuning_enabled))
+    resolved_tuning_space_id = source_context.get("tuning_search_space_id", tuning_search_space_id)
+    resolved_tuning_space_version = source_context.get(
+        "tuning_search_space_version", tuning_search_space_version
+    )
+    resolved_tuning_inner_cv_scheme = source_context.get(
+        "tuning_inner_cv_scheme", tuning_inner_cv_scheme
+    )
+    resolved_tuning_inner_group_field = source_context.get(
+        "tuning_inner_group_field", tuning_inner_group_field
+    )
+    resolved_subgroup_enabled = bool(
+        source_context.get("subgroup_reporting_enabled", subgroup_reporting_enabled)
+    )
+    resolved_subgroup_dimensions = source_context.get(
+        "subgroup_dimensions",
+        subgroup_dimensions
+        if subgroup_dimensions is not None
+        else ["label", "task", "modality", "session", "subject"],
+    )
+    resolved_subgroup_min_samples = int(
+        source_context.get("subgroup_min_samples_per_group", subgroup_min_samples_per_group)
+    )
+
+    resolved_inner_cv_scheme_literal: Literal["grouped_leave_one_group_out"] | None
+    if resolved_tuning_inner_cv_scheme is None:
+        resolved_inner_cv_scheme_literal = None
+    else:
+        normalized_inner_cv = str(resolved_tuning_inner_cv_scheme).strip()
+        if normalized_inner_cv != "grouped_leave_one_group_out":
+            raise ValueError(
+                "Unsupported tuning_inner_cv_scheme. "
+                "Allowed value: grouped_leave_one_group_out."
+            )
+        resolved_inner_cv_scheme_literal = cast(
+            Literal["grouped_leave_one_group_out"], normalized_inner_cv
+        )
+
+    methodology_policy = MethodologyPolicy(
+        policy_name=MethodologyPolicyName(resolved_policy_name),
+        class_weight_policy=ClassWeightPolicy(resolved_class_weight_policy),
+        tuning_enabled=resolved_tuning_enabled,
+        inner_cv_scheme=resolved_inner_cv_scheme_literal,
+        inner_group_field=resolved_tuning_inner_group_field,
+        tuning_search_space_id=resolved_tuning_space_id,
+        tuning_search_space_version=resolved_tuning_space_version,
+    )
+    subgroup_policy = SubgroupReportingPolicy(
+        enabled=resolved_subgroup_enabled,
+        subgroup_dimensions=list(resolved_subgroup_dimensions),
+        min_samples_per_group=resolved_subgroup_min_samples,
+    )
+    return methodology_policy, subgroup_policy
 
 
 def run_experiment(
@@ -254,6 +405,16 @@ def run_experiment(
     n_permutations: int = 0,
     primary_metric_name: str = "balanced_accuracy",
     permutation_metric_name: str | None = None,
+    methodology_policy_name: str = MethodologyPolicyName.FIXED_BASELINES_ONLY.value,
+    class_weight_policy: str = "none",
+    tuning_enabled: bool = False,
+    tuning_search_space_id: str | None = None,
+    tuning_search_space_version: str | None = None,
+    tuning_inner_cv_scheme: str | None = None,
+    tuning_inner_group_field: str | None = None,
+    subgroup_reporting_enabled: bool = True,
+    subgroup_dimensions: list[str] | None = None,
+    subgroup_min_samples_per_group: int = 1,
     interpretability_enabled_override: bool | None = None,
     framework_mode: FrameworkMode | str = FrameworkMode.EXPLORATORY,
     protocol_context: dict[str, Any] | None = None,
@@ -297,9 +458,9 @@ def run_experiment(
             raise ValueError("train_subject and test_subject must be different.")
 
     target_column = _resolve_target_column(target)
-    resolved_primary_metric_name = str(primary_metric_name).strip()
+    resolved_primary_metric_name = validate_metric_name(primary_metric_name)
     resolved_permutation_metric_name = (
-        str(permutation_metric_name).strip()
+        validate_metric_name(permutation_metric_name)
         if permutation_metric_name is not None
         else resolved_primary_metric_name
     )
@@ -313,6 +474,77 @@ def run_experiment(
         protocol_context=protocol_context,
         comparison_context=comparison_context,
     )
+    official_context: dict[str, Any] = {}
+    if resolved_framework_mode == FrameworkMode.CONFIRMATORY:
+        official_context = dict(resolved_protocol_context)
+    if resolved_framework_mode == FrameworkMode.LOCKED_COMPARISON:
+        official_context = dict(resolved_comparison_context)
+    if official_context:
+        context_primary_metric = official_context.get("primary_metric")
+        if context_primary_metric is not None and validate_metric_name(
+            str(context_primary_metric)
+        ) != resolved_primary_metric_name:
+            raise ValueError(
+                "Illegal override for official run key 'primary_metric'. "
+                "Use protocol/comparison spec values only."
+            )
+        controls_payload = official_context.get("controls")
+        if isinstance(controls_payload, dict):
+            context_perm_metric = controls_payload.get("permutation_metric")
+            if context_perm_metric is not None and validate_metric_name(
+                str(context_perm_metric)
+            ) != resolved_permutation_metric_name:
+                raise ValueError(
+                    "Illegal override for official run key 'permutation_metric'. "
+                    "Use protocol/comparison spec values only."
+                )
+            context_n_permutations = controls_payload.get("n_permutations")
+            if context_n_permutations is not None and int(context_n_permutations) != int(
+                n_permutations
+            ):
+                raise ValueError(
+                    "Illegal override for official run key 'n_permutations'. "
+                    "Use protocol/comparison spec values only."
+                )
+        context_interpretability = official_context.get("interpretability_enabled")
+        if (
+            context_interpretability is not None
+            and interpretability_enabled_override is not None
+            and bool(context_interpretability) != bool(interpretability_enabled_override)
+        ):
+            raise ValueError(
+                "Illegal override for official run key 'interpretability_enabled'. "
+                "Use protocol/comparison spec values only."
+            )
+    methodology_policy, subgroup_policy = _resolve_methodology_runtime(
+        framework_mode=resolved_framework_mode,
+        methodology_policy_name=methodology_policy_name,
+        class_weight_policy=class_weight_policy,
+        tuning_enabled=tuning_enabled,
+        tuning_search_space_id=tuning_search_space_id,
+        tuning_search_space_version=tuning_search_space_version,
+        tuning_inner_cv_scheme=tuning_inner_cv_scheme,
+        tuning_inner_group_field=tuning_inner_group_field,
+        subgroup_reporting_enabled=subgroup_reporting_enabled,
+        subgroup_dimensions=subgroup_dimensions,
+        subgroup_min_samples_per_group=subgroup_min_samples_per_group,
+        protocol_context=resolved_protocol_context,
+        comparison_context=resolved_comparison_context,
+    )
+
+    effective_tuning_space_id = methodology_policy.tuning_search_space_id
+    effective_tuning_space_version = methodology_policy.tuning_search_space_version
+    effective_tuning_inner_cv_scheme = methodology_policy.inner_cv_scheme
+    effective_tuning_inner_group_field = methodology_policy.inner_group_field
+    if methodology_policy.policy_name == MethodologyPolicyName.GROUPED_NESTED_TUNING:
+        if effective_tuning_space_id is None:
+            effective_tuning_space_id = LINEAR_GROUPED_NESTED_SEARCH_SPACE_ID
+        if effective_tuning_space_version is None:
+            effective_tuning_space_version = LINEAR_GROUPED_NESTED_SEARCH_SPACE_VERSION
+        if effective_tuning_inner_cv_scheme is None:
+            effective_tuning_inner_cv_scheme = "grouped_leave_one_group_out"
+        if effective_tuning_inner_group_field is None:
+            effective_tuning_inner_group_field = "session"
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     resolved_run_id = run_id or f"{timestamp}_{model}_{target_column}"
@@ -331,7 +563,11 @@ def run_experiment(
     fold_splits_path = report_dir / "fold_splits.csv"
     predictions_path = report_dir / "predictions.csv"
     metrics_path = report_dir / "metrics.json"
+    subgroup_metrics_json_path = report_dir / "subgroup_metrics.json"
+    subgroup_metrics_csv_path = report_dir / "subgroup_metrics.csv"
     config_path = report_dir / "config.json"
+    tuning_summary_path = report_dir / "tuning_summary.json"
+    tuning_best_params_path = report_dir / "best_params_per_fold.csv"
     spatial_compatibility_report_path = report_dir / "spatial_compatibility_report.json"
     interpretability_summary_path = report_dir / "interpretability_summary.json"
     interpretability_fold_artifacts_path = report_dir / "interpretability_fold_explanations.csv"
@@ -360,6 +596,16 @@ def run_experiment(
                 n_permutations=n_permutations,
                 primary_metric_name=resolved_primary_metric_name,
                 permutation_metric_name=resolved_permutation_metric_name,
+                methodology_policy_name=methodology_policy.policy_name.value,
+                class_weight_policy=methodology_policy.class_weight_policy.value,
+                tuning_enabled=bool(methodology_policy.tuning_enabled),
+                tuning_search_space_id=effective_tuning_space_id,
+                tuning_search_space_version=effective_tuning_space_version,
+                tuning_inner_cv_scheme=effective_tuning_inner_cv_scheme,
+                tuning_inner_group_field=effective_tuning_inner_group_field,
+                subgroup_reporting_enabled=bool(subgroup_policy.enabled),
+                subgroup_dimensions=tuple(subgroup_policy.subgroup_dimensions),
+                subgroup_min_samples_per_group=int(subgroup_policy.min_samples_per_group),
                 interpretability_enabled_override=interpretability_enabled_override,
                 run_id=resolved_run_id,
                 config_filename=config_path.name,
@@ -371,6 +617,10 @@ def run_experiment(
                 fold_splits_path=fold_splits_path,
                 predictions_path=predictions_path,
                 metrics_path=metrics_path,
+                subgroup_metrics_json_path=subgroup_metrics_json_path,
+                subgroup_metrics_csv_path=subgroup_metrics_csv_path,
+                tuning_summary_path=tuning_summary_path,
+                tuning_best_params_path=tuning_best_params_path,
                 spatial_report_path=spatial_compatibility_report_path,
                 interpretability_summary_path=interpretability_summary_path,
                 interpretability_fold_artifacts_path=interpretability_fold_artifacts_path,
@@ -379,7 +629,11 @@ def run_experiment(
                 base_artifact_id=base_artifact_id,
                 reuse_policy=reuse_policy,
                 reuse_completed_artifacts=should_reuse_completed_artifacts,
-                build_pipeline_fn=_build_pipeline,
+                build_pipeline_fn=lambda model_name, seed: _build_pipeline(
+                    model_name=model_name,
+                    seed=seed,
+                    class_weight_policy=methodology_policy.class_weight_policy.value,
+                ),
                 load_features_from_cache_fn=_load_features_from_cache,
                 scores_for_predictions_fn=_scores_for_predictions,
                 extract_linear_coefficients_fn=_extract_linear_coefficients,
@@ -445,6 +699,19 @@ def run_experiment(
         if isinstance(persisted_metrics, dict):
             persisted_metrics["canonical_run"] = bool(canonical_run)
             persisted_metrics["framework_mode"] = resolved_framework_mode.value
+            persisted_metrics["methodology_policy_name"] = methodology_policy.policy_name.value
+            persisted_metrics["class_weight_policy"] = methodology_policy.class_weight_policy.value
+            persisted_metrics["tuning_enabled"] = bool(methodology_policy.tuning_enabled)
+            persisted_metrics["tuning_summary_path"] = str(tuning_summary_path.resolve())
+            persisted_metrics["tuning_best_params_path"] = str(
+                tuning_best_params_path.resolve()
+            )
+            persisted_metrics["subgroup_metrics_json_path"] = str(
+                subgroup_metrics_json_path.resolve()
+            )
+            persisted_metrics["subgroup_metrics_csv_path"] = str(
+                subgroup_metrics_csv_path.resolve()
+            )
             persisted_metrics["protocol_id"] = protocol_id
             persisted_metrics["protocol_version"] = protocol_version
             persisted_metrics["protocol_schema_version"] = protocol_schema_version
@@ -501,6 +768,20 @@ def run_experiment(
         "seed": int(seed),
         "primary_metric_name": resolved_primary_metric_name,
         "permutation_metric_name": resolved_permutation_metric_name,
+        "methodology_policy_name": methodology_policy.policy_name.value,
+        "class_weight_policy": methodology_policy.class_weight_policy.value,
+        "tuning_enabled": bool(methodology_policy.tuning_enabled),
+        "tuning_search_space_id": effective_tuning_space_id,
+        "tuning_search_space_version": effective_tuning_space_version,
+        "tuning_inner_cv_scheme": effective_tuning_inner_cv_scheme,
+        "tuning_inner_group_field": effective_tuning_inner_group_field,
+        "tuning_summary_path": str(tuning_summary_path.resolve()),
+        "tuning_best_params_path": str(tuning_best_params_path.resolve()),
+        "subgroup_reporting_enabled": bool(subgroup_policy.enabled),
+        "subgroup_dimensions": list(subgroup_policy.subgroup_dimensions),
+        "subgroup_min_samples_per_group": int(subgroup_policy.min_samples_per_group),
+        "subgroup_metrics_json_path": str(subgroup_metrics_json_path.resolve()),
+        "subgroup_metrics_csv_path": str(subgroup_metrics_csv_path.resolve()),
         "filter_task": filter_task,
         "filter_modality": filter_modality,
         "n_permutations": int(n_permutations),
@@ -581,6 +862,10 @@ def run_experiment(
         "report_dir": str(report_dir.resolve()),
         "config_path": str(config_path.resolve()),
         "metrics_path": str(metrics_path.resolve()),
+        "subgroup_metrics_json_path": str(subgroup_metrics_json_path.resolve()),
+        "subgroup_metrics_csv_path": str(subgroup_metrics_csv_path.resolve()),
+        "tuning_summary_path": str(tuning_summary_path.resolve()),
+        "tuning_best_params_path": str(tuning_best_params_path.resolve()),
         "fold_metrics_path": str(fold_metrics_path.resolve()),
         "fold_splits_path": str(fold_splits_path.resolve()),
         "predictions_path": str(predictions_path.resolve()),
@@ -597,6 +882,9 @@ def run_experiment(
         "run_mode": run_mode,
         "framework_mode": resolved_framework_mode.value,
         "canonical_run": bool(canonical_run),
+        "methodology_policy_name": methodology_policy.policy_name.value,
+        "class_weight_policy": methodology_policy.class_weight_policy.value,
+        "tuning_enabled": bool(methodology_policy.tuning_enabled),
         "protocol_context": resolved_protocol_context if resolved_protocol_context else None,
         "comparison_context": resolved_comparison_context if resolved_comparison_context else None,
     }
@@ -658,6 +946,49 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Number of permutation rounds for optional significance testing.",
     )
     parser.add_argument(
+        "--methodology-policy",
+        default=MethodologyPolicyName.FIXED_BASELINES_ONLY.value,
+        choices=[
+            MethodologyPolicyName.FIXED_BASELINES_ONLY.value,
+            MethodologyPolicyName.GROUPED_NESTED_TUNING.value,
+        ],
+        help=(
+            "Methodology policy for exploratory runs. "
+            "Official comparison/protocol runs always load this from spec/protocol."
+        ),
+    )
+    parser.add_argument(
+        "--class-weight-policy",
+        default="none",
+        choices=["none", "balanced"],
+        help="Class-weight policy for exploratory runs.",
+    )
+    parser.add_argument(
+        "--tuning-search-space-id",
+        default=LINEAR_GROUPED_NESTED_SEARCH_SPACE_ID,
+        help="Search-space ID used when --methodology-policy grouped_nested_tuning.",
+    )
+    parser.add_argument(
+        "--tuning-search-space-version",
+        default=LINEAR_GROUPED_NESTED_SEARCH_SPACE_VERSION,
+        help="Search-space version used when --methodology-policy grouped_nested_tuning.",
+    )
+    parser.add_argument(
+        "--subgroup-dimension",
+        action="append",
+        default=[],
+        help=(
+            "Subgroup dimension for subgroup reporting. Repeat to include multiple "
+            "(label, task, modality, session, subject)."
+        ),
+    )
+    parser.add_argument(
+        "--subgroup-min-samples",
+        type=int,
+        default=1,
+        help="Minimum samples per subgroup row.",
+    )
+    parser.add_argument(
         "--run-id",
         default=None,
         help="Optional run identifier. If omitted, timestamp-based ID is used.",
@@ -714,6 +1045,9 @@ def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 
     models = list(MODEL_NAMES) if args.model == "all" else [args.model]
+    subgroup_dimensions = (
+        list(args.subgroup_dimension) if list(args.subgroup_dimension) else None
+    )
     results: list[dict[str, Any]] = []
 
     for model_name in models:
@@ -736,6 +1070,29 @@ def main(argv: list[str] | None = None) -> int:
             filter_task=args.filter_task,
             filter_modality=args.filter_modality,
             n_permutations=args.n_permutations,
+            methodology_policy_name=args.methodology_policy,
+            class_weight_policy=args.class_weight_policy,
+            tuning_enabled=(
+                str(args.methodology_policy)
+                == MethodologyPolicyName.GROUPED_NESTED_TUNING.value
+            ),
+            tuning_search_space_id=args.tuning_search_space_id,
+            tuning_search_space_version=args.tuning_search_space_version,
+            tuning_inner_cv_scheme=(
+                "grouped_leave_one_group_out"
+                if str(args.methodology_policy)
+                == MethodologyPolicyName.GROUPED_NESTED_TUNING.value
+                else None
+            ),
+            tuning_inner_group_field=(
+                "session"
+                if str(args.methodology_policy)
+                == MethodologyPolicyName.GROUPED_NESTED_TUNING.value
+                else None
+            ),
+            subgroup_reporting_enabled=True,
+            subgroup_dimensions=subgroup_dimensions,
+            subgroup_min_samples_per_group=args.subgroup_min_samples,
             run_id=model_run_id,
             reports_root=Path(args.reports_root),
             start_section=args.start_section,

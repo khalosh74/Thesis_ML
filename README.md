@@ -91,6 +91,9 @@ Framework mode lifecycle:
 - `thesisml-run-experiment` -> exploratory mode (`framework_mode=exploratory`, `canonical_run=false`), default reports root `outputs/reports/exploratory/`
 - `thesisml-run-comparison` -> locked comparison mode (`framework_mode=locked_comparison`, `canonical_run=false`), default reports root `outputs/reports/comparisons/`
 - `thesisml-run-protocol` -> confirmatory mode (`framework_mode=confirmatory`, `canonical_run=true`), default reports root `outputs/reports/confirmatory/`
+- official comparison/protocol contracts must pick exactly one methodology policy:
+  - `fixed_baselines_only`
+  - `grouped_nested_tuning`
 
 Locked comparison example:
 
@@ -98,6 +101,15 @@ Locked comparison example:
 python -m uv run thesisml-run-comparison `
   --comparison configs/comparisons/model_family_comparison_v1.json `
   --all-variants `
+  --reports-root outputs/reports/comparisons
+```
+
+Grouped nested comparison example:
+
+```powershell
+python -m uv run thesisml-run-comparison `
+  --comparison configs/comparisons/model_family_grouped_nested_comparison_v1.json `
+  --variant ridge `
   --reports-root outputs/reports/comparisons
 ```
 
@@ -299,6 +311,10 @@ outputs/reports/<mode>/<run_id>/
   fold_metrics.csv
   fold_splits.csv
   predictions.csv
+  subgroup_metrics.json
+  subgroup_metrics.csv
+  tuning_summary.json
+  best_params_per_fold.csv
   spatial_compatibility_report.json
   interpretability_summary.json
 ```
@@ -324,6 +340,8 @@ direct neural localization claims.
 Mode-level manifests:
 - locked comparison executions write `comparison_runs/<comparison_id>__<comparison_version>/...`
 - confirmatory protocol executions write `protocol_runs/<protocol_id>__<protocol_version>/...`
+- locked comparison manifests include `comparison_decision.json` with
+  `winner_selected` / `inconclusive` / `invalid_comparison`.
 
 ## Adding a new model to the registry
 
