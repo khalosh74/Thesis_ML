@@ -35,7 +35,7 @@ from Thesis_ML.config.methodology import (
 )
 from Thesis_ML.config.paths import DEFAULT_EXPERIMENT_REPORTS_ROOT
 from Thesis_ML.experiments.cache_loading import load_features_from_cache
-from Thesis_ML.experiments.errors import ThesisMLError
+from Thesis_ML.experiments.errors import exception_failure_payload
 from Thesis_ML.experiments.execution_policy import (
     prepare_report_dir,
     write_run_status,
@@ -121,19 +121,7 @@ def _warning_summary(warnings_payload: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def _failure_payload(exc: Exception) -> dict[str, Any]:
-    if isinstance(exc, ThesisMLError):
-        return {
-            "error_code": str(exc.code),
-            "error_type": type(exc).__name__,
-            "failure_stage": str(exc.stage),
-            "error_details": dict(exc.details or {}),
-        }
-    return {
-        "error_code": "unhandled_exception",
-        "error_type": type(exc).__name__,
-        "failure_stage": "runtime",
-        "error_details": {},
-    }
+    return exception_failure_payload(exc, default_stage="runtime")
 
 
 def _make_model(name: str, seed: int, class_weight_policy: str = "none") -> Any:

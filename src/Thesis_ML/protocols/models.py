@@ -695,6 +695,10 @@ class ProtocolRunResult(_ProtocolModel):
     metrics_path: str | None = None
     config_path: str | None = None
     error: str | None = None
+    error_code: str | None = None
+    error_type: str | None = None
+    failure_stage: str | None = None
+    error_details: dict[str, Any] | None = None
     metrics: dict[str, float | int | str | bool | None | dict[str, Any]] | None = None
 
     @model_validator(mode="after")
@@ -703,6 +707,25 @@ class ProtocolRunResult(_ProtocolModel):
             raise ValueError("ProtocolRunResult.framework_mode must be 'confirmatory'.")
         if self.status == "failed" and not self.error:
             raise ValueError("ProtocolRunResult.error is required when status='failed'.")
-        if self.status != "failed" and self.error is not None:
-            raise ValueError("ProtocolRunResult.error must be null unless status='failed'.")
+        if self.status == "failed":
+            if self.error_code is None:
+                raise ValueError("ProtocolRunResult.error_code is required when status='failed'.")
+            if self.error_type is None:
+                raise ValueError("ProtocolRunResult.error_type is required when status='failed'.")
+            if self.failure_stage is None:
+                raise ValueError(
+                    "ProtocolRunResult.failure_stage is required when status='failed'."
+                )
+        if self.status != "failed":
+            for field_name in (
+                "error",
+                "error_code",
+                "error_type",
+                "failure_stage",
+                "error_details",
+            ):
+                if getattr(self, field_name) is not None:
+                    raise ValueError(
+                        f"ProtocolRunResult.{field_name} must be null unless status='failed'."
+                    )
         return self

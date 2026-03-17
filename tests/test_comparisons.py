@@ -13,6 +13,7 @@ from Thesis_ML.comparisons.loader import load_comparison_spec
 from Thesis_ML.comparisons.models import ComparisonStatus
 from Thesis_ML.comparisons.runner import compile_and_run_comparison
 from Thesis_ML.data.index_dataset import build_dataset_index
+from Thesis_ML.experiments.errors import OfficialContractValidationError
 
 
 def _repo_root() -> Path:
@@ -197,6 +198,39 @@ def test_comparison_runner_dry_run_emits_artifacts(
     assert decision_payload["metric_policy_effective"]["decision_metric"] == "balanced_accuracy"
     assert manifest_payload["metric_policy_effective"]["primary_metric"] == "balanced_accuracy"
     assert manifest_payload["metric_policy_effective"]["decision_metric"] == "balanced_accuracy"
+
+
+def test_comparison_runner_surfaces_structured_failure_metadata(
+    comparison_dataset: dict[str, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    spec = load_comparison_spec(_comparison_spec_path())
+
+    def _failing_run_experiment(**_: object) -> dict[str, object]:
+        raise OfficialContractValidationError(
+            "synthetic comparison preflight failure",
+            details={"reason": "unit_test"},
+        )
+
+    monkeypatch.setattr("Thesis_ML.comparisons.runner.run_experiment", _failing_run_experiment)
+    result = compile_and_run_comparison(
+        comparison=spec,
+        index_csv=comparison_dataset["index_csv"],
+        data_root=comparison_dataset["data_root"],
+        cache_dir=comparison_dataset["cache_dir"],
+        reports_root=comparison_dataset["reports_root"],
+        variant_ids=["ridge"],
+        dry_run=False,
+    )
+    assert result["n_failed"] > 0
+    failed = [row for row in result["run_results"] if row["status"] == "failed"]
+    assert failed
+    first = failed[0]
+    assert first["error"] == "synthetic comparison preflight failure"
+    assert first["error_code"] == "official_contract_validation_error"
+    assert first["error_type"] == "OfficialContractValidationError"
+    assert first["failure_stage"] == "preflight_validation"
+    assert first["error_details"] == {"reason": "unit_test"}
 
 
 def test_comparison_runner_real_run_stamps_metadata(

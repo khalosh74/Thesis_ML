@@ -9,6 +9,7 @@ import pandas as pd
 import pytest
 
 from Thesis_ML.data.index_dataset import build_dataset_index
+from Thesis_ML.experiments.errors import OfficialContractValidationError
 from Thesis_ML.protocols.compiler import compile_protocol
 from Thesis_ML.protocols.loader import load_protocol
 from Thesis_ML.protocols.runner import compile_and_run_protocol
@@ -418,6 +419,40 @@ def test_protocol_runner_dry_run_emits_protocol_artifacts(
     assert suite_summary["metric_policy_effective"]["decision_metric"] == "balanced_accuracy"
     assert manifest_payload["metric_policy_effective"]["primary_metric"] == "balanced_accuracy"
     assert manifest_payload["metric_policy_effective"]["decision_metric"] == "balanced_accuracy"
+
+
+def test_protocol_runner_surfaces_structured_failure_metadata(
+    protocol_dataset: dict[str, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    protocol = load_protocol(_canonical_protocol_path())
+
+    def _failing_run_experiment(**_: object) -> dict[str, object]:
+        raise OfficialContractValidationError(
+            "synthetic preflight contract failure",
+            details={"reason": "unit_test"},
+        )
+
+    monkeypatch.setattr("Thesis_ML.protocols.runner.run_experiment", _failing_run_experiment)
+    result = compile_and_run_protocol(
+        protocol=protocol,
+        index_csv=protocol_dataset["index_csv"],
+        data_root=protocol_dataset["data_root"],
+        cache_dir=protocol_dataset["cache_dir"],
+        reports_root=protocol_dataset["reports_root"],
+        suite_ids=["primary_within_subject"],
+        dry_run=False,
+    )
+
+    assert result["n_failed"] > 0
+    failed = [row for row in result["run_results"] if row["status"] == "failed"]
+    assert failed
+    first = failed[0]
+    assert first["error"] == "synthetic preflight contract failure"
+    assert first["error_code"] == "official_contract_validation_error"
+    assert first["error_type"] == "OfficialContractValidationError"
+    assert first["failure_stage"] == "preflight_validation"
+    assert first["error_details"] == {"reason": "unit_test"}
 
 
 def test_protocol_run_records_metadata_in_run_artifacts(

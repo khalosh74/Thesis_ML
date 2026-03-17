@@ -65,9 +65,30 @@ class ReproducibilityValidationError(ThesisMLError):
         )
 
 
+def exception_failure_payload(
+    exc: Exception,
+    *,
+    default_stage: str = "runtime",
+) -> dict[str, Any]:
+    if isinstance(exc, ThesisMLError):
+        return {
+            "error_code": str(exc.code),
+            "error_type": type(exc).__name__,
+            "failure_stage": str(exc.stage),
+            "error_details": dict(exc.details or {}),
+        }
+    return {
+        "error_code": "unhandled_exception",
+        "error_type": type(exc).__name__,
+        "failure_stage": str(default_stage),
+        "error_details": {},
+    }
+
+
 __all__ = [
     "OfficialArtifactContractError",
     "OfficialContractValidationError",
     "ReproducibilityValidationError",
+    "exception_failure_payload",
     "ThesisMLError",
 ]

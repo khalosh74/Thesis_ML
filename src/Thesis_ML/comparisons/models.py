@@ -445,4 +445,41 @@ class ComparisonRunResult(_ComparisonModel):
     config_path: str | None = None
     metrics_path: str | None = None
     error: str | None = None
+    error_code: str | None = None
+    error_type: str | None = None
+    failure_stage: str | None = None
+    error_details: dict[str, Any] | None = None
     metrics: dict[str, float | int | str | bool | None | dict[str, Any]] | None = None
+
+    @model_validator(mode="after")
+    def _validate_result(self) -> ComparisonRunResult:
+        if self.framework_mode != FrameworkMode.LOCKED_COMPARISON.value:
+            raise ValueError("ComparisonRunResult.framework_mode must be 'locked_comparison'.")
+        if self.status == "failed":
+            if self.error is None:
+                raise ValueError("ComparisonRunResult.error is required when status='failed'.")
+            if self.error_code is None:
+                raise ValueError(
+                    "ComparisonRunResult.error_code is required when status='failed'."
+                )
+            if self.error_type is None:
+                raise ValueError(
+                    "ComparisonRunResult.error_type is required when status='failed'."
+                )
+            if self.failure_stage is None:
+                raise ValueError(
+                    "ComparisonRunResult.failure_stage is required when status='failed'."
+                )
+        if self.status != "failed":
+            for field_name in (
+                "error",
+                "error_code",
+                "error_type",
+                "failure_stage",
+                "error_details",
+            ):
+                if getattr(self, field_name) is not None:
+                    raise ValueError(
+                        f"ComparisonRunResult.{field_name} must be null unless status='failed'."
+                    )
+        return self

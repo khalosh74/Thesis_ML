@@ -15,6 +15,7 @@ from Thesis_ML.comparisons.models import (
 )
 from Thesis_ML.config.framework_mode import FrameworkMode
 from Thesis_ML.config.metric_policy import resolve_effective_metric_policy
+from Thesis_ML.experiments.errors import exception_failure_payload
 from Thesis_ML.experiments.run_experiment import run_experiment
 from Thesis_ML.verification.official_artifacts import verify_official_artifacts
 
@@ -191,6 +192,7 @@ def execute_compiled_comparison(
             )
             run_results.append(_to_run_result_success(spec, payload))
         except Exception as exc:
+            failure_payload = exception_failure_payload(exc, default_stage="runtime")
             run_results.append(
                 ComparisonRunResult(
                     run_id=spec.run_id,
@@ -200,6 +202,10 @@ def execute_compiled_comparison(
                     variant_id=spec.variant_id,
                     status="failed",
                     error=str(exc),
+                    error_code=str(failure_payload["error_code"]),
+                    error_type=str(failure_payload["error_type"]),
+                    failure_stage=str(failure_payload["failure_stage"]),
+                    error_details=dict(failure_payload["error_details"]),
                 )
             )
 

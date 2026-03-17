@@ -61,6 +61,7 @@ RC-1 adds explicit official-run release checks for:
 - strict official artifact completeness/invariants
 - deterministic rerun verification on a small official path
 - optional one-command wrapper for hygiene/lint/tests/performance
+- structured failure payloads in mode-level execution artifacts (`error_code`, `error_type`, `failure_stage`, `error_details`)
 
 ### 1) Official artifact verification
 
