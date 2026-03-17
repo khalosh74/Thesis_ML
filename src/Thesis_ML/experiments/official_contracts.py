@@ -487,6 +487,38 @@ def validate_official_preflight(
                         },
                     )
 
+            multiplicity_primary_hypotheses = int(
+                confirmatory_lock.get("multiplicity_primary_hypotheses", 1)
+            )
+            if multiplicity_primary_hypotheses < 1:
+                raise OfficialContractValidationError(
+                    "Confirmatory multiplicity policy is invalid: primary_hypotheses must be >= 1.",
+                    details={"primary_hypotheses": multiplicity_primary_hypotheses},
+                )
+            multiplicity_primary_alpha = float(
+                confirmatory_lock.get("multiplicity_primary_alpha", 0.05)
+            )
+            if not (0.0 < multiplicity_primary_alpha <= 1.0):
+                raise OfficialContractValidationError(
+                    "Confirmatory multiplicity policy is invalid: primary_alpha must be in (0, 1].",
+                    details={"primary_alpha": multiplicity_primary_alpha},
+                )
+            multiplicity_secondary_policy = str(
+                confirmatory_lock.get("multiplicity_secondary_policy", "")
+            ).strip()
+            if not multiplicity_secondary_policy:
+                raise OfficialContractValidationError(
+                    "Confirmatory multiplicity policy is invalid: secondary_policy must be non-empty.",
+                    details={"secondary_policy": multiplicity_secondary_policy},
+                )
+            if bool(
+                confirmatory_lock.get("multiplicity_exploratory_claims_allowed", False)
+            ):
+                raise OfficialContractValidationError(
+                    "Confirmatory multiplicity policy forbids exploratory_claims_allowed=true.",
+                    details={"exploratory_claims_allowed": True},
+                )
+
     resolved_primary_metric = validate_metric_name(primary_metric_name)
     resolved_permutation_metric = validate_metric_name(permutation_metric_name)
     if int(n_permutations) > 0 and resolved_primary_metric != resolved_permutation_metric:

@@ -209,6 +209,7 @@ def _verify_confirmatory_reporting_contract(
         "primary_metric",
         "model_family",
         "controls_status",
+        "multiplicity_policy",
         "interpretation_limits",
         "subgroup_evidence_policy",
         "deviations_from_protocol",
@@ -332,6 +333,51 @@ def _verify_confirmatory_reporting_contract(
                     message=f"confirmatory_reporting_contract field '{key}' must be non-empty.",
                     path=root / "suite_summary.json",
                 )
+        multiplicity_policy = contract.get("multiplicity_policy")
+        if not isinstance(multiplicity_policy, dict):
+            _add_issue(
+                issues,
+                code="confirmatory_freeze_multiplicity_policy_missing",
+                message="confirmatory_reporting_contract.multiplicity_policy must be an object.",
+                path=root / "suite_summary.json",
+            )
+        else:
+            for key in (
+                "primary_hypotheses",
+                "primary_alpha",
+                "secondary_policy",
+                "exploratory_claims_allowed",
+            ):
+                if key not in multiplicity_policy:
+                    _add_issue(
+                        issues,
+                        code="confirmatory_freeze_multiplicity_field_missing",
+                        message=f"multiplicity_policy missing required field '{key}'.",
+                        path=root / "suite_summary.json",
+                    )
+        interpretation_limits = contract.get("interpretation_limits")
+        if isinstance(interpretation_limits, dict):
+            for key in (
+                "no_causal_claims",
+                "no_clinical_claims",
+                "no_localization_claims_from_coefficients",
+                "no_external_generalization_claim",
+                "secondary_results_not_primary_evidence",
+            ):
+                if key not in interpretation_limits:
+                    _add_issue(
+                        issues,
+                        code="confirmatory_freeze_interpretation_limit_missing",
+                        message=f"interpretation_limits missing required field '{key}'.",
+                        path=root / "suite_summary.json",
+                    )
+                elif interpretation_limits.get(key) is not True:
+                    _add_issue(
+                        issues,
+                        code="confirmatory_freeze_interpretation_limit_invalid",
+                        message=f"interpretation_limits field '{key}' must be true for strict confirmatory freeze.",
+                        path=root / "suite_summary.json",
+                    )
         if not isinstance(contract.get("controls_status"), dict):
             _add_issue(
                 issues,

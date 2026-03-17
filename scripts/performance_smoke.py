@@ -145,7 +145,7 @@ def main() -> int:
     ]
     protocol_cmd = protocol_cmd_base + [
         "--protocol",
-        "configs/protocols/thesis_canonical_v1.json",
+        "configs/protocols/thesis_confirmatory_v1.json",
         "--all-suites",
         "--reports-root",
         str(reports_root / "confirmatory"),

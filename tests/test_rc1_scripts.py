@@ -58,7 +58,7 @@ def test_verify_repro_uses_default_protocol_config_when_omitted(
     )
 
     assert exit_code == 0
-    assert captured["config_path"] == Path(module.DEFAULT_THESIS_PROTOCOL_PATH)
+    assert captured["config_path"] == Path(module.DEFAULT_THESIS_CONFIRMATORY_PROTOCOL_PATH)
 
 
 def test_verify_repro_uses_default_comparison_config_when_omitted(

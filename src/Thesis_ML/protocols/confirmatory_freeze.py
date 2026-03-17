@@ -222,6 +222,7 @@ def build_confirmatory_lock_context(
     dataset_contract = dict(payload.get("dataset_contract", {}))
     controls = dict(payload.get("controls", {}))
     subgroups = dict(payload.get("subgroups", {}))
+    multiplicity = dict(payload.get("multiplicity", {}))
     interpretation_limits = dict(payload.get("interpretation_limits", {}))
     reporting = dict(payload.get("reporting", {}))
     mapping_validation = dict(payload.get("__mapping_validation", {}))
@@ -259,6 +260,16 @@ def build_confirmatory_lock_context(
         "subgroup_min_samples_per_group": int(subgroups.get("min_samples_per_group", 1)),
         "subgroup_min_classes_per_group": int(subgroups.get("min_classes_per_group", 1)),
         "subgroup_report_small_groups": bool(subgroups.get("report_small_groups", False)),
+        "multiplicity_primary_hypotheses": int(
+            multiplicity.get("primary_hypotheses", 1)
+        ),
+        "multiplicity_primary_alpha": float(multiplicity.get("primary_alpha", 0.05)),
+        "multiplicity_secondary_policy": str(
+            multiplicity.get("secondary_policy", "descriptive_only")
+        ),
+        "multiplicity_exploratory_claims_allowed": bool(
+            multiplicity.get("exploratory_claims_allowed", False)
+        ),
         "interpretation_limits": {
             str(key): bool(value) for key, value in interpretation_limits.items()
         },

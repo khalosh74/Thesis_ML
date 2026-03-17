@@ -33,21 +33,21 @@ Compatibility wrappers are kept only for migration and are deprecated.
 
 ## 3) First-use checks
 
-Canonical protocol dry-run:
+Frozen confirmatory protocol dry-run:
 
 ```bash
 thesisml-run-protocol \
-  --protocol configs/protocols/thesis_canonical_v1.json \
+  --protocol configs/protocols/thesis_confirmatory_v1.json \
   --all-suites \
   --reports-root outputs/reports/confirmatory \
   --dry-run
 ```
 
-Canonical protocol execution:
+Frozen confirmatory protocol execution:
 
 ```bash
 thesisml-run-protocol \
-  --protocol configs/protocols/thesis_canonical_v1.json \
+  --protocol configs/protocols/thesis_confirmatory_v1.json \
   --all-suites \
   --reports-root outputs/reports/confirmatory
 ```
@@ -219,6 +219,6 @@ Optional lightweight performance snapshot:
 
 ```bash
 python scripts/performance_smoke.py --output outputs/performance/performance_smoke_summary.json
-python scripts/verify_official_reproducibility.py --mode protocol --index-csv <...> --data-root <...> --cache-dir <...> --suite primary_controls
+python scripts/verify_official_reproducibility.py --mode protocol --index-csv <...> --data-root <...> --cache-dir <...> --suite confirmatory_primary_within_subject
 python scripts/rc1_release_gate.py --run-ruff --run-pytest --run-performance-smoke
 ```

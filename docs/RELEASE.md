@@ -85,10 +85,11 @@ Run a small official path twice and compare deterministic invariants:
 ```bash
 python scripts/verify_official_reproducibility.py \
   --mode protocol \
+  --config configs/protocols/thesis_confirmatory_v1.json \
   --index-csv <dataset_index.csv> \
   --data-root <data_root> \
   --cache-dir <cache_dir> \
-  --suite primary_controls
+  --suite confirmatory_primary_within_subject
 ```
 
 Comparison example:
@@ -121,7 +122,7 @@ Use `--repro-command` to include a reproducibility check in the same gate run:
 python scripts/rc1_release_gate.py \
   --run-ruff \
   --run-pytest \
-  --repro-command "python scripts/verify_official_reproducibility.py --mode protocol --index-csv <dataset_index.csv> --data-root <data_root> --cache-dir <cache_dir> --suite primary_controls"
+  --repro-command "python scripts/verify_official_reproducibility.py --mode protocol --config configs/protocols/thesis_confirmatory_v1.json --index-csv <dataset_index.csv> --data-root <data_root> --cache-dir <cache_dir> --suite confirmatory_primary_within_subject"
 ```
 
 ## Official RC checklist

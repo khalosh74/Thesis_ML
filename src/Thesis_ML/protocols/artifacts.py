@@ -354,6 +354,18 @@ def _confirmatory_reporting_contract(
             if isinstance(lock_payload.get("interpretation_limits"), dict)
             else {}
         ),
+        "multiplicity_policy": {
+            "primary_hypotheses": int(
+                lock_payload.get("multiplicity_primary_hypotheses", 1)
+            ),
+            "primary_alpha": float(lock_payload.get("multiplicity_primary_alpha", 0.05)),
+            "secondary_policy": str(
+                lock_payload.get("multiplicity_secondary_policy", "descriptive_only")
+            ),
+            "exploratory_claims_allowed": bool(
+                lock_payload.get("multiplicity_exploratory_claims_allowed", False)
+            ),
+        },
         "subgroup_evidence_policy": {
             "evidence_role": str(
                 lock_payload.get("subgroup_interpretation", "descriptive_only")

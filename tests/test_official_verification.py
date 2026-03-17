@@ -146,6 +146,12 @@ def _write_confirmatory_output(root: Path) -> Path:
                         "permutation_requirement_satisfied": True,
                         "controls_valid_for_confirmatory": True,
                     },
+                    "multiplicity_policy": {
+                        "primary_hypotheses": 1,
+                        "primary_alpha": 0.05,
+                        "secondary_policy": "descriptive_only",
+                        "exploratory_claims_allowed": False,
+                    },
                     "interpretation_limits": {"no_causal_claims": True},
                     "subgroup_evidence_policy": {
                         "evidence_role": "descriptive_only",
@@ -225,6 +231,37 @@ def test_verify_official_artifacts_fails_when_required_run_artifact_missing(tmp_
     summary = verify_official_artifacts(output_dir=output_dir)
     assert summary["passed"] is False
     assert any(issue["code"] == "run_artifact_missing" for issue in summary["issues"])
+
+
+def test_verify_official_artifacts_fails_when_strict_confirmatory_multiplicity_missing(
+    tmp_path: Path,
+) -> None:
+    output_dir = tmp_path / "protocol_runs" / "thesis-confirmatory__1.0.0"
+    _write_confirmatory_output(output_dir)
+
+    protocol_payload = json.loads((output_dir / "protocol.json").read_text(encoding="utf-8"))
+    protocol_payload["protocol_id"] = "thesis_confirmatory_v1"
+    (output_dir / "protocol.json").write_text(
+        f"{json.dumps(protocol_payload, indent=2)}\n", encoding="utf-8"
+    )
+
+    summary_payload = json.loads((output_dir / "suite_summary.json").read_text(encoding="utf-8"))
+    contract = summary_payload["confirmatory_reporting_contract"]
+    contract.pop("multiplicity_policy", None)
+    (output_dir / "suite_summary.json").write_text(
+        f"{json.dumps(summary_payload, indent=2)}\n", encoding="utf-8"
+    )
+
+    summary = verify_official_artifacts(output_dir=output_dir, mode="confirmatory")
+    assert summary["passed"] is False
+    assert any(
+        issue["code"]
+        in {
+            "confirmatory_reporting_field_missing",
+            "confirmatory_freeze_multiplicity_policy_missing",
+        }
+        for issue in summary["issues"]
+    )
 
 
 def test_compare_official_outputs_detects_deterministic_mismatch(tmp_path: Path) -> None:

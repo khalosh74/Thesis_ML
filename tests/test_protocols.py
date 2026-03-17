@@ -171,6 +171,11 @@ def test_confirmatory_freeze_protocol_dry_run_executes_with_locked_gates(
     assert contract["primary_metric"] == "balanced_accuracy"
     assert contract["model_family"] == "ridge"
     assert isinstance(contract["controls_status"], dict)
+    assert isinstance(contract["multiplicity_policy"], dict)
+    assert contract["multiplicity_policy"]["primary_hypotheses"] == 1
+    assert contract["multiplicity_policy"]["primary_alpha"] == 0.05
+    assert contract["multiplicity_policy"]["secondary_policy"] == "descriptive_only"
+    assert contract["multiplicity_policy"]["exploratory_claims_allowed"] is False
     assert isinstance(contract["interpretation_limits"], dict)
     assert contract["subgroup_evidence_policy"]["evidence_role"] == "descriptive_only"
     assert (

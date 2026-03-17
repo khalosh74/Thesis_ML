@@ -7,7 +7,7 @@ from pathlib import Path
 
 from Thesis_ML.config.paths import (
     DEFAULT_PROTOCOL_REPORTS_ROOT,
-    DEFAULT_THESIS_PROTOCOL_PATH,
+    DEFAULT_THESIS_CONFIRMATORY_PROTOCOL_PATH,
     PROJECT_ROOT,
 )
 from Thesis_ML.protocols.loader import load_protocol
@@ -44,8 +44,11 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--protocol",
-        default=str(DEFAULT_THESIS_PROTOCOL_PATH),
-        help="Path to canonical thesis protocol JSON.",
+        default=str(DEFAULT_THESIS_CONFIRMATORY_PROTOCOL_PATH),
+        help=(
+            "Path to confirmatory protocol JSON. Defaults to the frozen "
+            "confirmatory protocol for final science-freeze runs."
+        ),
     )
     parser.add_argument(
         "--suite",

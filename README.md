@@ -78,11 +78,11 @@ python -m uv run thesisml-run-decision-support --help
 python -m uv run thesisml-workbook --output outputs/workbooks/bootstrap_thesis_experiment_program.xlsx
 ```
 
-Official confirmatory thesis run path (canonical protocol):
+Official confirmatory thesis run path (frozen protocol):
 
 ```powershell
 python -m uv run thesisml-run-protocol `
-  --protocol configs/protocols/thesis_canonical_v1.json `
+  --protocol configs/protocols/thesis_confirmatory_v1.json `
   --all-suites `
   --reports-root outputs/reports/confirmatory
 ```
@@ -224,7 +224,7 @@ docker run --rm thesis-ml:dev
 - Local release hygiene check: `python scripts/release_hygiene_check.py`
 - Lightweight performance smoke: `python scripts/performance_smoke.py`
 - Official artifact invariant check: `python scripts/verify_official_artifacts.py --output-dir <official_output_dir>`
-- Deterministic rerun check: `python scripts/verify_official_reproducibility.py --mode protocol --index-csv <...> --data-root <...> --cache-dir <...> --suite primary_controls`
+- Deterministic rerun check: `python scripts/verify_official_reproducibility.py --mode protocol --index-csv <...> --data-root <...> --cache-dir <...> --suite confirmatory_primary_within_subject`
 - RC wrapper gate script: `python scripts/rc1_release_gate.py --run-ruff --run-pytest --run-performance-smoke`
 
 ## Operator documentation

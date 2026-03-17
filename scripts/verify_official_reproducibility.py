@@ -11,7 +11,7 @@ from Thesis_ML.comparisons.loader import load_comparison_spec
 from Thesis_ML.comparisons.runner import compile_and_run_comparison
 from Thesis_ML.config.paths import (
     DEFAULT_COMPARISON_SPEC_PATH,
-    DEFAULT_THESIS_PROTOCOL_PATH,
+    DEFAULT_THESIS_CONFIRMATORY_PROTOCOL_PATH,
 )
 from Thesis_ML.protocols.loader import load_protocol
 from Thesis_ML.protocols.runner import compile_and_run_protocol
@@ -35,7 +35,7 @@ def _build_parser() -> argparse.ArgumentParser:
         default="",
         help=(
             "Protocol/comparison spec path. Defaults: protocol->"
-            f"{DEFAULT_THESIS_PROTOCOL_PATH}, comparison->{DEFAULT_COMPARISON_SPEC_PATH}."
+            f"{DEFAULT_THESIS_CONFIRMATORY_PROTOCOL_PATH}, comparison->{DEFAULT_COMPARISON_SPEC_PATH}."
         ),
     )
     parser.add_argument("--index-csv", required=True, help="Dataset index CSV path.")
@@ -135,7 +135,7 @@ def main(argv: list[str] | None = None) -> int:
     config_path = Path(config_text) if config_text else Path()
     if not config_text:
         config_path = (
-            Path(DEFAULT_THESIS_PROTOCOL_PATH)
+            Path(DEFAULT_THESIS_CONFIRMATORY_PROTOCOL_PATH)
             if args.mode == "protocol"
             else Path(DEFAULT_COMPARISON_SPEC_PATH)
         )
