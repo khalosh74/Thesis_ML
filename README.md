@@ -266,6 +266,15 @@ docker run --rm thesis-ml:dev
   - `python scripts/build_publishable_bundle.py --output-dir <bundle_dir> --comparison-output <...> --confirmatory-output <...> --replay-summary <...> --replay-verification-summary <...> --repro-manifest <...>`
   - `python scripts/verify_publishable_bundle.py --bundle-dir <bundle_dir>`
 - RC wrapper gate script: `python scripts/rc1_release_gate.py --run-ruff --run-pytest --run-performance-smoke`
+- Frozen campaign phased orchestrator: `powershell -ExecutionPolicy Bypass -File scripts/run_frozen_campaign.ps1 -CampaignTag <tag> -IndexCsv <...> -DataRoot <...> -CacheDir <...> -Phase <precheck|confirmatory|comparison|replay|bundle|all>`
+
+Frozen campaign phase output roots:
+- `outputs/campaign/<CampaignTag>/release/precheck/`
+- `outputs/campaign/<CampaignTag>/confirmatory/`
+- `outputs/campaign/<CampaignTag>/comparison/`
+- `outputs/campaign/<CampaignTag>/release/replay/`
+- `outputs/campaign/<CampaignTag>/bundle/`
+- campaign/phase metadata: `outputs/campaign/<CampaignTag>/campaign_manifest.json`, `<phase_root>/phase_status.json`, `<phase_root>/phase_summary.json`
 
 ## Operator documentation
 

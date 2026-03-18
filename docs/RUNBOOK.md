@@ -70,6 +70,91 @@ This command archives legacy folders that often cause confusion
 creates a clean `outputs/campaign/<CampaignTag>/...` directory tree, and writes:
 `outputs/campaign/<CampaignTag>/release/prep_summary.json`.
 
+Frozen campaign phased execution (`scripts/run_frozen_campaign.ps1`):
+
+- `-Phase precheck`
+- `-Phase confirmatory`
+- `-Phase comparison`
+- `-Phase replay`
+- `-Phase bundle`
+- `-Phase all` (runs in order: `precheck -> confirmatory -> comparison -> replay -> bundle`)
+
+Phase dependencies and blocking semantics:
+
+- `confirmatory` depends on `precheck`.
+- `comparison` depends on `precheck`.
+- `replay` depends on `precheck`, `confirmatory`, and `comparison`.
+- `bundle` depends on `precheck`, `confirmatory`, `comparison`, and `replay`.
+- Confirmatory readiness blockers: `precheck`, `confirmatory`.
+- Campaign sign-off blockers: all phases.
+
+Phase output roots:
+
+- `outputs/campaign/<CampaignTag>/release/precheck/`
+- `outputs/campaign/<CampaignTag>/confirmatory/`
+- `outputs/campaign/<CampaignTag>/comparison/`
+- `outputs/campaign/<CampaignTag>/release/replay/`
+- `outputs/campaign/<CampaignTag>/bundle/`
+- `outputs/campaign/<CampaignTag>/logs/<phase>/`
+
+Campaign manifest and per-phase machine-readable artifacts:
+
+- `outputs/campaign/<CampaignTag>/campaign_manifest.json`
+- `<phase_root>/phase_status.json`
+- `<phase_root>/phase_summary.json`
+
+Example phased commands:
+
+```powershell
+# precheck only
+powershell -ExecutionPolicy Bypass -File scripts/run_frozen_campaign.ps1 `
+  -CampaignTag "campaign-YYYY-MM-DD-rc1" `
+  -IndexCsv "<index_csv>" `
+  -DataRoot "<data_root>" `
+  -CacheDir "<cache_dir>" `
+  -Phase precheck
+
+# confirmatory only
+powershell -ExecutionPolicy Bypass -File scripts/run_frozen_campaign.ps1 `
+  -CampaignTag "campaign-YYYY-MM-DD-rc1" `
+  -IndexCsv "<index_csv>" `
+  -DataRoot "<data_root>" `
+  -CacheDir "<cache_dir>" `
+  -Phase confirmatory
+
+# comparison only
+powershell -ExecutionPolicy Bypass -File scripts/run_frozen_campaign.ps1 `
+  -CampaignTag "campaign-YYYY-MM-DD-rc1" `
+  -IndexCsv "<index_csv>" `
+  -DataRoot "<data_root>" `
+  -CacheDir "<cache_dir>" `
+  -Phase comparison
+
+# replay only
+powershell -ExecutionPolicy Bypass -File scripts/run_frozen_campaign.ps1 `
+  -CampaignTag "campaign-YYYY-MM-DD-rc1" `
+  -IndexCsv "<index_csv>" `
+  -DataRoot "<data_root>" `
+  -CacheDir "<cache_dir>" `
+  -Phase replay
+
+# bundle only
+powershell -ExecutionPolicy Bypass -File scripts/run_frozen_campaign.ps1 `
+  -CampaignTag "campaign-YYYY-MM-DD-rc1" `
+  -IndexCsv "<index_csv>" `
+  -DataRoot "<data_root>" `
+  -CacheDir "<cache_dir>" `
+  -Phase bundle
+
+# all phases
+powershell -ExecutionPolicy Bypass -File scripts/run_frozen_campaign.ps1 `
+  -CampaignTag "campaign-YYYY-MM-DD-rc1" `
+  -IndexCsv "<index_csv>" `
+  -DataRoot "<data_root>" `
+  -CacheDir "<cache_dir>" `
+  -Phase all
+```
+
 Exploratory run:
 
 ```bash

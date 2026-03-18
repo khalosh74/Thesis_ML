@@ -201,26 +201,53 @@ python scripts/rc1_release_gate.py \
   --verify-bundle-dir outputs/reproducibility/publishable_bundle
 ```
 
+### 5) Phased frozen campaign orchestration
+
+`scripts/run_frozen_campaign.ps1` now supports explicit phases:
+
+- `precheck`
+- `confirmatory`
+- `comparison`
+- `replay`
+- `bundle`
+- `all` (ordered execution: `precheck -> confirmatory -> comparison -> replay -> bundle`)
+
+Dependency enforcement:
+
+- `confirmatory` requires `precheck=passed`.
+- `comparison` requires `precheck=passed`.
+- `replay` requires `precheck=passed`, `confirmatory=passed`, `comparison=passed`.
+- `bundle` requires `precheck=passed`, `confirmatory=passed`, `comparison=passed`, `replay=passed`.
+
+Blocking model:
+
+- confirmatory readiness blockers: `precheck`, `confirmatory`
+- campaign sign-off blockers: all phases
+
+Machine-readable orchestration artifacts:
+
+- campaign manifest: `outputs/campaign/<CampaignTag>/campaign_manifest.json`
+- per-phase status: `<phase_root>/phase_status.json`
+- per-phase summary: `<phase_root>/phase_summary.json`
+
 ## Official RC checklist
 
 Before freezing an experiment campaign:
 
 1. Prepare a clean campaign output root and archive legacy output folders:
    `powershell -ExecutionPolicy Bypass -File scripts/prepare_frozen_campaign.ps1 -CampaignTag "campaign-YYYY-MM-DD-rc1"`.
-2. Run baseline release checks (`build`, `twine`, `acceptance_smoke`).
-3. Run `python scripts/release_hygiene_check.py`.
-4. Validate at least one official comparison/protocol output with `verify_official_artifacts.py`.
-5. Run deterministic rerun verification with `verify_official_reproducibility.py` on a small official path.
-6. Capture performance smoke output:
-   `python scripts/performance_smoke.py --output outputs/performance/performance_smoke_summary.json`.
-7. Archive RC gate summary:
-   `python scripts/rc1_release_gate.py --summary-out outputs/release/rc1_gate_summary.json`.
-8. For final frozen campaign outputs, run confirmatory-ready verification:
-   `python scripts/verify_confirmatory_ready.py --output-dir <confirmatory_output_dir> --summary-out outputs/release/confirmatory_ready_summary.json`.
-9. Produce and verify canonical reproducibility artifacts:
-   - `python scripts/replay_official_paths.py --mode both --use-demo-dataset --verify-determinism`
-   - `python scripts/build_publishable_bundle.py ...`
-   - `python scripts/verify_publishable_bundle.py --bundle-dir <bundle_dir>`
+2. Run frozen campaign precheck phase:
+   `powershell -ExecutionPolicy Bypass -File scripts/run_frozen_campaign.ps1 -CampaignTag "campaign-YYYY-MM-DD-rc1" -IndexCsv "<index_csv>" -DataRoot "<data_root>" -CacheDir "<cache_dir>" -Phase precheck`.
+3. Run frozen campaign confirmatory phase:
+   `powershell -ExecutionPolicy Bypass -File scripts/run_frozen_campaign.ps1 -CampaignTag "campaign-YYYY-MM-DD-rc1" -IndexCsv "<index_csv>" -DataRoot "<data_root>" -CacheDir "<cache_dir>" -Phase confirmatory`.
+4. Run frozen campaign comparison phase:
+   `powershell -ExecutionPolicy Bypass -File scripts/run_frozen_campaign.ps1 -CampaignTag "campaign-YYYY-MM-DD-rc1" -IndexCsv "<index_csv>" -DataRoot "<data_root>" -CacheDir "<cache_dir>" -Phase comparison`.
+5. Run frozen campaign replay phase:
+   `powershell -ExecutionPolicy Bypass -File scripts/run_frozen_campaign.ps1 -CampaignTag "campaign-YYYY-MM-DD-rc1" -IndexCsv "<index_csv>" -DataRoot "<data_root>" -CacheDir "<cache_dir>" -Phase replay`.
+6. Run frozen campaign bundle phase:
+   `powershell -ExecutionPolicy Bypass -File scripts/run_frozen_campaign.ps1 -CampaignTag "campaign-YYYY-MM-DD-rc1" -IndexCsv "<index_csv>" -DataRoot "<data_root>" -CacheDir "<cache_dir>" -Phase bundle`.
+7. Optional one-command equivalent:
+   `powershell -ExecutionPolicy Bypass -File scripts/run_frozen_campaign.ps1 -CampaignTag "campaign-YYYY-MM-DD-rc1" -IndexCsv "<index_csv>" -DataRoot "<data_root>" -CacheDir "<cache_dir>" -Phase all`.
 
 ## Confirmatory-ready boundary
 
