@@ -1116,4 +1116,3 @@ def compile_workbook_file(path: Path) -> CompiledStudyManifest:
     workbook_path = Path(path)
     workbook = load_workbook(workbook_path, data_only=False)
     return compile_workbook_workbook(workbook, source_workbook_path=workbook_path)
-

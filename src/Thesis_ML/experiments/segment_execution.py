@@ -527,9 +527,7 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
                     subgroup_min_samples_per_group=request.subgroup_min_samples_per_group,
                     subgroup_min_classes_per_group=request.subgroup_min_classes_per_group,
                     subgroup_report_small_groups=request.subgroup_report_small_groups,
-                    confirmatory_guardrails_enabled=bool(
-                        request.confirmatory_guardrails_enabled
-                    ),
+                    confirmatory_guardrails_enabled=bool(request.confirmatory_guardrails_enabled),
                     subgroup_evidence_role=str(request.subgroup_evidence_role),
                     subgroup_primary_evidence_allowed=bool(
                         request.subgroup_primary_evidence_allowed

@@ -604,4 +604,3 @@ def build_study_design_layer(
         study_experiments,
         validation_warnings,
     )
-

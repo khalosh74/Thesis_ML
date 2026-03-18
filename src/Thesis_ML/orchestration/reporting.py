@@ -176,9 +176,7 @@ def summarize_by_experiment(
         experiment_id = str(experiment["experiment_id"])
         raw_metric_name = experiment.get("primary_metric")
         if raw_metric_name is None or not str(raw_metric_name).strip():
-            raise ValueError(
-                f"Experiment '{experiment_id}' is missing required primary_metric."
-            )
+            raise ValueError(f"Experiment '{experiment_id}' is missing required primary_metric.")
         metric_name = validate_metric_name(str(raw_metric_name))
         records = [row for row in variant_records if row["experiment_id"] == experiment_id]
 

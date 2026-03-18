@@ -524,4 +524,3 @@ def fill_effect_summaries(ws: Worksheet, *, effect_summaries_columns: list[str])
         ws, "=List_Study_ID", col_idx(effect_summaries_columns, "study_id"), 3, 1000
     )
     return last
-

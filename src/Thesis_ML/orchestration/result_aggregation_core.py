@@ -61,7 +61,8 @@ def _group_primary_metric_name(group_rows: list[dict[str, Any]]) -> str:
     metric_names = {
         str(row.get("primary_metric_name"))
         for row in group_rows
-        if isinstance(row.get("primary_metric_name"), str) and str(row.get("primary_metric_name")).strip()
+        if isinstance(row.get("primary_metric_name"), str)
+        and str(row.get("primary_metric_name")).strip()
     }
     if not metric_names:
         raise ValueError("Grouped aggregation rows are missing primary_metric_name.")

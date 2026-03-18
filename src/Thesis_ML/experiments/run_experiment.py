@@ -640,9 +640,7 @@ def run_experiment(
                 dataset_fingerprint=dataset_fingerprint,
             )
             if not data_policy_effective:
-                data_policy_effective = dict(
-                    data_artifact_info.get("data_policy_effective", {})
-                )
+                data_policy_effective = dict(data_artifact_info.get("data_policy_effective", {}))
         except Exception as exc:
             failure = _failure_payload(exc)
             stage_timings["total"] = float(perf_counter() - overall_start)
@@ -661,9 +659,7 @@ def run_experiment(
                 resource_summary=resource_summary,
             )
             raise
-        stage_timings["data_artifact_generation"] = float(
-            perf_counter() - data_artifacts_start
-        )
+        stage_timings["data_artifact_generation"] = float(perf_counter() - data_artifacts_start)
     try:
         execute_start = perf_counter()
         with warnings.catch_warnings(record=True) as warning_records:
@@ -715,9 +711,7 @@ def run_experiment(
                         ),
                         confirmatory_guardrails_enabled=bool(confirmatory_guardrails_enabled),
                         subgroup_evidence_role=str(subgroup_evidence_role),
-                        subgroup_primary_evidence_allowed=bool(
-                            subgroup_primary_evidence_allowed
-                        ),
+                        subgroup_primary_evidence_allowed=bool(subgroup_primary_evidence_allowed),
                         calibration_enabled=bool(evidence_policy_model.calibration.enabled),
                         calibration_n_bins=int(evidence_policy_model.calibration.n_bins),
                         calibration_require_probabilities_for_validity=bool(
@@ -1314,9 +1308,7 @@ def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 
     models = list(MODEL_NAMES) if args.model == "all" else [args.model]
-    subgroup_dimensions = (
-        list(args.subgroup_dimension) if list(args.subgroup_dimension) else None
-    )
+    subgroup_dimensions = list(args.subgroup_dimension) if list(args.subgroup_dimension) else None
     results: list[dict[str, Any]] = []
 
     for model_name in models:
@@ -1342,21 +1334,18 @@ def main(argv: list[str] | None = None) -> int:
             methodology_policy_name=args.methodology_policy,
             class_weight_policy=args.class_weight_policy,
             tuning_enabled=(
-                str(args.methodology_policy)
-                == MethodologyPolicyName.GROUPED_NESTED_TUNING.value
+                str(args.methodology_policy) == MethodologyPolicyName.GROUPED_NESTED_TUNING.value
             ),
             tuning_search_space_id=args.tuning_search_space_id,
             tuning_search_space_version=args.tuning_search_space_version,
             tuning_inner_cv_scheme=(
                 "grouped_leave_one_group_out"
-                if str(args.methodology_policy)
-                == MethodologyPolicyName.GROUPED_NESTED_TUNING.value
+                if str(args.methodology_policy) == MethodologyPolicyName.GROUPED_NESTED_TUNING.value
                 else None
             ),
             tuning_inner_group_field=(
                 "session"
-                if str(args.methodology_policy)
-                == MethodologyPolicyName.GROUPED_NESTED_TUNING.value
+                if str(args.methodology_policy) == MethodologyPolicyName.GROUPED_NESTED_TUNING.value
                 else None
             ),
             subgroup_reporting_enabled=True,

@@ -237,9 +237,7 @@ def execute_variant(
     metrics = dict(result.get("metrics", {})) if result else {}
     raw_primary_metric_name = experiment.get("primary_metric")
     if raw_primary_metric_name is None or not str(raw_primary_metric_name).strip():
-        raise ValueError(
-            f"Experiment '{experiment_id}' is missing required primary_metric."
-        )
+        raise ValueError(f"Experiment '{experiment_id}' is missing required primary_metric.")
     primary_metric_name = validate_metric_name(str(raw_primary_metric_name))
     primary_metric_value = extract_metric_value(
         metrics,

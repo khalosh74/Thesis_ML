@@ -1706,4 +1706,3 @@ def fill_dashboard_sheet(ws) -> None:
     ws.conditional_formatting.add(
         "B9:B14", FormulaRule(formula=['B9="NO"'], fill=PatternFill("solid", fgColor=COL["bad"]))
     )
-

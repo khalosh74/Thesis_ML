@@ -43,4 +43,3 @@ __all__ = [
     "fill_summary_outputs",
     "fill_trial_results",
 ]
-

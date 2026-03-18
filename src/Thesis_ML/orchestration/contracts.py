@@ -238,9 +238,7 @@ class StudyDesignSpec(_ContractModel):
     @model_validator(mode="after")
     def _validate_study(self) -> StudyDesignSpec:
         if "primary_metric" not in self.model_fields_set:
-            raise ValueError(
-                f"Study '{self.study_id}' must explicitly declare primary_metric."
-            )
+            raise ValueError(f"Study '{self.study_id}' must explicitly declare primary_metric.")
         if not str(self.primary_metric).strip():
             raise ValueError(f"Study '{self.study_id}' requires non-empty primary_metric.")
         self.primary_metric = validate_metric_name(str(self.primary_metric).strip())
@@ -466,7 +464,9 @@ class ExperimentSpec(_ContractModel):
                 f"Experiment '{self.experiment_id}' must explicitly declare primary_metric."
             )
         if not str(self.primary_metric).strip():
-            raise ValueError(f"Experiment '{self.experiment_id}' requires non-empty primary_metric.")
+            raise ValueError(
+                f"Experiment '{self.experiment_id}' requires non-empty primary_metric."
+            )
         self.primary_metric = validate_metric_name(str(self.primary_metric).strip())
         mismatched = [
             trial.template_id

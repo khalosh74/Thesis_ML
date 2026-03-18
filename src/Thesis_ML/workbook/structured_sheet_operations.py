@@ -172,6 +172,7 @@ def fill_machine_status(ws: Worksheet, *, machine_status_columns: list[str]) -> 
     )
     return last
 
+
 def fill_trial_results(ws: Worksheet, *, trial_results_columns: list[str]) -> int:
     last = fill_simple_structured_sheet(
         ws=ws,
@@ -417,4 +418,3 @@ def fill_search_spaces(
         3,
     )
     return last
-
