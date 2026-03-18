@@ -88,6 +88,13 @@ Official-policy note:
 - comparison/protocol contracts must choose exactly one methodology policy:
   `fixed_baselines_only` or `grouped_nested_tuning`.
 - locked comparison runs emit `comparison_decision.json` for machine-readable selection outcomes.
+- locked comparison runs emit evidence artifacts:
+  `repeated_run_metrics.csv`, `repeated_run_summary.json`,
+  `confidence_intervals.json`, `metric_intervals.csv`,
+  `paired_model_comparisons.json`, `paired_model_comparisons.csv`.
+- confirmatory runs emit evidence artifacts:
+  `repeated_run_metrics.csv`, `repeated_run_summary.json`,
+  `confidence_intervals.json`, `metric_intervals.csv`.
 - official comparison/confirmatory paths run strict preflight contract validation and fail fast on violations.
 - run-level `run_status.json` exposes structured diagnostics (`error_code`, `error_type`, `failure_stage`) and warning/timing/resource summaries.
 
@@ -98,6 +105,7 @@ Official metric policy:
 - official permutation metric must match primary metric
 - artifacts include `metric_policy_effective` so operators can audit effective primary/decision/tuning/permutation metrics
 - official run artifacts include deterministic provenance (`git_provenance`, `dataset_fingerprint`) for rerun traceability
+- official run artifacts include evidence metadata (`evidence_policy_effective`, repeat metadata, `evidence_run_role`)
 
 Architecture ownership (where to extend safely):
 - runner policy resolution belongs in `src/Thesis_ML/experiments/runtime_policies.py`

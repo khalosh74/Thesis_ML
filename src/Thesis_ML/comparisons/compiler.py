@@ -16,7 +16,7 @@ from Thesis_ML.comparisons.models import (
     TransferPairSource,
 )
 from Thesis_ML.config.framework_mode import FrameworkMode
-from Thesis_ML.config.methodology import MethodologyPolicyName
+from Thesis_ML.config.methodology import EvidenceRunRole, MethodologyPolicyName
 
 
 def _slug(value: str) -> str:
@@ -131,9 +131,91 @@ def compile_comparison(
         n_permutations=int(control_policy.n_permutations),
         dummy_baseline_enabled=bool(control_policy.dummy_baseline_enabled),
     )
+    repeat_count = int(comparison.evidence_policy.repeat_evaluation.repeat_count)
+    seed_stride = int(comparison.evidence_policy.repeat_evaluation.seed_stride)
+    require_untuned_baseline = bool(
+        comparison.methodology_policy.policy_name == MethodologyPolicyName.GROUPED_NESTED_TUNING
+        and comparison.evidence_policy.required_package.require_untuned_baseline_if_tuning
+    )
 
     runs: list[CompiledComparisonRunSpec] = []
     claim_to_run_map: dict[str, list[str]] = {}
+
+    def _append_run_variants(
+        *,
+        base_run_id: str,
+        variant_id: str,
+        claim_ids: list[str],
+        model_name: str,
+        interpretability_enabled: bool,
+        subject: str | None = None,
+        train_subject: str | None = None,
+        test_subject: str | None = None,
+    ) -> None:
+        base_seed = int(contract.seed_policy.global_seed)
+        for repeat_id in range(1, repeat_count + 1):
+            repeat_seed = int(base_seed + ((repeat_id - 1) * seed_stride))
+            repeated_run_id = (
+                f"{base_run_id}__r{repeat_id:03d}" if repeat_count > 1 else base_run_id
+            )
+            run = CompiledComparisonRunSpec(
+                run_id=repeated_run_id,
+                base_run_id=base_run_id,
+                repeat_id=repeat_id,
+                repeat_count=repeat_count,
+                evidence_run_role=EvidenceRunRole.PRIMARY,
+                framework_mode=FrameworkMode.LOCKED_COMPARISON.value,
+                canonical_run=False,
+                comparison_id=comparison.comparison_id,
+                comparison_version=comparison.comparison_version,
+                variant_id=variant_id,
+                claim_ids=list(claim_ids),
+                target=contract.target,
+                model=model_name,
+                cv_mode=contract.split_mode,
+                subject=subject,
+                train_subject=train_subject,
+                test_subject=test_subject,
+                filter_task=contract.filter_task,
+                filter_modality=contract.filter_modality,
+                seed=repeat_seed,
+                primary_metric=comparison.metric_policy.primary_metric,
+                controls=controls,
+                interpretability_enabled=interpretability_enabled,
+                methodology_policy_name=comparison.methodology_policy.policy_name,
+                class_weight_policy=comparison.methodology_policy.class_weight_policy,
+                tuning_enabled=bool(comparison.methodology_policy.tuning_enabled),
+                tuning_search_space_id=comparison.methodology_policy.tuning_search_space_id,
+                tuning_search_space_version=comparison.methodology_policy.tuning_search_space_version,
+                tuning_inner_cv_scheme=comparison.methodology_policy.inner_cv_scheme,
+                tuning_inner_group_field=comparison.methodology_policy.inner_group_field,
+                subgroup_reporting_enabled=bool(comparison.subgroup_reporting_policy.enabled),
+                subgroup_dimensions=list(comparison.subgroup_reporting_policy.subgroup_dimensions),
+                subgroup_min_samples_per_group=int(
+                    comparison.subgroup_reporting_policy.min_samples_per_group
+                ),
+                artifact_requirements=list(comparison.artifact_contract.required_run_artifacts),
+            )
+            runs.append(run)
+            for claim_id in claim_ids:
+                claim_to_run_map.setdefault(claim_id, []).append(run.run_id)
+
+            if require_untuned_baseline and model_name != "dummy":
+                untuned_run = run.model_copy(
+                    update={
+                        "run_id": f"{repeated_run_id}__untuned",
+                        "evidence_run_role": EvidenceRunRole.UNTUNED_BASELINE,
+                        "tuning_enabled": False,
+                        "tuning_search_space_id": None,
+                        "tuning_search_space_version": None,
+                        "tuning_inner_cv_scheme": None,
+                        "tuning_inner_group_field": None,
+                    }
+                )
+                runs.append(untuned_run)
+                for claim_id in claim_ids:
+                    claim_to_run_map.setdefault(claim_id, []).append(untuned_run.run_id)
+
     for variant_id in selected_variant_ids:
         variant = allowed_variants[variant_id]
         interpretability_enabled = bool(comparison.interpretability_policy.enabled) and (
@@ -142,87 +224,33 @@ def compile_comparison(
 
         if contract.split_mode == "within_subject_loso_session":
             for subject in _resolve_subjects(comparison, all_subjects):
-                run_id = _build_run_id(comparison, variant_id, subject=subject)
-                run = CompiledComparisonRunSpec(
-                    run_id=run_id,
-                    framework_mode=FrameworkMode.LOCKED_COMPARISON.value,
-                    canonical_run=False,
-                    comparison_id=comparison.comparison_id,
-                    comparison_version=comparison.comparison_version,
+                base_run_id = _build_run_id(comparison, variant_id, subject=subject)
+                _append_run_variants(
+                    base_run_id=base_run_id,
                     variant_id=variant.variant_id,
                     claim_ids=list(variant.claim_ids),
-                    target=contract.target,
-                    model=variant.model,
-                    cv_mode=contract.split_mode,
-                    subject=subject,
-                    filter_task=contract.filter_task,
-                    filter_modality=contract.filter_modality,
-                    seed=int(contract.seed_policy.global_seed),
-                    primary_metric=comparison.metric_policy.primary_metric,
-                    controls=controls,
+                    model_name=variant.model,
                     interpretability_enabled=interpretability_enabled,
-                    methodology_policy_name=comparison.methodology_policy.policy_name,
-                    class_weight_policy=comparison.methodology_policy.class_weight_policy,
-                    tuning_enabled=bool(comparison.methodology_policy.tuning_enabled),
-                    tuning_search_space_id=comparison.methodology_policy.tuning_search_space_id,
-                    tuning_search_space_version=comparison.methodology_policy.tuning_search_space_version,
-                    tuning_inner_cv_scheme=comparison.methodology_policy.inner_cv_scheme,
-                    tuning_inner_group_field=comparison.methodology_policy.inner_group_field,
-                    subgroup_reporting_enabled=bool(comparison.subgroup_reporting_policy.enabled),
-                    subgroup_dimensions=list(comparison.subgroup_reporting_policy.subgroup_dimensions),
-                    subgroup_min_samples_per_group=int(
-                        comparison.subgroup_reporting_policy.min_samples_per_group
-                    ),
-                    artifact_requirements=list(comparison.artifact_contract.required_run_artifacts),
+                    subject=subject,
                 )
-                runs.append(run)
-                for claim_id in variant.claim_ids:
-                    claim_to_run_map.setdefault(claim_id, []).append(run.run_id)
 
         if contract.split_mode == "frozen_cross_person_transfer":
             for pair in _resolve_transfer_pairs(comparison, all_subjects):
-                run_id = _build_run_id(
+                base_run_id = _build_run_id(
                     comparison,
                     variant_id,
                     train_subject=pair.train_subject,
                     test_subject=pair.test_subject,
                 )
-                run = CompiledComparisonRunSpec(
-                    run_id=run_id,
-                    framework_mode=FrameworkMode.LOCKED_COMPARISON.value,
-                    canonical_run=False,
-                    comparison_id=comparison.comparison_id,
-                    comparison_version=comparison.comparison_version,
+                _append_run_variants(
+                    base_run_id=base_run_id,
                     variant_id=variant.variant_id,
                     claim_ids=list(variant.claim_ids),
-                    target=contract.target,
-                    model=variant.model,
-                    cv_mode=contract.split_mode,
+                    model_name=variant.model,
+                    interpretability_enabled=interpretability_enabled,
                     train_subject=pair.train_subject,
                     test_subject=pair.test_subject,
-                    filter_task=contract.filter_task,
-                    filter_modality=contract.filter_modality,
-                    seed=int(contract.seed_policy.global_seed),
-                    primary_metric=comparison.metric_policy.primary_metric,
-                    controls=controls,
-                    interpretability_enabled=interpretability_enabled,
-                    methodology_policy_name=comparison.methodology_policy.policy_name,
-                    class_weight_policy=comparison.methodology_policy.class_weight_policy,
-                    tuning_enabled=bool(comparison.methodology_policy.tuning_enabled),
-                    tuning_search_space_id=comparison.methodology_policy.tuning_search_space_id,
-                    tuning_search_space_version=comparison.methodology_policy.tuning_search_space_version,
-                    tuning_inner_cv_scheme=comparison.methodology_policy.inner_cv_scheme,
-                    tuning_inner_group_field=comparison.methodology_policy.inner_group_field,
-                    subgroup_reporting_enabled=bool(comparison.subgroup_reporting_policy.enabled),
-                    subgroup_dimensions=list(comparison.subgroup_reporting_policy.subgroup_dimensions),
-                    subgroup_min_samples_per_group=int(
-                        comparison.subgroup_reporting_policy.min_samples_per_group
-                    ),
-                    artifact_requirements=list(comparison.artifact_contract.required_run_artifacts),
                 )
-                runs.append(run)
-                for claim_id in variant.claim_ids:
-                    claim_to_run_map.setdefault(claim_id, []).append(run.run_id)
 
     if not runs:
         raise ValueError("Comparison compilation produced zero concrete runs.")
@@ -240,6 +268,7 @@ def compile_comparison(
         metric_policy=comparison.metric_policy,
         subgroup_reporting_policy=comparison.subgroup_reporting_policy,
         decision_policy=comparison.decision_policy,
+        evidence_policy=comparison.evidence_policy,
         variant_ids=selected_variant_ids,
         runs=runs,
         claim_to_run_map=claim_to_run_map,

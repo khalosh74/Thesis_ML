@@ -13,6 +13,10 @@ _REQUIRED_PROTOCOL_ARTIFACTS = (
     "suite_summary.json",
     "execution_status.json",
     "deviation_log.json",
+    "repeated_run_metrics.csv",
+    "repeated_run_summary.json",
+    "confidence_intervals.json",
+    "metric_intervals.csv",
     "report_index.csv",
 )
 _REQUIRED_COMPARISON_ARTIFACTS = (
@@ -21,6 +25,12 @@ _REQUIRED_COMPARISON_ARTIFACTS = (
     "comparison_summary.json",
     "comparison_decision.json",
     "execution_status.json",
+    "repeated_run_metrics.csv",
+    "repeated_run_summary.json",
+    "confidence_intervals.json",
+    "metric_intervals.csv",
+    "paired_model_comparisons.json",
+    "paired_model_comparisons.csv",
     "report_index.csv",
 )
 
@@ -127,6 +137,15 @@ def _verify_metric_policy(
             path=report_dir,
         )
         return
+    evidence_policy_config = config_payload.get("evidence_policy_effective")
+    evidence_policy_metrics = metrics_payload.get("evidence_policy_effective")
+    if not isinstance(evidence_policy_config, dict) or not isinstance(evidence_policy_metrics, dict):
+        _add_issue(
+            issues,
+            code="evidence_policy_missing",
+            message="Run config/metrics must include evidence_policy_effective.",
+            path=report_dir,
+        )
     for key in (
         "primary_metric",
         "decision_metric",
@@ -153,7 +172,7 @@ def _verify_metric_policy(
                     message="Permutation metric does not match effective primary metric.",
                     path=report_dir,
                     details={"metric_name": metric_name, "primary_metric": primary_metric},
-                )
+                ) 
 
 
 def _verify_confirmatory_reporting_contract(
@@ -508,6 +527,43 @@ def verify_official_artifacts(
             issues=issues,
             root=root,
         )
+    repeated_summary_payload = _load_json(
+        root / "repeated_run_summary.json",
+        issues,
+        code_prefix="repeated_run_summary",
+    )
+    confidence_payload = _load_json(
+        root / "confidence_intervals.json",
+        issues,
+        code_prefix="confidence_intervals",
+    )
+    if isinstance(repeated_summary_payload, dict) and "groups" not in repeated_summary_payload:
+        _add_issue(
+            issues,
+            code="repeated_run_summary_invalid",
+            message="repeated_run_summary.json must include 'groups'.",
+            path=root / "repeated_run_summary.json",
+        )
+    if isinstance(confidence_payload, dict) and "intervals" not in confidence_payload:
+        _add_issue(
+            issues,
+            code="confidence_intervals_invalid",
+            message="confidence_intervals.json must include 'intervals'.",
+            path=root / "confidence_intervals.json",
+        )
+    if framework_mode == "locked_comparison":
+        paired_payload = _load_json(
+            root / "paired_model_comparisons.json",
+            issues,
+            code_prefix="paired_model_comparisons",
+        )
+        if isinstance(paired_payload, dict) and not isinstance(paired_payload.get("pairs"), list):
+            _add_issue(
+                issues,
+                code="paired_model_comparisons_invalid",
+                message="paired_model_comparisons.json must include list field 'pairs'.",
+                path=root / "paired_model_comparisons.json",
+            )
 
     report_rows = _load_report_index(root / "report_index.csv", issues)
     n_completed_runs_checked = 0

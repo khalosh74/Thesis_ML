@@ -103,6 +103,13 @@ Strict metric consistency policy:
 - metric drift fallbacks are disallowed; decision-support/workbook/search-space inputs must declare explicit metric fields
 - official run artifacts persist effective metric policy in `config.json` / `metrics.json` under `metric_policy_effective`
 
+Evidence layer policy (official comparison + confirmatory paths):
+- contracts must declare explicit `evidence_policy`
+- repeated-run settings (`repeat_count`, `seed_stride`) are compiled into concrete run specs
+- grouped-bootstrap confidence intervals and paired sign-flip comparisons are emitted as machine-readable artifacts
+- calibration artifacts are always emitted (`performed` or explicit `not_applicable`)
+- required evidence package checks (dummy/permutation/untuned baseline when tuning) are reflected in mode-level summaries/decisions
+
 RC-1 hardening policy (official runs):
 - confirmatory and locked-comparison runs enforce strict preflight contract validation before execution
 - run artifacts now include deterministic provenance (`git_provenance` and `dataset_fingerprint`)
@@ -347,6 +354,8 @@ outputs/reports/<mode>/<run_id>/
   best_params_per_fold.csv
   spatial_compatibility_report.json
   interpretability_summary.json
+  calibration_summary.json
+  calibration_table.csv
 ```
 
 Default `<mode>` by command:
@@ -372,6 +381,18 @@ Mode-level manifests:
 - confirmatory protocol executions write `protocol_runs/<protocol_id>__<protocol_version>/...`
 - locked comparison manifests include `comparison_decision.json` with
   `winner_selected` / `inconclusive` / `invalid_comparison`.
+- locked comparison evidence artifacts include:
+  - `repeated_run_metrics.csv`
+  - `repeated_run_summary.json`
+  - `confidence_intervals.json`
+  - `metric_intervals.csv`
+  - `paired_model_comparisons.json`
+  - `paired_model_comparisons.csv`
+- confirmatory protocol evidence artifacts include:
+  - `repeated_run_metrics.csv`
+  - `repeated_run_summary.json`
+  - `confidence_intervals.json`
+  - `metric_intervals.csv`
 
 ## Adding a new model to the registry
 

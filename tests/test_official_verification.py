@@ -36,8 +36,15 @@ def _write_confirmatory_output(root: Path) -> Path:
         "framework_mode": "confirmatory",
         "canonical_run": True,
         "methodology_policy_name": "fixed_baselines_only",
+        "class_weight_policy": "none",
+        "tuning_enabled": False,
+        "evidence_run_role": "primary",
+        "repeat_id": 1,
+        "repeat_count": 1,
+        "base_run_id": "run_001",
         "protocol_id": "thesis-canonical",
         "protocol_version": "1.0.0",
+        "protocol_schema_version": "thesis-protocol-v1",
         "suite_id": "primary_within_subject",
         "claim_ids": ["C01"],
         "metric_policy_effective": {
@@ -47,6 +54,36 @@ def _write_confirmatory_output(root: Path) -> Path:
             "tuning_metric": "balanced_accuracy",
             "permutation_metric": "balanced_accuracy",
             "higher_is_better": True,
+        },
+        "evidence_policy_effective": {
+            "repeat_evaluation": {"repeat_count": 1, "seed_stride": 1000},
+            "confidence_intervals": {
+                "method": "grouped_bootstrap_percentile",
+                "confidence_level": 0.95,
+                "n_bootstrap": 10,
+                "seed": 2026,
+            },
+            "paired_comparisons": {
+                "method": "paired_sign_flip_permutation",
+                "n_permutations": 100,
+                "alpha": 0.05,
+                "require_significant_win": False,
+            },
+            "permutation": {
+                "alpha": 0.05,
+                "minimum_permutations": 10,
+                "require_pass_for_validity": False,
+            },
+            "calibration": {
+                "enabled": True,
+                "n_bins": 10,
+                "require_probabilities_for_validity": False,
+            },
+            "required_package": {
+                "require_dummy_baseline": True,
+                "require_permutation_control": True,
+                "require_untuned_baseline_if_tuning": False,
+            },
         },
         "primary_metric_name": "balanced_accuracy",
         "dataset_fingerprint": dataset_fingerprint,
@@ -182,6 +219,51 @@ def _write_confirmatory_output(root: Path) -> Path:
             indent=2,
         )
         + "\n",
+        encoding="utf-8",
+    )
+    (root / "repeated_run_metrics.csv").write_text(
+        "group_key,run_id,base_run_id,evidence_run_role,repeat_id,repeat_count,primary_metric_name,primary_metric_value\n"
+        "primary_within_subject,run_001,run_001,primary,1,1,balanced_accuracy,0.75\n",
+        encoding="utf-8",
+    )
+    (root / "repeated_run_summary.json").write_text(
+        json.dumps(
+            {
+                "groups": [
+                    {
+                        "group_key": "primary_within_subject",
+                        "n_runs": 1,
+                        "primary_metric_name": "balanced_accuracy",
+                        "mean_primary_metric_value": 0.75,
+                    }
+                ]
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (root / "confidence_intervals.json").write_text(
+        json.dumps(
+            {
+                "intervals": [
+                    {
+                        "group_key": "primary_within_subject",
+                        "metric_name": "balanced_accuracy",
+                        "confidence_level": 0.95,
+                        "lower_bound": 0.75,
+                        "upper_bound": 0.75,
+                    }
+                ]
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (root / "metric_intervals.csv").write_text(
+        "group_key,metric_name,confidence_level,lower_bound,upper_bound\n"
+        "primary_within_subject,balanced_accuracy,0.95,0.75,0.75\n",
         encoding="utf-8",
     )
     (root / "deviation_log.json").write_text(

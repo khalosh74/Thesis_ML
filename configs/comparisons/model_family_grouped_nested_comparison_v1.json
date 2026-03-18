@@ -68,6 +68,39 @@
     "allow_mixed_methodology_policies": false,
     "block_on_subgroup_failures": false
   },
+  "evidence_policy": {
+    "repeat_evaluation": {
+      "repeat_count": 1,
+      "seed_stride": 1000
+    },
+    "confidence_intervals": {
+      "method": "grouped_bootstrap_percentile",
+      "confidence_level": 0.95,
+      "n_bootstrap": 1000,
+      "seed": 2026
+    },
+    "paired_comparisons": {
+      "method": "paired_sign_flip_permutation",
+      "n_permutations": 5000,
+      "alpha": 0.05,
+      "require_significant_win": false
+    },
+    "permutation": {
+      "alpha": 0.05,
+      "minimum_permutations": 0,
+      "require_pass_for_validity": false
+    },
+    "calibration": {
+      "enabled": true,
+      "n_bins": 10,
+      "require_probabilities_for_validity": false
+    },
+    "required_package": {
+      "require_dummy_baseline": false,
+      "require_permutation_control": false,
+      "require_untuned_baseline_if_tuning": true
+    }
+  },
   "interpretability_policy": {
     "enabled": false,
     "allowed_models": []
@@ -105,6 +138,12 @@
       "comparison_summary.json",
       "comparison_decision.json",
       "execution_status.json",
+      "repeated_run_metrics.csv",
+      "repeated_run_summary.json",
+      "confidence_intervals.json",
+      "metric_intervals.csv",
+      "paired_model_comparisons.json",
+      "paired_model_comparisons.csv",
       "report_index.csv"
     ],
     "required_run_artifacts": [
@@ -118,12 +157,20 @@
       "tuning_summary.json",
       "best_params_per_fold.csv",
       "spatial_compatibility_report.json",
-      "interpretability_summary.json"
+      "interpretability_summary.json",
+      "calibration_summary.json",
+      "calibration_table.csv"
     ],
     "required_run_metadata_fields": [
       "framework_mode",
       "canonical_run",
       "methodology_policy_name",
+      "class_weight_policy",
+      "tuning_enabled",
+      "evidence_run_role",
+      "repeat_id",
+      "repeat_count",
+      "base_run_id",
       "comparison_id",
       "comparison_version",
       "comparison_variant_id"

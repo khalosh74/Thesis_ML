@@ -11,6 +11,7 @@ from sklearn.metrics import confusion_matrix
 from sklearn.model_selection import GridSearchCV, LeaveOneGroupOut
 
 from Thesis_ML.config.metric_policy import metric_bundle, metric_scorer
+from Thesis_ML.experiments.evidence_statistics import build_calibration_outputs
 from Thesis_ML.experiments.metrics import classification_metric_score
 from Thesis_ML.experiments.tuning_search_spaces import get_search_space
 
@@ -598,6 +599,16 @@ def execute_evaluation(section_input: EvaluationInput) -> dict[str, Any]:
         if section_input.tuning_best_params_path is not None
         else report_dir / "best_params_per_fold.csv"
     )
+    calibration_summary_path = (
+        section_input.calibration_summary_path
+        if section_input.calibration_summary_path is not None
+        else report_dir / "calibration_summary.json"
+    )
+    calibration_table_path = (
+        section_input.calibration_table_path
+        if section_input.calibration_table_path is not None
+        else report_dir / "calibration_table.csv"
+    )
     metric_values = metric_bundle(
         section_input.y_true_all,
         section_input.y_pred_all,
@@ -652,6 +663,14 @@ def execute_evaluation(section_input: EvaluationInput) -> dict[str, Any]:
         "balanced_accuracy": overall_balanced,
         "macro_f1": overall_macro_f1,
         "methodology_policy_name": section_input.methodology_policy_name,
+        "evidence_run_role": str(section_input.evidence_run_role),
+        "repeat_id": int(section_input.repeat_id),
+        "repeat_count": int(section_input.repeat_count),
+        "base_run_id": (
+            str(section_input.base_run_id)
+            if section_input.base_run_id is not None
+            else str(section_input.run_id)
+        ),
         "primary_metric_name": primary_metric_name,
         "primary_metric_value": primary_metric_value,
         "tuning_enabled": bool(section_input.methodology_policy_name == "grouped_nested_tuning"),
@@ -673,7 +692,7 @@ def execute_evaluation(section_input: EvaluationInput) -> dict[str, Any]:
         permutation_metric_name = str(
             section_input.permutation_metric_name or section_input.primary_metric_name
         )
-        metrics["permutation_test"] = section_input.evaluate_permutations_fn(
+        permutation_payload = section_input.evaluate_permutations_fn(
             pipeline_template=section_input.build_pipeline_fn(
                 model_name=section_input.model,
                 seed=section_input.seed,
@@ -690,6 +709,27 @@ def execute_evaluation(section_input: EvaluationInput) -> dict[str, Any]:
                 metric_name=permutation_metric_name,
             ),
         )
+        permutation_payload["alpha"] = float(section_input.permutation_alpha)
+        permutation_payload["minimum_required"] = int(section_input.permutation_minimum_required)
+        permutation_payload["meets_minimum"] = bool(
+            int(permutation_payload.get("n_permutations", 0))
+            >= int(section_input.permutation_minimum_required)
+        )
+        p_value = permutation_payload.get("p_value")
+        passes_threshold = (
+            isinstance(p_value, (int, float))
+            and float(p_value) <= float(section_input.permutation_alpha)
+        )
+        permutation_payload["passes_threshold"] = bool(passes_threshold)
+        permutation_payload["require_pass_for_validity"] = bool(
+            section_input.permutation_require_pass_for_validity
+        )
+        permutation_payload["interpretation_status"] = (
+            "passes_threshold"
+            if bool(passes_threshold)
+            else "fails_threshold"
+        )
+        metrics["permutation_test"] = permutation_payload
 
     metrics["interpretability"] = {
         "enabled": bool(section_input.interpretability_summary["enabled"]),
@@ -754,6 +794,65 @@ def execute_evaluation(section_input: EvaluationInput) -> dict[str, Any]:
     metrics["subgroup_reporting"] = {
         key: value for key, value in subgroup_payload.items() if key != "rows"
     }
+
+    if section_input.calibration_enabled:
+        calibration_summary, calibration_table = build_calibration_outputs(
+            section_input.prediction_rows,
+            n_bins=int(section_input.calibration_n_bins),
+        )
+        if (
+            str(calibration_summary.get("status")) == "not_applicable"
+            and bool(section_input.calibration_require_probabilities_for_validity)
+        ):
+            calibration_summary["status"] = "failed"
+            calibration_summary["reason"] = "probabilities_required_but_missing"
+            calibration_summary["performed"] = False
+    else:
+        calibration_summary = {
+            "status": "not_applicable",
+            "reason": "calibration_disabled_by_policy",
+            "performed": False,
+            "n_bins": int(section_input.calibration_n_bins),
+            "n_samples": int(len(section_input.prediction_rows)),
+            "ece": None,
+            "brier_score": None,
+        }
+        calibration_table = pd.DataFrame(
+            columns=[
+                "bin_index",
+                "bin_lower",
+                "bin_upper",
+                "n_samples",
+                "mean_confidence",
+                "empirical_accuracy",
+            ]
+        )
+    calibration_summary["enabled"] = bool(section_input.calibration_enabled)
+    calibration_summary["require_probabilities_for_validity"] = bool(
+        section_input.calibration_require_probabilities_for_validity
+    )
+    calibration_summary["summary_path"] = str(calibration_summary_path.resolve())
+    calibration_summary["table_path"] = str(calibration_table_path.resolve())
+    calibration_summary_path.write_text(
+        f"{json.dumps(calibration_summary, indent=2)}\n",
+        encoding="utf-8",
+    )
+    if calibration_table.empty:
+        calibration_table = pd.DataFrame(
+            columns=[
+                "bin_index",
+                "bin_lower",
+                "bin_upper",
+                "n_samples",
+                "mean_confidence",
+                "empirical_accuracy",
+            ]
+        )
+    calibration_table.to_csv(calibration_table_path, index=False)
+    metrics["calibration"] = calibration_summary
+
+    if isinstance(section_input.evidence_policy_effective, dict):
+        metrics["evidence_policy_effective"] = dict(section_input.evidence_policy_effective)
 
     fold_rows = [dict(row) for row in section_input.fold_rows]
     split_rows = [dict(row) for row in section_input.split_rows]

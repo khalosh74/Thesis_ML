@@ -150,3 +150,113 @@ class ComparisonDecisionPolicy(_MethodologyModel):
         if float(self.tie_tolerance) < 0.0:
             raise ValueError("comparison decision tie_tolerance must be >= 0.0.")
         return self
+
+
+class ConfidenceIntervalMethod(StrEnum):
+    GROUPED_BOOTSTRAP_PERCENTILE = "grouped_bootstrap_percentile"
+
+
+class PairedComparisonMethod(StrEnum):
+    PAIRED_SIGN_FLIP_PERMUTATION = "paired_sign_flip_permutation"
+
+
+class EvidenceRunRole(StrEnum):
+    PRIMARY = "primary"
+    UNTUNED_BASELINE = "untuned_baseline"
+
+
+class RepeatEvaluationPolicy(_MethodologyModel):
+    repeat_count: int = 1
+    seed_stride: int = 1000
+
+    @model_validator(mode="after")
+    def _validate_repeat_policy(self) -> RepeatEvaluationPolicy:
+        if int(self.repeat_count) <= 0:
+            raise ValueError("evidence_policy.repeat_evaluation.repeat_count must be > 0.")
+        if int(self.seed_stride) <= 0:
+            raise ValueError("evidence_policy.repeat_evaluation.seed_stride must be > 0.")
+        return self
+
+
+class ConfidenceIntervalPolicy(_MethodologyModel):
+    method: ConfidenceIntervalMethod = ConfidenceIntervalMethod.GROUPED_BOOTSTRAP_PERCENTILE
+    confidence_level: float = 0.95
+    n_bootstrap: int = 1000
+    seed: int = 2026
+
+    @model_validator(mode="after")
+    def _validate_confidence_intervals(self) -> ConfidenceIntervalPolicy:
+        level = float(self.confidence_level)
+        if level <= 0.0 or level >= 1.0:
+            raise ValueError(
+                "evidence_policy.confidence_intervals.confidence_level must be in (0.0, 1.0)."
+            )
+        if int(self.n_bootstrap) <= 0:
+            raise ValueError(
+                "evidence_policy.confidence_intervals.n_bootstrap must be > 0."
+            )
+        if int(self.seed) < 0:
+            raise ValueError("evidence_policy.confidence_intervals.seed must be >= 0.")
+        return self
+
+
+class PairedComparisonPolicy(_MethodologyModel):
+    method: PairedComparisonMethod = PairedComparisonMethod.PAIRED_SIGN_FLIP_PERMUTATION
+    n_permutations: int = 5000
+    alpha: float = 0.05
+    require_significant_win: bool = False
+
+    @model_validator(mode="after")
+    def _validate_paired_comparison(self) -> PairedComparisonPolicy:
+        if int(self.n_permutations) <= 0:
+            raise ValueError("evidence_policy.paired_comparisons.n_permutations must be > 0.")
+        alpha = float(self.alpha)
+        if alpha <= 0.0 or alpha > 1.0:
+            raise ValueError("evidence_policy.paired_comparisons.alpha must be in (0.0, 1.0].")
+        return self
+
+
+class PermutationEvidencePolicy(_MethodologyModel):
+    alpha: float = 0.05
+    minimum_permutations: int = 100
+    require_pass_for_validity: bool = False
+
+    @model_validator(mode="after")
+    def _validate_permutation_evidence(self) -> PermutationEvidencePolicy:
+        alpha = float(self.alpha)
+        if alpha <= 0.0 or alpha > 1.0:
+            raise ValueError("evidence_policy.permutation.alpha must be in (0.0, 1.0].")
+        if int(self.minimum_permutations) < 0:
+            raise ValueError(
+                "evidence_policy.permutation.minimum_permutations must be >= 0."
+            )
+        return self
+
+
+class CalibrationPolicy(_MethodologyModel):
+    enabled: bool = True
+    n_bins: int = 10
+    require_probabilities_for_validity: bool = False
+
+    @model_validator(mode="after")
+    def _validate_calibration(self) -> CalibrationPolicy:
+        if int(self.n_bins) <= 1:
+            raise ValueError("evidence_policy.calibration.n_bins must be > 1.")
+        return self
+
+
+class RequiredEvidencePackagePolicy(_MethodologyModel):
+    require_dummy_baseline: bool = True
+    require_permutation_control: bool = True
+    require_untuned_baseline_if_tuning: bool = True
+
+
+class EvidencePolicy(_MethodologyModel):
+    repeat_evaluation: RepeatEvaluationPolicy = Field(default_factory=RepeatEvaluationPolicy)
+    confidence_intervals: ConfidenceIntervalPolicy = Field(default_factory=ConfidenceIntervalPolicy)
+    paired_comparisons: PairedComparisonPolicy = Field(default_factory=PairedComparisonPolicy)
+    permutation: PermutationEvidencePolicy = Field(default_factory=PermutationEvidencePolicy)
+    calibration: CalibrationPolicy = Field(default_factory=CalibrationPolicy)
+    required_package: RequiredEvidencePackagePolicy = Field(
+        default_factory=RequiredEvidencePackagePolicy
+    )

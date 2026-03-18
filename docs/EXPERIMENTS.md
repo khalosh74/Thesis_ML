@@ -93,6 +93,13 @@ metric policy, controls, and interpretability policy are loaded from JSON contra
 Each comparison/protocol contract must choose exactly one methodology policy:
 - `fixed_baselines_only`
 - `grouped_nested_tuning`
+Each comparison/protocol contract must also declare an `evidence_policy` that controls:
+- repeated evaluation (`repeat_count`, `seed_stride`)
+- confidence intervals (grouped bootstrap percentile)
+- paired model comparisons (paired sign-flip permutation, comparisons mode)
+- permutation evidence thresholds and minimum rounds
+- calibration handling policy
+- required evidence package checks
 Thesis-facing active contracts do not include ROI-switch, dimensionality-reduction, or scaling-policy
 variation dimensions; those remain out of scope unless explicitly introduced as new locked specs/protocols.
 
@@ -117,6 +124,8 @@ Run-level artifacts (all modes):
 - `best_params_per_fold.csv`
 - `spatial_compatibility_report.json`
 - `interpretability_summary.json`
+- `calibration_summary.json`
+- `calibration_table.csv`
 
 Locked comparison execution artifacts:
 - `comparison.json`
@@ -124,6 +133,12 @@ Locked comparison execution artifacts:
 - `comparison_summary.json`
 - `comparison_decision.json`
 - `execution_status.json`
+- `repeated_run_metrics.csv`
+- `repeated_run_summary.json`
+- `confidence_intervals.json`
+- `metric_intervals.csv`
+- `paired_model_comparisons.json`
+- `paired_model_comparisons.csv`
 - `report_index.csv`
 
 Confirmatory protocol execution artifacts:
@@ -132,6 +147,10 @@ Confirmatory protocol execution artifacts:
 - `claim_to_run_map.json`
 - `suite_summary.json`
 - `execution_status.json`
+- `repeated_run_metrics.csv`
+- `repeated_run_summary.json`
+- `confidence_intervals.json`
+- `metric_intervals.csv`
 - `report_index.csv`
 
 ## Guardrail policy
@@ -141,3 +160,5 @@ Confirmatory protocol execution artifacts:
 - comparison path rejects variants outside registered specs
 - confirmatory path rejects ad hoc science-affecting overrides
 - protocol and comparison runs stamp mode + identity metadata into run artifacts
+- official run artifacts include repeat metadata (`repeat_id`, `repeat_count`, `base_run_id`),
+  `evidence_run_role`, and `evidence_policy_effective`

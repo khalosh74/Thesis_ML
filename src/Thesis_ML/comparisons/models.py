@@ -9,6 +9,8 @@ from Thesis_ML.config.framework_mode import FrameworkMode
 from Thesis_ML.config.methodology import (
     ClassWeightPolicy,
     ComparisonDecisionPolicy,
+    EvidencePolicy,
+    EvidenceRunRole,
     MethodologyPolicy,
     MethodologyPolicyName,
     MetricPolicy,
@@ -26,6 +28,12 @@ REQUIRED_COMPARISON_ARTIFACTS = (
     "comparison_summary.json",
     "comparison_decision.json",
     "execution_status.json",
+    "repeated_run_metrics.csv",
+    "repeated_run_summary.json",
+    "confidence_intervals.json",
+    "metric_intervals.csv",
+    "paired_model_comparisons.json",
+    "paired_model_comparisons.csv",
     "report_index.csv",
 )
 REQUIRED_COMPARISON_RUN_ARTIFACTS = (
@@ -40,6 +48,8 @@ REQUIRED_COMPARISON_RUN_ARTIFACTS = (
     "best_params_per_fold.csv",
     "spatial_compatibility_report.json",
     "interpretability_summary.json",
+    "calibration_summary.json",
+    "calibration_table.csv",
 )
 SUPPORTED_PRIMARY_METRICS = SUPPORTED_CLASSIFICATION_METRICS
 
@@ -212,6 +222,12 @@ class ComparisonArtifactContract(_ComparisonModel):
             "framework_mode",
             "canonical_run",
             "methodology_policy_name",
+            "class_weight_policy",
+            "tuning_enabled",
+            "evidence_run_role",
+            "repeat_id",
+            "repeat_count",
+            "base_run_id",
             "comparison_id",
             "comparison_version",
             "comparison_variant_id",
@@ -248,6 +264,7 @@ class ComparisonSpec(_ComparisonModel):
         default_factory=SubgroupReportingPolicy
     )
     decision_policy: ComparisonDecisionPolicy = Field(default_factory=ComparisonDecisionPolicy)
+    evidence_policy: EvidencePolicy
     interpretability_policy: ComparisonInterpretabilityPolicy = Field(
         default_factory=ComparisonInterpretabilityPolicy
     )
@@ -287,6 +304,31 @@ class ComparisonSpec(_ComparisonModel):
         if resolved_permutation_metric != self.metric_policy.primary_metric:
             raise ValueError(
                 "control_policy.permutation_metric must match metric_policy.primary_metric for locked comparisons."
+            )
+        if (
+            self.evidence_policy.required_package.require_dummy_baseline
+            and not self.control_policy.dummy_baseline_enabled
+        ):
+            raise ValueError(
+                "evidence_policy.required_package.require_dummy_baseline=true "
+                "requires control_policy.dummy_baseline_enabled=true."
+            )
+        if (
+            self.evidence_policy.required_package.require_permutation_control
+            and not self.control_policy.permutation_enabled
+        ):
+            raise ValueError(
+                "evidence_policy.required_package.require_permutation_control=true "
+                "requires control_policy.permutation_enabled=true."
+            )
+        if (
+            self.control_policy.permutation_enabled
+            and int(self.control_policy.n_permutations)
+            < int(self.evidence_policy.permutation.minimum_permutations)
+        ):
+            raise ValueError(
+                "control_policy.n_permutations must be >= "
+                "evidence_policy.permutation.minimum_permutations."
             )
 
         if self.control_policy.dummy_baseline_enabled:
@@ -346,6 +388,10 @@ class CompiledComparisonRunSpec(_ComparisonModel):
         default_factory=lambda: ["label", "task", "modality", "session", "subject"]
     )
     subgroup_min_samples_per_group: int = 1
+    repeat_id: int = 1
+    repeat_count: int = 1
+    base_run_id: str = Field(min_length=1)
+    evidence_run_role: EvidenceRunRole = EvidenceRunRole.PRIMARY
     artifact_requirements: list[str] = Field(
         default_factory=lambda: list(REQUIRED_COMPARISON_RUN_ARTIFACTS)
     )
@@ -374,20 +420,50 @@ class CompiledComparisonRunSpec(_ComparisonModel):
                     f"CompiledComparisonRunSpec '{self.run_id}' requires controls.permutation_metric "
                     "to match primary_metric for locked comparisons."
                 )
-        MethodologyPolicy(
-            policy_name=self.methodology_policy_name,
-            class_weight_policy=self.class_weight_policy,
-            tuning_enabled=self.tuning_enabled,
-            inner_cv_scheme=self.tuning_inner_cv_scheme,
-            inner_group_field=self.tuning_inner_group_field,
-            tuning_search_space_id=self.tuning_search_space_id,
-            tuning_search_space_version=self.tuning_search_space_version,
-        )
+        if self.evidence_run_role == EvidenceRunRole.UNTUNED_BASELINE:
+            if self.methodology_policy_name != MethodologyPolicyName.GROUPED_NESTED_TUNING:
+                raise ValueError(
+                    "evidence_run_role='untuned_baseline' requires grouped_nested_tuning."
+                )
+            if self.tuning_enabled:
+                raise ValueError(
+                    "evidence_run_role='untuned_baseline' requires tuning_enabled=false."
+                )
+            if any(
+                value is not None
+                for value in (
+                    self.tuning_search_space_id,
+                    self.tuning_search_space_version,
+                    self.tuning_inner_cv_scheme,
+                    self.tuning_inner_group_field,
+                )
+            ):
+                raise ValueError(
+                    "evidence_run_role='untuned_baseline' forbids tuning search-space and inner-CV metadata."
+                )
+        else:
+            MethodologyPolicy(
+                policy_name=self.methodology_policy_name,
+                class_weight_policy=self.class_weight_policy,
+                tuning_enabled=self.tuning_enabled,
+                inner_cv_scheme=self.tuning_inner_cv_scheme,
+                inner_group_field=self.tuning_inner_group_field,
+                tuning_search_space_id=self.tuning_search_space_id,
+                tuning_search_space_version=self.tuning_search_space_version,
+            )
         SubgroupReportingPolicy(
             enabled=self.subgroup_reporting_enabled,
             subgroup_dimensions=self.subgroup_dimensions,
             min_samples_per_group=self.subgroup_min_samples_per_group,
         )
+        if int(self.repeat_count) <= 0:
+            raise ValueError("CompiledComparisonRunSpec.repeat_count must be > 0.")
+        if int(self.repeat_id) <= 0:
+            raise ValueError("CompiledComparisonRunSpec.repeat_id must be > 0.")
+        if int(self.repeat_id) > int(self.repeat_count):
+            raise ValueError("CompiledComparisonRunSpec.repeat_id must be <= repeat_count.")
+        if not str(self.base_run_id).strip():
+            raise ValueError("CompiledComparisonRunSpec.base_run_id must be non-empty.")
         return self
 
 
@@ -402,6 +478,7 @@ class CompiledComparisonManifest(_ComparisonModel):
     metric_policy: MetricPolicy
     subgroup_reporting_policy: SubgroupReportingPolicy
     decision_policy: ComparisonDecisionPolicy
+    evidence_policy: EvidencePolicy
     variant_ids: list[str] = Field(min_length=1)
     runs: list[CompiledComparisonRunSpec] = Field(min_length=1)
     claim_to_run_map: dict[str, list[str]]
@@ -416,6 +493,12 @@ class CompiledComparisonManifest(_ComparisonModel):
             "framework_mode",
             "canonical_run",
             "methodology_policy_name",
+            "class_weight_policy",
+            "tuning_enabled",
+            "evidence_run_role",
+            "repeat_id",
+            "repeat_count",
+            "base_run_id",
             "comparison_id",
             "comparison_version",
             "comparison_variant_id",

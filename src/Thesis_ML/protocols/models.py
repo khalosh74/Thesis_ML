@@ -8,6 +8,8 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from Thesis_ML.config.framework_mode import FrameworkMode
 from Thesis_ML.config.methodology import (
     ClassWeightPolicy,
+    EvidencePolicy,
+    EvidenceRunRole,
     MethodologyPolicy,
     MethodologyPolicyName,
     MetricPolicy,
@@ -31,6 +33,10 @@ REQUIRED_PROTOCOL_ARTIFACTS = (
     "claim_to_run_map.json",
     "suite_summary.json",
     "execution_status.json",
+    "repeated_run_metrics.csv",
+    "repeated_run_summary.json",
+    "confidence_intervals.json",
+    "metric_intervals.csv",
     "report_index.csv",
 )
 REQUIRED_RUN_ARTIFACTS_BASELINE = (
@@ -45,6 +51,8 @@ REQUIRED_RUN_ARTIFACTS_BASELINE = (
     "best_params_per_fold.csv",
     "spatial_compatibility_report.json",
     "interpretability_summary.json",
+    "calibration_summary.json",
+    "calibration_table.csv",
 )
 
 
@@ -248,6 +256,10 @@ class ArtifactContract(_ProtocolModel):
             "methodology_policy_name",
             "class_weight_policy",
             "tuning_enabled",
+            "evidence_run_role",
+            "repeat_id",
+            "repeat_count",
+            "base_run_id",
             "primary_metric_name",
             "protocol_id",
             "protocol_version",
@@ -291,6 +303,10 @@ class ArtifactContract(_ProtocolModel):
             "methodology_policy_name",
             "class_weight_policy",
             "tuning_enabled",
+            "evidence_run_role",
+            "repeat_id",
+            "repeat_count",
+            "base_run_id",
             "primary_metric_name",
             "protocol_id",
             "protocol_version",
@@ -381,6 +397,7 @@ class ThesisProtocol(_ProtocolModel):
     subgroup_reporting_policy: SubgroupReportingPolicy = Field(
         default_factory=SubgroupReportingPolicy
     )
+    evidence_policy: EvidencePolicy
     control_policy: ControlPolicy
     interpretability_policy: InterpretabilityPolicy
     sensitivity_policy: SensitivityPolicy
@@ -464,6 +481,31 @@ class ThesisProtocol(_ProtocolModel):
             raise ValueError(
                 "control_policy.permutation.metric must match metric_policy.primary_metric "
                 "for confirmatory protocol runs."
+            )
+        if (
+            self.evidence_policy.required_package.require_dummy_baseline
+            and not self.control_policy.dummy_baseline.enabled
+        ):
+            raise ValueError(
+                "evidence_policy.required_package.require_dummy_baseline=true "
+                "requires control_policy.dummy_baseline.enabled=true."
+            )
+        if (
+            self.evidence_policy.required_package.require_permutation_control
+            and not self.control_policy.permutation.enabled
+        ):
+            raise ValueError(
+                "evidence_policy.required_package.require_permutation_control=true "
+                "requires control_policy.permutation.enabled=true."
+            )
+        if (
+            self.control_policy.permutation.enabled
+            and int(self.control_policy.permutation.n_permutations)
+            < int(self.evidence_policy.permutation.minimum_permutations)
+        ):
+            raise ValueError(
+                "control_policy.permutation.n_permutations must be >= "
+                "evidence_policy.permutation.minimum_permutations."
             )
 
         for suite in self.official_run_suites:
@@ -560,6 +602,10 @@ class CompiledRunSpec(_ProtocolModel):
         default_factory=lambda: ["label", "task", "modality", "session", "subject"]
     )
     subgroup_min_samples_per_group: int = 1
+    repeat_id: int = 1
+    repeat_count: int = 1
+    base_run_id: str = Field(min_length=1)
+    evidence_run_role: EvidenceRunRole = EvidenceRunRole.PRIMARY
     framework_mode: Literal["confirmatory"] = FrameworkMode.CONFIRMATORY.value
     canonical_run: bool = True
     artifact_requirements: list[str] = Field(
@@ -607,20 +653,50 @@ class CompiledRunSpec(_ProtocolModel):
                     f"CompiledRunSpec '{self.run_id}' requires controls.permutation_metric "
                     "to match primary_metric for confirmatory runs."
                 )
-        MethodologyPolicy(
-            policy_name=self.methodology_policy_name,
-            class_weight_policy=self.class_weight_policy,
-            tuning_enabled=self.tuning_enabled,
-            inner_cv_scheme=self.tuning_inner_cv_scheme,
-            inner_group_field=self.tuning_inner_group_field,
-            tuning_search_space_id=self.tuning_search_space_id,
-            tuning_search_space_version=self.tuning_search_space_version,
-        )
+        if self.evidence_run_role == EvidenceRunRole.UNTUNED_BASELINE:
+            if self.methodology_policy_name != MethodologyPolicyName.GROUPED_NESTED_TUNING:
+                raise ValueError(
+                    "evidence_run_role='untuned_baseline' requires grouped_nested_tuning."
+                )
+            if self.tuning_enabled:
+                raise ValueError(
+                    "evidence_run_role='untuned_baseline' requires tuning_enabled=false."
+                )
+            if any(
+                value is not None
+                for value in (
+                    self.tuning_search_space_id,
+                    self.tuning_search_space_version,
+                    self.tuning_inner_cv_scheme,
+                    self.tuning_inner_group_field,
+                )
+            ):
+                raise ValueError(
+                    "evidence_run_role='untuned_baseline' forbids tuning search-space and inner-CV metadata."
+                )
+        else:
+            MethodologyPolicy(
+                policy_name=self.methodology_policy_name,
+                class_weight_policy=self.class_weight_policy,
+                tuning_enabled=self.tuning_enabled,
+                inner_cv_scheme=self.tuning_inner_cv_scheme,
+                inner_group_field=self.tuning_inner_group_field,
+                tuning_search_space_id=self.tuning_search_space_id,
+                tuning_search_space_version=self.tuning_search_space_version,
+            )
         SubgroupReportingPolicy(
             enabled=self.subgroup_reporting_enabled,
             subgroup_dimensions=self.subgroup_dimensions,
             min_samples_per_group=self.subgroup_min_samples_per_group,
         )
+        if int(self.repeat_count) <= 0:
+            raise ValueError("CompiledRunSpec.repeat_count must be > 0.")
+        if int(self.repeat_id) <= 0:
+            raise ValueError("CompiledRunSpec.repeat_id must be > 0.")
+        if int(self.repeat_id) > int(self.repeat_count):
+            raise ValueError("CompiledRunSpec.repeat_id must be <= repeat_count.")
+        if not str(self.base_run_id).strip():
+            raise ValueError("CompiledRunSpec.base_run_id must be non-empty.")
         if self.framework_mode != FrameworkMode.CONFIRMATORY.value:
             raise ValueError(
                 f"CompiledRunSpec '{self.run_id}' must use framework_mode='confirmatory'."
@@ -642,6 +718,7 @@ class CompiledProtocolManifest(_ProtocolModel):
     methodology_policy: MethodologyPolicy
     metric_policy: MetricPolicy
     subgroup_reporting_policy: SubgroupReportingPolicy
+    evidence_policy: EvidencePolicy
     suite_ids: list[str] = Field(min_length=1)
     runs: list[CompiledRunSpec] = Field(min_length=1)
     claim_to_run_map: dict[str, list[str]]
@@ -658,6 +735,10 @@ class CompiledProtocolManifest(_ProtocolModel):
             "methodology_policy_name",
             "class_weight_policy",
             "tuning_enabled",
+            "evidence_run_role",
+            "repeat_id",
+            "repeat_count",
+            "base_run_id",
             "primary_metric_name",
             "protocol_id",
             "protocol_version",

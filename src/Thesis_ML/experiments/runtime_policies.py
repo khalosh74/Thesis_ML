@@ -135,6 +135,7 @@ def resolve_methodology_runtime(
     subgroup_reporting_enabled: bool,
     subgroup_dimensions: list[str] | None,
     subgroup_min_samples_per_group: int,
+    evidence_run_role: str | None,
     protocol_context: dict[str, Any],
     comparison_context: dict[str, Any],
 ) -> tuple[MethodologyPolicy, SubgroupReportingPolicy]:
@@ -210,6 +211,13 @@ def resolve_methodology_runtime(
     resolved_subgroup_min_samples = int(
         source_context.get("subgroup_min_samples_per_group", subgroup_min_samples_per_group)
     )
+    resolved_evidence_run_role = str(
+        source_context.get("evidence_run_role", evidence_run_role or "primary")
+    ).strip()
+    if resolved_evidence_run_role not in {"primary", "untuned_baseline"}:
+        raise ValueError(
+            "Unsupported evidence_run_role. Allowed values: primary, untuned_baseline."
+        )
 
     resolved_inner_cv_scheme_literal: Literal["grouped_leave_one_group_out"] | None
     if resolved_tuning_inner_cv_scheme is None:
@@ -225,15 +233,47 @@ def resolve_methodology_runtime(
             Literal["grouped_leave_one_group_out"], normalized_inner_cv
         )
 
-    methodology_policy = MethodologyPolicy(
-        policy_name=MethodologyPolicyName(resolved_policy_name),
-        class_weight_policy=ClassWeightPolicy(resolved_class_weight_policy),
-        tuning_enabled=resolved_tuning_enabled,
-        inner_cv_scheme=resolved_inner_cv_scheme_literal,
-        inner_group_field=resolved_tuning_inner_group_field,
-        tuning_search_space_id=resolved_tuning_space_id,
-        tuning_search_space_version=resolved_tuning_space_version,
-    )
+    if resolved_evidence_run_role == "untuned_baseline":
+        if resolved_policy_name != MethodologyPolicyName.GROUPED_NESTED_TUNING.value:
+            raise ValueError(
+                "evidence_run_role='untuned_baseline' requires methodology_policy_name='grouped_nested_tuning'."
+            )
+        if bool(resolved_tuning_enabled):
+            raise ValueError(
+                "evidence_run_role='untuned_baseline' requires tuning_enabled=false."
+            )
+        if any(
+            value is not None
+            for value in (
+                resolved_tuning_space_id,
+                resolved_tuning_space_version,
+                resolved_inner_cv_scheme_literal,
+                resolved_tuning_inner_group_field,
+            )
+        ):
+            raise ValueError(
+                "evidence_run_role='untuned_baseline' forbids tuning search-space and inner-CV metadata."
+            )
+        methodology_policy = MethodologyPolicy.model_construct(
+            policy_name=MethodologyPolicyName.GROUPED_NESTED_TUNING,
+            class_weight_policy=ClassWeightPolicy(resolved_class_weight_policy),
+            tuning_enabled=False,
+            inner_cv_scheme=None,
+            inner_group_field=None,
+            tuning_search_space_id=None,
+            tuning_search_space_version=None,
+            notes=None,
+        )
+    else:
+        methodology_policy = MethodologyPolicy(
+            policy_name=MethodologyPolicyName(resolved_policy_name),
+            class_weight_policy=ClassWeightPolicy(resolved_class_weight_policy),
+            tuning_enabled=resolved_tuning_enabled,
+            inner_cv_scheme=resolved_inner_cv_scheme_literal,
+            inner_group_field=resolved_tuning_inner_group_field,
+            tuning_search_space_id=resolved_tuning_space_id,
+            tuning_search_space_version=resolved_tuning_space_version,
+        )
     subgroup_policy = SubgroupReportingPolicy(
         enabled=resolved_subgroup_enabled,
         subgroup_dimensions=list(resolved_subgroup_dimensions),

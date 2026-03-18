@@ -407,6 +407,10 @@ def test_protocol_runner_dry_run_emits_protocol_artifacts(
     assert result["n_planned"] > 0
     for artifact_path in result["artifact_paths"].values():
         assert Path(artifact_path).exists()
+    assert "repeated_run_metrics" in result["artifact_paths"]
+    assert "repeated_run_summary" in result["artifact_paths"]
+    assert "confidence_intervals" in result["artifact_paths"]
+    assert "metric_intervals" in result["artifact_paths"]
 
     execution_status = json.loads(
         Path(result["artifact_paths"]["execution_status"]).read_text(encoding="utf-8")
@@ -422,6 +426,7 @@ def test_protocol_runner_dry_run_emits_protocol_artifacts(
     assert all(row["status"] == "planned" for row in execution_status["runs"])
     assert suite_summary["metric_policy_effective"]["primary_metric"] == "balanced_accuracy"
     assert suite_summary["metric_policy_effective"]["decision_metric"] == "balanced_accuracy"
+    assert isinstance(suite_summary["required_evidence_status"], dict)
     assert manifest_payload["metric_policy_effective"]["primary_metric"] == "balanced_accuracy"
     assert manifest_payload["metric_policy_effective"]["decision_metric"] == "balanced_accuracy"
 
@@ -495,6 +500,14 @@ def test_protocol_run_records_metadata_in_run_artifacts(
     assert config["metric_policy_effective"]["tuning_metric"] == "balanced_accuracy"
     assert config["metric_policy_effective"]["permutation_metric"] == "balanced_accuracy"
     assert config["metric_policy_effective"]["higher_is_better"] is True
+    assert config["evidence_run_role"] == "primary"
+    assert config["repeat_id"] == 1
+    assert config["repeat_count"] == 1
+    assert config["base_run_id"]
+    assert isinstance(config["evidence_policy_effective"], dict)
+    assert config["evidence_policy_effective"]["confidence_intervals"]["method"] == (
+        "grouped_bootstrap_percentile"
+    )
     assert isinstance(config["claim_ids"], list) and config["claim_ids"]
 
     assert metrics["canonical_run"] is True
@@ -512,11 +525,19 @@ def test_protocol_run_records_metadata_in_run_artifacts(
     assert metrics["metric_policy_effective"]["tuning_metric"] == "balanced_accuracy"
     assert metrics["metric_policy_effective"]["permutation_metric"] == "balanced_accuracy"
     assert metrics["metric_policy_effective"]["higher_is_better"] is True
+    assert metrics["evidence_run_role"] == "primary"
+    assert metrics["repeat_id"] == 1
+    assert metrics["repeat_count"] == 1
+    assert metrics["base_run_id"]
+    assert isinstance(metrics["evidence_policy_effective"], dict)
+    assert metrics["calibration"]["status"] in {"performed", "not_applicable", "failed"}
     assert isinstance(metrics["claim_ids"], list) and metrics["claim_ids"]
     assert Path(str(config["subgroup_metrics_json_path"])).exists()
     assert Path(str(config["subgroup_metrics_csv_path"])).exists()
     assert Path(str(config["tuning_summary_path"])).exists()
     assert Path(str(config["tuning_best_params_path"])).exists()
+    assert Path(str(config["calibration_summary_path"])).exists()
+    assert Path(str(config["calibration_table_path"])).exists()
 
 
 def test_permutation_control_uses_primary_metric(
@@ -549,6 +570,13 @@ def test_permutation_control_uses_primary_metric(
         assert "permutation_metric_std" in permutation
         assert "observed_score" in permutation
         assert "p_value" in permutation
+        assert permutation["minimum_required"] >= 0
+        assert isinstance(permutation["meets_minimum"], bool)
+        assert isinstance(permutation["passes_threshold"], bool)
+        assert permutation["interpretation_status"] in {
+            "passes_threshold",
+            "fails_threshold",
+        }
 
 
 def test_protocol_primary_metric_change_propagates_to_official_metric_policy(
@@ -630,3 +658,31 @@ def test_nested_protocol_supports_grouped_nested_methodology(
     )
     assert result["n_failed"] == 0
     assert result["n_planned"] > 0
+
+
+def test_nested_protocol_compiler_expands_repeats_and_untuned_ablation(
+    protocol_dataset: dict[str, Path],
+) -> None:
+    protocol = load_protocol(_nested_protocol_path()).model_copy(deep=True)
+    protocol.evidence_policy.repeat_evaluation.repeat_count = 2
+    protocol.evidence_policy.repeat_evaluation.seed_stride = 23
+    manifest = compile_protocol(
+        protocol,
+        index_csv=protocol_dataset["index_csv"],
+        suite_ids=["primary_within_subject"],
+    )
+
+    primary_runs = [run for run in manifest.runs if run.evidence_run_role.value == "primary"]
+    untuned_runs = [
+        run for run in manifest.runs if run.evidence_run_role.value == "untuned_baseline"
+    ]
+    assert len(primary_runs) == 12
+    assert len(untuned_runs) == 12
+    assert {run.repeat_id for run in primary_runs} == {1, 2}
+    assert {run.repeat_count for run in primary_runs} == {2}
+    assert all(run.tuning_enabled is True for run in primary_runs)
+    assert all(run.tuning_enabled is False for run in untuned_runs)
+    assert all(run.run_id.endswith("__untuned") for run in untuned_runs)
+    for primary in primary_runs:
+        expected_untuned = f"{primary.run_id}__untuned"
+        assert any(run.run_id == expected_untuned for run in untuned_runs)

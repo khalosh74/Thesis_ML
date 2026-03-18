@@ -7,12 +7,19 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from Thesis_ML.config.methodology import MethodologyPolicy, MetricPolicy, SubgroupReportingPolicy
+from Thesis_ML.config.framework_mode import FrameworkMode
+from Thesis_ML.config.methodology import (
+    EvidencePolicy,
+    MethodologyPolicy,
+    MetricPolicy,
+    SubgroupReportingPolicy,
+)
 from Thesis_ML.experiments.run_experiment import (
     _build_pipeline,
     _extract_linear_coefficients,
     _scores_for_predictions,
 )
+from Thesis_ML.experiments.runtime_policies import resolve_methodology_runtime
 from Thesis_ML.experiments.sections import ModelFitInput, model_fit
 
 
@@ -133,6 +140,58 @@ def test_fixed_policy_rejects_tuning_configuration() -> None:
         )
 
 
+def test_evidence_policy_contract_validation_rejects_invalid_ranges() -> None:
+    EvidencePolicy.model_validate(
+        {
+            "repeat_evaluation": {"repeat_count": 2, "seed_stride": 1000},
+            "confidence_intervals": {
+                "method": "grouped_bootstrap_percentile",
+                "confidence_level": 0.95,
+                "n_bootstrap": 100,
+                "seed": 2026,
+            },
+            "paired_comparisons": {
+                "method": "paired_sign_flip_permutation",
+                "n_permutations": 1000,
+                "alpha": 0.05,
+                "require_significant_win": False,
+            },
+            "permutation": {
+                "alpha": 0.05,
+                "minimum_permutations": 10,
+                "require_pass_for_validity": False,
+            },
+            "calibration": {
+                "enabled": True,
+                "n_bins": 10,
+                "require_probabilities_for_validity": False,
+            },
+            "required_package": {
+                "require_dummy_baseline": True,
+                "require_permutation_control": True,
+                "require_untuned_baseline_if_tuning": True,
+            },
+        }
+    )
+    with pytest.raises(ValueError, match="repeat_count must be > 0"):
+        EvidencePolicy.model_validate(
+            {
+                "repeat_evaluation": {"repeat_count": 0, "seed_stride": 1000},
+            }
+        )
+    with pytest.raises(ValueError, match="confidence_level must be in"):
+        EvidencePolicy.model_validate(
+            {
+                "confidence_intervals": {
+                    "method": "grouped_bootstrap_percentile",
+                    "confidence_level": 1.0,
+                    "n_bootstrap": 100,
+                    "seed": 2026,
+                }
+            }
+        )
+
+
 def test_grouped_nested_tuning_writes_tuning_artifacts(tmp_path: Path) -> None:
     report_dir = tmp_path / "run"
     report_dir.mkdir(parents=True, exist_ok=True)
@@ -213,3 +272,85 @@ def test_grouped_nested_tuning_uses_declared_primary_metric(tmp_path: Path) -> N
     assert summary["primary_metric_name"] == "macro_f1"
     params_df = pd.read_csv(fit_output.tuning_best_params_path)
     assert set(params_df["primary_metric_name"].astype(str).tolist()) == {"macro_f1"}
+
+
+def test_runtime_policy_allows_untuned_ablation_role_without_relaxing_guards() -> None:
+    policy, subgroup = resolve_methodology_runtime(
+        framework_mode=FrameworkMode.LOCKED_COMPARISON,
+        methodology_policy_name="grouped_nested_tuning",
+        class_weight_policy="none",
+        tuning_enabled=False,
+        tuning_search_space_id=None,
+        tuning_search_space_version=None,
+        tuning_inner_cv_scheme=None,
+        tuning_inner_group_field=None,
+        subgroup_reporting_enabled=True,
+        subgroup_dimensions=["label"],
+        subgroup_min_samples_per_group=1,
+        evidence_run_role="untuned_baseline",
+        protocol_context={},
+        comparison_context={
+            "methodology_policy_name": "grouped_nested_tuning",
+            "class_weight_policy": "none",
+            "tuning_enabled": False,
+            "subgroup_reporting_enabled": True,
+            "subgroup_dimensions": ["label"],
+            "subgroup_min_samples_per_group": 1,
+            "framework_mode": "locked_comparison",
+            "comparison_id": "cmp",
+            "comparison_version": "1.0.0",
+            "variant_id": "ridge",
+            "metric_policy": {
+                "primary_metric": "balanced_accuracy",
+                "secondary_metrics": ["macro_f1", "accuracy"],
+                "decision_metric": "balanced_accuracy",
+                "tuning_metric": "balanced_accuracy",
+                "permutation_metric": "balanced_accuracy",
+                "higher_is_better": True,
+            },
+            "required_run_metadata_fields": ["framework_mode", "canonical_run"],
+            "evidence_run_role": "untuned_baseline",
+        },
+    )
+    assert policy.policy_name.value == "grouped_nested_tuning"
+    assert policy.tuning_enabled is False
+    assert subgroup.enabled is True
+
+    with pytest.raises(ValueError, match="forbids tuning search-space and inner-CV metadata"):
+        resolve_methodology_runtime(
+            framework_mode=FrameworkMode.LOCKED_COMPARISON,
+            methodology_policy_name="grouped_nested_tuning",
+            class_weight_policy="none",
+            tuning_enabled=False,
+            tuning_search_space_id="linear-grouped-nested-v1",
+            tuning_search_space_version=None,
+            tuning_inner_cv_scheme=None,
+            tuning_inner_group_field=None,
+            subgroup_reporting_enabled=True,
+            subgroup_dimensions=["label"],
+            subgroup_min_samples_per_group=1,
+            evidence_run_role="untuned_baseline",
+            protocol_context={},
+            comparison_context={
+                "methodology_policy_name": "grouped_nested_tuning",
+                "class_weight_policy": "none",
+                "tuning_enabled": False,
+                "subgroup_reporting_enabled": True,
+                "subgroup_dimensions": ["label"],
+                "subgroup_min_samples_per_group": 1,
+                "framework_mode": "locked_comparison",
+                "comparison_id": "cmp",
+                "comparison_version": "1.0.0",
+                "variant_id": "ridge",
+                "metric_policy": {
+                    "primary_metric": "balanced_accuracy",
+                    "secondary_metrics": ["macro_f1", "accuracy"],
+                    "decision_metric": "balanced_accuracy",
+                    "tuning_metric": "balanced_accuracy",
+                    "permutation_metric": "balanced_accuracy",
+                    "higher_is_better": True,
+                },
+                "required_run_metadata_fields": ["framework_mode", "canonical_run"],
+                "evidence_run_role": "untuned_baseline",
+            },
+        )

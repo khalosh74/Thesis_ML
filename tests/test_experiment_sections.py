@@ -348,6 +348,10 @@ def test_extracted_sections_model_fit_interpretability_evaluation(tmp_path: Path
     assert Path(report_dir / "metrics.json").exists()
     metrics = json.loads((report_dir / "metrics.json").read_text(encoding="utf-8"))
     assert {"accuracy", "balanced_accuracy", "macro_f1", "interpretability"} <= set(metrics)
+    assert "calibration" in metrics
+    assert metrics["calibration"]["status"] in {"performed", "not_applicable", "failed"}
+    assert Path(report_dir / "calibration_summary.json").exists()
+    assert Path(report_dir / "calibration_table.csv").exists()
     assert evaluation_output.metrics["n_folds"] == 3
 
     metrics_record = get_artifact(

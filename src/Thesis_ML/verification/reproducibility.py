@@ -100,6 +100,22 @@ def collect_official_invariants(output_dir: Path | str) -> dict[str, Any]:
             invariants["mode_artifacts"]["comparison_decision"] = _normalize_payload(
                 _load_json(decision_path)
             )
+    repeated_summary_path = root / "repeated_run_summary.json"
+    if repeated_summary_path.exists():
+        invariants["mode_artifacts"]["repeated_run_summary"] = _normalize_payload(
+            _load_json(repeated_summary_path)
+        )
+    confidence_intervals_path = root / "confidence_intervals.json"
+    if confidence_intervals_path.exists():
+        invariants["mode_artifacts"]["confidence_intervals"] = _normalize_payload(
+            _load_json(confidence_intervals_path)
+        )
+    if framework_mode == "locked_comparison":
+        paired_path = root / "paired_model_comparisons.json"
+        if paired_path.exists():
+            invariants["mode_artifacts"]["paired_model_comparisons"] = _normalize_payload(
+                _load_json(paired_path)
+            )
 
     for row in report_rows:
         if str(row.get("status", "")).strip().lower() != "completed":
@@ -116,16 +132,24 @@ def collect_official_invariants(output_dir: Path | str) -> dict[str, Any]:
         metrics_path = report_dir / "metrics.json"
         fold_splits_path = report_dir / "fold_splits.csv"
         predictions_path = report_dir / "predictions.csv"
+        calibration_summary_path = report_dir / "calibration_summary.json"
+        calibration_table_path = report_dir / "calibration_table.csv"
 
         run_payload: dict[str, Any] = {}
         if config_path.exists():
             run_payload["config"] = _normalize_payload(_load_json(config_path))
         if metrics_path.exists():
             run_payload["metrics"] = _normalize_payload(_load_json(metrics_path))
+        if calibration_summary_path.exists():
+            run_payload["calibration_summary"] = _normalize_payload(
+                _load_json(calibration_summary_path)
+            )
         if fold_splits_path.exists():
             run_payload["fold_splits_sha256"] = _file_sha256(fold_splits_path)
         if predictions_path.exists():
             run_payload["predictions_sha256"] = _file_sha256(predictions_path)
+        if calibration_table_path.exists():
+            run_payload["calibration_table_sha256"] = _file_sha256(calibration_table_path)
 
         invariants["run_artifacts"][run_id] = run_payload
 

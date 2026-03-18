@@ -61,6 +61,36 @@ def _base_comparison_spec() -> ComparisonSpec:
                 "allow_mixed_methodology_policies": False,
                 "block_on_subgroup_failures": False,
             },
+            "evidence_policy": {
+                "repeat_evaluation": {"repeat_count": 1, "seed_stride": 1000},
+                "confidence_intervals": {
+                    "method": "grouped_bootstrap_percentile",
+                    "confidence_level": 0.95,
+                    "n_bootstrap": 1000,
+                    "seed": 2026,
+                },
+                "paired_comparisons": {
+                    "method": "paired_sign_flip_permutation",
+                    "n_permutations": 2000,
+                    "alpha": 0.05,
+                    "require_significant_win": False,
+                },
+                "permutation": {
+                    "alpha": 0.05,
+                    "minimum_permutations": 0,
+                    "require_pass_for_validity": False,
+                },
+                "calibration": {
+                    "enabled": True,
+                    "n_bins": 10,
+                    "require_probabilities_for_validity": False,
+                },
+                "required_package": {
+                    "require_dummy_baseline": False,
+                    "require_permutation_control": False,
+                    "require_untuned_baseline_if_tuning": False,
+                },
+            },
             "interpretability_policy": {"enabled": False, "allowed_models": []},
             "allowed_variants": [
                 {"variant_id": "ridge", "model": "ridge", "claim_ids": ["c1"]},
@@ -80,6 +110,7 @@ def _compiled_manifest() -> CompiledComparisonManifest:
     runs = [
         CompiledComparisonRunSpec(
             run_id="r1",
+            base_run_id="r1",
             framework_mode=FrameworkMode.LOCKED_COMPARISON.value,
             canonical_run=False,
             comparison_id="cmp-decision-test",
@@ -103,6 +134,7 @@ def _compiled_manifest() -> CompiledComparisonManifest:
         ),
         CompiledComparisonRunSpec(
             run_id="r2",
+            base_run_id="r2",
             framework_mode=FrameworkMode.LOCKED_COMPARISON.value,
             canonical_run=False,
             comparison_id="cmp-decision-test",
@@ -136,6 +168,7 @@ def _compiled_manifest() -> CompiledComparisonManifest:
         metric_policy=spec.metric_policy,
         subgroup_reporting_policy=spec.subgroup_reporting_policy,
         decision_policy=spec.decision_policy,
+        evidence_policy=spec.evidence_policy,
         variant_ids=["ridge", "logreg"],
         runs=runs,
         claim_to_run_map={"c1": ["r1"], "c2": ["r2"]},

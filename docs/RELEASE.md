@@ -62,6 +62,11 @@ RC-1 adds explicit official-run release checks for:
 - deterministic rerun verification on a small official path
 - optional one-command wrapper for hygiene/lint/tests/performance
 - structured failure payloads in mode-level execution artifacts (`error_code`, `error_type`, `failure_stage`, `error_details`)
+- evidence-layer artifact invariants for official modes:
+  - confirmatory: `repeated_run_metrics.csv`, `repeated_run_summary.json`,
+    `confidence_intervals.json`, `metric_intervals.csv`
+  - comparison: all confirmatory evidence artifacts plus
+    `paired_model_comparisons.json` and `paired_model_comparisons.csv`
 
 ### 1) Official artifact verification
 

@@ -77,11 +77,21 @@ class SegmentExecutionRequest:
     tuning_summary_path: Path
     tuning_best_params_path: Path
     spatial_report_path: Path
+    calibration_summary_path: Path
+    calibration_table_path: Path
     interpretability_summary_path: Path
     interpretability_fold_artifacts_path: Path
     primary_metric_name: str = "balanced_accuracy"
     permutation_metric_name: str | None = None
+    permutation_alpha: float = 0.05
+    permutation_minimum_required: int = 0
+    permutation_require_pass_for_validity: bool = False
     methodology_policy_name: str = "fixed_baselines_only"
+    evidence_run_role: str = "primary"
+    repeat_id: int = 1
+    repeat_count: int = 1
+    base_run_id: str | None = None
+    evidence_policy_effective: dict[str, Any] | None = None
     class_weight_policy: str = "none"
     tuning_enabled: bool = False
     tuning_search_space_id: str | None = None
@@ -102,6 +112,9 @@ class SegmentExecutionRequest:
     confirmatory_guardrails_enabled: bool = False
     subgroup_evidence_role: str = "exploratory"
     subgroup_primary_evidence_allowed: bool = True
+    calibration_enabled: bool = True
+    calibration_n_bins: int = 10
+    calibration_require_probabilities_for_validity: bool = False
     interpretability_enabled_override: bool | None = None
     start_section: str | SectionName | None = None
     end_section: str | SectionName | None = None
@@ -494,7 +507,21 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
                     n_permutations=request.n_permutations,
                     primary_metric_name=request.primary_metric_name,
                     permutation_metric_name=request.permutation_metric_name,
+                    permutation_alpha=float(request.permutation_alpha),
+                    permutation_minimum_required=int(request.permutation_minimum_required),
+                    permutation_require_pass_for_validity=bool(
+                        request.permutation_require_pass_for_validity
+                    ),
                     methodology_policy_name=request.methodology_policy_name,
+                    evidence_run_role=str(request.evidence_run_role),
+                    repeat_id=int(request.repeat_id),
+                    repeat_count=int(request.repeat_count),
+                    base_run_id=request.base_run_id,
+                    evidence_policy_effective=(
+                        dict(request.evidence_policy_effective)
+                        if isinstance(request.evidence_policy_effective, dict)
+                        else None
+                    ),
                     subgroup_reporting_enabled=request.subgroup_reporting_enabled,
                     subgroup_dimensions=list(request.subgroup_dimensions),
                     subgroup_min_samples_per_group=request.subgroup_min_samples_per_group,
@@ -511,6 +538,13 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
                     subgroup_metrics_csv_path=request.subgroup_metrics_csv_path,
                     tuning_summary_path=request.tuning_summary_path,
                     tuning_best_params_path=request.tuning_best_params_path,
+                    calibration_enabled=bool(request.calibration_enabled),
+                    calibration_n_bins=int(request.calibration_n_bins),
+                    calibration_require_probabilities_for_validity=bool(
+                        request.calibration_require_probabilities_for_validity
+                    ),
+                    calibration_summary_path=request.calibration_summary_path,
+                    calibration_table_path=request.calibration_table_path,
                     spatial_compatibility=spatial_compatibility,
                     spatial_report_path=request.spatial_report_path,
                     interpretability_summary=interpretability_summary,

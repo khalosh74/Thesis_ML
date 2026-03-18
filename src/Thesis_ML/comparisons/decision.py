@@ -75,6 +75,8 @@ def build_comparison_decision(
     comparison: ComparisonSpec,
     compiled_manifest: CompiledComparisonManifest,
     run_results: list[ComparisonRunResult],
+    paired_comparison_payload: dict[str, Any] | None = None,
+    required_evidence_status: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     metric_policy_effective = enforce_primary_metric_alignment(
         resolve_effective_metric_policy(
@@ -108,6 +110,8 @@ def build_comparison_decision(
     missing_metric_runs: list[str] = []
 
     for spec in compiled_manifest.runs:
+        if str(spec.evidence_run_role.value) != "primary":
+            continue
         bucket = variant_scores.setdefault(
             spec.variant_id,
             {
@@ -158,6 +162,24 @@ def build_comparison_decision(
     for bucket in variant_scores.values():
         values = [float(value) for value in bucket["primary_metric_values"]]
         bucket["mean_primary_metric"] = float(sum(values) / len(values)) if values else None
+
+    if isinstance(required_evidence_status, dict) and not bool(
+        required_evidence_status.get("valid", False)
+    ):
+        return {
+            "framework_mode": FrameworkMode.LOCKED_COMPARISON.value,
+            "comparison_id": comparison.comparison_id,
+            "comparison_version": comparison.comparison_version,
+            "decision_status": ComparisonDecisionStatus.INVALID_COMPARISON.value,
+            "primary_metric": primary_metric,
+            "metric_policy_effective": _metric_policy_payload(metric_policy_effective),
+            "variant_scores": variant_scores,
+            "selected_variant": None,
+            "reason": "required_evidence_package_not_satisfied",
+            "required_evidence_status": required_evidence_status,
+            "paired_model_comparisons": paired_comparison_payload or {"pairs": []},
+            "control_results_summary": {},
+        }
 
     if decision_policy.require_all_runs_completed:
         non_completed = [
@@ -216,6 +238,9 @@ def build_comparison_decision(
     control_results_summary: dict[str, Any] = {
         "require_permutation_control_pass": bool(decision_policy.require_permutation_control_pass),
         "permutation_p_value_threshold": float(decision_policy.permutation_p_value_threshold),
+        "require_significant_win": bool(
+            comparison.evidence_policy.paired_comparisons.require_significant_win
+        ),
         "variants": {},
     }
     if decision_policy.require_permutation_control_pass:
@@ -275,6 +300,57 @@ def build_comparison_decision(
         }
 
     selected_variant = tied_variants[0]
+
+    if bool(comparison.evidence_policy.paired_comparisons.require_significant_win):
+        pair_rows = (
+            paired_comparison_payload.get("pairs", [])
+            if isinstance(paired_comparison_payload, dict)
+            else []
+        )
+        if not isinstance(pair_rows, list):
+            pair_rows = []
+        comparison_outcomes: dict[str, bool] = {}
+        for row in pair_rows:
+            if not isinstance(row, dict):
+                continue
+            left_variant = str(row.get("left_variant_id", ""))
+            right_variant = str(row.get("right_variant_id", ""))
+            if selected_variant not in {left_variant, right_variant}:
+                continue
+            significant = bool(row.get("significant", False))
+            observed_diff = _safe_float(row.get("observed_mean_difference"))
+            if observed_diff is None:
+                comparison_outcomes[
+                    right_variant if selected_variant == left_variant else left_variant
+                ] = False
+                continue
+            if selected_variant == left_variant:
+                comparison_outcomes[right_variant] = bool(significant and observed_diff > 0.0)
+            else:
+                comparison_outcomes[left_variant] = bool(significant and observed_diff < 0.0)
+        other_variants = sorted(set(candidate_scores.keys()) - {selected_variant})
+        missing_or_non_significant = [
+            variant_id
+            for variant_id in other_variants
+            if not bool(comparison_outcomes.get(variant_id, False))
+        ]
+        if missing_or_non_significant:
+            return {
+                "framework_mode": FrameworkMode.LOCKED_COMPARISON.value,
+                "comparison_id": comparison.comparison_id,
+                "comparison_version": comparison.comparison_version,
+                "decision_status": ComparisonDecisionStatus.INCONCLUSIVE.value,
+                "primary_metric": primary_metric,
+                "metric_policy_effective": _metric_policy_payload(metric_policy_effective),
+                "variant_scores": variant_scores,
+                "selected_variant": None,
+                "reason": "selected_variant_lacks_significant_paired_wins",
+                "non_significant_or_missing_pairs": missing_or_non_significant,
+                "required_evidence_status": required_evidence_status,
+                "paired_model_comparisons": paired_comparison_payload or {"pairs": []},
+                "control_results_summary": control_results_summary,
+            }
+
     if decision_policy.block_on_subgroup_failures:
         variant_results = [row for row in run_results if row.variant_id == selected_variant]
         subgroup_ok, subgroup_reason = _subgroup_reports_ok(variant_results)
@@ -308,6 +384,7 @@ def build_comparison_decision(
         "variant_scores": variant_scores,
         "selected_variant": selected_variant,
         "reason": "best_primary_metric",
+        "required_evidence_status": required_evidence_status,
+        "paired_model_comparisons": paired_comparison_payload or {"pairs": []},
         "control_results_summary": control_results_summary,
     }
-

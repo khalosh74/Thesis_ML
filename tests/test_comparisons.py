@@ -174,6 +174,12 @@ def test_comparison_runner_dry_run_emits_artifacts(
     assert result["n_planned"] == 2
     for artifact_path in result["artifact_paths"].values():
         assert Path(artifact_path).exists()
+    assert "repeated_run_metrics" in result["artifact_paths"]
+    assert "repeated_run_summary" in result["artifact_paths"]
+    assert "confidence_intervals" in result["artifact_paths"]
+    assert "metric_intervals" in result["artifact_paths"]
+    assert "paired_model_comparisons" in result["artifact_paths"]
+    assert "paired_model_comparisons_csv" in result["artifact_paths"]
     assert Path(result["artifact_paths"]["comparison_decision"]).exists()
 
     status_payload = json.loads(
@@ -194,6 +200,8 @@ def test_comparison_runner_dry_run_emits_artifacts(
     )
     assert summary_payload["metric_policy_effective"]["primary_metric"] == "balanced_accuracy"
     assert summary_payload["metric_policy_effective"]["decision_metric"] == "balanced_accuracy"
+    assert isinstance(summary_payload["required_evidence_status"], dict)
+    assert isinstance(summary_payload["paired_comparisons"], dict)
     assert decision_payload["metric_policy_effective"]["primary_metric"] == "balanced_accuracy"
     assert decision_payload["metric_policy_effective"]["decision_metric"] == "balanced_accuracy"
     assert manifest_payload["metric_policy_effective"]["primary_metric"] == "balanced_accuracy"
@@ -336,3 +344,33 @@ def test_grouped_nested_comparison_spec_supports_dry_run(
         "inconclusive",
         "invalid_comparison",
     }
+
+
+def test_grouped_nested_comparison_compiler_expands_repeats_and_untuned_ablation(
+    comparison_dataset: dict[str, Path],
+) -> None:
+    spec = load_comparison_spec(_nested_comparison_spec_path()).model_copy(deep=True)
+    spec.evidence_policy.repeat_evaluation.repeat_count = 2
+    spec.evidence_policy.repeat_evaluation.seed_stride = 17
+
+    manifest = compile_comparison(
+        spec,
+        index_csv=comparison_dataset["index_csv"],
+        variant_ids=["ridge"],
+    )
+    primary_runs = [run for run in manifest.runs if run.evidence_run_role.value == "primary"]
+    untuned_runs = [
+        run for run in manifest.runs if run.evidence_run_role.value == "untuned_baseline"
+    ]
+    assert len(primary_runs) == 4
+    assert len(untuned_runs) == 4
+
+    assert {run.repeat_id for run in primary_runs} == {1, 2}
+    assert {run.repeat_count for run in primary_runs} == {2}
+    assert all(run.tuning_enabled is True for run in primary_runs)
+    assert all(run.tuning_enabled is False for run in untuned_runs)
+    assert all(run.run_id.endswith("__untuned") for run in untuned_runs)
+
+    for primary in primary_runs:
+        expected_untuned = f"{primary.run_id}__untuned"
+        assert any(run.run_id == expected_untuned for run in untuned_runs)

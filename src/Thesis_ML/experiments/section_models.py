@@ -184,7 +184,15 @@ class EvaluationInput(_SectionModel):
     n_permutations: int = 0
     primary_metric_name: str = "balanced_accuracy"
     permutation_metric_name: str | None = None
+    permutation_alpha: float = 0.05
+    permutation_minimum_required: int = 0
+    permutation_require_pass_for_validity: bool = False
     methodology_policy_name: str = "fixed_baselines_only"
+    evidence_run_role: str = "primary"
+    repeat_id: int = 1
+    repeat_count: int = 1
+    base_run_id: str | None = None
+    evidence_policy_effective: dict[str, Any] | None = None
     subgroup_reporting_enabled: bool = True
     subgroup_dimensions: list[str] = Field(
         default_factory=lambda: ["label", "task", "modality", "session", "subject"]
@@ -199,6 +207,11 @@ class EvaluationInput(_SectionModel):
     subgroup_metrics_csv_path: Path | None = None
     tuning_summary_path: Path | None = None
     tuning_best_params_path: Path | None = None
+    calibration_enabled: bool = True
+    calibration_n_bins: int = 10
+    calibration_require_probabilities_for_validity: bool = False
+    calibration_summary_path: Path | None = None
+    calibration_table_path: Path | None = None
     spatial_compatibility: dict[str, Any]
     spatial_report_path: Path
     interpretability_summary: dict[str, Any]

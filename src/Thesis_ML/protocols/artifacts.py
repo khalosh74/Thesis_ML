@@ -5,8 +5,14 @@ import json
 from pathlib import Path
 from typing import Any
 
+import pandas as pd
+
 from Thesis_ML.config.framework_mode import FrameworkMode
 from Thesis_ML.config.metric_policy import resolve_effective_metric_policy
+from Thesis_ML.experiments.evidence_statistics import (
+    aggregate_repeated_runs,
+    grouped_bootstrap_percentile_interval,
+)
 from Thesis_ML.protocols.models import (
     CompiledProtocolManifest,
     ProtocolRunResult,
@@ -429,6 +435,31 @@ def _suite_summary(
                 "confirmatory",
             )
         ),
+        "required_evidence_status": {
+            "controls_valid_for_confirmatory": bool(
+                reporting_contract.get("controls_status", {}).get(
+                    "controls_valid_for_confirmatory", False
+                )
+            ),
+            "subgroup_primary_evidence_substitution_allowed": bool(
+                reporting_contract.get("subgroup_evidence_policy", {}).get(
+                    "primary_evidence_substitution_allowed",
+                    False,
+                )
+            ),
+            "valid": bool(
+                reporting_contract.get("deviations_from_protocol", {}).get(
+                    "controls_valid_for_confirmatory",
+                    False,
+                )
+                and not bool(
+                    reporting_contract.get("deviations_from_protocol", {}).get(
+                        "science_critical_deviation_detected",
+                        False,
+                    )
+                )
+            ),
+        },
         "confirmatory_reporting_contract": reporting_contract,
         "suite_status_counts": by_suite,
         "n_runs": int(len(run_results)),
@@ -552,6 +583,10 @@ def _report_index_rows(
                 "interpretability_enabled": bool(spec.interpretability_enabled),
                 "subgroup_reporting_enabled": bool(spec.subgroup_reporting_enabled),
                 "canonical_run": bool(spec.canonical_run),
+                "evidence_run_role": spec.evidence_run_role.value,
+                "repeat_id": int(spec.repeat_id),
+                "repeat_count": int(spec.repeat_count),
+                "base_run_id": str(spec.base_run_id),
                 "report_dir": result.report_dir if result is not None else None,
                 "report_dir_relative": (
                     _relative_path(result.report_dir) if result is not None else None
@@ -580,6 +615,73 @@ def _report_index_rows(
     return rows
 
 
+def _completed_primary_rows(report_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        row
+        for row in report_rows
+        if str(row.get("status", "")).strip().lower() == "completed"
+        and str(row.get("evidence_run_role", "")).strip() == "primary"
+    ]
+
+
+def _build_repeated_run_outputs(
+    *,
+    report_rows: list[dict[str, Any]],
+) -> tuple[pd.DataFrame, dict[str, Any]]:
+    repeated_rows, repeated_summary_frame = aggregate_repeated_runs(
+        report_rows,
+        metric_key="primary_metric_value",
+        group_keys=["protocol_id", "protocol_version", "suite_id", "model"],
+    )
+    summary_payload = {
+        "n_rows": int(repeated_rows.shape[0]),
+        "n_groups": int(repeated_summary_frame.shape[0]),
+        "groups": repeated_summary_frame.to_dict(orient="records"),
+    }
+    return repeated_rows, summary_payload
+
+
+def _build_confidence_interval_outputs(
+    *,
+    protocol: ThesisProtocol,
+    report_rows: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    ci_policy = protocol.evidence_policy.confidence_intervals
+    interval_rows: list[dict[str, Any]] = []
+    grouping = {}
+    for row in report_rows:
+        suite_id = str(row.get("suite_id", ""))
+        model = str(row.get("model", ""))
+        grouping.setdefault((suite_id, model), []).append(row)
+    for (suite_id, model), suite_rows in sorted(grouping.items()):
+        interval = grouped_bootstrap_percentile_interval(
+            suite_rows,
+            value_key="primary_metric_value",
+            group_key="base_run_id",
+            confidence_level=float(ci_policy.confidence_level),
+            n_bootstrap=int(ci_policy.n_bootstrap),
+            seed=int(ci_policy.seed),
+        )
+        interval_rows.append(
+            {
+                "protocol_id": protocol.protocol_id,
+                "protocol_version": protocol.protocol_version,
+                "suite_id": suite_id,
+                "model": model,
+                "primary_metric": protocol.metric_policy.primary_metric,
+                **interval,
+            }
+        )
+    payload = {
+        "method": str(ci_policy.method.value),
+        "confidence_level": float(ci_policy.confidence_level),
+        "n_bootstrap": int(ci_policy.n_bootstrap),
+        "seed": int(ci_policy.seed),
+        "intervals": interval_rows,
+    }
+    return interval_rows, payload
+
+
 def write_protocol_artifacts(
     *,
     protocol: ThesisProtocol,
@@ -598,6 +700,10 @@ def write_protocol_artifacts(
     suite_summary_path = protocol_dir / "suite_summary.json"
     execution_status_path = protocol_dir / "execution_status.json"
     deviation_log_path = protocol_dir / "deviation_log.json"
+    repeated_run_metrics_path = protocol_dir / "repeated_run_metrics.csv"
+    repeated_run_summary_path = protocol_dir / "repeated_run_summary.json"
+    confidence_intervals_path = protocol_dir / "confidence_intervals.json"
+    metric_intervals_path = protocol_dir / "metric_intervals.csv"
     report_index_path = protocol_dir / "report_index.csv"
 
     metric_policy_effective = resolve_effective_metric_policy(
@@ -665,6 +771,20 @@ def write_protocol_artifacts(
             resolved_confirmatory_status
         ),
     )
+    primary_rows = _completed_primary_rows(report_rows)
+    repeated_run_rows, repeated_summary_payload = _build_repeated_run_outputs(
+        report_rows=primary_rows
+    )
+    repeated_run_rows.to_csv(repeated_run_metrics_path, index=False)
+    _write_json(repeated_run_summary_path, repeated_summary_payload)
+
+    interval_rows, confidence_payload = _build_confidence_interval_outputs(
+        protocol=protocol,
+        report_rows=primary_rows,
+    )
+    _write_json(confidence_intervals_path, confidence_payload)
+    pd.DataFrame(interval_rows).to_csv(metric_intervals_path, index=False)
+
     with report_index_path.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.DictWriter(
             handle,
@@ -681,5 +801,9 @@ def write_protocol_artifacts(
         "suite_summary": str(suite_summary_path.resolve()),
         "execution_status": str(execution_status_path.resolve()),
         "deviation_log": str(deviation_log_path.resolve()),
+        "repeated_run_metrics": str(repeated_run_metrics_path.resolve()),
+        "repeated_run_summary": str(repeated_run_summary_path.resolve()),
+        "confidence_intervals": str(confidence_intervals_path.resolve()),
+        "metric_intervals": str(metric_intervals_path.resolve()),
         "report_index": str(report_index_path.resolve()),
     }

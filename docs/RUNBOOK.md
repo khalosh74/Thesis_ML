@@ -118,6 +118,13 @@ Policy note:
 - comparison/protocol specs must declare one methodology policy:
   `fixed_baselines_only` or `grouped_nested_tuning`.
 - locked comparison outputs include `comparison_decision.json` for machine-readable winner/inconclusive/invalid decisions.
+- locked comparison outputs also include evidence artifacts:
+  `repeated_run_metrics.csv`, `repeated_run_summary.json`,
+  `confidence_intervals.json`, `metric_intervals.csv`,
+  `paired_model_comparisons.json`, `paired_model_comparisons.csv`.
+- confirmatory protocol outputs include evidence artifacts:
+  `repeated_run_metrics.csv`, `repeated_run_summary.json`,
+  `confidence_intervals.json`, `metric_intervals.csv`.
 - official comparison/confirmatory paths enforce strict preflight contracts and fail fast on violations.
 - `run_status.json` now includes structured failure diagnostics (`error_code`, `error_type`, `failure_stage`) and warning/timing/resource summaries.
 
@@ -128,6 +135,8 @@ Metric policy note (official runs):
 - `config.json`, `metrics.json`, and mode-level manifests include `metric_policy_effective`
 - implicit metric fallbacks are disabled; workbook/registry/search-space inputs must explicitly declare required metric fields
 - official run artifacts include deterministic provenance blocks (`git_provenance`, `dataset_fingerprint`)
+- official run artifacts include evidence metadata:
+  `evidence_policy_effective`, `repeat_id`, `repeat_count`, `base_run_id`, `evidence_run_role`
 
 Implementation ownership notes (for maintainers):
 - framework/methodology/metric runtime resolution: `src/Thesis_ML/experiments/runtime_policies.py`

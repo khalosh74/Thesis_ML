@@ -31,6 +31,7 @@ def _comparison_context_payload(
     secondary_metrics: list[str],
     decision_metric: str,
     required_run_metadata_fields: list[str],
+    evidence_policy_payload: dict[str, Any],
 ) -> dict[str, Any]:
     metric_policy = resolve_effective_metric_policy(
         primary_metric=spec.primary_metric,
@@ -57,6 +58,11 @@ def _comparison_context_payload(
         "subgroup_min_samples_per_group": int(spec.subgroup_min_samples_per_group),
         "artifact_requirements": list(spec.artifact_requirements),
         "required_run_metadata_fields": list(required_run_metadata_fields),
+        "repeat_id": int(spec.repeat_id),
+        "repeat_count": int(spec.repeat_count),
+        "base_run_id": str(spec.base_run_id),
+        "evidence_run_role": spec.evidence_run_role.value,
+        "evidence_policy": dict(evidence_policy_payload),
         "primary_metric": spec.primary_metric,
         "metric_policy": {
             "primary_metric": metric_policy.primary_metric,
@@ -188,7 +194,15 @@ def execute_compiled_comparison(
                     required_run_metadata_fields=list(
                         compiled_manifest.required_run_metadata_fields
                     ),
+                    evidence_policy_payload=compiled_manifest.evidence_policy.model_dump(
+                        mode="json"
+                    ),
                 ),
+                repeat_id=int(spec.repeat_id),
+                repeat_count=int(spec.repeat_count),
+                base_run_id=str(spec.base_run_id),
+                evidence_run_role=spec.evidence_run_role.value,
+                evidence_policy=compiled_manifest.evidence_policy.model_dump(mode="json"),
             )
             run_results.append(_to_run_result_success(spec, payload))
         except Exception as exc:

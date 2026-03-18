@@ -407,6 +407,39 @@ def adapt_confirmatory_freeze_to_thesis_protocol(
             ],
             "min_samples_per_group": int(subgroups.get("min_samples_per_group", 20)),
         },
+        "evidence_policy": {
+            "repeat_evaluation": {
+                "repeat_count": 1,
+                "seed_stride": 1000,
+            },
+            "confidence_intervals": {
+                "method": "grouped_bootstrap_percentile",
+                "confidence_level": 0.95,
+                "n_bootstrap": 1000,
+                "seed": 2026,
+            },
+            "paired_comparisons": {
+                "method": "paired_sign_flip_permutation",
+                "n_permutations": 5000,
+                "alpha": 0.05,
+                "require_significant_win": False,
+            },
+            "permutation": {
+                "alpha": float(confirmatory_lock["multiplicity_primary_alpha"]),
+                "minimum_permutations": int(controls.get("n_permutations", 1000)),
+                "require_pass_for_validity": False,
+            },
+            "calibration": {
+                "enabled": True,
+                "n_bins": 10,
+                "require_probabilities_for_validity": False,
+            },
+            "required_package": {
+                "require_dummy_baseline": bool(controls.get("dummy_baseline", True)),
+                "require_permutation_control": bool(controls.get("permutation_test", True)),
+                "require_untuned_baseline_if_tuning": bool(tuning_enabled),
+            },
+        },
         "control_policy": {
             "dummy_baseline": {
                 "enabled": bool(controls.get("dummy_baseline", True)),

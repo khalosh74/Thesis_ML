@@ -29,6 +29,7 @@ from Thesis_ML.artifacts.registry import (
 )
 from Thesis_ML.config.framework_mode import FrameworkMode
 from Thesis_ML.config.methodology import (
+    EvidencePolicy,
     MethodologyPolicy,
     MethodologyPolicyName,
     SubgroupReportingPolicy,
@@ -240,6 +241,7 @@ def _resolve_methodology_runtime(
     subgroup_reporting_enabled: bool,
     subgroup_dimensions: list[str] | None,
     subgroup_min_samples_per_group: int,
+    evidence_run_role: str | None,
     protocol_context: dict[str, Any],
     comparison_context: dict[str, Any],
 ) -> tuple[MethodologyPolicy, SubgroupReportingPolicy]:
@@ -255,6 +257,7 @@ def _resolve_methodology_runtime(
         subgroup_reporting_enabled=subgroup_reporting_enabled,
         subgroup_dimensions=subgroup_dimensions,
         subgroup_min_samples_per_group=subgroup_min_samples_per_group,
+        evidence_run_role=evidence_run_role,
         protocol_context=protocol_context,
         comparison_context=comparison_context,
     )
@@ -276,6 +279,11 @@ def run_experiment(
     n_permutations: int = 0,
     primary_metric_name: str = "balanced_accuracy",
     permutation_metric_name: str | None = None,
+    repeat_id: int = 1,
+    repeat_count: int = 1,
+    base_run_id: str | None = None,
+    evidence_run_role: str = "primary",
+    evidence_policy: dict[str, Any] | None = None,
     methodology_policy_name: str = MethodologyPolicyName.FIXED_BASELINES_ONLY.value,
     class_weight_policy: str = "none",
     tuning_enabled: bool = False,
@@ -374,6 +382,52 @@ def run_experiment(
         else "exploratory"
     )
     subgroup_primary_evidence_allowed = bool(not confirmatory_guardrails_enabled)
+    context_repeat_id = official_context.get("repeat_id")
+    context_repeat_count = official_context.get("repeat_count")
+    context_base_run_id = official_context.get("base_run_id")
+    context_evidence_run_role = official_context.get("evidence_run_role")
+    if context_repeat_id is not None and int(context_repeat_id) != int(repeat_id):
+        raise ValueError(
+            "Illegal override for official run key 'repeat_id'. "
+            "Use protocol/comparison spec values only."
+        )
+    if context_repeat_count is not None and int(context_repeat_count) != int(repeat_count):
+        raise ValueError(
+            "Illegal override for official run key 'repeat_count'. "
+            "Use protocol/comparison spec values only."
+        )
+    if context_base_run_id is not None and str(context_base_run_id) != str(base_run_id):
+        raise ValueError(
+            "Illegal override for official run key 'base_run_id'. "
+            "Use protocol/comparison spec values only."
+        )
+    if context_evidence_run_role is not None and str(context_evidence_run_role) != str(
+        evidence_run_role
+    ):
+        raise ValueError(
+            "Illegal override for official run key 'evidence_run_role'. "
+            "Use protocol/comparison spec values only."
+        )
+    resolved_repeat_id = int(context_repeat_id if context_repeat_id is not None else repeat_id)
+    resolved_repeat_count = int(
+        context_repeat_count if context_repeat_count is not None else repeat_count
+    )
+    resolved_base_run_id = (
+        str(context_base_run_id)
+        if context_base_run_id is not None
+        else (str(base_run_id) if base_run_id is not None else None)
+    )
+    resolved_evidence_run_role = str(
+        context_evidence_run_role if context_evidence_run_role is not None else evidence_run_role
+    )
+    resolved_evidence_policy_payload = (
+        dict(official_context.get("evidence_policy"))
+        if isinstance(official_context.get("evidence_policy"), dict)
+        else dict(evidence_policy)
+        if isinstance(evidence_policy, dict)
+        else EvidencePolicy().model_dump(mode="json")
+    )
+    evidence_policy_model = EvidencePolicy.model_validate(resolved_evidence_policy_payload)
     stage_timings["context_resolution"] = float(perf_counter() - context_start)
 
     metric_policy_start = perf_counter()
@@ -404,6 +458,7 @@ def run_experiment(
         subgroup_reporting_enabled=subgroup_reporting_enabled,
         subgroup_dimensions=subgroup_dimensions,
         subgroup_min_samples_per_group=subgroup_min_samples_per_group,
+        evidence_run_role=resolved_evidence_run_role,
         protocol_context=resolved_protocol_context,
         comparison_context=resolved_comparison_context,
     )
@@ -425,6 +480,8 @@ def run_experiment(
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     resolved_run_id = run_id or f"{timestamp}_{model}_{target_column}"
+    if resolved_base_run_id is None:
+        resolved_base_run_id = str(resolved_run_id)
     report_dir = reports_root / resolved_run_id
     should_reuse_completed_artifacts = bool(resume or reuse_completed_artifacts)
     artifact_registry_path = reports_root / "artifact_registry.sqlite3"
@@ -498,6 +555,8 @@ def run_experiment(
     tuning_summary_path = report_dir / "tuning_summary.json"
     tuning_best_params_path = report_dir / "best_params_per_fold.csv"
     spatial_compatibility_report_path = report_dir / "spatial_compatibility_report.json"
+    calibration_summary_path = report_dir / "calibration_summary.json"
+    calibration_table_path = report_dir / "calibration_table.csv"
     interpretability_summary_path = report_dir / "interpretability_summary.json"
     interpretability_fold_artifacts_path = report_dir / "interpretability_fold_explanations.csv"
 
@@ -531,6 +590,18 @@ def run_experiment(
                         n_permutations=n_permutations,
                         primary_metric_name=resolved_primary_metric_name,
                         permutation_metric_name=resolved_permutation_metric_name,
+                        permutation_alpha=float(evidence_policy_model.permutation.alpha),
+                        permutation_minimum_required=int(
+                            evidence_policy_model.permutation.minimum_permutations
+                        ),
+                        permutation_require_pass_for_validity=bool(
+                            evidence_policy_model.permutation.require_pass_for_validity
+                        ),
+                        repeat_id=int(resolved_repeat_id),
+                        repeat_count=int(resolved_repeat_count),
+                        base_run_id=str(resolved_base_run_id),
+                        evidence_run_role=str(resolved_evidence_run_role),
+                        evidence_policy_effective=evidence_policy_model.model_dump(mode="json"),
                         methodology_policy_name=methodology_policy.policy_name.value,
                         class_weight_policy=methodology_policy.class_weight_policy.value,
                         tuning_enabled=bool(methodology_policy.tuning_enabled),
@@ -550,6 +621,11 @@ def run_experiment(
                         subgroup_primary_evidence_allowed=bool(
                             subgroup_primary_evidence_allowed
                         ),
+                        calibration_enabled=bool(evidence_policy_model.calibration.enabled),
+                        calibration_n_bins=int(evidence_policy_model.calibration.n_bins),
+                        calibration_require_probabilities_for_validity=bool(
+                            evidence_policy_model.calibration.require_probabilities_for_validity
+                        ),
                         interpretability_enabled_override=interpretability_enabled_override,
                         run_id=resolved_run_id,
                         config_filename=config_path.name,
@@ -566,6 +642,8 @@ def run_experiment(
                         tuning_summary_path=tuning_summary_path,
                         tuning_best_params_path=tuning_best_params_path,
                         spatial_report_path=spatial_compatibility_report_path,
+                        calibration_summary_path=calibration_summary_path,
+                        calibration_table_path=calibration_table_path,
                         interpretability_summary_path=interpretability_summary_path,
                         interpretability_fold_artifacts_path=interpretability_fold_artifacts_path,
                         start_section=start_section,
@@ -628,6 +706,11 @@ def run_experiment(
             metrics_path=metrics_path,
             canonical_run=canonical_run,
             framework_mode=resolved_framework_mode.value,
+            repeat_id=int(resolved_repeat_id),
+            repeat_count=int(resolved_repeat_count),
+            base_run_id=str(resolved_base_run_id),
+            evidence_run_role=str(resolved_evidence_run_role),
+            evidence_policy_effective=evidence_policy_model.model_dump(mode="json"),
             methodology_policy_name=methodology_policy.policy_name.value,
             class_weight_policy=methodology_policy.class_weight_policy.value,
             tuning_enabled=bool(methodology_policy.tuning_enabled),
@@ -705,6 +788,11 @@ def run_experiment(
             train_subject=train_subject,
             test_subject=test_subject,
             seed=seed,
+            repeat_id=int(resolved_repeat_id),
+            repeat_count=int(resolved_repeat_count),
+            base_run_id=str(resolved_base_run_id),
+            evidence_run_role=str(resolved_evidence_run_role),
+            evidence_policy_effective=evidence_policy_model.model_dump(mode="json"),
             primary_metric_name=resolved_primary_metric_name,
             permutation_metric_name=resolved_permutation_metric_name,
             metric_policy_effective=metric_policy_effective,
@@ -717,6 +805,8 @@ def run_experiment(
             tuning_inner_group_field=effective_tuning_inner_group_field,
             tuning_summary_path=tuning_summary_path,
             tuning_best_params_path=tuning_best_params_path,
+            calibration_summary_path=calibration_summary_path,
+            calibration_table_path=calibration_table_path,
             subgroup_reporting_enabled=bool(subgroup_policy.enabled),
             subgroup_dimensions=list(subgroup_policy.subgroup_dimensions),
             subgroup_min_samples_per_group=int(subgroup_policy.min_samples_per_group),
@@ -886,6 +976,8 @@ def run_experiment(
         subgroup_metrics_csv_path=subgroup_metrics_csv_path,
         tuning_summary_path=tuning_summary_path,
         tuning_best_params_path=tuning_best_params_path,
+        calibration_summary_path=calibration_summary_path,
+        calibration_table_path=calibration_table_path,
         fold_metrics_path=fold_metrics_path,
         fold_splits_path=fold_splits_path,
         predictions_path=predictions_path,
@@ -900,6 +992,11 @@ def run_experiment(
         run_mode=run_mode,
         framework_mode=resolved_framework_mode.value,
         canonical_run=bool(canonical_run),
+        repeat_id=int(resolved_repeat_id),
+        repeat_count=int(resolved_repeat_count),
+        base_run_id=str(resolved_base_run_id),
+        evidence_run_role=str(resolved_evidence_run_role),
+        evidence_policy_effective=evidence_policy_model.model_dump(mode="json"),
         metric_policy_effective=metric_policy_effective,
         methodology_policy_name=methodology_policy.policy_name.value,
         class_weight_policy=methodology_policy.class_weight_policy.value,

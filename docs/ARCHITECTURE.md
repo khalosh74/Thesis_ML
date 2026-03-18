@@ -27,6 +27,7 @@ Core package root: `src/Thesis_ML/`
   - framework lifecycle mode enum (`framework_mode.py`)
   - methodology + decision policy contracts (`methodology.py`)
   - centralized metric policy registry/scorers (`metric_policy.py`)
+  - evidence policy contracts (`methodology.py`: repeat/CI/paired/permutation/calibration/required package)
   - schema/version constants (`schema_versions.py`)
 - `data/`, `features/`, `spm/`
   - indexing, cache extraction, SPM utilities
@@ -43,6 +44,7 @@ Core package root: `src/Thesis_ML/`
   - segment planner/executor (`segment_execution.py`)
   - idempotency/run-state policy (`execution_policy.py`)
   - grouped nested tuning search-space registry (`tuning_search_spaces.py`)
+  - shared evidence statistics (`evidence_statistics.py`)
 - `protocols/`
   - strict thesis protocol schema (`models.py`)
   - protocol JSON loader/validation (`loader.py`)
@@ -93,6 +95,7 @@ Core package root: `src/Thesis_ML/`
 - Execute each run spec through existing `run_experiment(...)`.
 - Stamp `framework_mode=locked_comparison` and comparison identity metadata.
 - Emit comparison-level manifests/summaries under `outputs/reports/comparisons/`.
+- Emit evidence-layer artifacts (`repeated_run_*`, `confidence_intervals.*`, `paired_model_comparisons.*`).
 - Emit machine-readable `comparison_decision.json` (`winner_selected`, `inconclusive`, `invalid_comparison`) via `comparisons/decision.py`.
 - Validate mode-level + run-level official artifacts via `verification/official_artifacts.py` before success return.
 
@@ -102,6 +105,7 @@ Core package root: `src/Thesis_ML/`
 - Execute each run spec through existing `run_experiment(...)`.
 - Stamp `framework_mode=confirmatory` and `canonical_run=true`.
 - Persist protocol metadata in run artifacts and emit protocol-level manifests/summaries under `outputs/reports/confirmatory/`.
+- Emit evidence-layer artifacts (`repeated_run_*`, `confidence_intervals.*`) and required-evidence status in suite summaries.
 - Validate mode-level + run-level official artifacts via `verification/official_artifacts.py` before success return.
 
 4. Decision-support campaign (`thesisml-run-decision-support`)
@@ -135,6 +139,7 @@ Framework guardrails:
 - `thesisml-run-comparison` can execute only registered variants from a comparison spec.
 - `thesisml-run-protocol` can execute only canonical protocol suites and cannot accept ad hoc science overrides.
 - comparison/protocol contracts must explicitly declare methodology policy (`fixed_baselines_only` or `grouped_nested_tuning`).
+- comparison/protocol contracts must explicitly declare `evidence_policy`.
 - primary metric is centralized in `config.metric_policy` and is the single metric authority for official runs.
 - decision metric, tuning metric, and permutation metric are resolved from primary metric and must align (drift raises validation/runtime errors).
 - secondary metrics are emitted for descriptive reporting only.
