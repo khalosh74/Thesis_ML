@@ -142,6 +142,18 @@ RC-1 hardening policy (official runs):
 - confirmatory and locked-comparison runs enforce strict preflight contract validation before execution
 - run artifacts now include deterministic provenance (`git_provenance` and `dataset_fingerprint`)
 - run-level `run_status.json` now exposes structured failure diagnostics (`error_code`, `error_type`, `failure_stage`) and warning/timing/resource summaries
+- run-level terminal status contract is explicit:
+  - `success`
+  - `failed`
+  - `timed_out`
+  - `skipped_due_to_policy`
+- per-run watchdog timeout policy defaults:
+  - confirmatory default: 45 minutes
+  - locked comparison default: 90 minutes
+  - model override: `logreg` 120 minutes
+  - shutdown grace period: 30 seconds
+  - absolute hard ceiling: 180 minutes
+- timed-out runs emit `timeout_diagnostics.json` under the run report directory
 - mode-level runners verify official artifact completeness/invariants before returning success
 
 Modular architecture highlights:
@@ -275,6 +287,11 @@ Frozen campaign phase output roots:
 - `outputs/campaign/<CampaignTag>/release/replay/`
 - `outputs/campaign/<CampaignTag>/bundle/`
 - campaign/phase metadata: `outputs/campaign/<CampaignTag>/campaign_manifest.json`, `<phase_root>/phase_status.json`, `<phase_root>/phase_summary.json`
+- phase summaries include run-state counts: `n_success`, `n_failed`, `n_timed_out`, `n_skipped_due_to_policy`
+- phase timeout/failure semantics:
+  - confirmatory: timed-out runs are blocking (phase does not pass)
+  - comparison: timed-out runs are explicit and phase may be `partial`
+  - replay/bundle: blocked unless upstream dependency phases are `passed`
 
 ## Operator documentation
 

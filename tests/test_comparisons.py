@@ -221,13 +221,32 @@ def test_comparison_runner_surfaces_structured_failure_metadata(
 ) -> None:
     spec = load_comparison_spec(_comparison_spec_path())
 
-    def _failing_run_experiment(**_: object) -> dict[str, object]:
-        raise OfficialContractValidationError(
+    def _failing_watchdog(**_: object) -> dict[str, object]:
+        failure = OfficialContractValidationError(
             "synthetic comparison preflight failure",
             details={"reason": "unit_test"},
         )
+        return {
+            "status": "failed",
+            "run_payload": None,
+            "report_dir": None,
+            "error": str(failure),
+            "error_code": "official_contract_validation_error",
+            "error_type": "OfficialContractValidationError",
+            "failure_stage": "preflight_validation",
+            "error_details": {"reason": "unit_test"},
+            "timeout_seconds": None,
+            "elapsed_seconds": None,
+            "timeout_diagnostics_path": None,
+            "child_pid": None,
+            "termination_method": "normal_exit",
+            "command": [],
+        }
 
-    monkeypatch.setattr("Thesis_ML.comparisons.runner.run_experiment", _failing_run_experiment)
+    monkeypatch.setattr(
+        "Thesis_ML.comparisons.runner.execute_run_with_timeout_watchdog",
+        _failing_watchdog,
+    )
     result = compile_and_run_comparison(
         comparison=spec,
         index_csv=comparison_dataset["index_csv"],
@@ -262,11 +281,11 @@ def test_comparison_runner_real_run_stamps_metadata(
         dry_run=False,
     )
     assert result["n_failed"] == 0
-    completed = [row for row in result["run_results"] if row["status"] == "completed"]
-    assert completed
+    successful = [row for row in result["run_results"] if row["status"] == "success"]
+    assert successful
 
-    config_path = Path(str(completed[0]["config_path"]))
-    metrics_path = Path(str(completed[0]["metrics_path"]))
+    config_path = Path(str(successful[0]["config_path"]))
+    metrics_path = Path(str(successful[0]["metrics_path"]))
     config = json.loads(config_path.read_text(encoding="utf-8"))
     metrics = json.loads(metrics_path.read_text(encoding="utf-8"))
 
@@ -313,6 +332,73 @@ def test_comparison_runner_real_run_stamps_metadata(
     assert Path(str(config["class_balance_report_path"])).exists()
     assert Path(str(config["missingness_report_path"])).exists()
     assert Path(str(config["leakage_audit_path"])).exists()
+
+
+def test_comparison_runner_timed_out_runs_are_explicit_and_invalidate_decision(
+    comparison_dataset: dict[str, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    spec = load_comparison_spec(_comparison_spec_path())
+
+    def _timed_out_watchdog(*, run_kwargs: dict[str, object], **_: object) -> dict[str, object]:
+        report_dir = Path(str(run_kwargs["reports_root"])) / str(run_kwargs["run_id"])
+        report_dir.mkdir(parents=True, exist_ok=True)
+        timeout_path = report_dir / "timeout_diagnostics.json"
+        timeout_path.write_text(
+            json.dumps(
+                {
+                    "run_id": str(run_kwargs["run_id"]),
+                    "termination_method": "terminate",
+                    "timeout_budget_seconds": 1,
+                    "elapsed_seconds": 1.1,
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        return {
+            "status": "timed_out",
+            "run_payload": None,
+            "report_dir": str(report_dir),
+            "error": "run_exceeded_timeout_budget",
+            "error_code": "run_timeout",
+            "error_type": "RunTimeoutError",
+            "failure_stage": "watchdog_timeout",
+            "error_details": {"timeout_budget_seconds": 1},
+            "timeout_seconds": 1.0,
+            "elapsed_seconds": 1.1,
+            "timeout_diagnostics_path": str(timeout_path),
+            "child_pid": 12345,
+            "termination_method": "terminate",
+            "command": ["python", "-m", "Thesis_ML.experiments.supervised_worker"],
+        }
+
+    monkeypatch.setattr(
+        "Thesis_ML.comparisons.runner.execute_run_with_timeout_watchdog",
+        _timed_out_watchdog,
+    )
+    result = compile_and_run_comparison(
+        comparison=spec,
+        index_csv=comparison_dataset["index_csv"],
+        data_root=comparison_dataset["data_root"],
+        cache_dir=comparison_dataset["cache_dir"],
+        reports_root=comparison_dataset["reports_root"],
+        variant_ids=["ridge"],
+        dry_run=False,
+    )
+
+    assert result["n_success"] == 0
+    assert result["n_failed"] == 0
+    assert result["n_timed_out"] > 0
+
+    decision = json.loads(
+        Path(result["artifact_paths"]["comparison_decision"]).read_text(encoding="utf-8")
+    )
+    assert decision["decision_status"] == "invalid_comparison"
+    assert "timed_out" in str(decision["reason"])
+
+    report_index = pd.read_csv(Path(result["artifact_paths"]["report_index"]))
+    assert set(report_index["status"].astype(str)) == {"timed_out"}
 
 
 def test_comparison_runner_rejects_draft_or_retired_status(

@@ -112,15 +112,26 @@ def main(argv: list[str] | None = None) -> int:
                 "protocol_id": result["protocol_id"],
                 "protocol_version": result["protocol_version"],
                 "protocol_output_dir": result["protocol_output_dir"],
+                "n_success": result["n_success"],
                 "n_completed": result["n_completed"],
                 "n_failed": result["n_failed"],
+                "n_timed_out": result["n_timed_out"],
+                "n_skipped_due_to_policy": result["n_skipped_due_to_policy"],
                 "n_planned": result["n_planned"],
                 "artifact_paths": result["artifact_paths"],
             },
             indent=2,
         )
     )
-    return 1 if int(result["n_failed"]) > 0 else 0
+    return (
+        1
+        if (
+            int(result["n_failed"]) > 0
+            or int(result["n_timed_out"]) > 0
+            or int(result["n_skipped_due_to_policy"]) > 0
+        )
+        else 0
+    )
 
 
 if __name__ == "__main__":

@@ -101,14 +101,20 @@ def test_framework_mode_coercion() -> None:
 
 
 def test_default_reports_roots_are_mode_separated() -> None:
-    assert str(DEFAULT_EXPLORATORY_REPORTS_ROOT).replace("\\", "/").endswith(
-        "outputs/reports/exploratory"
+    assert (
+        str(DEFAULT_EXPLORATORY_REPORTS_ROOT)
+        .replace("\\", "/")
+        .endswith("outputs/reports/exploratory")
     )
-    assert str(DEFAULT_COMPARISON_REPORTS_ROOT).replace("\\", "/").endswith(
-        "outputs/reports/comparisons"
+    assert (
+        str(DEFAULT_COMPARISON_REPORTS_ROOT)
+        .replace("\\", "/")
+        .endswith("outputs/reports/comparisons")
     )
-    assert str(DEFAULT_CONFIRMATORY_REPORTS_ROOT).replace("\\", "/").endswith(
-        "outputs/reports/confirmatory"
+    assert (
+        str(DEFAULT_CONFIRMATORY_REPORTS_ROOT)
+        .replace("\\", "/")
+        .endswith("outputs/reports/confirmatory")
     )
 
 
@@ -133,7 +139,7 @@ def test_exploratory_runner_stamps_framework_mode(
     assert metrics["framework_mode"] == FrameworkMode.EXPLORATORY.value
     assert metrics["canonical_run"] is False
     assert result["framework_mode"] == FrameworkMode.EXPLORATORY.value
-    assert status is not None and status["status"] == "completed"
+    assert status is not None and status["status"] == "success"
 
 
 def test_mode_boundary_rejects_illegal_context_crossing(tmp_path: Path) -> None:
@@ -208,7 +214,9 @@ def test_official_context_rejects_metric_policy_drift(tmp_path: Path) -> None:
         ],
     }
 
-    with pytest.raises(ValueError, match="Illegal override for official run key 'metric_policy.primary_metric'"):
+    with pytest.raises(
+        ValueError, match="Illegal override for official run key 'metric_policy.primary_metric'"
+    ):
         run_experiment(
             **kwargs,
             framework_mode=FrameworkMode.CONFIRMATORY,

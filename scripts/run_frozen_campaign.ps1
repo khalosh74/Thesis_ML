@@ -107,6 +107,83 @@ function New-DefaultPhaseStatusRecord {
     }
 }
 
+function New-RunStatusCounts {
+    return [ordered]@{
+        n_success               = 0
+        n_failed                = 0
+        n_timed_out             = 0
+        n_skipped_due_to_policy = 0
+        n_planned               = 0
+    }
+}
+
+function Add-RunStatusCounts {
+    param(
+        [Parameter(Mandatory = $true)][System.Collections.IDictionary]$Accumulator,
+        [Parameter(Mandatory = $true)][System.Collections.IDictionary]$Increment
+    )
+    foreach ($key in @("n_success", "n_failed", "n_timed_out", "n_skipped_due_to_policy", "n_planned")) {
+        $Accumulator[$key] = [int]$Accumulator[$key] + [int]$Increment[$key]
+    }
+}
+
+function Get-RunStatusCountsFromExecutionStatus {
+    param([string]$ExecutionStatusPath)
+
+    $counts = New-RunStatusCounts
+    $payload = Read-JsonFile -Path $ExecutionStatusPath
+    if ($null -eq $payload -or $null -eq $payload.runs) {
+        return $counts
+    }
+    foreach ($run in @($payload.runs)) {
+        $rawStatus = [string]$run.status
+        $status = $rawStatus.Trim().ToLowerInvariant()
+        switch ($status) {
+            "success" { $counts.n_success += 1; break }
+            "completed" { $counts.n_success += 1; break }
+            "failed" { $counts.n_failed += 1; break }
+            "timed_out" { $counts.n_timed_out += 1; break }
+            "skipped_due_to_policy" { $counts.n_skipped_due_to_policy += 1; break }
+            "planned" { $counts.n_planned += 1; break }
+            default { $counts.n_planned += 1; break }
+        }
+    }
+    return $counts
+}
+
+function Resolve-ContextRunStatusCounts {
+    param($Context)
+
+    $counts = New-RunStatusCounts
+    $candidate = $null
+    $hasCandidate = $false
+    if ($null -ne $Context -and $null -ne $Context.extra) {
+        if ($Context.extra -is [System.Collections.IDictionary]) {
+            if ($Context.extra.Contains("run_status_counts")) {
+                $candidate = $Context.extra["run_status_counts"]
+                $hasCandidate = $true
+            }
+        }
+        elseif ($Context.extra.PSObject.Properties.Name -contains "run_status_counts") {
+            $candidate = $Context.extra.run_status_counts
+            $hasCandidate = $true
+        }
+    }
+    if ($hasCandidate -and $null -ne $candidate) {
+        foreach ($key in @("n_success", "n_failed", "n_timed_out", "n_skipped_due_to_policy", "n_planned")) {
+            if ($candidate -is [System.Collections.IDictionary]) {
+                if ($candidate.Contains($key)) {
+                    $counts[$key] = [int]$candidate[$key]
+                }
+            }
+            elseif ($candidate.PSObject.Properties.Name -contains $key) {
+                $counts[$key] = [int]$candidate.$key
+            }
+        }
+    }
+    return $counts
+}
+
 function Get-PhaseOutputRoot {
     param([string]$PhaseName)
     return [string]$PhaseDefinitions[$PhaseName].output_root
@@ -267,7 +344,8 @@ function Invoke-PhaseCommand {
         [Parameter(Mandatory = $true)]$Context,
         [Parameter(Mandatory = $true)][string]$Label,
         [Parameter(Mandatory = $true)][string[]]$CommandParts,
-        [string]$LogPath = ""
+        [string]$LogPath = "",
+        [switch]$ContinueOnError
     )
 
     if ([string]::IsNullOrWhiteSpace($LogPath)) {
@@ -308,7 +386,7 @@ function Invoke-PhaseCommand {
     }
     $Context.commands += $record
 
-    if ($exitCode -ne 0) {
+    if ($exitCode -ne 0 -and -not $ContinueOnError) {
         throw "Step failed: $Label (exit code: $exitCode). See log: $LogPath"
     }
 
@@ -333,10 +411,19 @@ function Write-PhaseSummary {
         $dependencyStatus[$dep] = Get-PhaseStatusValue -PhaseName $dep
     }
 
+    $runStatusCounts = Resolve-ContextRunStatusCounts -Context $Context
+
     $summary = [ordered]@{
         phase                       = $phaseName
+        phase_status                = $Status
         status                      = $Status
         output_root                 = $Context.output_root
+        n_success                   = [int]$runStatusCounts.n_success
+        n_failed                    = [int]$runStatusCounts.n_failed
+        n_timed_out                 = [int]$runStatusCounts.n_timed_out
+        n_skipped_due_to_policy     = [int]$runStatusCounts.n_skipped_due_to_policy
+        n_planned                   = [int]$runStatusCounts.n_planned
+        run_status_counts           = $runStatusCounts
         inputs                      = $Context.inputs
         dependency_status           = $dependencyStatus
         commands_executed           = @($Context.commands)
@@ -392,8 +479,33 @@ function Update-CampaignManifest {
     }
 
     $phaseStatuses = [ordered]@{}
+    $phaseRunStatusCounts = [ordered]@{}
     foreach ($phaseName in $OrderedPhases) {
         $phaseStatuses[$phaseName] = Get-PhaseStatusRecord -PhaseName $phaseName
+        $summaryPayload = Read-JsonFile -Path (Get-PhaseSummaryPath -PhaseName $phaseName)
+        $summaryCounts = $null
+        if ($null -ne $summaryPayload) {
+            if ($summaryPayload -is [System.Collections.IDictionary]) {
+                if ($summaryPayload.Contains("run_status_counts")) {
+                    $summaryCounts = $summaryPayload["run_status_counts"]
+                }
+            }
+            elseif ($summaryPayload.PSObject.Properties.Name -contains "run_status_counts") {
+                $summaryCounts = $summaryPayload.run_status_counts
+            }
+        }
+        if ($null -ne $summaryCounts) {
+            $phaseRunStatusCounts[$phaseName] = [ordered]@{
+                n_success               = [int]$summaryCounts.n_success
+                n_failed                = [int]$summaryCounts.n_failed
+                n_timed_out             = [int]$summaryCounts.n_timed_out
+                n_skipped_due_to_policy = [int]$summaryCounts.n_skipped_due_to_policy
+                n_planned               = [int]$summaryCounts.n_planned
+            }
+        }
+        else {
+            $phaseRunStatusCounts[$phaseName] = New-RunStatusCounts
+        }
     }
 
     $commitSha = Try-ReadFirstLine -Path (Join-Path $PrecheckRoot "commit_sha.txt")
@@ -452,6 +564,7 @@ function Update-CampaignManifest {
             bundle = [ordered]@{ dependencies = @($PhaseDefinitions.bundle.dependencies); output_root = $PhaseDefinitions.bundle.output_root; blocking_for = @($PhaseDefinitions.bundle.blocking_for) }
         }
         phase_statuses = $phaseStatuses
+        phase_run_status_counts = $phaseRunStatusCounts
         blocking_model = [ordered]@{
             confirmatory_readiness_blockers = @("precheck", "confirmatory")
             campaign_signoff_blockers       = @($OrderedPhases)
@@ -522,10 +635,21 @@ function Invoke-Phase {
 
         & $Runner $context
 
-        Write-PhaseSummary -Context $context -Status "passed"
+        $resolvedPhaseStatus = "passed"
+        if ($null -ne $context.extra -and $null -ne $context.extra.phase_status_override) {
+            $candidate = [string]$context.extra.phase_status_override
+            if (@("passed", "partial", "skipped", "failed") -contains $candidate) {
+                $resolvedPhaseStatus = $candidate
+            }
+        }
+
+        Write-PhaseSummary -Context $context -Status $resolvedPhaseStatus
         $summaryWritten = $true
-        Write-PhaseStatus -PhaseName $PhaseName -Status "passed" -StartUtc $startUtc -EndUtc (Get-UtcNow)
+        Write-PhaseStatus -PhaseName $PhaseName -Status $resolvedPhaseStatus -StartUtc $startUtc -EndUtc (Get-UtcNow)
         Update-CampaignManifest
+        if ($resolvedPhaseStatus -eq "failed") {
+            throw "Phase '$PhaseName' reported failed status."
+        }
     }
     catch {
         $errorSummary = [string]$_.Exception.Message
@@ -672,13 +796,13 @@ $PhaseRunners["precheck"] = {
 $PhaseRunners["confirmatory"] = {
     param($Context)
 
-    Invoke-PhaseCommand -Context $Context -Label "Run frozen confirmatory protocol" -CommandParts @(
+    $protocolRunResult = Invoke-PhaseCommand -Context $Context -Label "Run frozen confirmatory protocol" -CommandParts @(
         "python", "-m", "Thesis_ML.cli.protocol_runner",
         "--protocol", $ConfirmatoryProtocol,
         "--all-suites",
         "--reports-root", $ConfirmatoryRoot,
         "--force"
-    ) | Out-Null
+    ) -ContinueOnError
 
     $protocolRunsRoot = Join-Path $ConfirmatoryRoot "protocol_runs"
     if (-not (Test-Path -LiteralPath $protocolRunsRoot -PathType Container)) {
@@ -720,17 +844,32 @@ $PhaseRunners["confirmatory"] = {
 
     $Context.extra["resolved_confirmatory_output_dir"] = $resolvedConfirmatoryDir.FullName
     $Context.extra["protocol_runs_root"] = $protocolRunsRoot
+    $confirmatoryExecutionStatus = Join-Path $resolvedConfirmatoryDir.FullName "execution_status.json"
+    $confirmatoryCounts = Get-RunStatusCountsFromExecutionStatus -ExecutionStatusPath $confirmatoryExecutionStatus
+    $Context.extra["run_status_counts"] = $confirmatoryCounts
     $Context.key_outputs += $resolvedConfirmatoryDir.FullName
     $Context.key_outputs += $confirmatoryArtifactSummary
     $Context.key_outputs += $confirmatoryReadySummary
+    $Context.key_outputs += $confirmatoryExecutionStatus
     $Context.verification_summaries += $confirmatoryArtifactSummary
     $Context.verification_summaries += $confirmatoryReadySummary
+
+    if ([int]$protocolRunResult.exit_code -ne 0) {
+        if ([int]$confirmatoryCounts.n_timed_out -gt 0) {
+            $Context.warnings += "Confirmatory run includes timed_out executions and is blocking."
+        }
+        if ([int]$confirmatoryCounts.n_skipped_due_to_policy -gt 0) {
+            $Context.warnings += "Confirmatory run includes skipped_due_to_policy executions and is blocking."
+        }
+        throw "Frozen confirmatory protocol reported non-success run outcomes. See execution_status and logs."
+    }
 }
 $PhaseRunners["comparison"] = {
     param($Context)
 
     $specOutputs = [ordered]@{}
     $primaryOutputDir = ""
+    $aggregateCounts = New-RunStatusCounts
 
     foreach ($spec in $ComparisonSpecs) {
         $specName = Get-SpecName -SpecPath $spec
@@ -769,8 +908,14 @@ $PhaseRunners["comparison"] = {
             artifact_verification_summary = $artifactSummaryPath
         }
 
+        $executionStatusPath = Join-Path $resolvedComparisonDir.FullName "execution_status.json"
+        $specCounts = Get-RunStatusCountsFromExecutionStatus -ExecutionStatusPath $executionStatusPath
+        Add-RunStatusCounts -Accumulator $aggregateCounts -Increment $specCounts
+        $specOutputs[$spec]["run_status_counts"] = $specCounts
+
         $Context.key_outputs += $resolvedComparisonDir.FullName
         $Context.key_outputs += $artifactSummaryPath
+        $Context.key_outputs += $executionStatusPath
         $Context.verification_summaries += $artifactSummaryPath
 
         $resolvedSpecPath = (Resolve-Path -LiteralPath $spec).ProviderPath
@@ -785,6 +930,11 @@ $PhaseRunners["comparison"] = {
 
     $Context.extra["spec_outputs"] = $specOutputs
     $Context.extra["primary_comparison_output_dir"] = $primaryOutputDir
+    $Context.extra["run_status_counts"] = $aggregateCounts
+    if ([int]$aggregateCounts.n_timed_out -gt 0 -or [int]$aggregateCounts.n_skipped_due_to_policy -gt 0) {
+        $Context.extra["phase_status_override"] = "partial"
+        $Context.warnings += "Comparison phase completed with timed_out/skipped_due_to_policy runs."
+    }
 }
 
 $PhaseRunners["replay"] = {

@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from Thesis_ML.experiments.provenance import collect_git_provenance
+from Thesis_ML.experiments.run_states import is_run_success_status
 
 MANIFEST_SCHEMA_VERSION = "reproducibility-manifest-v1"
 
@@ -98,7 +99,7 @@ def _dataset_fingerprint_summary(output_dir: Path) -> dict[str, Any]:
     with report_index_path.open("r", encoding="utf-8", newline="") as handle:
         reader = csv.DictReader(handle)
         for row in reader:
-            if str(row.get("status", "")).strip().lower() != "completed":
+            if not is_run_success_status(str(row.get("status", "")).strip().lower()):
                 continue
             n_completed += 1
             run_id = str(row.get("run_id", "")).strip()
@@ -133,6 +134,7 @@ def _dataset_fingerprint_summary(output_dir: Path) -> dict[str, Any]:
     n_present = int(n_completed - len(missing_run_ids))
     return {
         "available": True,
+        "n_success_runs": int(n_completed),
         "n_completed_runs": int(n_completed),
         "n_with_fingerprint": int(n_present),
         "n_missing_fingerprint": int(len(missing_run_ids)),
@@ -198,9 +200,7 @@ def build_reproducibility_manifest(
     repo_root: Path | None = None,
 ) -> dict[str, Any]:
     resolved_repo_root = (
-        Path(repo_root).resolve()
-        if repo_root is not None
-        else Path(__file__).resolve().parents[3]
+        Path(repo_root).resolve() if repo_root is not None else Path(__file__).resolve().parents[3]
     )
     index_csv_resolved = Path(index_csv).resolve()
     data_root_resolved = Path(data_root).resolve()
@@ -208,9 +208,7 @@ def build_reproducibility_manifest(
 
     demo_manifest_path = index_csv_resolved.parent / "demo_dataset_manifest.json"
     bundle_manifest_path = (
-        Path(bundle_dir).resolve() / "bundle_manifest.json"
-        if bundle_dir is not None
-        else None
+        Path(bundle_dir).resolve() / "bundle_manifest.json" if bundle_dir is not None else None
     )
     mode_outputs: dict[str, Any] = {}
     for mode, output_dir in sorted(output_dirs_by_mode.items()):

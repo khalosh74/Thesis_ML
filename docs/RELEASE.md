@@ -224,6 +224,24 @@ Blocking model:
 - confirmatory readiness blockers: `precheck`, `confirmatory`
 - campaign sign-off blockers: all phases
 
+Timeout watchdog and terminal status semantics:
+
+- official run terminal states are explicit and machine-readable:
+  - `success`
+  - `failed`
+  - `timed_out`
+  - `skipped_due_to_policy`
+- default timeout policy for official runs:
+  - confirmatory: 45 minutes
+  - comparison: 90 minutes
+  - `logreg` override: 120 minutes
+  - shutdown grace: 30 seconds
+  - absolute hard ceiling: 180 minutes
+- timed-out runs emit `timeout_diagnostics.json` in run directories and are counted in phase summaries (`n_timed_out`).
+- confirmatory phase treats timed-out runs as blocking.
+- comparison phase can be recorded as `partial` when timed-out/skipped runs are present.
+- replay/bundle remain dependency-gated and will not proceed unless required upstream phases are `passed`.
+
 Machine-readable orchestration artifacts:
 
 - campaign manifest: `outputs/campaign/<CampaignTag>/campaign_manifest.json`

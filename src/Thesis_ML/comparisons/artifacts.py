@@ -24,6 +24,11 @@ from Thesis_ML.experiments.evidence_statistics import (
     grouped_bootstrap_percentile_interval,
     paired_sign_flip_permutation,
 )
+from Thesis_ML.experiments.run_states import (
+    increment_run_status_count,
+    initialized_run_status_counts,
+    is_run_success_status,
+)
 
 
 def _write_json(path: Path, payload: dict[str, Any]) -> None:
@@ -61,13 +66,15 @@ def _comparison_summary(
     )
     by_variant: dict[str, dict[str, int]] = {}
     for variant_id in compiled_manifest.variant_ids:
-        by_variant[variant_id] = {"planned": 0, "completed": 0, "failed": 0}
+        by_variant[variant_id] = initialized_run_status_counts()
     for result in run_results:
         variant_counts = by_variant.setdefault(
             result.variant_id,
-            {"planned": 0, "completed": 0, "failed": 0},
+            initialized_run_status_counts(),
         )
-        variant_counts[result.status] = int(variant_counts.get(result.status, 0)) + 1
+        increment_run_status_count(variant_counts, result.status)
+    for counts in by_variant.values():
+        counts["completed"] = int(counts.get("success", 0))
     return {
         "framework_mode": FrameworkMode.LOCKED_COMPARISON.value,
         "comparison_id": comparison.comparison_id,
@@ -217,7 +224,7 @@ def _completed_primary_rows(report_rows: list[dict[str, Any]]) -> list[dict[str,
     return [
         row
         for row in report_rows
-        if str(row.get("status", "")).strip().lower() == "completed"
+        if is_run_success_status(str(row.get("status", "")))
         and str(row.get("evidence_run_role", "")).strip() == "primary"
     ]
 
@@ -363,7 +370,8 @@ def _required_evidence_status(
         and (not requires_permutation or permutation_present)
         and (
             not requires_untuned
-            or comparison.methodology_policy.policy_name != MethodologyPolicyName.GROUPED_NESTED_TUNING
+            or comparison.methodology_policy.policy_name
+            != MethodologyPolicyName.GROUPED_NESTED_TUNING
             or untuned_present
         )
     )
@@ -439,7 +447,7 @@ def write_comparison_artifacts(
 
     primary_rows = _completed_primary_rows(report_rows)
     completed_rows = [
-        row for row in report_rows if str(row.get("status", "")).strip().lower() == "completed"
+        row for row in report_rows if is_run_success_status(str(row.get("status", "")))
     ]
     repeated_run_rows, repeated_summary_payload = _build_repeated_run_outputs(
         report_rows=primary_rows

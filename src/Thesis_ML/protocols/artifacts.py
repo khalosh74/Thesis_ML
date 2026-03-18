@@ -13,6 +13,14 @@ from Thesis_ML.experiments.evidence_statistics import (
     aggregate_repeated_runs,
     grouped_bootstrap_percentile_interval,
 )
+from Thesis_ML.experiments.run_states import (
+    RUN_STATUS_FAILED,
+    RUN_STATUS_TIMED_OUT,
+    increment_run_status_count,
+    initialized_run_status_counts,
+    is_run_success_status,
+    normalize_run_status,
+)
 from Thesis_ML.protocols.models import (
     CompiledProtocolManifest,
     ProtocolRunResult,
@@ -85,7 +93,7 @@ def _fingerprint_signature(payload: dict[str, Any]) -> str:
 
 
 def _dataset_fingerprint_summary(run_results: list[ProtocolRunResult]) -> dict[str, Any]:
-    completed = [result for result in run_results if result.status == "completed"]
+    completed = [result for result in run_results if is_run_success_status(result.status)]
     signatures: set[str] = set()
     missing_run_ids: list[str] = []
     sources: list[str] = []
@@ -93,9 +101,7 @@ def _dataset_fingerprint_summary(run_results: list[ProtocolRunResult]) -> dict[s
         config_payload = _load_json(result.config_path)
         metrics_payload = _load_json(result.metrics_path)
         config_fingerprint = (
-            config_payload.get("dataset_fingerprint")
-            if isinstance(config_payload, dict)
-            else None
+            config_payload.get("dataset_fingerprint") if isinstance(config_payload, dict) else None
         )
         metrics_fingerprint = (
             metrics_payload.get("dataset_fingerprint")
@@ -133,7 +139,8 @@ def _deviation_log_payload(
     deviations: list[dict[str, Any]] = []
     science_critical_count = 0
     for result in run_results:
-        if result.status != "failed":
+        normalized_status = normalize_run_status(result.status)
+        if normalized_status not in {RUN_STATUS_FAILED, RUN_STATUS_TIMED_OUT}:
             continue
         error_text = str(result.error or "")
         science_critical = _is_science_critical_deviation(error_text)
@@ -144,6 +151,7 @@ def _deviation_log_payload(
                 "run_id": result.run_id,
                 "suite_id": result.suite_id,
                 "status": "deviation_detected",
+                "run_status": normalized_status,
                 "science_critical": bool(science_critical),
                 "reason": error_text,
             }
@@ -164,10 +172,10 @@ def _deviation_log_payload(
         "protocol_id": protocol.protocol_id,
         "protocol_version": protocol.protocol_version,
         "science_critical_deviation_detected": science_critical_detected,
-        "confirmatory_status": (
-            "downgraded" if science_critical_detected else "confirmatory"
+        "confirmatory_status": ("downgraded" if science_critical_detected else "confirmatory"),
+        "n_total_deviations": int(
+            len([entry for entry in deviations if entry["status"] != "no_deviation"])
         ),
-        "n_total_deviations": int(len([entry for entry in deviations if entry["status"] != "no_deviation"])),
         "n_science_critical_deviations": int(science_critical_count),
         "deviations": deviations,
     }
@@ -180,7 +188,9 @@ def _controls_status(
     *,
     dry_run: bool,
 ) -> dict[str, Any]:
-    lock_payload = protocol.confirmatory_lock if isinstance(protocol.confirmatory_lock, dict) else {}
+    lock_payload = (
+        protocol.confirmatory_lock if isinstance(protocol.confirmatory_lock, dict) else {}
+    )
     dummy_required = bool(
         lock_payload.get(
             "dummy_baseline_required",
@@ -215,10 +225,17 @@ def _controls_status(
         if spec.suite_id in permutation_control_suites
     )
     completed_by_run = {
-        result.run_id: result for result in run_results if result.status == "completed"
+        result.run_id: result for result in run_results if is_run_success_status(result.status)
     }
     failed_by_run = {
-        result.run_id: result for result in run_results if result.status == "failed"
+        result.run_id: result
+        for result in run_results
+        if normalize_run_status(result.status) == RUN_STATUS_FAILED
+    }
+    timed_out_by_run = {
+        result.run_id: result
+        for result in run_results
+        if normalize_run_status(result.status) == RUN_STATUS_TIMED_OUT
     }
     invalid_permutation_runs = sorted(
         spec.run_id
@@ -264,10 +281,7 @@ def _controls_status(
                 permutation_runs_below_minimum_by_metrics.append(run_id)
         dummy_requirement_satisfied = bool(
             (not dummy_required)
-            or (
-                bool(dummy_run_ids)
-                and not bool(missing_dummy_completion_run_ids)
-            )
+            or (bool(dummy_run_ids) and not bool(missing_dummy_completion_run_ids))
         )
         permutation_requirement_satisfied = bool(
             (not permutation_required)
@@ -292,6 +306,9 @@ def _controls_status(
         "dummy_baseline_failed_run_ids": sorted(
             run_id for run_id in dummy_run_ids if run_id in failed_by_run
         ),
+        "dummy_baseline_timed_out_run_ids": sorted(
+            run_id for run_id in dummy_run_ids if run_id in timed_out_by_run
+        ),
         "dummy_baseline_missing_completion_run_ids": missing_dummy_completion_run_ids,
         "dummy_requirement_satisfied": bool(dummy_requirement_satisfied),
         "permutation_required": bool(permutation_required),
@@ -302,6 +319,9 @@ def _controls_status(
         ),
         "permutation_failed_run_ids": sorted(
             run_id for run_id in permutation_run_ids if run_id in failed_by_run
+        ),
+        "permutation_timed_out_run_ids": sorted(
+            run_id for run_id in permutation_run_ids if run_id in timed_out_by_run
         ),
         "permutation_missing_completion_run_ids": missing_permutation_completion_run_ids,
         "invalid_permutation_run_ids": invalid_permutation_runs,
@@ -323,7 +343,9 @@ def _confirmatory_reporting_contract(
     *,
     dry_run: bool,
 ) -> dict[str, Any]:
-    lock_payload = protocol.confirmatory_lock if isinstance(protocol.confirmatory_lock, dict) else {}
+    lock_payload = (
+        protocol.confirmatory_lock if isinstance(protocol.confirmatory_lock, dict) else {}
+    )
     fingerprint_summary = _dataset_fingerprint_summary(run_results)
     deviations = list(deviation_log_payload.get("deviations", []))
     total_deviations = int(
@@ -367,9 +389,7 @@ def _confirmatory_reporting_contract(
             else {}
         ),
         "multiplicity_policy": {
-            "primary_hypotheses": int(
-                lock_payload.get("multiplicity_primary_hypotheses", 1)
-            ),
+            "primary_hypotheses": int(lock_payload.get("multiplicity_primary_hypotheses", 1)),
             "primary_alpha": float(lock_payload.get("multiplicity_primary_alpha", 0.05)),
             "secondary_policy": str(
                 lock_payload.get("multiplicity_secondary_policy", "descriptive_only")
@@ -379,9 +399,7 @@ def _confirmatory_reporting_contract(
             ),
         },
         "subgroup_evidence_policy": {
-            "evidence_role": str(
-                lock_payload.get("subgroup_interpretation", "descriptive_only")
-            ),
+            "evidence_role": str(lock_payload.get("subgroup_interpretation", "descriptive_only")),
             "primary_evidence_substitution_allowed": False,
         },
         "deviations_from_protocol": {
@@ -394,7 +412,9 @@ def _confirmatory_reporting_contract(
             "confirmatory_status": str(confirmatory_status),
             "explicit_no_deviation_record": bool(total_deviations == 0),
         },
-        "confirmatory_valid": bool(not dry_run and controls_valid and not science_critical_deviation_detected),
+        "confirmatory_valid": bool(
+            not dry_run and controls_valid and not science_critical_deviation_detected
+        ),
     }
 
 
@@ -413,13 +433,12 @@ def _suite_summary(
     )
     by_suite: dict[str, dict[str, int]] = {}
     for suite_id in compiled_manifest.suite_ids:
-        by_suite[suite_id] = {"planned": 0, "completed": 0, "failed": 0}
+        by_suite[suite_id] = initialized_run_status_counts()
     for result in run_results:
-        status_counts = by_suite.setdefault(
-            result.suite_id,
-            {"planned": 0, "completed": 0, "failed": 0},
-        )
-        status_counts[result.status] = int(status_counts.get(result.status, 0)) + 1
+        status_counts = by_suite.setdefault(result.suite_id, initialized_run_status_counts())
+        increment_run_status_count(status_counts, result.status)
+    for counts in by_suite.values():
+        counts["completed"] = int(counts.get("success", 0))
     return {
         "framework_mode": FrameworkMode.CONFIRMATORY.value,
         "protocol_id": compiled_manifest.protocol_id,
@@ -521,7 +540,9 @@ def _report_index_rows(
     confirmatory_status: str,
 ) -> list[dict[str, Any]]:
     result_by_run_id = {result.run_id: result for result in run_results}
-    lock_payload = protocol.confirmatory_lock if isinstance(protocol.confirmatory_lock, dict) else {}
+    lock_payload = (
+        protocol.confirmatory_lock if isinstance(protocol.confirmatory_lock, dict) else {}
+    )
     metric_policy_cache: dict[
         tuple[str, tuple[str, ...], str],
         dict[str, Any],
@@ -563,20 +584,17 @@ def _report_index_rows(
                 "suite_id": spec.suite_id,
                 "claim_ids": "|".join(spec.claim_ids),
                 "status": result.status if result is not None else "planned",
-                "primary_split": str(
-                    lock_payload.get("split", protocol.split_policy.primary_mode)
-                ),
+                "primary_split": str(lock_payload.get("split", protocol.split_policy.primary_mode)),
                 "target": spec.target,
                 "model_family": str(
                     lock_payload.get(
                         "model_family",
-                        protocol.model_policy.models[0]
-                        if protocol.model_policy.models
-                        else "",
+                        protocol.model_policy.models[0] if protocol.model_policy.models else "",
                     )
                 ),
                 "model": spec.model,
-                "target_mapping_version": str(lock_payload.get("target_mapping_version", "")) or None,
+                "target_mapping_version": str(lock_payload.get("target_mapping_version", ""))
+                or None,
                 "target_mapping_hash": str(lock_payload.get("target_mapping_hash", "")) or None,
                 "cv_mode": spec.cv_mode,
                 "subject": spec.subject,
@@ -616,7 +634,8 @@ def _report_index_rows(
                 "error": result.error if result is not None else None,
                 "science_critical_deviation": (
                     bool(_is_science_critical_deviation(str(result.error or "")))
-                    if result is not None and result.status == "failed"
+                    if result is not None
+                    and normalize_run_status(result.status) == RUN_STATUS_FAILED
                     else False
                 ),
                 "balanced_accuracy": metrics.get("balanced_accuracy"),
@@ -633,7 +652,7 @@ def _completed_primary_rows(report_rows: list[dict[str, Any]]) -> list[dict[str,
     return [
         row
         for row in report_rows
-        if str(row.get("status", "")).strip().lower() == "completed"
+        if is_run_success_status(str(row.get("status", "")))
         and str(row.get("evidence_run_role", "")).strip() == "primary"
     ]
 
@@ -781,9 +800,7 @@ def write_protocol_artifacts(
         protocol,
         compiled_manifest,
         run_results,
-        confirmatory_status=str(
-            resolved_confirmatory_status
-        ),
+        confirmatory_status=str(resolved_confirmatory_status),
     )
     primary_rows = _completed_primary_rows(report_rows)
     repeated_run_rows, repeated_summary_payload = _build_repeated_run_outputs(

@@ -6,6 +6,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from Thesis_ML.experiments.run_states import (
+    is_run_success_status,
+)
+
 RUN_STATUS_FILENAME = "run_status.json"
 
 
@@ -120,7 +124,7 @@ def prepare_report_dir(
         report_dir.mkdir(parents=True, exist_ok=False)
         return "forced_rerun"
 
-    if status_value == "completed":
+    if is_run_success_status(status_value):
         raise FileExistsError(
             f"Run '{run_id}' already completed at {updated_at}. "
             "Use force=True to rerun from scratch with the same run_id, "

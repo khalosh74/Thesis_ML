@@ -4,10 +4,13 @@ import json
 from pathlib import Path
 from typing import Any
 
+from Thesis_ML.experiments.run_states import is_run_success_status
 from Thesis_ML.verification.official_artifacts import verify_official_artifacts
 
 
-def _load_json(path: Path, *, issues: list[dict[str, Any]], code_prefix: str) -> dict[str, Any] | None:
+def _load_json(
+    path: Path, *, issues: list[dict[str, Any]], code_prefix: str
+) -> dict[str, Any] | None:
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
@@ -98,9 +101,7 @@ def verify_confirmatory_ready(
             "issues": issues,
             "official_artifact_summary": official_summary,
             "reproducibility_summary_path": (
-                str(Path(reproducibility_summary).resolve())
-                if reproducibility_summary
-                else None
+                str(Path(reproducibility_summary).resolve()) if reproducibility_summary else None
             ),
         }
 
@@ -119,8 +120,10 @@ def verify_confirmatory_ready(
         issues=issues,
         code_prefix="deviation_log",
     )
-    if not isinstance(execution_status, dict) or not isinstance(suite_summary, dict) or not isinstance(
-        deviation_log, dict
+    if (
+        not isinstance(execution_status, dict)
+        or not isinstance(suite_summary, dict)
+        or not isinstance(deviation_log, dict)
     ):
         criteria.append(
             _criterion(
@@ -135,9 +138,7 @@ def verify_confirmatory_ready(
             "issues": issues,
             "official_artifact_summary": official_summary,
             "reproducibility_summary_path": (
-                str(Path(reproducibility_summary).resolve())
-                if reproducibility_summary
-                else None
+                str(Path(reproducibility_summary).resolve()) if reproducibility_summary else None
             ),
         }
 
@@ -175,7 +176,9 @@ def verify_confirmatory_ready(
             }
         )
 
-    deviation_science_critical = bool(deviation_log.get("science_critical_deviation_detected", False))
+    deviation_science_critical = bool(
+        deviation_log.get("science_critical_deviation_detected", False)
+    )
     criteria.append(
         _criterion(
             "deviation_log_science_critical_clear",
@@ -259,7 +262,7 @@ def verify_confirmatory_ready(
 
     runs = execution_status.get("runs", [])
     all_runs_completed = isinstance(runs, list) and all(
-        isinstance(entry, dict) and str(entry.get("status", "")).strip() == "completed"
+        isinstance(entry, dict) and is_run_success_status(str(entry.get("status", "")).strip())
         for entry in runs
     )
     criteria.append(

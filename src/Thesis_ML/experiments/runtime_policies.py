@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from typing import Any, Literal, cast
 
 from Thesis_ML.config.framework_mode import FrameworkMode, coerce_framework_mode
@@ -49,6 +50,160 @@ LOCKED_COMPARISON_CONTEXT_REQUIRED_KEYS: tuple[str, ...] = (
     "data_policy",
     "required_run_metadata_fields",
 )
+
+_DEFAULT_TIMEOUT_POLICY: dict[str, Any] = {
+    "enabled": True,
+    "default_timeout_seconds": 90 * 60,
+    "mode_timeouts_seconds": {
+        FrameworkMode.CONFIRMATORY.value: 45 * 60,
+        FrameworkMode.LOCKED_COMPARISON.value: 90 * 60,
+    },
+    "model_timeouts_seconds": {
+        "logreg": 120 * 60,
+    },
+    "shutdown_grace_seconds": 30,
+    "absolute_hard_ceiling_seconds": 180 * 60,
+}
+
+
+def default_timeout_policy_payload() -> dict[str, Any]:
+    return deepcopy(_DEFAULT_TIMEOUT_POLICY)
+
+
+def _coerce_timeout_seconds(
+    value: Any,
+    *,
+    field_name: str,
+    minimum: int = 1,
+) -> int:
+    seconds = int(value)
+    if seconds < int(minimum):
+        raise ValueError(f"{field_name} must be >= {minimum} seconds.")
+    return seconds
+
+
+def _coerce_optional_timeout_map(raw: Any, *, field_name: str) -> dict[str, int]:
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        raise ValueError(f"{field_name} must be an object when provided.")
+    resolved: dict[str, int] = {}
+    for key, value in raw.items():
+        key_text = str(key).strip().lower()
+        if not key_text:
+            raise ValueError(f"{field_name} contains an empty key.")
+        resolved[key_text] = _coerce_timeout_seconds(
+            value,
+            field_name=f"{field_name}.{key_text}",
+        )
+    return resolved
+
+
+def _merge_timeout_policy_overrides(
+    base: dict[str, Any],
+    overrides: dict[str, Any] | None,
+) -> dict[str, Any]:
+    merged = deepcopy(base)
+    if not isinstance(overrides, dict):
+        return merged
+    if "enabled" in overrides:
+        merged["enabled"] = bool(overrides.get("enabled"))
+    if "default_timeout_seconds" in overrides:
+        merged["default_timeout_seconds"] = _coerce_timeout_seconds(
+            overrides.get("default_timeout_seconds"),
+            field_name="default_timeout_seconds",
+        )
+    if "mode_timeouts_seconds" in overrides:
+        merged["mode_timeouts_seconds"] = _coerce_optional_timeout_map(
+            overrides.get("mode_timeouts_seconds"),
+            field_name="mode_timeouts_seconds",
+        )
+    if "model_timeouts_seconds" in overrides:
+        merged["model_timeouts_seconds"] = _coerce_optional_timeout_map(
+            overrides.get("model_timeouts_seconds"),
+            field_name="model_timeouts_seconds",
+        )
+    if "shutdown_grace_seconds" in overrides:
+        merged["shutdown_grace_seconds"] = _coerce_timeout_seconds(
+            overrides.get("shutdown_grace_seconds"),
+            field_name="shutdown_grace_seconds",
+        )
+    if "absolute_hard_ceiling_seconds" in overrides:
+        merged["absolute_hard_ceiling_seconds"] = _coerce_timeout_seconds(
+            overrides.get("absolute_hard_ceiling_seconds"),
+            field_name="absolute_hard_ceiling_seconds",
+        )
+    return merged
+
+
+def resolve_run_timeout_policy(
+    *,
+    framework_mode: FrameworkMode | str,
+    model_name: str,
+    policy_overrides: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    resolved_mode = coerce_framework_mode(framework_mode)
+    merged = _merge_timeout_policy_overrides(
+        default_timeout_policy_payload(),
+        policy_overrides,
+    )
+    enabled = bool(merged.get("enabled", True))
+    default_timeout_seconds = _coerce_timeout_seconds(
+        merged.get("default_timeout_seconds", _DEFAULT_TIMEOUT_POLICY["default_timeout_seconds"]),
+        field_name="default_timeout_seconds",
+    )
+    mode_timeouts = _coerce_optional_timeout_map(
+        merged.get("mode_timeouts_seconds"),
+        field_name="mode_timeouts_seconds",
+    )
+    model_timeouts = _coerce_optional_timeout_map(
+        merged.get("model_timeouts_seconds"),
+        field_name="model_timeouts_seconds",
+    )
+    shutdown_grace_seconds = _coerce_timeout_seconds(
+        merged.get("shutdown_grace_seconds", _DEFAULT_TIMEOUT_POLICY["shutdown_grace_seconds"]),
+        field_name="shutdown_grace_seconds",
+    )
+    hard_ceiling_seconds = _coerce_timeout_seconds(
+        merged.get(
+            "absolute_hard_ceiling_seconds",
+            _DEFAULT_TIMEOUT_POLICY["absolute_hard_ceiling_seconds"],
+        ),
+        field_name="absolute_hard_ceiling_seconds",
+    )
+
+    effective_timeout_seconds: int | None = None
+    effective_source = "disabled"
+    if enabled:
+        candidate = default_timeout_seconds
+        effective_source = "default"
+
+        mode_key = resolved_mode.value
+        if mode_key in mode_timeouts:
+            candidate = int(mode_timeouts[mode_key])
+            effective_source = "mode_default"
+
+        model_key = str(model_name).strip().lower()
+        if model_key in model_timeouts:
+            candidate = int(model_timeouts[model_key])
+            effective_source = "model_override"
+
+        effective_timeout_seconds = min(int(candidate), int(hard_ceiling_seconds))
+
+    return {
+        "enabled": enabled,
+        "default_timeout_seconds": int(default_timeout_seconds),
+        "mode_timeouts_seconds": dict(mode_timeouts),
+        "model_timeouts_seconds": dict(model_timeouts),
+        "shutdown_grace_seconds": int(shutdown_grace_seconds),
+        "absolute_hard_ceiling_seconds": int(hard_ceiling_seconds),
+        "effective_timeout_seconds": (
+            int(effective_timeout_seconds) if effective_timeout_seconds is not None else None
+        ),
+        "effective_timeout_source": str(effective_source),
+        "framework_mode": resolved_mode.value,
+        "model_name": str(model_name),
+    }
 
 
 def _validate_required_context_keys(
@@ -217,8 +372,7 @@ def resolve_methodology_runtime(
         missing = [key for key in sorted(required_context_keys) if key not in source_context]
         if missing:
             raise ValueError(
-                "Official run context is missing methodology/subgroup keys: "
-                + ", ".join(missing)
+                "Official run context is missing methodology/subgroup keys: " + ", ".join(missing)
             )
         mismatch_checks = {
             "methodology_policy_name": str(methodology_policy_name),
@@ -286,8 +440,7 @@ def resolve_methodology_runtime(
         normalized_inner_cv = str(resolved_tuning_inner_cv_scheme).strip()
         if normalized_inner_cv != "grouped_leave_one_group_out":
             raise ValueError(
-                "Unsupported tuning_inner_cv_scheme. "
-                "Allowed value: grouped_leave_one_group_out."
+                "Unsupported tuning_inner_cv_scheme. Allowed value: grouped_leave_one_group_out."
             )
         resolved_inner_cv_scheme_literal = cast(
             Literal["grouped_leave_one_group_out"], normalized_inner_cv
@@ -299,9 +452,7 @@ def resolve_methodology_runtime(
                 "evidence_run_role='untuned_baseline' requires methodology_policy_name='grouped_nested_tuning'."
             )
         if bool(resolved_tuning_enabled):
-            raise ValueError(
-                "evidence_run_role='untuned_baseline' requires tuning_enabled=false."
-            )
+            raise ValueError("evidence_run_role='untuned_baseline' requires tuning_enabled=false.")
         if any(
             value is not None
             for value in (
@@ -363,9 +514,10 @@ def resolve_metric_policy_runtime(
     resolved_tuning_metric = resolved_primary_metric_name
     if official_context:
         context_primary_metric = official_context.get("primary_metric")
-        if context_primary_metric is not None and validate_metric_name(
-            str(context_primary_metric)
-        ) != resolved_primary_metric_name:
+        if (
+            context_primary_metric is not None
+            and validate_metric_name(str(context_primary_metric)) != resolved_primary_metric_name
+        ):
             raise ValueError(
                 "Illegal override for official run key 'primary_metric'. "
                 "Use protocol/comparison spec values only."
@@ -373,9 +525,11 @@ def resolve_metric_policy_runtime(
         controls_payload = official_context.get("controls")
         if isinstance(controls_payload, dict):
             context_perm_metric = controls_payload.get("permutation_metric")
-            if context_perm_metric is not None and validate_metric_name(
-                str(context_perm_metric)
-            ) != resolved_permutation_metric_name:
+            if (
+                context_perm_metric is not None
+                and validate_metric_name(str(context_perm_metric))
+                != resolved_permutation_metric_name
+            ):
                 raise ValueError(
                     "Illegal override for official run key 'permutation_metric'. "
                     "Use protocol/comparison spec values only."

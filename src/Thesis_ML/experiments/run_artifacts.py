@@ -37,7 +37,9 @@ def resolve_run_identity(
     claim_ids = [str(value) for value in claim_ids_raw] if isinstance(claim_ids_raw, list) else None
     return RunIdentity(
         protocol_id=(
-            str(protocol_context.get("protocol_id")) if protocol_context.get("protocol_id") else None
+            str(protocol_context.get("protocol_id"))
+            if protocol_context.get("protocol_id")
+            else None
         ),
         protocol_version=(
             str(protocol_context.get("protocol_version"))
@@ -49,7 +51,9 @@ def resolve_run_identity(
             if protocol_context.get("protocol_schema_version")
             else None
         ),
-        suite_id=str(protocol_context.get("suite_id")) if protocol_context.get("suite_id") else None,
+        suite_id=str(protocol_context.get("suite_id"))
+        if protocol_context.get("suite_id")
+        else None,
         claim_ids=claim_ids,
         comparison_id=(
             str(comparison_context.get("comparison_id"))
@@ -108,6 +112,7 @@ def stamp_metrics_artifact(
     stage_timings_seconds: dict[str, float] | None = None,
     resource_summary: dict[str, Any] | None = None,
     warning_summary: dict[str, Any] | None = None,
+    timeout_policy_effective: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     if not metrics_path.exists():
         return None
@@ -131,15 +136,15 @@ def stamp_metrics_artifact(
     persisted_metrics["tuning_summary_path"] = str(tuning_summary_path.resolve())
     persisted_metrics["tuning_summary_path_relative"] = _relative_path(tuning_summary_path)
     persisted_metrics["tuning_best_params_path"] = str(tuning_best_params_path.resolve())
-    persisted_metrics["tuning_best_params_path_relative"] = _relative_path(
-        tuning_best_params_path
-    )
+    persisted_metrics["tuning_best_params_path_relative"] = _relative_path(tuning_best_params_path)
     persisted_metrics["subgroup_metrics_json_path"] = str(subgroup_metrics_json_path.resolve())
     persisted_metrics["subgroup_metrics_json_path_relative"] = _relative_path(
         subgroup_metrics_json_path
     )
     persisted_metrics["subgroup_metrics_csv_path"] = str(subgroup_metrics_csv_path.resolve())
-    persisted_metrics["subgroup_metrics_csv_path_relative"] = _relative_path(subgroup_metrics_csv_path)
+    persisted_metrics["subgroup_metrics_csv_path_relative"] = _relative_path(
+        subgroup_metrics_csv_path
+    )
     persisted_metrics["metric_policy_effective"] = metric_policy_effective_payload(
         metric_policy_effective
     )
@@ -172,6 +177,8 @@ def stamp_metrics_artifact(
         persisted_metrics["resource_summary"] = dict(resource_summary)
     if warning_summary is not None:
         persisted_metrics["warning_summary"] = dict(warning_summary)
+    if timeout_policy_effective is not None:
+        persisted_metrics["timeout_policy_effective"] = dict(timeout_policy_effective)
     metrics_path.write_text(f"{json.dumps(persisted_metrics, indent=2)}\n", encoding="utf-8")
     return persisted_metrics
 
@@ -268,6 +275,7 @@ def build_run_config_payload(
     stage_timings_seconds: dict[str, float] | None = None,
     resource_summary: dict[str, Any] | None = None,
     warning_summary: dict[str, Any] | None = None,
+    timeout_policy_effective: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     return {
         "run_id": run_id,
@@ -407,6 +415,9 @@ def build_run_config_payload(
         ),
         "resource_summary": dict(resource_summary) if resource_summary is not None else None,
         "warning_summary": dict(warning_summary) if warning_summary is not None else None,
+        "timeout_policy_effective": (
+            dict(timeout_policy_effective) if isinstance(timeout_policy_effective, dict) else None
+        ),
     }
 
 
@@ -464,6 +475,7 @@ def build_run_result_payload(
     resource_summary: dict[str, Any] | None = None,
     warning_summary: dict[str, Any] | None = None,
     dataset_fingerprint: dict[str, Any] | None = None,
+    timeout_policy_effective: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     return {
         "run_id": run_id,
@@ -559,4 +571,7 @@ def build_run_result_payload(
         "resource_summary": dict(resource_summary) if resource_summary is not None else None,
         "warning_summary": dict(warning_summary) if warning_summary is not None else None,
         "dataset_fingerprint": dict(dataset_fingerprint) if dataset_fingerprint else None,
+        "timeout_policy_effective": (
+            dict(timeout_policy_effective) if isinstance(timeout_policy_effective, dict) else None
+        ),
     }

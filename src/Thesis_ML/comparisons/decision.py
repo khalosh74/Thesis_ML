@@ -17,6 +17,15 @@ from Thesis_ML.config.metric_policy import (
     resolve_effective_metric_policy,
     validate_metric_name,
 )
+from Thesis_ML.experiments.run_states import (
+    RUN_STATUS_FAILED,
+    RUN_STATUS_PLANNED,
+    RUN_STATUS_SKIPPED_DUE_TO_POLICY,
+    RUN_STATUS_SUCCESS,
+    RUN_STATUS_TIMED_OUT,
+    is_run_success_status,
+    normalize_run_status,
+)
 
 
 def _safe_float(value: Any) -> float | None:
@@ -54,7 +63,7 @@ def _metric_policy_payload(metric_policy_effective: Any) -> dict[str, Any]:
 
 def _subgroup_reports_ok(variant_results: list[ComparisonRunResult]) -> tuple[bool, str | None]:
     for result in variant_results:
-        if result.status != "completed" or not result.report_dir:
+        if not is_run_success_status(result.status) or not result.report_dir:
             continue
         subgroup_json_path = Path(result.report_dir) / "subgroup_metrics.json"
         if not subgroup_json_path.exists():
@@ -97,8 +106,11 @@ def build_comparison_decision(
     variant_scores: dict[str, dict[str, Any]] = {
         variant_id: {
             "n_runs": 0,
+            "n_success": 0,
             "n_completed": 0,
             "n_failed": 0,
+            "n_timed_out": 0,
+            "n_skipped_due_to_policy": 0,
             "n_planned": 0,
             "primary_metric_values": [],
             "mean_primary_metric": None,
@@ -116,8 +128,11 @@ def build_comparison_decision(
             spec.variant_id,
             {
                 "n_runs": 0,
+                "n_success": 0,
                 "n_completed": 0,
                 "n_failed": 0,
+                "n_timed_out": 0,
+                "n_skipped_due_to_policy": 0,
                 "n_planned": 0,
                 "primary_metric_values": [],
                 "mean_primary_metric": None,
@@ -130,13 +145,16 @@ def build_comparison_decision(
             missing_runs.append(spec.run_id)
             bucket["n_planned"] = int(bucket["n_planned"]) + 1
             continue
-        if result.status == "completed":
+        normalized_status = normalize_run_status(result.status)
+        if normalized_status == RUN_STATUS_SUCCESS:
+            bucket["n_success"] = int(bucket["n_success"]) + 1
             bucket["n_completed"] = int(bucket["n_completed"]) + 1
             metrics_payload = _load_metrics_payload(result)
             payload_primary_metric_name = metrics_payload.get("primary_metric_name")
-            if payload_primary_metric_name is not None and validate_metric_name(
-                str(payload_primary_metric_name)
-            ) != primary_metric:
+            if (
+                payload_primary_metric_name is not None
+                and validate_metric_name(str(payload_primary_metric_name)) != primary_metric
+            ):
                 missing_metric_runs.append(spec.run_id)
                 continue
             metric_value = extract_metric_value(
@@ -154,14 +172,31 @@ def build_comparison_decision(
                 p_value = _safe_float(permutation_payload.get("p_value"))
                 if p_value is not None:
                     bucket["permutation_p_values"].append(p_value)
-        elif result.status == "failed":
+        elif normalized_status == RUN_STATUS_FAILED:
             bucket["n_failed"] = int(bucket["n_failed"]) + 1
+        elif normalized_status == RUN_STATUS_TIMED_OUT:
+            bucket["n_timed_out"] = int(bucket["n_timed_out"]) + 1
+        elif normalized_status == RUN_STATUS_SKIPPED_DUE_TO_POLICY:
+            bucket["n_skipped_due_to_policy"] = int(bucket["n_skipped_due_to_policy"]) + 1
+        elif normalized_status == RUN_STATUS_PLANNED:
+            bucket["n_planned"] = int(bucket["n_planned"]) + 1
         else:
             bucket["n_planned"] = int(bucket["n_planned"]) + 1
 
     for bucket in variant_scores.values():
         values = [float(value) for value in bucket["primary_metric_values"]]
         bucket["mean_primary_metric"] = float(sum(values) / len(values)) if values else None
+
+    timed_out_runs = sorted(
+        result.run_id
+        for result in run_results
+        if normalize_run_status(result.status) == RUN_STATUS_TIMED_OUT
+    )
+    skipped_runs = sorted(
+        result.run_id
+        for result in run_results
+        if normalize_run_status(result.status) == RUN_STATUS_SKIPPED_DUE_TO_POLICY
+    )
 
     if isinstance(required_evidence_status, dict) and not bool(
         required_evidence_status.get("valid", False)
@@ -183,9 +218,16 @@ def build_comparison_decision(
 
     if decision_policy.require_all_runs_completed:
         non_completed = [
-            result.run_id for result in run_results if result.status in {"failed", "planned"}
+            result.run_id
+            for result in run_results
+            if normalize_run_status(result.status) != RUN_STATUS_SUCCESS
         ]
         if missing_runs or non_completed:
+            reason = "not_all_runs_completed"
+            if timed_out_runs:
+                reason = "required_runs_timed_out"
+            elif skipped_runs:
+                reason = "required_runs_skipped_due_to_policy"
             return {
                 "framework_mode": FrameworkMode.LOCKED_COMPARISON.value,
                 "comparison_id": comparison.comparison_id,
@@ -195,11 +237,34 @@ def build_comparison_decision(
                 "metric_policy_effective": _metric_policy_payload(metric_policy_effective),
                 "variant_scores": variant_scores,
                 "selected_variant": None,
-                "reason": "not_all_runs_completed",
+                "reason": reason,
                 "missing_runs": sorted(missing_runs),
                 "non_completed_runs": sorted(non_completed),
+                "timed_out_runs": timed_out_runs,
+                "skipped_due_to_policy_runs": skipped_runs,
                 "control_results_summary": {},
             }
+
+    required_variants_timed_out = sorted(
+        variant_id
+        for variant_id, payload in variant_scores.items()
+        if int(payload.get("n_timed_out", 0)) > 0 and int(payload.get("n_success", 0)) == 0
+    )
+    if required_variants_timed_out:
+        return {
+            "framework_mode": FrameworkMode.LOCKED_COMPARISON.value,
+            "comparison_id": comparison.comparison_id,
+            "comparison_version": comparison.comparison_version,
+            "decision_status": ComparisonDecisionStatus.INVALID_COMPARISON.value,
+            "primary_metric": primary_metric,
+            "metric_policy_effective": _metric_policy_payload(metric_policy_effective),
+            "variant_scores": variant_scores,
+            "selected_variant": None,
+            "reason": "required_variants_timed_out",
+            "required_variants_timed_out": required_variants_timed_out,
+            "timed_out_runs": timed_out_runs,
+            "control_results_summary": {},
+        }
 
     if decision_policy.invalid_on_missing_metrics and missing_metric_runs:
         return {

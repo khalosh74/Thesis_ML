@@ -304,11 +304,18 @@ def _determinism_for_mode(
         output_a = Path(str(result_a["protocol_output_dir"]))
         output_b = Path(str(result_b["protocol_output_dir"]))
 
-    if int(result_a.get("n_failed", 0)) > 0 or int(result_b.get("n_failed", 0)) > 0:
+    if (
+        int(result_a.get("n_failed", 0)) > 0
+        or int(result_b.get("n_failed", 0)) > 0
+        or int(result_a.get("n_timed_out", 0)) > 0
+        or int(result_b.get("n_timed_out", 0)) > 0
+        or int(result_a.get("n_skipped_due_to_policy", 0)) > 0
+        or int(result_b.get("n_skipped_due_to_policy", 0)) > 0
+    ):
         return {
             "passed": False,
             "mode": mode,
-            "reason": "one_or_more_runs_failed",
+            "reason": "one_or_more_runs_not_successful",
             "run_a": result_a,
             "run_b": result_b,
         }
@@ -463,22 +470,20 @@ def main(argv: list[str] | None = None) -> int:
         "index_csv": str(index_csv.resolve()),
         "data_root": str(data_root.resolve()),
         "cache_dir": str(cache_dir.resolve()),
-        "comparison_spec": (
-            str(Path(args.comparison).resolve()) if run_comparison_mode else None
-        ),
-        "protocol_spec": (
-            str(Path(args.protocol).resolve()) if run_confirmatory_mode else None
-        ),
+        "comparison_spec": (str(Path(args.comparison).resolve()) if run_comparison_mode else None),
+        "protocol_spec": (str(Path(args.protocol).resolve()) if run_confirmatory_mode else None),
         "results": mode_results,
         "determinism": determinism_summary,
     }
 
     verification_checks: dict[str, Any] = {}
     for mode_name, mode_payload in mode_results.items():
-        mode_ok = int(mode_payload.get("n_failed", 0)) == 0
-        artifact_ok = bool(
-            mode_payload.get("artifact_verification", {}).get("passed", False)
+        mode_ok = (
+            int(mode_payload.get("n_failed", 0)) == 0
+            and int(mode_payload.get("n_timed_out", 0)) == 0
+            and int(mode_payload.get("n_skipped_due_to_policy", 0)) == 0
         )
+        artifact_ok = bool(mode_payload.get("artifact_verification", {}).get("passed", False))
         confirmatory_ready_ok = True
         if mode_name == "confirmatory" and not bool(args.skip_confirmatory_ready):
             confirmatory_ready_ok = bool(

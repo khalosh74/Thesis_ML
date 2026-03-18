@@ -88,6 +88,25 @@ Phase dependencies and blocking semantics:
 - Confirmatory readiness blockers: `precheck`, `confirmatory`.
 - Campaign sign-off blockers: all phases.
 
+Timeout watchdog policy (official runs):
+
+- terminal run statuses are explicit:
+  - `success`
+  - `failed`
+  - `timed_out`
+  - `skipped_due_to_policy`
+- default per-run wall-clock limits:
+  - confirmatory mode: 45 minutes
+  - locked comparison mode: 90 minutes
+  - `logreg` override: 120 minutes
+  - shutdown grace period: 30 seconds
+  - absolute hard ceiling: 180 minutes
+- timed-out runs emit `run_status.json` with `status=timed_out` and `timeout_diagnostics.json` in the run directory.
+- phase behavior with timed-out runs:
+  - confirmatory phase is blocking and does not pass when timed-out runs are present.
+  - comparison phase can complete as `partial` and records timeout counts in phase summary.
+  - replay and bundle phases remain dependency-gated and do not run unless upstream phases are `passed`.
+
 Phase output roots:
 
 - `outputs/campaign/<CampaignTag>/release/precheck/`
@@ -102,6 +121,7 @@ Campaign manifest and per-phase machine-readable artifacts:
 - `outputs/campaign/<CampaignTag>/campaign_manifest.json`
 - `<phase_root>/phase_status.json`
 - `<phase_root>/phase_summary.json`
+- phase summaries include `n_success`, `n_failed`, `n_timed_out`, `n_skipped_due_to_policy`, `n_planned`
 
 Example phased commands:
 

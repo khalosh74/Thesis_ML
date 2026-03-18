@@ -192,12 +192,19 @@ def main(argv: list[str] | None = None) -> int:
         left_dir = Path(str(result_a["comparison_output_dir"]))
         right_dir = Path(str(result_b["comparison_output_dir"]))
 
-    if int(result_a.get("n_failed", 0)) > 0 or int(result_b.get("n_failed", 0)) > 0:
+    if (
+        int(result_a.get("n_failed", 0)) > 0
+        or int(result_b.get("n_failed", 0)) > 0
+        or int(result_a.get("n_timed_out", 0)) > 0
+        or int(result_b.get("n_timed_out", 0)) > 0
+        or int(result_a.get("n_skipped_due_to_policy", 0)) > 0
+        or int(result_b.get("n_skipped_due_to_policy", 0)) > 0
+    ):
         summary = {
             "passed": False,
             "mode": args.mode,
             "config": str(config_path.resolve()),
-            "reason": "one_or_more_runs_failed",
+            "reason": "one_or_more_runs_not_successful",
             "run_a": result_a,
             "run_b": result_b,
         }

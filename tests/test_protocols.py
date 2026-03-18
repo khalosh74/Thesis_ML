@@ -180,10 +180,7 @@ def test_confirmatory_freeze_protocol_dry_run_executes_with_locked_gates(
     assert contract["multiplicity_policy"]["exploratory_claims_allowed"] is False
     assert isinstance(contract["interpretation_limits"], dict)
     assert contract["subgroup_evidence_policy"]["evidence_role"] == "descriptive_only"
-    assert (
-        contract["subgroup_evidence_policy"]["primary_evidence_substitution_allowed"]
-        is False
-    )
+    assert contract["subgroup_evidence_policy"]["primary_evidence_substitution_allowed"] is False
     assert contract["deviations_from_protocol"]["controls_valid_for_confirmatory"] is True
 
 
@@ -267,18 +264,14 @@ def test_confirmatory_freeze_execution_records_downgrade_on_science_critical_dev
         / f"{protocol.protocol_id}__{protocol.protocol_version}"
     )
 
-    deviation_log = json.loads(
-        (output_dir / "deviation_log.json").read_text(encoding="utf-8")
-    )
+    deviation_log = json.loads((output_dir / "deviation_log.json").read_text(encoding="utf-8"))
     execution_status = json.loads(
         (output_dir / "execution_status.json").read_text(encoding="utf-8")
     )
     suite_summary = json.loads((output_dir / "suite_summary.json").read_text(encoding="utf-8"))
     assert deviation_log["science_critical_deviation_detected"] is True
     assert deviation_log["confirmatory_status"] == "downgraded"
-    assert any(
-        bool(row.get("science_critical", False)) for row in deviation_log["deviations"]
-    )
+    assert any(bool(row.get("science_critical", False)) for row in deviation_log["deviations"])
     assert execution_status["confirmatory_status"] == "downgraded"
     assert (
         suite_summary["confirmatory_reporting_contract"]["deviations_from_protocol"][
@@ -306,9 +299,9 @@ def test_confirmatory_freeze_subgroup_rows_mark_insufficient_data(
         dry_run=False,
     )
     assert result["n_failed"] == 0
-    completed = [row for row in result["run_results"] if row["status"] == "completed"]
-    assert completed
-    config = json.loads(Path(str(completed[0]["config_path"])).read_text(encoding="utf-8"))
+    successful = [row for row in result["run_results"] if row["status"] == "success"]
+    assert successful
+    config = json.loads(Path(str(successful[0]["config_path"])).read_text(encoding="utf-8"))
     subgroup_payload = json.loads(
         Path(str(config["subgroup_metrics_json_path"])).read_text(encoding="utf-8")
     )
@@ -372,7 +365,9 @@ def test_protocol_compiler_expands_primary_and_transfer_suites(
     assert len(within_runs) == 2 * repeat_count
     assert len(transfer_runs) == 2 * repeat_count
     assert all(run.subject is not None for run in within_runs)
-    assert all(run.train_subject is not None and run.test_subject is not None for run in transfer_runs)
+    assert all(
+        run.train_subject is not None and run.test_subject is not None for run in transfer_runs
+    )
 
 
 def test_control_suite_expands_dummy_and_permutation_controls(
@@ -440,13 +435,32 @@ def test_protocol_runner_surfaces_structured_failure_metadata(
 ) -> None:
     protocol = load_protocol(_canonical_protocol_path())
 
-    def _failing_run_experiment(**_: object) -> dict[str, object]:
-        raise OfficialContractValidationError(
+    def _failing_watchdog(**_: object) -> dict[str, object]:
+        failure = OfficialContractValidationError(
             "synthetic preflight contract failure",
             details={"reason": "unit_test"},
         )
+        return {
+            "status": "failed",
+            "run_payload": None,
+            "report_dir": None,
+            "error": str(failure),
+            "error_code": "official_contract_validation_error",
+            "error_type": "OfficialContractValidationError",
+            "failure_stage": "preflight_validation",
+            "error_details": {"reason": "unit_test"},
+            "timeout_seconds": None,
+            "elapsed_seconds": None,
+            "timeout_diagnostics_path": None,
+            "child_pid": None,
+            "termination_method": "normal_exit",
+            "command": [],
+        }
 
-    monkeypatch.setattr("Thesis_ML.protocols.runner.run_experiment", _failing_run_experiment)
+    monkeypatch.setattr(
+        "Thesis_ML.protocols.runner.execute_run_with_timeout_watchdog",
+        _failing_watchdog,
+    )
     result = compile_and_run_protocol(
         protocol=protocol,
         index_csv=protocol_dataset["index_csv"],
@@ -483,11 +497,11 @@ def test_protocol_run_records_metadata_in_run_artifacts(
     )
 
     assert result["n_failed"] == 0
-    completed = [row for row in result["run_results"] if row["status"] == "completed"]
-    assert completed
+    successful = [row for row in result["run_results"] if row["status"] == "success"]
+    assert successful
 
-    config_path = Path(str(completed[0]["config_path"]))
-    metrics_path = Path(str(completed[0]["metrics_path"]))
+    config_path = Path(str(successful[0]["config_path"]))
+    metrics_path = Path(str(successful[0]["metrics_path"]))
     config = json.loads(config_path.read_text(encoding="utf-8"))
     metrics = json.loads(metrics_path.read_text(encoding="utf-8"))
 
@@ -563,6 +577,70 @@ def test_protocol_run_records_metadata_in_run_artifacts(
     assert Path(str(config["calibration_table_path"])).exists()
 
 
+def test_protocol_runner_timed_out_runs_are_explicit(
+    protocol_dataset: dict[str, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    protocol = load_protocol(_canonical_protocol_path())
+
+    def _timed_out_watchdog(*, run_kwargs: dict[str, object], **_: object) -> dict[str, object]:
+        report_dir = Path(str(run_kwargs["reports_root"])) / str(run_kwargs["run_id"])
+        report_dir.mkdir(parents=True, exist_ok=True)
+        timeout_path = report_dir / "timeout_diagnostics.json"
+        timeout_path.write_text(
+            json.dumps(
+                {
+                    "run_id": str(run_kwargs["run_id"]),
+                    "termination_method": "terminate",
+                    "timeout_budget_seconds": 1,
+                    "elapsed_seconds": 1.2,
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        return {
+            "status": "timed_out",
+            "run_payload": None,
+            "report_dir": str(report_dir),
+            "error": "run_exceeded_timeout_budget",
+            "error_code": "run_timeout",
+            "error_type": "RunTimeoutError",
+            "failure_stage": "watchdog_timeout",
+            "error_details": {"timeout_budget_seconds": 1},
+            "timeout_seconds": 1.0,
+            "elapsed_seconds": 1.2,
+            "timeout_diagnostics_path": str(timeout_path),
+            "child_pid": 67890,
+            "termination_method": "terminate",
+            "command": ["python", "-m", "Thesis_ML.experiments.supervised_worker"],
+        }
+
+    monkeypatch.setattr(
+        "Thesis_ML.protocols.runner.execute_run_with_timeout_watchdog",
+        _timed_out_watchdog,
+    )
+    result = compile_and_run_protocol(
+        protocol=protocol,
+        index_csv=protocol_dataset["index_csv"],
+        data_root=protocol_dataset["data_root"],
+        cache_dir=protocol_dataset["cache_dir"],
+        reports_root=protocol_dataset["reports_root"],
+        suite_ids=["primary_within_subject"],
+        dry_run=False,
+    )
+
+    assert result["n_success"] == 0
+    assert result["n_failed"] == 0
+    assert result["n_timed_out"] > 0
+    assert all(row["status"] == "timed_out" for row in result["run_results"])
+
+    execution_status = json.loads(
+        Path(result["artifact_paths"]["execution_status"]).read_text(encoding="utf-8")
+    )
+    assert set(row["status"] for row in execution_status["runs"]) == {"timed_out"}
+
+
 def test_permutation_control_uses_primary_metric(
     protocol_dataset: dict[str, Path],
 ) -> None:
@@ -580,10 +658,10 @@ def test_permutation_control_uses_primary_metric(
     )
 
     assert result["n_failed"] == 0
-    completed = [row for row in result["run_results"] if row["status"] == "completed"]
-    assert completed
+    successful = [row for row in result["run_results"] if row["status"] == "success"]
+    assert successful
 
-    for run_row in completed:
+    for run_row in successful:
         metrics_path = Path(str(run_row["metrics_path"]))
         metrics = json.loads(metrics_path.read_text(encoding="utf-8"))
         permutation = metrics["permutation_test"]
@@ -624,10 +702,10 @@ def test_protocol_primary_metric_change_propagates_to_official_metric_policy(
     )
 
     assert result["n_failed"] == 0
-    completed = [row for row in result["run_results"] if row["status"] == "completed"]
-    assert completed
+    successful = [row for row in result["run_results"] if row["status"] == "success"]
+    assert successful
 
-    metrics_path = Path(str(completed[0]["metrics_path"]))
+    metrics_path = Path(str(successful[0]["metrics_path"]))
     metrics = json.loads(metrics_path.read_text(encoding="utf-8"))
     assert metrics["primary_metric_name"] == "macro_f1"
     assert metrics["decision_metric_name"] == "macro_f1"
@@ -659,7 +737,7 @@ def test_protocol_level_report_index_is_emitted_for_completed_runs(
     report_index = pd.read_csv(report_index_path)
     assert len(report_index) == 2 * int(protocol.evidence_policy.repeat_evaluation.repeat_count)
     assert set(report_index["suite_id"].astype(str)) == {"secondary_cross_person_transfer"}
-    assert set(report_index["status"].astype(str)) == {"completed"}
+    assert set(report_index["status"].astype(str)) == {"success"}
 
 
 def test_nested_protocol_supports_grouped_nested_methodology(

@@ -6,6 +6,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+from Thesis_ML.experiments.run_states import is_run_success_status
+
 _NON_DETERMINISTIC_KEYS = {
     "timestamp",
     "updated_at_utc",
@@ -142,7 +144,7 @@ def collect_official_invariants(output_dir: Path | str) -> dict[str, Any]:
             )
 
     for row in report_rows:
-        if str(row.get("status", "")).strip().lower() != "completed":
+        if not is_run_success_status(str(row.get("status", "")).strip().lower()):
             continue
         run_id = str(row.get("run_id", "")).strip()
         report_dir_text = str(row.get("report_dir", "")).strip()

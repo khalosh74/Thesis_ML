@@ -179,7 +179,7 @@ def test_resume_after_partial_completion(
     assert call_state["reuse_flag"] is True
     status_after = read_run_status(report_dir)
     assert status_after is not None
-    assert status_after["status"] == "completed"
+    assert status_after["status"] == "success"
 
 
 def test_explicit_reuse_completed_artifacts_flag_is_forwarded(

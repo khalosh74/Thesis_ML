@@ -271,6 +271,47 @@ def test_comparison_decision_invalid_on_missing_metrics() -> None:
     assert decision["decision_status"] == "invalid_comparison"
 
 
+def test_comparison_decision_invalid_when_required_run_timed_out() -> None:
+    spec = _base_comparison_spec()
+    manifest = _compiled_manifest()
+    run_results = [
+        ComparisonRunResult(
+            run_id="r1",
+            framework_mode=FrameworkMode.LOCKED_COMPARISON.value,
+            comparison_id="cmp-decision-test",
+            comparison_version="1.0.0",
+            variant_id="ridge",
+            status="success",
+            metrics={"balanced_accuracy": 0.80},
+        ),
+        ComparisonRunResult(
+            run_id="r2",
+            framework_mode=FrameworkMode.LOCKED_COMPARISON.value,
+            comparison_id="cmp-decision-test",
+            comparison_version="1.0.0",
+            variant_id="logreg",
+            status="timed_out",
+            report_dir="outputs/reports/comparisons/r2",
+            error="run_exceeded_timeout_budget",
+            error_code="run_timeout",
+            error_type="RunTimeoutError",
+            failure_stage="watchdog_timeout",
+            error_details={"timeout_budget_seconds": 1},
+            timeout_seconds=1.0,
+            elapsed_seconds=1.2,
+            timeout_diagnostics_path="outputs/reports/comparisons/r2/timeout_diagnostics.json",
+        ),
+    ]
+    decision = build_comparison_decision(
+        comparison=spec,
+        compiled_manifest=manifest,
+        run_results=run_results,
+    )
+    assert decision["decision_status"] == "invalid_comparison"
+    assert decision["reason"] == "required_runs_timed_out"
+    assert decision["selected_variant"] is None
+
+
 def test_comparison_decision_uses_declared_primary_metric_for_selection() -> None:
     spec = _base_comparison_spec().model_copy(deep=True)
     spec.metric_policy.primary_metric = "macro_f1"

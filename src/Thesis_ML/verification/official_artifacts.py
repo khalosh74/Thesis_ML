@@ -5,6 +5,8 @@ import json
 from pathlib import Path
 from typing import Any, Literal
 
+from Thesis_ML.experiments.run_states import is_run_success_status
+
 FrameworkModeLiteral = Literal["confirmatory", "locked_comparison"]
 _REQUIRED_PROTOCOL_ARTIFACTS = (
     "protocol.json",
@@ -65,7 +67,9 @@ def _add_issue(
     issues.append(payload)
 
 
-def _load_json(path: Path, issues: list[dict[str, Any]], *, code_prefix: str) -> dict[str, Any] | None:
+def _load_json(
+    path: Path, issues: list[dict[str, Any]], *, code_prefix: str
+) -> dict[str, Any] | None:
     if not path.exists():
         _add_issue(
             issues,
@@ -95,7 +99,9 @@ def _load_json(path: Path, issues: list[dict[str, Any]], *, code_prefix: str) ->
     return payload
 
 
-def _expected_mode(mode_hint: str | None, execution_status: dict[str, Any]) -> FrameworkModeLiteral | None:
+def _expected_mode(
+    mode_hint: str | None, execution_status: dict[str, Any]
+) -> FrameworkModeLiteral | None:
     detected = execution_status.get("framework_mode")
     if not isinstance(detected, str):
         return None
@@ -159,7 +165,9 @@ def _verify_metric_policy(
         return
     evidence_policy_config = config_payload.get("evidence_policy_effective")
     evidence_policy_metrics = metrics_payload.get("evidence_policy_effective")
-    if not isinstance(evidence_policy_config, dict) or not isinstance(evidence_policy_metrics, dict):
+    if not isinstance(evidence_policy_config, dict) or not isinstance(
+        evidence_policy_metrics, dict
+    ):
         _add_issue(
             issues,
             code="evidence_policy_missing",
@@ -183,7 +191,9 @@ def _verify_metric_policy(
     permutation_payload = metrics_payload.get("permutation_test")
     if isinstance(permutation_payload, dict):
         metric_name = permutation_payload.get("metric_name")
-        primary_metric = config_policy.get("primary_metric") if isinstance(config_policy, dict) else None
+        primary_metric = (
+            config_policy.get("primary_metric") if isinstance(config_policy, dict) else None
+        )
         if isinstance(metric_name, str) and isinstance(primary_metric, str):
             if metric_name.strip() != primary_metric.strip():
                 _add_issue(
@@ -192,7 +202,7 @@ def _verify_metric_policy(
                     message="Permutation metric does not match effective primary metric.",
                     path=report_dir,
                     details={"metric_name": metric_name, "primary_metric": primary_metric},
-                ) 
+                )
 
 
 def _verify_data_layer_artifacts(
@@ -544,6 +554,7 @@ def _verify_confirmatory_reporting_contract(
                 path=root / "suite_summary.json",
             )
 
+
 def verify_official_artifacts(
     *,
     output_dir: Path | str,
@@ -703,7 +714,7 @@ def verify_official_artifacts(
 
     for row in report_rows:
         status = str(row.get("status", "")).strip().lower()
-        if status != "completed":
+        if not is_run_success_status(status):
             continue
         n_completed_runs_checked += 1
         report_dir_raw = str(row.get("report_dir", "")).strip()
@@ -711,7 +722,7 @@ def verify_official_artifacts(
             _add_issue(
                 issues,
                 code="report_dir_missing",
-                message="Completed run row is missing report_dir.",
+                message="Successful run row is missing report_dir.",
                 details={"run_id": row.get("run_id")},
             )
             continue
@@ -720,7 +731,7 @@ def verify_official_artifacts(
             _add_issue(
                 issues,
                 code="report_dir_invalid",
-                message="Completed run report_dir does not exist.",
+                message="Successful run report_dir does not exist.",
                 path=report_dir,
                 details={"run_id": row.get("run_id")},
             )

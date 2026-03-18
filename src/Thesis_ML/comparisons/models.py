@@ -19,6 +19,14 @@ from Thesis_ML.config.methodology import (
 )
 from Thesis_ML.config.metric_policy import SUPPORTED_CLASSIFICATION_METRICS, validate_metric_name
 from Thesis_ML.experiments.model_factory import ALL_MODEL_NAMES
+from Thesis_ML.experiments.run_states import (
+    RUN_STATUS_COMPLETED_LEGACY,
+    RUN_STATUS_FAILED,
+    RUN_STATUS_SKIPPED_DUE_TO_POLICY,
+    RUN_STATUS_SUCCESS,
+    RUN_STATUS_TIMED_OUT,
+    normalize_run_status,
+)
 from Thesis_ML.protocols.models import SUPPORTED_CV_MODES
 
 COMPARISON_SCHEMA_VERSION = "comparison-spec-v1"
@@ -114,7 +122,9 @@ class ComparisonControlPolicy(_ComparisonModel):
         if self.permutation_metric is not None:
             validate_metric_name(self.permutation_metric)
         if self.permutation_enabled and int(self.n_permutations) <= 0:
-            raise ValueError("control_policy.n_permutations must be > 0 when permutation_enabled is true.")
+            raise ValueError(
+                "control_policy.n_permutations must be > 0 when permutation_enabled is true."
+            )
         if not self.permutation_enabled and int(self.n_permutations) < 0:
             raise ValueError("control_policy.n_permutations must be >= 0.")
         return self
@@ -284,9 +294,7 @@ class ComparisonArtifactContract(_ComparisonModel):
             "comparison_variant_id",
         ):
             if key not in self.required_run_metadata_fields:
-                raise ValueError(
-                    "required_run_metadata_fields is missing required key: " + key
-                )
+                raise ValueError("required_run_metadata_fields is missing required key: " + key)
         return self
 
 
@@ -364,11 +372,9 @@ class ComparisonSpec(_ComparisonModel):
                 "evidence_policy.required_package.require_permutation_control=true "
                 "requires control_policy.permutation_enabled=true."
             )
-        if (
-            self.control_policy.permutation_enabled
-            and int(self.control_policy.n_permutations)
-            < int(self.evidence_policy.permutation.minimum_permutations)
-        ):
+        if self.control_policy.permutation_enabled and int(
+            self.control_policy.n_permutations
+        ) < int(self.evidence_policy.permutation.minimum_permutations):
             raise ValueError(
                 "control_policy.n_permutations must be >= "
                 "evidence_policy.permutation.minimum_permutations."
@@ -581,7 +587,14 @@ class ComparisonRunResult(_ComparisonModel):
     comparison_id: str = Field(min_length=1)
     comparison_version: str = Field(min_length=1)
     variant_id: str = Field(min_length=1)
-    status: Literal["planned", "completed", "failed"]
+    status: Literal[
+        "planned",
+        "success",
+        "failed",
+        "timed_out",
+        "skipped_due_to_policy",
+        "completed",
+    ]
     report_dir: str | None = None
     config_path: str | None = None
     metrics_path: str | None = None
@@ -590,28 +603,51 @@ class ComparisonRunResult(_ComparisonModel):
     error_type: str | None = None
     failure_stage: str | None = None
     error_details: dict[str, Any] | None = None
+    timeout_seconds: float | None = None
+    elapsed_seconds: float | None = None
+    timeout_diagnostics_path: str | None = None
+    policy_reason: str | None = None
     metrics: dict[str, float | int | str | bool | None | dict[str, Any]] | None = None
 
     @model_validator(mode="after")
     def _validate_result(self) -> ComparisonRunResult:
         if self.framework_mode != FrameworkMode.LOCKED_COMPARISON.value:
             raise ValueError("ComparisonRunResult.framework_mode must be 'locked_comparison'.")
-        if self.status == "failed":
+        normalized_status = normalize_run_status(self.status)
+        if normalized_status == RUN_STATUS_SUCCESS and self.status == RUN_STATUS_COMPLETED_LEGACY:
+            self.status = RUN_STATUS_SUCCESS
+
+        if normalized_status in {RUN_STATUS_FAILED, RUN_STATUS_TIMED_OUT}:
             if self.error is None:
-                raise ValueError("ComparisonRunResult.error is required when status='failed'.")
+                raise ValueError(
+                    "ComparisonRunResult.error is required when status is failed or timed_out."
+                )
             if self.error_code is None:
                 raise ValueError(
-                    "ComparisonRunResult.error_code is required when status='failed'."
+                    "ComparisonRunResult.error_code is required when status is failed or timed_out."
                 )
             if self.error_type is None:
                 raise ValueError(
-                    "ComparisonRunResult.error_type is required when status='failed'."
+                    "ComparisonRunResult.error_type is required when status is failed or timed_out."
                 )
             if self.failure_stage is None:
                 raise ValueError(
-                    "ComparisonRunResult.failure_stage is required when status='failed'."
+                    "ComparisonRunResult.failure_stage is required when status is failed or timed_out."
                 )
-        if self.status != "failed":
+        if normalized_status == RUN_STATUS_TIMED_OUT:
+            if self.timeout_seconds is None:
+                raise ValueError(
+                    "ComparisonRunResult.timeout_seconds is required when status='timed_out'."
+                )
+            if self.elapsed_seconds is None:
+                raise ValueError(
+                    "ComparisonRunResult.elapsed_seconds is required when status='timed_out'."
+                )
+            if self.timeout_diagnostics_path is None:
+                raise ValueError(
+                    "ComparisonRunResult.timeout_diagnostics_path is required when status='timed_out'."
+                )
+        if normalized_status not in {RUN_STATUS_FAILED, RUN_STATUS_TIMED_OUT}:
             for field_name in (
                 "error",
                 "error_code",
@@ -621,6 +657,23 @@ class ComparisonRunResult(_ComparisonModel):
             ):
                 if getattr(self, field_name) is not None:
                     raise ValueError(
-                        f"ComparisonRunResult.{field_name} must be null unless status='failed'."
+                        f"ComparisonRunResult.{field_name} must be null unless status is failed or timed_out."
                     )
+        if normalized_status != RUN_STATUS_TIMED_OUT:
+            for field_name in ("timeout_seconds", "elapsed_seconds", "timeout_diagnostics_path"):
+                if getattr(self, field_name) is not None:
+                    raise ValueError(
+                        f"ComparisonRunResult.{field_name} must be null unless status='timed_out'."
+                    )
+        if normalized_status != RUN_STATUS_SKIPPED_DUE_TO_POLICY and self.policy_reason is not None:
+            raise ValueError(
+                "ComparisonRunResult.policy_reason must be null unless status='skipped_due_to_policy'."
+            )
+        if (
+            normalized_status == RUN_STATUS_SKIPPED_DUE_TO_POLICY
+            and not str(self.policy_reason or "").strip()
+        ):
+            raise ValueError(
+                "ComparisonRunResult.policy_reason is required when status='skipped_due_to_policy'."
+            )
         return self

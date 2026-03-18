@@ -121,3 +121,56 @@ def test_replay_official_paths_fails_on_verification_error(tmp_path: Path, monke
         ]
     )
     assert exit_code == 1
+
+
+def test_replay_official_paths_fails_when_mode_has_timed_out_runs(
+    tmp_path: Path, monkeypatch
+) -> None:
+    module = _load_replay_module()
+    comparison_output = tmp_path / "comparison_output"
+    comparison_output.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(
+        module,
+        "_run_comparison",
+        lambda **_: {
+            "comparison_id": "cmp",
+            "comparison_version": "1.0.0",
+            "comparison_output_dir": str(comparison_output),
+            "n_success": 0,
+            "n_completed": 0,
+            "n_failed": 0,
+            "n_timed_out": 1,
+            "n_skipped_due_to_policy": 0,
+            "n_planned": 0,
+        },
+    )
+    monkeypatch.setattr(
+        module,
+        "verify_official_artifacts",
+        lambda **_: {"passed": True, "issues": []},
+    )
+    monkeypatch.setattr(
+        module,
+        "build_reproducibility_manifest",
+        lambda **_: {"manifest_schema_version": "reproducibility-manifest-v1"},
+    )
+    monkeypatch.setattr(
+        module,
+        "write_reproducibility_manifest",
+        lambda *, manifest, output_path: output_path.write_text(
+            f"{json.dumps(manifest, indent=2)}\n",
+            encoding="utf-8",
+        ),
+    )
+
+    exit_code = module.main(
+        [
+            "--mode",
+            "comparison",
+            "--use-demo-dataset",
+            "--reports-root",
+            str(tmp_path / "reports"),
+        ]
+    )
+    assert exit_code == 1

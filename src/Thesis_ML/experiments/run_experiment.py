@@ -63,6 +63,7 @@ from Thesis_ML.experiments.run_artifacts import (
     resolve_run_identity,
     stamp_metrics_artifact,
 )
+from Thesis_ML.experiments.run_states import RUN_STATUS_SUCCESS
 from Thesis_ML.experiments.runtime_policies import (
     resolve_framework_context as _runtime_resolve_framework_context,
 )
@@ -309,6 +310,7 @@ def run_experiment(
     force: bool = False,
     resume: bool = False,
     reuse_completed_artifacts: bool = False,
+    timeout_policy_effective: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Run one leakage-safe grouped-CV experiment and write standardized artifacts."""
     index_csv = Path(index_csv)
@@ -827,6 +829,7 @@ def run_experiment(
             stage_timings_seconds=stage_timings,
             resource_summary=resource_summary,
             warning_summary=warning_summary,
+            timeout_policy_effective=timeout_policy_effective,
         )
     except Exception as exc:
         failure = _failure_payload(exc)
@@ -976,6 +979,7 @@ def run_experiment(
             stage_timings_seconds=stage_timings,
             resource_summary=resource_summary,
             warning_summary=warning_summary,
+            timeout_policy_effective=timeout_policy_effective,
         )
         config_path.write_text(f"{json.dumps(config, indent=2)}\n", encoding="utf-8")
     except Exception as exc:
@@ -1081,7 +1085,7 @@ def run_experiment(
     run_status = write_run_status(
         report_dir,
         run_id=resolved_run_id,
-        status="completed",
+        status=RUN_STATUS_SUCCESS,
         executed_sections=segment_result.executed_sections,
         reused_sections=segment_result.reused_sections,
         warnings=warnings_payload,
@@ -1151,6 +1155,7 @@ def run_experiment(
         resource_summary=resource_summary,
         warning_summary=warning_summary,
         dataset_fingerprint=dataset_fingerprint,
+        timeout_policy_effective=timeout_policy_effective,
     )
 
 

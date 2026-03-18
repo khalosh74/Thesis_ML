@@ -120,6 +120,48 @@ def test_verify_repro_uses_default_comparison_config_when_omitted(
     assert captured["config_path"] == Path(module.DEFAULT_COMPARISON_SPEC_PATH)
 
 
+def test_verify_repro_fails_when_runs_are_timed_out(tmp_path: Path, monkeypatch) -> None:
+    module = _load_verify_repro_module()
+
+    def _stub_run_protocol_once(**kwargs):
+        return {
+            "n_failed": 0,
+            "n_timed_out": 1,
+            "n_skipped_due_to_policy": 0,
+            "protocol_output_dir": str(tmp_path / "protocol_runs" / "thesis-canonical__1.0.0"),
+        }
+
+    monkeypatch.setattr(module, "_run_protocol_once", _stub_run_protocol_once)
+    monkeypatch.setattr(
+        module,
+        "compare_official_outputs",
+        lambda **_: {
+            "passed": True,
+            "left": {},
+            "right": {},
+            "mismatches": [],
+        },
+    )
+
+    exit_code = module.main(
+        [
+            "--mode",
+            "protocol",
+            "--index-csv",
+            "dummy_index.csv",
+            "--data-root",
+            "dummy_data_root",
+            "--cache-dir",
+            "dummy_cache",
+            "--suite",
+            "primary_controls",
+            "--reports-root",
+            str(tmp_path / "reports"),
+        ]
+    )
+    assert exit_code == 1
+
+
 def test_rc1_gate_supports_replay_and_bundle_checks(tmp_path: Path, monkeypatch) -> None:
     module = _load_rc1_gate_module()
     commands: list[list[str] | str] = []
@@ -152,12 +194,14 @@ def test_rc1_gate_supports_replay_and_bundle_checks(tmp_path: Path, monkeypatch)
     assert exit_code == 0
     assert summary_out.exists()
     assert any(
-        isinstance(command, list)
-        and "scripts/replay_official_paths.py" in command
+        isinstance(command, list) and "scripts/replay_official_paths.py" in command
         for command in commands
     )
-    assert sum(
-        1
-        for command in commands
-        if isinstance(command, list) and "scripts/verify_publishable_bundle.py" in command
-    ) == 2
+    assert (
+        sum(
+            1
+            for command in commands
+            if isinstance(command, list) and "scripts/verify_publishable_bundle.py" in command
+        )
+        == 2
+    )
