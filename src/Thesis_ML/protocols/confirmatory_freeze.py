@@ -32,14 +32,10 @@ def _load_json_object(path: Path) -> dict[str, Any]:
 
 
 def _file_sha256(path: Path) -> str:
-    hasher = hashlib.sha256()
-    with path.open("rb") as handle:
-        while True:
-            chunk = handle.read(1024 * 1024)
-            if not chunk:
-                break
-            hasher.update(chunk)
-    return hasher.hexdigest()
+    # Normalize line endings before hashing so protocol mapping locks are stable
+    # across LF/CRLF checkouts on different operating systems.
+    payload = path.read_bytes().replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+    return hashlib.sha256(payload).hexdigest()
 
 
 def _require_locked_analysis_status(payload: dict[str, Any], protocol_path: Path) -> None:
