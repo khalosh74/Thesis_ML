@@ -167,6 +167,7 @@ def _compiled_manifest() -> CompiledComparisonManifest:
         methodology_policy=spec.methodology_policy,
         metric_policy=spec.metric_policy,
         subgroup_reporting_policy=spec.subgroup_reporting_policy,
+        data_policy=spec.data_policy,
         decision_policy=spec.decision_policy,
         evidence_policy=spec.evidence_policy,
         variant_ids=["ridge", "logreg"],

@@ -17,6 +17,7 @@ from Thesis_ML.config.framework_mode import FrameworkMode
 from Thesis_ML.config.metric_policy import resolve_effective_metric_policy
 from Thesis_ML.experiments.errors import exception_failure_payload
 from Thesis_ML.experiments.run_experiment import run_experiment
+from Thesis_ML.experiments.runtime_policies import validate_official_context_payload
 from Thesis_ML.verification.official_artifacts import verify_official_artifacts
 
 
@@ -41,7 +42,7 @@ def _comparison_context_payload(
         tuning_metric=spec.primary_metric,
         permutation_metric=spec.controls.permutation_metric,
     )
-    return {
+    payload = {
         "framework_mode": FrameworkMode.LOCKED_COMPARISON.value,
         "comparison_id": spec.comparison_id,
         "comparison_version": spec.comparison_version,
@@ -77,6 +78,11 @@ def _comparison_context_payload(
         "controls": spec.controls.model_dump(mode="json"),
         "interpretability_enabled": bool(spec.interpretability_enabled),
     }
+    return validate_official_context_payload(
+        framework_mode=FrameworkMode.LOCKED_COMPARISON,
+        context_name="comparison_context",
+        context=payload,
+    )
 
 
 def _to_run_result_success(

@@ -8,6 +8,7 @@ from Thesis_ML.config.framework_mode import FrameworkMode
 from Thesis_ML.config.metric_policy import resolve_effective_metric_policy
 from Thesis_ML.experiments.errors import exception_failure_payload
 from Thesis_ML.experiments.run_experiment import run_experiment
+from Thesis_ML.experiments.runtime_policies import validate_official_context_payload
 from Thesis_ML.protocols.artifacts import write_protocol_artifacts
 from Thesis_ML.protocols.compiler import compile_protocol
 from Thesis_ML.protocols.models import (
@@ -88,7 +89,11 @@ def _protocol_context_payload(
         payload["target_mapping_version"] = str(
             confirmatory_lock.get("target_mapping_version", "")
         )
-    return payload
+    return validate_official_context_payload(
+        framework_mode=FrameworkMode.CONFIRMATORY,
+        context_name="protocol_context",
+        context=payload,
+    )
 
 
 def _validate_confirmatory_lock_controls(

@@ -192,6 +192,7 @@ def test_official_context_rejects_metric_policy_drift(tmp_path: Path) -> None:
             "permutation_metric": "macro_f1",
             "higher_is_better": True,
         },
+        "data_policy": {},
         "required_run_metadata_fields": [
             "framework_mode",
             "canonical_run",
@@ -208,6 +209,46 @@ def test_official_context_rejects_metric_policy_drift(tmp_path: Path) -> None:
     }
 
     with pytest.raises(ValueError, match="Illegal override for official run key 'metric_policy.primary_metric'"):
+        run_experiment(
+            **kwargs,
+            framework_mode=FrameworkMode.CONFIRMATORY,
+            protocol_context=protocol_context,
+            primary_metric_name="balanced_accuracy",
+            permutation_metric_name="balanced_accuracy",
+        )
+
+
+def test_confirmatory_context_requires_data_policy(tmp_path: Path) -> None:
+    kwargs = _base_run_kwargs(tmp_path)
+    protocol_context = {
+        "framework_mode": FrameworkMode.CONFIRMATORY.value,
+        "canonical_run": True,
+        "protocol_id": "thesis-canonical",
+        "protocol_version": "1.0.0",
+        "protocol_schema_version": "thesis-protocol-v1",
+        "suite_id": "primary_controls",
+        "claim_ids": ["claim-001"],
+        "methodology_policy_name": "fixed_baselines_only",
+        "class_weight_policy": "none",
+        "tuning_enabled": False,
+        "subgroup_reporting_enabled": True,
+        "subgroup_dimensions": ["label"],
+        "subgroup_min_samples_per_group": 1,
+        "metric_policy": {
+            "primary_metric": "balanced_accuracy",
+            "secondary_metrics": ["macro_f1", "accuracy"],
+            "decision_metric": "balanced_accuracy",
+            "tuning_metric": "balanced_accuracy",
+            "permutation_metric": "balanced_accuracy",
+            "higher_is_better": True,
+        },
+        "required_run_metadata_fields": ["framework_mode", "canonical_run"],
+    }
+
+    with pytest.raises(
+        ValueError,
+        match="protocol_context is missing required keys: data_policy",
+    ):
         run_experiment(
             **kwargs,
             framework_mode=FrameworkMode.CONFIRMATORY,

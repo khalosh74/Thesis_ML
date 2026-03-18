@@ -16,6 +16,114 @@ from Thesis_ML.config.metric_policy import (
     validate_metric_name,
 )
 
+CONFIRMATORY_PROTOCOL_CONTEXT_REQUIRED_KEYS: tuple[str, ...] = (
+    "framework_mode",
+    "protocol_id",
+    "protocol_version",
+    "protocol_schema_version",
+    "suite_id",
+    "claim_ids",
+    "methodology_policy_name",
+    "class_weight_policy",
+    "tuning_enabled",
+    "subgroup_reporting_enabled",
+    "subgroup_dimensions",
+    "subgroup_min_samples_per_group",
+    "metric_policy",
+    "data_policy",
+    "required_run_metadata_fields",
+)
+
+LOCKED_COMPARISON_CONTEXT_REQUIRED_KEYS: tuple[str, ...] = (
+    "framework_mode",
+    "comparison_id",
+    "comparison_version",
+    "variant_id",
+    "methodology_policy_name",
+    "class_weight_policy",
+    "tuning_enabled",
+    "subgroup_reporting_enabled",
+    "subgroup_dimensions",
+    "subgroup_min_samples_per_group",
+    "metric_policy",
+    "data_policy",
+    "required_run_metadata_fields",
+)
+
+
+def _validate_required_context_keys(
+    *,
+    framework_mode: FrameworkMode,
+    context_name: str,
+    context: dict[str, Any],
+    required_keys: tuple[str, ...],
+) -> None:
+    missing = [key for key in required_keys if key not in context]
+    if missing:
+        raise ValueError(
+            f"framework_mode='{framework_mode.value}' {context_name} is missing required keys: "
+            + ", ".join(missing)
+        )
+    data_policy_payload = context.get("data_policy")
+    if not isinstance(data_policy_payload, dict):
+        raise ValueError(
+            f"framework_mode='{framework_mode.value}' {context_name}.data_policy must be a JSON object."
+        )
+
+
+def validate_official_context_payload(
+    *,
+    framework_mode: FrameworkMode | str,
+    context_name: Literal["protocol_context", "comparison_context"],
+    context: dict[str, Any],
+) -> dict[str, Any]:
+    resolved_mode = coerce_framework_mode(framework_mode)
+    resolved_context = dict(context)
+
+    if resolved_mode == FrameworkMode.CONFIRMATORY:
+        if context_name != "protocol_context":
+            raise ValueError(
+                "framework_mode='confirmatory' requires context_name='protocol_context'."
+            )
+        _validate_required_context_keys(
+            framework_mode=resolved_mode,
+            context_name=context_name,
+            context=resolved_context,
+            required_keys=CONFIRMATORY_PROTOCOL_CONTEXT_REQUIRED_KEYS,
+        )
+        if bool(resolved_context.get("canonical_run", True)) is not True:
+            raise ValueError(
+                "framework_mode='confirmatory' requires protocol_context['canonical_run']=true."
+            )
+        if str(resolved_context.get("framework_mode")) != FrameworkMode.CONFIRMATORY.value:
+            raise ValueError(
+                "framework_mode='confirmatory' requires protocol_context['framework_mode']='confirmatory'."
+            )
+        resolved_context["canonical_run"] = True
+        return resolved_context
+
+    if resolved_mode == FrameworkMode.LOCKED_COMPARISON:
+        if context_name != "comparison_context":
+            raise ValueError(
+                "framework_mode='locked_comparison' requires context_name='comparison_context'."
+            )
+        _validate_required_context_keys(
+            framework_mode=resolved_mode,
+            context_name=context_name,
+            context=resolved_context,
+            required_keys=LOCKED_COMPARISON_CONTEXT_REQUIRED_KEYS,
+        )
+        if str(resolved_context.get("framework_mode")) != FrameworkMode.LOCKED_COMPARISON.value:
+            raise ValueError(
+                "framework_mode='locked_comparison' requires comparison_context['framework_mode']='locked_comparison'."
+            )
+        return resolved_context
+
+    raise ValueError(
+        "validate_official_context_payload only supports official framework modes: "
+        "confirmatory and locked_comparison."
+    )
+
 
 def resolve_framework_context(
     framework_mode: FrameworkMode | str,
@@ -50,38 +158,11 @@ def resolve_framework_context(
             raise ValueError("framework_mode='confirmatory' requires non-empty protocol_context.")
         if comparison_context is not None:
             raise ValueError("framework_mode='confirmatory' cannot accept comparison_context.")
-        required_keys = [
-            "framework_mode",
-            "protocol_id",
-            "protocol_version",
-            "protocol_schema_version",
-            "suite_id",
-            "claim_ids",
-            "methodology_policy_name",
-            "class_weight_policy",
-            "tuning_enabled",
-            "subgroup_reporting_enabled",
-            "subgroup_dimensions",
-            "subgroup_min_samples_per_group",
-            "metric_policy",
-            "data_policy",
-            "required_run_metadata_fields",
-        ]
-        missing = [key for key in required_keys if key not in resolved_protocol_context]
-        if missing:
-            raise ValueError(
-                "framework_mode='confirmatory' protocol_context is missing required keys: "
-                + ", ".join(missing)
-            )
-        if bool(resolved_protocol_context.get("canonical_run", True)) is not True:
-            raise ValueError(
-                "framework_mode='confirmatory' requires protocol_context['canonical_run']=true."
-            )
-        if str(resolved_protocol_context.get("framework_mode")) != FrameworkMode.CONFIRMATORY.value:
-            raise ValueError(
-                "framework_mode='confirmatory' requires protocol_context['framework_mode']='confirmatory'."
-            )
-        resolved_protocol_context["canonical_run"] = True
+        resolved_protocol_context = validate_official_context_payload(
+            framework_mode=resolved_mode,
+            context_name="protocol_context",
+            context=resolved_protocol_context,
+        )
         return resolved_mode, True, resolved_protocol_context, {}
 
     if resolved_mode == FrameworkMode.LOCKED_COMPARISON:
@@ -91,34 +172,11 @@ def resolve_framework_context(
             )
         if protocol_context is not None:
             raise ValueError("framework_mode='locked_comparison' cannot accept protocol_context.")
-        required_keys = [
-            "framework_mode",
-            "comparison_id",
-            "comparison_version",
-            "variant_id",
-            "methodology_policy_name",
-            "class_weight_policy",
-            "tuning_enabled",
-            "subgroup_reporting_enabled",
-            "subgroup_dimensions",
-            "subgroup_min_samples_per_group",
-            "metric_policy",
-            "data_policy",
-            "required_run_metadata_fields",
-        ]
-        missing = [key for key in required_keys if key not in resolved_comparison_context]
-        if missing:
-            raise ValueError(
-                "framework_mode='locked_comparison' comparison_context is missing required keys: "
-                + ", ".join(missing)
-            )
-        if (
-            str(resolved_comparison_context.get("framework_mode"))
-            != FrameworkMode.LOCKED_COMPARISON.value
-        ):
-            raise ValueError(
-                "framework_mode='locked_comparison' requires comparison_context['framework_mode']='locked_comparison'."
-            )
+        resolved_comparison_context = validate_official_context_payload(
+            framework_mode=resolved_mode,
+            context_name="comparison_context",
+            context=resolved_comparison_context,
+        )
         return resolved_mode, False, {}, resolved_comparison_context
 
     raise ValueError(f"Unsupported framework_mode '{resolved_mode}'.")
