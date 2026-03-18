@@ -365,10 +365,9 @@ def run_experiment(
         official_context = dict(resolved_protocol_context)
     if resolved_framework_mode == FrameworkMode.LOCKED_COMPARISON:
         official_context = dict(resolved_comparison_context)
+    confirmatory_lock_candidate = official_context.get("confirmatory_lock")
     confirmatory_lock_payload = (
-        dict(official_context.get("confirmatory_lock"))
-        if isinstance(official_context.get("confirmatory_lock"), dict)
-        else {}
+        dict(confirmatory_lock_candidate) if isinstance(confirmatory_lock_candidate, dict) else {}
     )
     confirmatory_subgroup_min_classes = int(
         confirmatory_lock_payload.get("subgroup_min_classes_per_group", 1)
@@ -425,16 +424,18 @@ def run_experiment(
     resolved_evidence_run_role = str(
         context_evidence_run_role if context_evidence_run_role is not None else evidence_run_role
     )
+    official_evidence_policy_candidate = official_context.get("evidence_policy")
     resolved_evidence_policy_payload = (
-        dict(official_context.get("evidence_policy"))
-        if isinstance(official_context.get("evidence_policy"), dict)
+        dict(official_evidence_policy_candidate)
+        if isinstance(official_evidence_policy_candidate, dict)
         else dict(evidence_policy)
         if isinstance(evidence_policy, dict)
         else EvidencePolicy().model_dump(mode="json")
     )
+    official_data_policy_candidate = official_context.get("data_policy")
     resolved_data_policy_payload = (
-        dict(official_context.get("data_policy"))
-        if isinstance(official_context.get("data_policy"), dict)
+        dict(official_data_policy_candidate)
+        if isinstance(official_data_policy_candidate, dict)
         else dict(data_policy)
         if isinstance(data_policy, dict)
         else {}

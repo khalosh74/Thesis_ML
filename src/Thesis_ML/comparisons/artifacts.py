@@ -293,8 +293,11 @@ def _build_paired_comparison_outputs(
             str(row.get("test_subject", "")),
             str(row.get("cv_mode", "")),
         )
+        raw_metric_value = row.get("primary_metric_value")
+        if raw_metric_value is None:
+            continue
         try:
-            metric_value = float(row.get("primary_metric_value"))
+            metric_value = float(raw_metric_value)
         except (TypeError, ValueError):
             continue
         by_variant_key.setdefault(variant_id, {})[base_key] = metric_value

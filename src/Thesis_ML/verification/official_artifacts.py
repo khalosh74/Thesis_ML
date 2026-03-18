@@ -100,8 +100,10 @@ def _expected_mode(mode_hint: str | None, execution_status: dict[str, Any]) -> F
     if not isinstance(detected, str):
         return None
     if mode_hint is None:
-        if detected in {"confirmatory", "locked_comparison"}:
-            return detected
+        if detected == "confirmatory":
+            return "confirmatory"
+        if detected == "locked_comparison":
+            return "locked_comparison"
         return None
     normalized_hint = str(mode_hint).strip().lower()
     if normalized_hint in {"confirmatory", "protocol"}:

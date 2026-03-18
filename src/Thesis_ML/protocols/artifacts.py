@@ -662,7 +662,7 @@ def _build_confidence_interval_outputs(
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     ci_policy = protocol.evidence_policy.confidence_intervals
     interval_rows: list[dict[str, Any]] = []
-    grouping = {}
+    grouping: dict[tuple[str, str], list[dict[str, Any]]] = {}
     for row in report_rows:
         suite_id = str(row.get("suite_id", ""))
         model = str(row.get("model", ""))

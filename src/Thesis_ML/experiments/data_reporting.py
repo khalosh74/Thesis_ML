@@ -423,19 +423,19 @@ def evaluate_official_data_policy(
         "checks": leakage_checks,
     }
 
-    external_card = {
+    external_card: dict[str, Any] = {
         "mode": str(data_policy.external_validation.mode),
         "enabled": bool(data_policy.external_validation.enabled),
         "datasets": [],
     }
-    external_summary = {
+    external_summary: dict[str, Any] = {
         "enabled": bool(data_policy.external_validation.enabled),
         "n_datasets": 0,
         "n_compatible": 0,
         "n_incompatible": 0,
         "datasets": [],
     }
-    external_compatibility = {
+    external_compatibility: dict[str, Any] = {
         "enabled": bool(data_policy.external_validation.enabled),
         "mode": str(data_policy.external_validation.mode),
         "require_compatible": bool(data_policy.external_validation.require_compatible),
