@@ -282,6 +282,14 @@ def _write_confirmatory_output(root: Path) -> Path:
     (root / "suite_summary.json").write_text(
         json.dumps(
             {
+                "required_evidence_status": {
+                    "valid": True,
+                    "required_checks": [
+                        "dummy_baseline",
+                        "permutation_control",
+                    ],
+                    "missing_checks": [],
+                },
                 "confirmatory_reporting_contract": {
                     "protocol_id": "thesis-canonical",
                     "protocol_version": "1.0.0",
@@ -469,6 +477,21 @@ def test_verify_official_artifacts_fails_when_strict_confirmatory_multiplicity_m
         }
         for issue in summary["issues"]
     )
+
+
+def test_verify_official_artifacts_resolves_relative_report_dirs(tmp_path: Path) -> None:
+    output_dir = tmp_path / "protocol_runs" / "thesis-canonical__1.0.0"
+    run_dir = _write_confirmatory_output(output_dir)
+
+    report_index_path = output_dir / "report_index.csv"
+    report_index_path.write_text(
+        "run_id,status,report_dir\n"
+        f"run_001,completed,{run_dir.relative_to(output_dir).as_posix()}\n",
+        encoding="utf-8",
+    )
+
+    summary = verify_official_artifacts(output_dir=output_dir)
+    assert summary["passed"] is True
 
 
 def test_compare_official_outputs_detects_deterministic_mismatch(tmp_path: Path) -> None:

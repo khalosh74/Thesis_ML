@@ -16,6 +16,7 @@ Governance policy and release-facing boundaries are explicit and versioned:
 - Privacy/data handling: `docs/PRIVACY_AND_DATA_HANDLING.md`
 - Intended/non-intended use and misuse warnings: `docs/USE_AND_MISUSE_BOUNDARIES.md`
 - Confirmatory-ready criteria and verification command: `docs/CONFIRMATORY_READY.md`
+- Canonical reproducibility workflow: `docs/REPRODUCIBILITY.md`
 
 Confirmatory-ready means contract/governance checks passed for frozen scientific runs.
 It does **not** mean deployable clinical decision support.
@@ -260,6 +261,10 @@ docker run --rm thesis-ml:dev
 - Official artifact invariant check: `python scripts/verify_official_artifacts.py --output-dir <official_output_dir>`
 - Confirmatory-ready governance check: `python scripts/verify_confirmatory_ready.py --output-dir <confirmatory_output_dir>`
 - Deterministic rerun check: `python scripts/verify_official_reproducibility.py --mode protocol --index-csv <...> --data-root <...> --cache-dir <...> --suite confirmatory_primary_within_subject`
+- One-command official replay (comparison + confirmatory): `python scripts/replay_official_paths.py --mode both --use-demo-dataset`
+- Publishable bundle tooling:
+  - `python scripts/build_publishable_bundle.py --output-dir <bundle_dir> --comparison-output <...> --confirmatory-output <...> --replay-summary <...> --replay-verification-summary <...> --repro-manifest <...>`
+  - `python scripts/verify_publishable_bundle.py --bundle-dir <bundle_dir>`
 - RC wrapper gate script: `python scripts/rc1_release_gate.py --run-ruff --run-pytest --run-performance-smoke`
 
 ## Operator documentation
@@ -270,6 +275,7 @@ docker run --rm thesis-ml:dev
 - Privacy/data handling: `docs/PRIVACY_AND_DATA_HANDLING.md`
 - Use/misuse boundaries: `docs/USE_AND_MISUSE_BOUNDARIES.md`
 - Confirmatory-ready criteria: `docs/CONFIRMATORY_READY.md`
+- Reproducibility workflow: `docs/REPRODUCIBILITY.md`
 - Workbook workflow: `docs/WORKBOOK_WORKFLOW.md`
 - Segment execution: `docs/SEGMENT_EXECUTION.md`
 - Maintainer quick path: `docs/MAINTAINER_GUIDE.md`

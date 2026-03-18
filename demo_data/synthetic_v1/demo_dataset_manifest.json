@@ -1,0 +1,222 @@
+{
+  "manifest_schema_version": "demo-dataset-manifest-v1",
+  "dataset_id": "thesis_ml_synthetic_v1",
+  "dataset_version": "synthetic_v1",
+  "generator_script": "scripts/generate_demo_dataset.py",
+  "data_root": "data_root",
+  "index_csv": "dataset_index.csv",
+  "subjects": [
+    "sub-001",
+    "sub-002"
+  ],
+  "sessions": [
+    "ses-01",
+    "ses-02"
+  ],
+  "labels": [
+    "run-1_passive_anger_audio",
+    "run-1_passive_happiness_audio",
+    "run-1_passive_anger_video",
+    "run-1_passive_happiness_video"
+  ],
+  "n_rows": 16,
+  "n_subjects": 2,
+  "n_sessions": 4,
+  "sessions_per_subject": {
+    "sub-001": 2,
+    "sub-002": 2
+  },
+  "required_index_columns": [
+    "sample_id",
+    "subject",
+    "session",
+    "task",
+    "modality",
+    "emotion",
+    "coarse_affect",
+    "beta_path",
+    "mask_path",
+    "subject_session",
+    "subject_session_bas",
+    "regressor_label",
+    "bas"
+  ],
+  "index_csv_sha256": "650c1134907755a3d54ce6402cf3b9bf63fb8c60e76e350fe31cfb659c65c04c",
+  "files": [
+    {
+      "path": "cache/.gitkeep",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size_bytes": 0
+    },
+    {
+      "path": "data_root/processed/extractions/sub-001/ses-01/BAS2/regressor_beta_mapping.csv",
+      "sha256": "1a41d6eb71310ec6919888b1155ce9df01630cfedd87cd3c0124adcb9c8fffb4",
+      "size_bytes": 654
+    },
+    {
+      "path": "data_root/processed/extractions/sub-001/ses-01/BAS2/session_summary.json",
+      "sha256": "65a13fd7aaa141cd438dfbe798fc552b85eb36979687903c7b5839cbe554a58f",
+      "size_bytes": 355
+    },
+    {
+      "path": "data_root/processed/extractions/sub-001/ses-02/BAS2/regressor_beta_mapping.csv",
+      "sha256": "1a41d6eb71310ec6919888b1155ce9df01630cfedd87cd3c0124adcb9c8fffb4",
+      "size_bytes": 654
+    },
+    {
+      "path": "data_root/processed/extractions/sub-001/ses-02/BAS2/session_summary.json",
+      "sha256": "e15422d92c7c1be6f6d536a183652b5d85994280614d8f034ca341b655f8a6a2",
+      "size_bytes": 355
+    },
+    {
+      "path": "data_root/processed/extractions/sub-002/ses-01/BAS2/regressor_beta_mapping.csv",
+      "sha256": "1a41d6eb71310ec6919888b1155ce9df01630cfedd87cd3c0124adcb9c8fffb4",
+      "size_bytes": 654
+    },
+    {
+      "path": "data_root/processed/extractions/sub-002/ses-01/BAS2/session_summary.json",
+      "sha256": "b1ee955db452137ca3ec710e8efc9b65c68c7dcd5f68c0462c7e44b317278a72",
+      "size_bytes": 355
+    },
+    {
+      "path": "data_root/processed/extractions/sub-002/ses-02/BAS2/regressor_beta_mapping.csv",
+      "sha256": "1a41d6eb71310ec6919888b1155ce9df01630cfedd87cd3c0124adcb9c8fffb4",
+      "size_bytes": 654
+    },
+    {
+      "path": "data_root/processed/extractions/sub-002/ses-02/BAS2/session_summary.json",
+      "sha256": "d35e291f4696c6227474d7560bf56a87e28ceecffa34aa5be7dfbe3fcd261915",
+      "size_bytes": 355
+    },
+    {
+      "path": "data_root/sub-001/ses-01/BAS2/beta_0001.nii",
+      "sha256": "30380a399b6a6ffdade9c98a4c523925ed3271eeb386f56ee30e2fbc71db8f42",
+      "size_bytes": 460
+    },
+    {
+      "path": "data_root/sub-001/ses-01/BAS2/beta_0002.nii",
+      "sha256": "21e36c1ac1cbaa7dee0da3dfb5e00ebcbd29757998218f6d3a949dddc46dffef",
+      "size_bytes": 460
+    },
+    {
+      "path": "data_root/sub-001/ses-01/BAS2/beta_0003.nii",
+      "sha256": "a4fb9a538f205cb72fdbe1a628f5772a026b6f43ea4df5981629ee8964d063e8",
+      "size_bytes": 460
+    },
+    {
+      "path": "data_root/sub-001/ses-01/BAS2/beta_0004.nii",
+      "sha256": "47e52b698511527fb19043e89cec1ba65c303c8d8e3926e01f4fa62b991c7c08",
+      "size_bytes": 460
+    },
+    {
+      "path": "data_root/sub-001/ses-01/BAS2/mask.nii",
+      "sha256": "42cea30c9edb3f977465c0b384372bb5b140b668a9acf7758ac86279fbadc297",
+      "size_bytes": 460
+    },
+    {
+      "path": "data_root/sub-001/ses-01/BAS2/regressor_labels.csv",
+      "sha256": "47d53cd961d0c7677727cb2bcca9bfa51f582fa2eb4ef7a4d01c6d1d455e3cfd",
+      "size_bytes": 116
+    },
+    {
+      "path": "data_root/sub-001/ses-02/BAS2/beta_0001.nii",
+      "sha256": "37ee691d617c6d9c8719fcb989e532baef43bcb6238f2c352e3d7c4d5ae73326",
+      "size_bytes": 460
+    },
+    {
+      "path": "data_root/sub-001/ses-02/BAS2/beta_0002.nii",
+      "sha256": "768c0a05a36d3890cee2a542cd6d88e994f3100dfc57a4c0a0a4f0481d41ce33",
+      "size_bytes": 460
+    },
+    {
+      "path": "data_root/sub-001/ses-02/BAS2/beta_0003.nii",
+      "sha256": "67641e5e916dfcf227a6618d0e293cd4ef2ee0373ccf6a41a315556fabda6a01",
+      "size_bytes": 460
+    },
+    {
+      "path": "data_root/sub-001/ses-02/BAS2/beta_0004.nii",
+      "sha256": "65f5b10f94743600344e64042f1809cf0cbdd6abda18d4cb813f0a9c712bd13d",
+      "size_bytes": 460
+    },
+    {
+      "path": "data_root/sub-001/ses-02/BAS2/mask.nii",
+      "sha256": "42cea30c9edb3f977465c0b384372bb5b140b668a9acf7758ac86279fbadc297",
+      "size_bytes": 460
+    },
+    {
+      "path": "data_root/sub-001/ses-02/BAS2/regressor_labels.csv",
+      "sha256": "47d53cd961d0c7677727cb2bcca9bfa51f582fa2eb4ef7a4d01c6d1d455e3cfd",
+      "size_bytes": 116
+    },
+    {
+      "path": "data_root/sub-002/ses-01/BAS2/beta_0001.nii",
+      "sha256": "944965067f0e3f7290d57eefc965c14166da624eb43a554f39b4bb4e2669c7ba",
+      "size_bytes": 460
+    },
+    {
+      "path": "data_root/sub-002/ses-01/BAS2/beta_0002.nii",
+      "sha256": "2f47667fb0cf2e602161a71d8049f060a600ce264871a9fa722f695a904aed17",
+      "size_bytes": 460
+    },
+    {
+      "path": "data_root/sub-002/ses-01/BAS2/beta_0003.nii",
+      "sha256": "3b5075b4307ca98ac6a551817760c643eac0f19533dd44722494479899a2e7a3",
+      "size_bytes": 460
+    },
+    {
+      "path": "data_root/sub-002/ses-01/BAS2/beta_0004.nii",
+      "sha256": "b80e52608489b354d63c46cbe28c627934dceb883491f8d89c54c4352fb1bd3c",
+      "size_bytes": 460
+    },
+    {
+      "path": "data_root/sub-002/ses-01/BAS2/mask.nii",
+      "sha256": "42cea30c9edb3f977465c0b384372bb5b140b668a9acf7758ac86279fbadc297",
+      "size_bytes": 460
+    },
+    {
+      "path": "data_root/sub-002/ses-01/BAS2/regressor_labels.csv",
+      "sha256": "47d53cd961d0c7677727cb2bcca9bfa51f582fa2eb4ef7a4d01c6d1d455e3cfd",
+      "size_bytes": 116
+    },
+    {
+      "path": "data_root/sub-002/ses-02/BAS2/beta_0001.nii",
+      "sha256": "7e5ef576c5d2a16ade6ec56f3a87850fad3f108304492839d70b608368f3d5b5",
+      "size_bytes": 460
+    },
+    {
+      "path": "data_root/sub-002/ses-02/BAS2/beta_0002.nii",
+      "sha256": "2de149b3c8dab894216df1f7844f7139596c328d1c3e02592e118e53b73f2281",
+      "size_bytes": 460
+    },
+    {
+      "path": "data_root/sub-002/ses-02/BAS2/beta_0003.nii",
+      "sha256": "cc4455733160ff1f4e217babd82ef922c2de19dd70df5cd68d1f1dcd51d0f9d9",
+      "size_bytes": 460
+    },
+    {
+      "path": "data_root/sub-002/ses-02/BAS2/beta_0004.nii",
+      "sha256": "dd5806465f0a572f6ed1fa5dcf54668ac3c4756d0d812504a501d4bf830b351d",
+      "size_bytes": 460
+    },
+    {
+      "path": "data_root/sub-002/ses-02/BAS2/mask.nii",
+      "sha256": "42cea30c9edb3f977465c0b384372bb5b140b668a9acf7758ac86279fbadc297",
+      "size_bytes": 460
+    },
+    {
+      "path": "data_root/sub-002/ses-02/BAS2/regressor_labels.csv",
+      "sha256": "47d53cd961d0c7677727cb2bcca9bfa51f582fa2eb4ef7a4d01c6d1d455e3cfd",
+      "size_bytes": 116
+    },
+    {
+      "path": "dataset_index.csv",
+      "sha256": "650c1134907755a3d54ce6402cf3b9bf63fb8c60e76e350fe31cfb659c65c04c",
+      "size_bytes": 4286
+    },
+    {
+      "path": "README.md",
+      "sha256": "a999976b8d826bde556637c44070ca898d5676636ca6b323d5403bfac31e1cdf",
+      "size_bytes": 721
+    }
+  ]
+}

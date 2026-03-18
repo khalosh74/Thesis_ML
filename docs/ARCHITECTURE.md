@@ -78,6 +78,7 @@ Core package root: `src/Thesis_ML/`
   - official artifact invariant verifier (`official_artifacts.py`)
   - confirmatory-ready governance verifier (`confirmatory_ready.py`)
   - deterministic official-output comparator (`reproducibility.py`)
+  - centralized reproducibility manifest builder (`repro_manifest.py`)
 
 ## Runtime flows
 
@@ -151,6 +152,7 @@ Framework guardrails:
   and external compatibility artifacts when configured).
 - run-level status artifacts (`run_status.json`) include structured failure diagnostics (`error_code`, `error_type`, `failure_stage`) plus warning/timing/resource summaries.
 - official run artifacts persist deterministic provenance blocks (`git_provenance`, `dataset_fingerprint`) for rerun auditability.
+- reproducibility orchestration scripts (`scripts/replay_official_paths.py`, `scripts/build_publishable_bundle.py`, `scripts/verify_publishable_bundle.py`) compose existing runners/verifiers without altering framework-mode contracts.
 
 Compatibility wrappers are still present but deprecated:
 

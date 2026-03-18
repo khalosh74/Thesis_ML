@@ -155,6 +155,7 @@ Metric policy note (official runs):
   - `docs/PRIVACY_AND_DATA_HANDLING.md`
   - `docs/USE_AND_MISUSE_BOUNDARIES.md`
   - `docs/CONFIRMATORY_READY.md`
+  - `docs/REPRODUCIBILITY.md`
 
 Implementation ownership notes (for maintainers):
 - framework/methodology/metric runtime resolution: `src/Thesis_ML/experiments/runtime_policies.py`
@@ -269,6 +270,9 @@ python scripts/performance_smoke.py --output outputs/performance/performance_smo
 python scripts/verify_official_artifacts.py --output-dir <official_output_dir>
 python scripts/verify_confirmatory_ready.py --output-dir <confirmatory_output_dir>
 python scripts/verify_official_reproducibility.py --mode protocol --index-csv <...> --data-root <...> --cache-dir <...> --suite confirmatory_primary_within_subject
+python scripts/replay_official_paths.py --mode both --use-demo-dataset --verify-determinism
+python scripts/build_publishable_bundle.py --output-dir <bundle_dir> --comparison-output <...> --confirmatory-output <...> --replay-summary <...> --replay-verification-summary <...> --repro-manifest <...>
+python scripts/verify_publishable_bundle.py --bundle-dir <bundle_dir>
 python scripts/rc1_release_gate.py --run-ruff --run-pytest --run-performance-smoke
 ```
 

@@ -1,0 +1,16 @@
+{
+  "glm_dir": "D:\\Khaled\\Projects\\VScode\\Thesis\\demo_data\\synthetic_v1\\data_root\\sub-002\\ses-02\\BAS2",
+  "bas_name": "BAS2",
+  "mask_path": "mask.nii",
+  "mask_shape": [
+    3,
+    3,
+    3
+  ],
+  "voxels_in_mask": 8,
+  "n_regressors_csv": 4,
+  "n_beta_present": 4,
+  "regressor_type_counts": {
+    "emotion_condition": 4
+  }
+}

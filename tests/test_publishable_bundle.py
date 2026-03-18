@@ -1,0 +1,121 @@
+from __future__ import annotations
+
+import importlib.util
+import json
+from pathlib import Path
+
+
+def _load_script_module(script_name: str):
+    repo_root = Path(__file__).resolve().parents[1]
+    script_path = repo_root / "scripts" / script_name
+    spec = importlib.util.spec_from_file_location(script_name.replace(".py", ""), script_path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _write_confirmatory_output_fixture(output_dir: Path) -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    test_path = repo_root / "tests" / "test_official_verification.py"
+    spec = importlib.util.spec_from_file_location("test_official_verification_fixture", test_path)
+    assert spec is not None and spec.loader is not None
+    test_module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(test_module)
+    test_module._write_confirmatory_output(output_dir)
+
+
+def test_build_and_verify_publishable_bundle_roundtrip(tmp_path: Path) -> None:
+    build_module = _load_script_module("build_publishable_bundle.py")
+    verify_module = _load_script_module("verify_publishable_bundle.py")
+
+    confirmatory_output = tmp_path / "protocol_runs" / "thesis-canonical__1.0.0"
+    _write_confirmatory_output_fixture(confirmatory_output)
+
+    replay_summary = tmp_path / "replay_summary.json"
+    replay_summary.write_text(f"{json.dumps({'passed': True}, indent=2)}\n", encoding="utf-8")
+    replay_verification = tmp_path / "replay_verification_summary.json"
+    replay_verification.write_text(
+        f"{json.dumps({'passed': True, 'determinism': {'passed': True}}, indent=2)}\n",
+        encoding="utf-8",
+    )
+    repro_manifest = tmp_path / "reproducibility_manifest.json"
+    repro_manifest.write_text(
+        f"{json.dumps({'manifest_schema_version': 'reproducibility-manifest-v1'}, indent=2)}\n",
+        encoding="utf-8",
+    )
+    confirmatory_ready = tmp_path / "confirmatory_ready_summary.json"
+    confirmatory_ready.write_text(f"{json.dumps({'passed': True}, indent=2)}\n", encoding="utf-8")
+
+    bundle_dir = tmp_path / "bundle"
+    build_exit = build_module.main(
+        [
+            "--output-dir",
+            str(bundle_dir),
+            "--confirmatory-output",
+            str(confirmatory_output),
+            "--replay-summary",
+            str(replay_summary),
+            "--replay-verification-summary",
+            str(replay_verification),
+            "--repro-manifest",
+            str(repro_manifest),
+            "--confirmatory-ready-summary",
+            str(confirmatory_ready),
+        ]
+    )
+    assert build_exit == 0
+    assert (bundle_dir / "bundle_manifest.json").exists()
+
+    verify_exit = verify_module.main(["--bundle-dir", str(bundle_dir)])
+    assert verify_exit == 0
+
+
+def test_verify_publishable_bundle_fails_on_hash_mismatch(tmp_path: Path) -> None:
+    build_module = _load_script_module("build_publishable_bundle.py")
+    verify_module = _load_script_module("verify_publishable_bundle.py")
+
+    confirmatory_output = tmp_path / "protocol_runs" / "thesis-canonical__1.0.0"
+    _write_confirmatory_output_fixture(confirmatory_output)
+
+    replay_summary = tmp_path / "replay_summary.json"
+    replay_summary.write_text(f"{json.dumps({'passed': True}, indent=2)}\n", encoding="utf-8")
+    replay_verification = tmp_path / "replay_verification_summary.json"
+    replay_verification.write_text(
+        f"{json.dumps({'passed': True, 'determinism': {'passed': True}}, indent=2)}\n",
+        encoding="utf-8",
+    )
+    repro_manifest = tmp_path / "reproducibility_manifest.json"
+    repro_manifest.write_text(
+        f"{json.dumps({'manifest_schema_version': 'reproducibility-manifest-v1'}, indent=2)}\n",
+        encoding="utf-8",
+    )
+    confirmatory_ready = tmp_path / "confirmatory_ready_summary.json"
+    confirmatory_ready.write_text(f"{json.dumps({'passed': True}, indent=2)}\n", encoding="utf-8")
+
+    bundle_dir = tmp_path / "bundle"
+    build_module.main(
+        [
+            "--output-dir",
+            str(bundle_dir),
+            "--confirmatory-output",
+            str(confirmatory_output),
+            "--replay-summary",
+            str(replay_summary),
+            "--replay-verification-summary",
+            str(replay_verification),
+            "--repro-manifest",
+            str(repro_manifest),
+            "--confirmatory-ready-summary",
+            str(confirmatory_ready),
+        ]
+    )
+
+    tamper_target = bundle_dir / "verification" / "replay_summary.json"
+    tamper_target.write_text(
+        f"{json.dumps({'passed': False, 'tampered': True}, indent=2)}\n",
+        encoding="utf-8",
+    )
+
+    verify_exit = verify_module.main(["--bundle-dir", str(bundle_dir)])
+    assert verify_exit == 1

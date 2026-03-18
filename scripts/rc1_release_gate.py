@@ -83,6 +83,53 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--run-official-replay",
+        action="store_true",
+        help="Run scripts/replay_official_paths.py as part of the RC gate.",
+    )
+    parser.add_argument(
+        "--replay-mode",
+        choices=["comparison", "confirmatory", "both"],
+        default="both",
+        help="Mode for scripts/replay_official_paths.py when --run-official-replay is set.",
+    )
+    parser.add_argument(
+        "--replay-reports-root",
+        default="outputs/reproducibility/rc1_replay",
+        help="Reports root for scripts/replay_official_paths.py.",
+    )
+    parser.add_argument(
+        "--replay-summary-out",
+        default="outputs/release/replay_summary.json",
+        help="Summary path for scripts/replay_official_paths.py.",
+    )
+    parser.add_argument(
+        "--replay-verification-summary-out",
+        default="outputs/release/replay_verification_summary.json",
+        help="Verification summary path for scripts/replay_official_paths.py.",
+    )
+    parser.add_argument(
+        "--replay-manifest-out",
+        default="outputs/release/reproducibility_manifest.json",
+        help="Reproducibility manifest path for scripts/replay_official_paths.py.",
+    )
+    parser.add_argument(
+        "--replay-use-demo-dataset",
+        action="store_true",
+        help="Pass --use-demo-dataset to scripts/replay_official_paths.py.",
+    )
+    parser.add_argument(
+        "--replay-verify-determinism",
+        action="store_true",
+        help="Pass --verify-determinism to scripts/replay_official_paths.py.",
+    )
+    parser.add_argument(
+        "--verify-bundle-dir",
+        action="append",
+        default=[],
+        help="Bundle directory to verify with scripts/verify_publishable_bundle.py (repeatable).",
+    )
+    parser.add_argument(
         "--confirmatory-ready-dir",
         default="",
         help=(
@@ -138,6 +185,40 @@ def main(argv: list[str] | None = None) -> int:
                     "scripts/verify_official_artifacts.py",
                     "--output-dir",
                     str(directory),
+                ],
+                cwd=REPO_ROOT,
+            )
+        )
+
+    if args.run_official_replay:
+        replay_command = [
+            "python",
+            "scripts/replay_official_paths.py",
+            "--mode",
+            str(args.replay_mode),
+            "--reports-root",
+            str(args.replay_reports_root),
+            "--summary-out",
+            str(args.replay_summary_out),
+            "--verification-summary-out",
+            str(args.replay_verification_summary_out),
+            "--manifest-out",
+            str(args.replay_manifest_out),
+        ]
+        if args.replay_use_demo_dataset:
+            replay_command.append("--use-demo-dataset")
+        if args.replay_verify_determinism:
+            replay_command.append("--verify-determinism")
+        steps.append(_run_step(replay_command, cwd=REPO_ROOT))
+
+    for bundle_dir in list(args.verify_bundle_dir):
+        steps.append(
+            _run_step(
+                [
+                    "python",
+                    "scripts/verify_publishable_bundle.py",
+                    "--bundle-dir",
+                    str(bundle_dir),
                 ],
                 cwd=REPO_ROOT,
             )

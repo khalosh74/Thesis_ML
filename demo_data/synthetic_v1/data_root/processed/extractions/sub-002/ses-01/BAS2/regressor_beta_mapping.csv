@@ -1,0 +1,5 @@
+label,raw_label,beta_index,run,task,emotion,modality,regressor_type,motion_param,beta_file,beta_path,beta_exists
+run-1_passive_anger_audio,run-1_passive_anger_audio,1,1,passive,anger,audio,emotion_condition,,beta_0001.nii,beta_0001.nii,True
+run-1_passive_happiness_audio,run-1_passive_happiness_audio,2,1,passive,happiness,audio,emotion_condition,,beta_0002.nii,beta_0002.nii,True
+run-1_passive_anger_video,run-1_passive_anger_video,3,1,passive,anger,video,emotion_condition,,beta_0003.nii,beta_0003.nii,True
+run-1_passive_happiness_video,run-1_passive_happiness_video,4,1,passive,happiness,video,emotion_condition,,beta_0004.nii,beta_0004.nii,True

@@ -6,6 +6,9 @@ This repository uses a tag-triggered release validation workflow:
 - Trigger: push tag matching `v*` (for example `v0.2.0`)
 - Manual trigger: GitHub Actions `workflow_dispatch`
 
+Canonical reproducibility/operator path is documented in `docs/REPRODUCIBILITY.md`
+(Python 3.13 + `uv.lock` + `uv sync --frozen --extra dev`).
+
 ## What it validates
 
 1. Builds `sdist` and `wheel` with `python -m build`.
@@ -122,7 +125,43 @@ python scripts/verify_official_reproducibility.py \
   --variant ridge
 ```
 
-### 3) RC wrapper gate
+Canonical one-command replay path (comparison + confirmatory using checked-in demo data):
+
+```bash
+python scripts/replay_official_paths.py \
+  --mode both \
+  --use-demo-dataset \
+  --reports-root outputs/reproducibility/official_replay \
+  --verify-determinism
+```
+
+This command emits:
+- `replay_summary.json`
+- `replay_verification_summary.json`
+- `reproducibility_manifest.json`
+
+### 3) Publishable bundle build + verification
+
+Build canonical directory+manifest bundle:
+
+```bash
+python scripts/build_publishable_bundle.py \
+  --output-dir outputs/reproducibility/publishable_bundle \
+  --comparison-output <comparison_output_dir> \
+  --confirmatory-output <confirmatory_output_dir> \
+  --replay-summary outputs/reproducibility/official_replay/replay_summary.json \
+  --replay-verification-summary outputs/reproducibility/official_replay/replay_verification_summary.json \
+  --repro-manifest outputs/reproducibility/official_replay/reproducibility_manifest.json
+```
+
+Verify bundle structure/hashes/contracts:
+
+```bash
+python scripts/verify_publishable_bundle.py \
+  --bundle-dir outputs/reproducibility/publishable_bundle
+```
+
+### 4) RC wrapper gate
 
 Run release hygiene plus optional lint/tests/performance and official checks:
 
@@ -152,6 +191,16 @@ python scripts/rc1_release_gate.py \
   --repro-command "python scripts/verify_official_reproducibility.py --mode protocol --config configs/protocols/thesis_confirmatory_v1.json --index-csv <dataset_index.csv> --data-root <data_root> --cache-dir <cache_dir> --suite confirmatory_primary_within_subject"
 ```
 
+Or use native replay/bundle options:
+
+```bash
+python scripts/rc1_release_gate.py \
+  --run-official-replay \
+  --replay-use-demo-dataset \
+  --replay-verify-determinism \
+  --verify-bundle-dir outputs/reproducibility/publishable_bundle
+```
+
 ## Official RC checklist
 
 Before freezing an experiment campaign:
@@ -166,6 +215,10 @@ Before freezing an experiment campaign:
    `python scripts/rc1_release_gate.py --summary-out outputs/release/rc1_gate_summary.json`.
 7. For final frozen campaign outputs, run confirmatory-ready verification:
    `python scripts/verify_confirmatory_ready.py --output-dir <confirmatory_output_dir> --summary-out outputs/release/confirmatory_ready_summary.json`.
+8. Produce and verify canonical reproducibility artifacts:
+   - `python scripts/replay_official_paths.py --mode both --use-demo-dataset --verify-determinism`
+   - `python scripts/build_publishable_bundle.py ...`
+   - `python scripts/verify_publishable_bundle.py --bundle-dir <bundle_dir>`
 
 ## Confirmatory-ready boundary
 

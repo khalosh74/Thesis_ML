@@ -125,6 +125,7 @@ Governance references:
 - `docs/PRIVACY_AND_DATA_HANDLING.md`
 - `docs/USE_AND_MISUSE_BOUNDARIES.md`
 - `docs/CONFIRMATORY_READY.md`
+- `docs/REPRODUCIBILITY.md`
 
 Architecture ownership (where to extend safely):
 - runner policy resolution belongs in `src/Thesis_ML/experiments/runtime_policies.py`
@@ -241,6 +242,9 @@ python scripts/release_hygiene_check.py
 python scripts/acceptance_smoke.py
 python scripts/verify_official_artifacts.py --output-dir <official_output_dir>
 python scripts/verify_confirmatory_ready.py --output-dir <confirmatory_output_dir>
+python scripts/replay_official_paths.py --mode both --use-demo-dataset --verify-determinism
+python scripts/build_publishable_bundle.py --output-dir <bundle_dir> --comparison-output <...> --confirmatory-output <...> --replay-summary <...> --replay-verification-summary <...> --repro-manifest <...>
+python scripts/verify_publishable_bundle.py --bundle-dir <bundle_dir>
 ```
 
 Optional lightweight performance snapshot:

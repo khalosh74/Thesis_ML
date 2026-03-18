@@ -44,6 +44,9 @@ def test_release_hygiene_passes_when_governance_files_present(tmp_path: Path) ->
     (tmp_path / "docs" / "CONFIRMATORY_READY.md").write_text(
         "# Confirmatory Ready\n", encoding="utf-8"
     )
+    (tmp_path / "docs" / "REPRODUCIBILITY.md").write_text(
+        "# Reproducibility\n", encoding="utf-8"
+    )
 
     completed = subprocess.run(
         [sys.executable, str(_script_path()), "--repo-root", str(tmp_path)],

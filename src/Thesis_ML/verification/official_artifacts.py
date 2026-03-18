@@ -131,6 +131,13 @@ def _load_report_index(path: Path, issues: list[dict[str, Any]]) -> list[dict[st
         return [{str(k): str(v) for k, v in row.items()} for row in reader]
 
 
+def _resolve_report_dir(root: Path, report_dir_raw: str) -> Path:
+    report_dir = Path(report_dir_raw)
+    if report_dir.is_absolute():
+        return report_dir
+    return root / report_dir
+
+
 def _verify_metric_policy(
     *,
     config_payload: dict[str, Any],
@@ -706,7 +713,7 @@ def verify_official_artifacts(
                 details={"run_id": row.get("run_id")},
             )
             continue
-        report_dir = Path(report_dir_raw)
+        report_dir = _resolve_report_dir(root, report_dir_raw)
         if not report_dir.exists() or not report_dir.is_dir():
             _add_issue(
                 issues,

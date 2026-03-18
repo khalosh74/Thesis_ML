@@ -64,3 +64,8 @@ thesis_experiment_program_v2_checked.xlsx
 .DS_Store
 Thumbs.db
 *.code-workspace
+
+# Checked-in reproducibility demo dataset allowlist
+!demo_data/
+!demo_data/synthetic_v1/
+!demo_data/synthetic_v1/**

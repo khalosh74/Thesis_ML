@@ -68,6 +68,13 @@ def _read_report_index(path: Path) -> list[dict[str, str]]:
         return [{str(k): str(v) for k, v in row.items()} for row in reader]
 
 
+def _resolve_report_dir(root: Path, report_dir_text: str) -> Path:
+    report_dir = Path(report_dir_text)
+    if report_dir.is_absolute():
+        return report_dir
+    return root / report_dir
+
+
 def collect_official_invariants(output_dir: Path | str) -> dict[str, Any]:
     root = Path(output_dir)
     execution_status = _load_json(root / "execution_status.json")
@@ -107,16 +114,31 @@ def collect_official_invariants(output_dir: Path | str) -> dict[str, Any]:
         invariants["mode_artifacts"]["repeated_run_summary"] = _normalize_payload(
             _load_json(repeated_summary_path)
         )
+    repeated_metrics_path = root / "repeated_run_metrics.csv"
+    if repeated_metrics_path.exists():
+        invariants["mode_artifacts"]["repeated_run_metrics_sha256"] = _file_sha256(
+            repeated_metrics_path
+        )
     confidence_intervals_path = root / "confidence_intervals.json"
     if confidence_intervals_path.exists():
         invariants["mode_artifacts"]["confidence_intervals"] = _normalize_payload(
             _load_json(confidence_intervals_path)
+        )
+    metric_intervals_path = root / "metric_intervals.csv"
+    if metric_intervals_path.exists():
+        invariants["mode_artifacts"]["metric_intervals_sha256"] = _file_sha256(
+            metric_intervals_path
         )
     if framework_mode == "locked_comparison":
         paired_path = root / "paired_model_comparisons.json"
         if paired_path.exists():
             invariants["mode_artifacts"]["paired_model_comparisons"] = _normalize_payload(
                 _load_json(paired_path)
+            )
+        paired_csv_path = root / "paired_model_comparisons.csv"
+        if paired_csv_path.exists():
+            invariants["mode_artifacts"]["paired_model_comparisons_csv_sha256"] = _file_sha256(
+                paired_csv_path
             )
 
     for row in report_rows:
@@ -126,7 +148,7 @@ def collect_official_invariants(output_dir: Path | str) -> dict[str, Any]:
         report_dir_text = str(row.get("report_dir", "")).strip()
         if not run_id or not report_dir_text:
             continue
-        report_dir = Path(report_dir_text)
+        report_dir = _resolve_report_dir(root, report_dir_text)
         if not report_dir.exists():
             continue
 
