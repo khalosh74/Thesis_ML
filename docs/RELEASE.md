@@ -205,17 +205,19 @@ python scripts/rc1_release_gate.py \
 
 Before freezing an experiment campaign:
 
-1. Run baseline release checks (`build`, `twine`, `acceptance_smoke`).
-2. Run `python scripts/release_hygiene_check.py`.
-3. Validate at least one official comparison/protocol output with `verify_official_artifacts.py`.
-4. Run deterministic rerun verification with `verify_official_reproducibility.py` on a small official path.
-5. Capture performance smoke output:
+1. Prepare a clean campaign output root and archive legacy output folders:
+   `powershell -ExecutionPolicy Bypass -File scripts/prepare_frozen_campaign.ps1 -CampaignTag "campaign-YYYY-MM-DD-rc1"`.
+2. Run baseline release checks (`build`, `twine`, `acceptance_smoke`).
+3. Run `python scripts/release_hygiene_check.py`.
+4. Validate at least one official comparison/protocol output with `verify_official_artifacts.py`.
+5. Run deterministic rerun verification with `verify_official_reproducibility.py` on a small official path.
+6. Capture performance smoke output:
    `python scripts/performance_smoke.py --output outputs/performance/performance_smoke_summary.json`.
-6. Archive RC gate summary:
+7. Archive RC gate summary:
    `python scripts/rc1_release_gate.py --summary-out outputs/release/rc1_gate_summary.json`.
-7. For final frozen campaign outputs, run confirmatory-ready verification:
+8. For final frozen campaign outputs, run confirmatory-ready verification:
    `python scripts/verify_confirmatory_ready.py --output-dir <confirmatory_output_dir> --summary-out outputs/release/confirmatory_ready_summary.json`.
-8. Produce and verify canonical reproducibility artifacts:
+9. Produce and verify canonical reproducibility artifacts:
    - `python scripts/replay_official_paths.py --mode both --use-demo-dataset --verify-determinism`
    - `python scripts/build_publishable_bundle.py ...`
    - `python scripts/verify_publishable_bundle.py --bundle-dir <bundle_dir>`

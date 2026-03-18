@@ -50,6 +50,26 @@ Configured in `src/Thesis_ML/config/paths.py`.
 
 ## 3) Framework mode commands
 
+Frozen campaign preparation (PowerShell, recommended before running `scripts/run_frozen_campaign.ps1`):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/prepare_frozen_campaign.ps1 `
+  -CampaignTag "campaign-YYYY-MM-DD-rc1"
+```
+
+Optional prune after successful archive:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/prepare_frozen_campaign.ps1 `
+  -CampaignTag "campaign-YYYY-MM-DD-rc1" `
+  -PruneAfterArchive
+```
+
+This command archives legacy folders that often cause confusion
+(`outputs/manual_validation`, `outputs/reproducibility`, `outputs/reports`),
+creates a clean `outputs/campaign/<CampaignTag>/...` directory tree, and writes:
+`outputs/campaign/<CampaignTag>/release/prep_summary.json`.
+
 Exploratory run:
 
 ```bash
