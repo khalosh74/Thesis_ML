@@ -104,6 +104,15 @@ Current official defaults in checked-in comparison/protocol specs:
 - `repeat_count=3` for stronger stability estimates
 - locked comparison `require_significant_win=true` for paired-comparison winner gating
 - calibration runs as `performed` when probabilities are available, or explicit `not_applicable` when not
+Each comparison/protocol contract must also declare a `data_policy` that controls:
+- class-balance thresholds (warning/blocking)
+- missingness thresholds (warning/blocking)
+- leakage checks and blocking rules
+- optional external-validation compatibility checks (compatibility-only in this phase)
+Official data-policy behavior:
+- structural data integrity violations are blocking on official paths
+- threshold checks default to warnings unless explicitly set as blocking in config
+- data-policy outcomes are stamped into run artifacts under `data_policy_effective`
 Thesis-facing active contracts do not include ROI-switch, dimensionality-reduction, or scaling-policy
 variation dimensions; those remain out of scope unless explicitly introduced as new locked specs/protocols.
 
@@ -119,6 +128,17 @@ Metric consistency rules for official runs:
 Run-level artifacts (all modes):
 - `config.json`
 - `metrics.json`
+- `dataset_card.json`
+- `dataset_card.md`
+- `dataset_summary.json`
+- `dataset_summary.csv`
+- `data_quality_report.json`
+- `class_balance_report.csv`
+- `missingness_report.csv`
+- `leakage_audit.json`
+- `external_dataset_card.json`
+- `external_dataset_summary.json`
+- `external_validation_compatibility.json`
 - `fold_metrics.csv`
 - `fold_splits.csv`
 - `predictions.csv`

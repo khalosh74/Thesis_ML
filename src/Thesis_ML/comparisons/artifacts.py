@@ -83,6 +83,14 @@ def _comparison_summary(
             "permutation_metric": metric_policy_effective.permutation_metric,
             "higher_is_better": bool(metric_policy_effective.higher_is_better),
         },
+        "data_policy_effective": compiled_manifest.data_policy.model_dump(mode="json"),
+        "external_validation_status": {
+            "enabled": bool(compiled_manifest.data_policy.external_validation.enabled),
+            "mode": str(compiled_manifest.data_policy.external_validation.mode),
+            "require_compatible": bool(
+                compiled_manifest.data_policy.external_validation.require_compatible
+            ),
+        },
         "variant_status_counts": by_variant,
         "n_runs": int(len(run_results)),
     }

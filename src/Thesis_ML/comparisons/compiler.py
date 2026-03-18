@@ -267,6 +267,7 @@ def compile_comparison(
         methodology_policy=comparison.methodology_policy,
         metric_policy=comparison.metric_policy,
         subgroup_reporting_policy=comparison.subgroup_reporting_policy,
+        data_policy=comparison.data_policy,
         decision_policy=comparison.decision_policy,
         evidence_policy=comparison.evidence_policy,
         variant_ids=selected_variant_ids,

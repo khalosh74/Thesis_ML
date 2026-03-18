@@ -100,6 +100,8 @@ def stamp_metrics_artifact(
     subgroup_metrics_json_path: Path,
     subgroup_metrics_csv_path: Path,
     metric_policy_effective: EffectiveMetricPolicy,
+    data_policy_effective: dict[str, Any] | None,
+    data_artifacts: dict[str, Any] | None,
     identity: RunIdentity,
     dataset_fingerprint: dict[str, Any] | None = None,
     git_provenance: dict[str, Any] | None = None,
@@ -140,6 +142,12 @@ def stamp_metrics_artifact(
     persisted_metrics["subgroup_metrics_csv_path_relative"] = _relative_path(subgroup_metrics_csv_path)
     persisted_metrics["metric_policy_effective"] = metric_policy_effective_payload(
         metric_policy_effective
+    )
+    persisted_metrics["data_policy_effective"] = (
+        dict(data_policy_effective) if isinstance(data_policy_effective, dict) else None
+    )
+    persisted_metrics["data_artifacts"] = (
+        dict(data_artifacts) if isinstance(data_artifacts, dict) else None
     )
     persisted_metrics["decision_metric_name"] = metric_policy_effective.decision_metric
     persisted_metrics["tuning_metric_name"] = metric_policy_effective.tuning_metric
@@ -189,6 +197,7 @@ def build_run_config_payload(
     base_run_id: str,
     evidence_run_role: str,
     evidence_policy_effective: dict[str, Any],
+    data_policy_effective: dict[str, Any] | None,
     metric_policy_effective: EffectiveMetricPolicy,
     methodology_policy_name: str,
     class_weight_policy: str,
@@ -206,6 +215,18 @@ def build_run_config_payload(
     subgroup_min_samples_per_group: int,
     subgroup_metrics_json_path: Path,
     subgroup_metrics_csv_path: Path,
+    dataset_card_json_path: Path,
+    dataset_card_md_path: Path,
+    dataset_summary_json_path: Path,
+    dataset_summary_csv_path: Path,
+    data_quality_report_path: Path,
+    class_balance_report_path: Path,
+    missingness_report_path: Path,
+    leakage_audit_path: Path,
+    external_dataset_card_path: Path,
+    external_dataset_summary_path: Path,
+    external_validation_compatibility_path: Path,
+    data_artifacts: dict[str, Any] | None,
     filter_task: str | None,
     filter_modality: str | None,
     n_permutations: int,
@@ -270,6 +291,9 @@ def build_run_config_payload(
         "base_run_id": str(base_run_id),
         "evidence_run_role": str(evidence_run_role),
         "evidence_policy_effective": dict(evidence_policy_effective),
+        "data_policy_effective": (
+            dict(data_policy_effective) if isinstance(data_policy_effective, dict) else None
+        ),
         "primary_metric_name": primary_metric_name,
         "permutation_metric_name": permutation_metric_name,
         "metric_policy_effective": metric_policy_effective_payload(metric_policy_effective),
@@ -297,6 +321,33 @@ def build_run_config_payload(
         "subgroup_metrics_json_path_relative": _relative_path(subgroup_metrics_json_path),
         "subgroup_metrics_csv_path": str(subgroup_metrics_csv_path.resolve()),
         "subgroup_metrics_csv_path_relative": _relative_path(subgroup_metrics_csv_path),
+        "dataset_card_json_path": str(dataset_card_json_path.resolve()),
+        "dataset_card_json_path_relative": _relative_path(dataset_card_json_path),
+        "dataset_card_md_path": str(dataset_card_md_path.resolve()),
+        "dataset_card_md_path_relative": _relative_path(dataset_card_md_path),
+        "dataset_summary_json_path": str(dataset_summary_json_path.resolve()),
+        "dataset_summary_json_path_relative": _relative_path(dataset_summary_json_path),
+        "dataset_summary_csv_path": str(dataset_summary_csv_path.resolve()),
+        "dataset_summary_csv_path_relative": _relative_path(dataset_summary_csv_path),
+        "data_quality_report_path": str(data_quality_report_path.resolve()),
+        "data_quality_report_path_relative": _relative_path(data_quality_report_path),
+        "class_balance_report_path": str(class_balance_report_path.resolve()),
+        "class_balance_report_path_relative": _relative_path(class_balance_report_path),
+        "missingness_report_path": str(missingness_report_path.resolve()),
+        "missingness_report_path_relative": _relative_path(missingness_report_path),
+        "leakage_audit_path": str(leakage_audit_path.resolve()),
+        "leakage_audit_path_relative": _relative_path(leakage_audit_path),
+        "external_dataset_card_path": str(external_dataset_card_path.resolve()),
+        "external_dataset_card_path_relative": _relative_path(external_dataset_card_path),
+        "external_dataset_summary_path": str(external_dataset_summary_path.resolve()),
+        "external_dataset_summary_path_relative": _relative_path(external_dataset_summary_path),
+        "external_validation_compatibility_path": str(
+            external_validation_compatibility_path.resolve()
+        ),
+        "external_validation_compatibility_path_relative": _relative_path(
+            external_validation_compatibility_path
+        ),
+        "data_artifacts": dict(data_artifacts) if isinstance(data_artifacts, dict) else None,
         "filter_task": filter_task,
         "filter_modality": filter_modality,
         "n_permutations": int(n_permutations),
@@ -367,6 +418,17 @@ def build_run_result_payload(
     metrics_path: Path,
     subgroup_metrics_json_path: Path,
     subgroup_metrics_csv_path: Path,
+    dataset_card_json_path: Path,
+    dataset_card_md_path: Path,
+    dataset_summary_json_path: Path,
+    dataset_summary_csv_path: Path,
+    data_quality_report_path: Path,
+    class_balance_report_path: Path,
+    missingness_report_path: Path,
+    leakage_audit_path: Path,
+    external_dataset_card_path: Path,
+    external_dataset_summary_path: Path,
+    external_validation_compatibility_path: Path,
     tuning_summary_path: Path,
     tuning_best_params_path: Path,
     calibration_summary_path: Path,
@@ -390,6 +452,8 @@ def build_run_result_payload(
     base_run_id: str,
     evidence_run_role: str,
     evidence_policy_effective: dict[str, Any],
+    data_policy_effective: dict[str, Any] | None,
+    data_artifacts: dict[str, Any] | None,
     metric_policy_effective: EffectiveMetricPolicy,
     methodology_policy_name: str,
     class_weight_policy: str,
@@ -413,6 +477,32 @@ def build_run_result_payload(
         "subgroup_metrics_json_path_relative": _relative_path(subgroup_metrics_json_path),
         "subgroup_metrics_csv_path": str(subgroup_metrics_csv_path.resolve()),
         "subgroup_metrics_csv_path_relative": _relative_path(subgroup_metrics_csv_path),
+        "dataset_card_json_path": str(dataset_card_json_path.resolve()),
+        "dataset_card_json_path_relative": _relative_path(dataset_card_json_path),
+        "dataset_card_md_path": str(dataset_card_md_path.resolve()),
+        "dataset_card_md_path_relative": _relative_path(dataset_card_md_path),
+        "dataset_summary_json_path": str(dataset_summary_json_path.resolve()),
+        "dataset_summary_json_path_relative": _relative_path(dataset_summary_json_path),
+        "dataset_summary_csv_path": str(dataset_summary_csv_path.resolve()),
+        "dataset_summary_csv_path_relative": _relative_path(dataset_summary_csv_path),
+        "data_quality_report_path": str(data_quality_report_path.resolve()),
+        "data_quality_report_path_relative": _relative_path(data_quality_report_path),
+        "class_balance_report_path": str(class_balance_report_path.resolve()),
+        "class_balance_report_path_relative": _relative_path(class_balance_report_path),
+        "missingness_report_path": str(missingness_report_path.resolve()),
+        "missingness_report_path_relative": _relative_path(missingness_report_path),
+        "leakage_audit_path": str(leakage_audit_path.resolve()),
+        "leakage_audit_path_relative": _relative_path(leakage_audit_path),
+        "external_dataset_card_path": str(external_dataset_card_path.resolve()),
+        "external_dataset_card_path_relative": _relative_path(external_dataset_card_path),
+        "external_dataset_summary_path": str(external_dataset_summary_path.resolve()),
+        "external_dataset_summary_path_relative": _relative_path(external_dataset_summary_path),
+        "external_validation_compatibility_path": str(
+            external_validation_compatibility_path.resolve()
+        ),
+        "external_validation_compatibility_path_relative": _relative_path(
+            external_validation_compatibility_path
+        ),
         "tuning_summary_path": str(tuning_summary_path.resolve()),
         "tuning_summary_path_relative": _relative_path(tuning_summary_path),
         "tuning_best_params_path": str(tuning_best_params_path.resolve()),
@@ -451,6 +541,10 @@ def build_run_result_payload(
         "base_run_id": str(base_run_id),
         "evidence_run_role": str(evidence_run_role),
         "evidence_policy_effective": dict(evidence_policy_effective),
+        "data_policy_effective": (
+            dict(data_policy_effective) if isinstance(data_policy_effective, dict) else None
+        ),
+        "data_artifacts": dict(data_artifacts) if isinstance(data_artifacts, dict) else None,
         "metric_policy_effective": metric_policy_effective_payload(metric_policy_effective),
         "methodology_policy_name": methodology_policy_name,
         "class_weight_policy": class_weight_policy,

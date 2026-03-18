@@ -294,6 +294,7 @@ def adapt_confirmatory_freeze_to_thesis_protocol(
 ) -> ThesisProtocol:
     primary_analysis = dict(payload.get("primary_analysis", {}))
     target = dict(payload.get("target", {}))
+    dataset_contract = dict(payload.get("dataset_contract", {}))
     controls = dict(payload.get("controls", {}))
     subgroups = dict(payload.get("subgroups", {}))
     secondary_analyses = list(payload.get("secondary_analyses", []))
@@ -406,6 +407,48 @@ def adapt_confirmatory_freeze_to_thesis_protocol(
                 str(value) for value in list(subgroups.get("allowed", ["subject", "task", "modality"]))
             ],
             "min_samples_per_group": int(subgroups.get("min_samples_per_group", 20)),
+        },
+        "data_policy": {
+            "class_balance": {
+                "enabled": True,
+                "axes": ["overall", "subject", "session", "task", "modality"],
+                "min_class_fraction_warning": 0.05,
+                "min_class_fraction_blocking": None,
+            },
+            "missingness": {
+                "enabled": True,
+                "max_missing_fraction_warning": 0.1,
+                "max_missing_fraction_blocking": None,
+            },
+            "leakage": {
+                "enabled": True,
+                "fail_on_duplicate_sample_id": True,
+                "warn_on_duplicate_beta_path": True,
+                "fail_on_duplicate_beta_path": False,
+                "fail_on_subject_overlap_for_transfer": True,
+                "fail_on_cv_group_overlap": True,
+            },
+            "external_validation": {
+                "enabled": False,
+                "mode": "compatibility_only",
+                "require_compatible": False,
+                "require_for_official_runs": False,
+                "datasets": [],
+            },
+            "required_index_columns": [
+                str(value)
+                for value in list(dataset_contract.get("allowed_index_columns", []))
+            ],
+            "intended_use": (
+                "Frozen confirmatory internal validation for thesis_confirmatory_v1."
+            ),
+            "not_intended_use": [
+                "External generalization claims from internal confirmatory runs.",
+                "Causal or clinical claims.",
+            ],
+            "known_limitations": [
+                "External validation is compatibility-only in this phase."
+            ],
         },
         "evidence_policy": {
             "repeat_evaluation": {

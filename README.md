@@ -113,6 +113,19 @@ Evidence layer policy (official comparison + confirmatory paths):
 - official checked-in locked comparison specs require significant paired wins (`require_significant_win=true`) for winner selection
 - calibration policy is explicit: calibration is performed when probability scores exist; otherwise runs emit `status=not_applicable` (no synthetic calibration)
 
+Official data-layer policy (official comparison + confirmatory paths):
+- contracts now carry explicit `data_policy` (class balance, missingness, leakage, external-validation compatibility).
+- structural integrity failures are blocking on official paths (missing required columns/fields, invalid grouping requirements, empty filtered subsets, blocking leakage findings).
+- threshold checks default to warnings unless explicitly configured as blocking in `data_policy`.
+- official run artifacts now include:
+  - `dataset_card.json`, `dataset_card.md`
+  - `dataset_summary.json`, `dataset_summary.csv`
+  - `data_quality_report.json`
+  - `class_balance_report.csv`, `missingness_report.csv`
+  - `leakage_audit.json`
+  - `external_dataset_card.json`, `external_dataset_summary.json`, `external_validation_compatibility.json`
+- external validation in this phase is compatibility-only (schema/coverage compatibility checks); it is explicitly labeled as external/non-confirmatory evidence.
+
 RC-1 hardening policy (official runs):
 - confirmatory and locked-comparison runs enforce strict preflight contract validation before execution
 - run artifacts now include deterministic provenance (`git_provenance` and `dataset_fingerprint`)

@@ -9,6 +9,7 @@ from Thesis_ML.config.framework_mode import FrameworkMode
 from Thesis_ML.config.methodology import (
     ClassWeightPolicy,
     ComparisonDecisionPolicy,
+    DataPolicy,
     EvidencePolicy,
     EvidenceRunRole,
     MethodologyPolicy,
@@ -39,6 +40,17 @@ REQUIRED_COMPARISON_ARTIFACTS = (
 REQUIRED_COMPARISON_RUN_ARTIFACTS = (
     "config.json",
     "metrics.json",
+    "dataset_card.json",
+    "dataset_card.md",
+    "dataset_summary.json",
+    "dataset_summary.csv",
+    "data_quality_report.json",
+    "class_balance_report.csv",
+    "missingness_report.csv",
+    "leakage_audit.json",
+    "external_dataset_card.json",
+    "external_dataset_summary.json",
+    "external_validation_compatibility.json",
     "fold_metrics.csv",
     "fold_splits.csv",
     "predictions.csv",
@@ -228,6 +240,7 @@ class ComparisonArtifactContract(_ComparisonModel):
             "repeat_id",
             "repeat_count",
             "base_run_id",
+            "data_policy_effective",
             "comparison_id",
             "comparison_version",
             "comparison_variant_id",
@@ -245,6 +258,35 @@ class ComparisonArtifactContract(_ComparisonModel):
             raise ValueError(
                 "required_comparison_artifacts is missing entries: " + ", ".join(missing)
             )
+        missing_run = [
+            value
+            for value in (
+                "config.json",
+                "metrics.json",
+                "dataset_card.json",
+                "dataset_summary.json",
+                "data_quality_report.json",
+                "leakage_audit.json",
+            )
+            if value not in self.required_run_artifacts
+        ]
+        if missing_run:
+            raise ValueError(
+                "required_run_artifacts is missing required entries: "
+                + ", ".join(sorted(missing_run))
+            )
+        for key in (
+            "framework_mode",
+            "canonical_run",
+            "data_policy_effective",
+            "comparison_id",
+            "comparison_version",
+            "comparison_variant_id",
+        ):
+            if key not in self.required_run_metadata_fields:
+                raise ValueError(
+                    "required_run_metadata_fields is missing required key: " + key
+                )
         return self
 
 
@@ -263,6 +305,7 @@ class ComparisonSpec(_ComparisonModel):
     subgroup_reporting_policy: SubgroupReportingPolicy = Field(
         default_factory=SubgroupReportingPolicy
     )
+    data_policy: DataPolicy = Field(default_factory=DataPolicy)
     decision_policy: ComparisonDecisionPolicy = Field(default_factory=ComparisonDecisionPolicy)
     evidence_policy: EvidencePolicy
     interpretability_policy: ComparisonInterpretabilityPolicy = Field(
@@ -477,6 +520,7 @@ class CompiledComparisonManifest(_ComparisonModel):
     methodology_policy: MethodologyPolicy
     metric_policy: MetricPolicy
     subgroup_reporting_policy: SubgroupReportingPolicy
+    data_policy: DataPolicy
     decision_policy: ComparisonDecisionPolicy
     evidence_policy: EvidencePolicy
     variant_ids: list[str] = Field(min_length=1)
@@ -499,6 +543,7 @@ class CompiledComparisonManifest(_ComparisonModel):
             "repeat_id",
             "repeat_count",
             "base_run_id",
+            "data_policy_effective",
             "comparison_id",
             "comparison_version",
             "comparison_variant_id",
@@ -514,6 +559,19 @@ class CompiledComparisonManifest(_ComparisonModel):
             raise ValueError(
                 "CompiledComparisonManifest.required_run_metadata_fields must not be empty."
             )
+        for key in (
+            "framework_mode",
+            "canonical_run",
+            "data_policy_effective",
+            "comparison_id",
+            "comparison_version",
+            "comparison_variant_id",
+        ):
+            if key not in self.required_run_metadata_fields:
+                raise ValueError(
+                    "CompiledComparisonManifest.required_run_metadata_fields is missing required key: "
+                    + key
+                )
         return self
 
 

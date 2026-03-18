@@ -55,6 +55,44 @@ def _write_confirmatory_output(root: Path) -> Path:
             "permutation_metric": "balanced_accuracy",
             "higher_is_better": True,
         },
+        "data_policy_effective": {
+            "class_balance": {
+                "enabled": True,
+                "axes": ["overall"],
+                "min_class_fraction_warning": 0.05,
+                "min_class_fraction_blocking": None,
+            },
+            "missingness": {
+                "enabled": True,
+                "max_missing_fraction_warning": 0.1,
+                "max_missing_fraction_blocking": None,
+            },
+            "leakage": {
+                "enabled": True,
+                "fail_on_duplicate_sample_id": True,
+                "warn_on_duplicate_beta_path": True,
+                "fail_on_duplicate_beta_path": False,
+                "fail_on_subject_overlap_for_transfer": True,
+                "fail_on_cv_group_overlap": True,
+            },
+            "external_validation": {
+                "enabled": False,
+                "mode": "compatibility_only",
+                "require_compatible": False,
+                "require_for_official_runs": False,
+                "datasets": [],
+            },
+            "required_index_columns": [],
+            "intended_use": "unit test",
+            "not_intended_use": [],
+            "known_limitations": [],
+        },
+        "data_artifacts": {
+            "dataset_card_json": str((run_dir / "dataset_card.json").resolve()),
+            "dataset_summary_json": str((run_dir / "dataset_summary.json").resolve()),
+            "data_quality_report_json": str((run_dir / "data_quality_report.json").resolve()),
+            "leakage_audit_json": str((run_dir / "leakage_audit.json").resolve()),
+        },
         "evidence_policy_effective": {
             "repeat_evaluation": {"repeat_count": 1, "seed_stride": 1000},
             "confidence_intervals": {
@@ -108,6 +146,81 @@ def _write_confirmatory_output(root: Path) -> Path:
     )
     (run_dir / "fold_splits.csv").write_text("fold,train,test\n0,a,b\n", encoding="utf-8")
     (run_dir / "predictions.csv").write_text("y_true,y_pred\nanger,anger\n", encoding="utf-8")
+    (run_dir / "dataset_card.json").write_text(
+        json.dumps(
+            {
+                "framework_mode": "confirmatory",
+                "dataset_identity": {"dataset_fingerprint": dataset_fingerprint},
+                "target_definition": {"target_column": "coarse_affect"},
+                "coverage": {"selected_subset": {"n_rows": 2}},
+                "external_validation": {"enabled": False, "mode": "compatibility_only", "status": "not_configured", "datasets": []},
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (run_dir / "dataset_card.md").write_text("# Dataset Card\n", encoding="utf-8")
+    (run_dir / "dataset_summary.json").write_text(
+        json.dumps(
+            {
+                "framework_mode": "confirmatory",
+                "target_column": "coarse_affect",
+                "full_index": {"n_rows": 2},
+                "selected_subset": {"n_rows": 2},
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (run_dir / "dataset_summary.csv").write_text(
+        "scope,n_rows,n_subjects,n_sessions\nselected_subset,2,1,2\n",
+        encoding="utf-8",
+    )
+    (run_dir / "data_quality_report.json").write_text(
+        json.dumps(
+            {
+                "status": "pass",
+                "n_blocking_issues": 0,
+                "n_warnings": 0,
+                "blocking_issues": [],
+                "warnings": [],
+                "leakage_audit_verdict": "pass",
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (run_dir / "class_balance_report.csv").write_text(
+        "scope,axis,group_value,n_samples,n_classes,min_class_fraction,status\nselected_subset,overall,__overall__,2,2,0.5,ok\n",
+        encoding="utf-8",
+    )
+    (run_dir / "missingness_report.csv").write_text(
+        "scope,column,missing_count,missing_fraction,status\nselected_subset,coarse_affect,0,0.0,ok\n",
+        encoding="utf-8",
+    )
+    (run_dir / "leakage_audit.json").write_text(
+        json.dumps({"verdict": "pass", "checks": []}, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    (run_dir / "external_dataset_card.json").write_text(
+        json.dumps({"enabled": False, "datasets": []}, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    (run_dir / "external_dataset_summary.json").write_text(
+        json.dumps({"enabled": False, "n_datasets": 0, "datasets": []}, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    (run_dir / "external_validation_compatibility.json").write_text(
+        json.dumps(
+            {"enabled": False, "mode": "compatibility_only", "status": "not_configured", "datasets": []},
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
 
     (root / "protocol.json").write_text(
         json.dumps(
@@ -135,6 +248,17 @@ def _write_confirmatory_output(root: Path) -> Path:
                 "required_run_artifacts": [
                     "config.json",
                     "metrics.json",
+                    "dataset_card.json",
+                    "dataset_card.md",
+                    "dataset_summary.json",
+                    "dataset_summary.csv",
+                    "data_quality_report.json",
+                    "class_balance_report.csv",
+                    "missingness_report.csv",
+                    "leakage_audit.json",
+                    "external_dataset_card.json",
+                    "external_dataset_summary.json",
+                    "external_validation_compatibility.json",
                     "fold_splits.csv",
                     "predictions.csv",
                 ],
@@ -142,6 +266,7 @@ def _write_confirmatory_output(root: Path) -> Path:
                     "framework_mode",
                     "canonical_run",
                     "methodology_policy_name",
+                    "data_policy_effective",
                     "protocol_id",
                     "protocol_version",
                     "suite_id",

@@ -34,6 +34,7 @@ Core package root: `src/Thesis_ML/`
 - `experiments/`
   - full pipeline wrapper (`run_experiment.py`)
   - official preflight + artifact contract validation (`official_contracts.py`)
+  - official data-policy evaluation + data artifact writer (`data_reporting.py`)
   - structured error taxonomy for machine-readable failures (`errors.py`)
   - deterministic provenance helpers (git + dataset fingerprints) (`provenance.py`)
   - runtime policy/context resolution (`runtime_policies.py`)
@@ -144,6 +145,9 @@ Framework guardrails:
 - decision metric, tuning metric, and permutation metric are resolved from primary metric and must align (drift raises validation/runtime errors).
 - secondary metrics are emitted for descriptive reporting only.
 - official artifacts (`config.json`, `metrics.json`, comparison/protocol manifests and summaries) persist `metric_policy_effective` for auditability.
+- official comparison/confirmatory runs persist `data_policy_effective` and standardized data-layer artifacts
+  (`dataset_card.*`, `dataset_summary.*`, `data_quality_report.json`, class/missingness reports, `leakage_audit.json`,
+  and external compatibility artifacts when configured).
 - run-level status artifacts (`run_status.json`) include structured failure diagnostics (`error_code`, `error_type`, `failure_stage`) plus warning/timing/resource summaries.
 - official run artifacts persist deterministic provenance blocks (`git_provenance`, `dataset_fingerprint`) for rerun auditability.
 

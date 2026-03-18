@@ -9,6 +9,7 @@ import pandas as pd
 from Thesis_ML.config.framework_mode import FrameworkMode
 from Thesis_ML.config.metric_policy import validate_metric_name
 from Thesis_ML.data.affect_labels import with_coarse_affect
+from Thesis_ML.experiments.data_reporting import evaluate_official_data_policy
 from Thesis_ML.experiments.errors import (
     OfficialArtifactContractError,
     OfficialContractValidationError,
@@ -45,6 +46,8 @@ class OfficialPreflightResult:
     index_row_count: int
     required_run_artifacts: list[str]
     required_run_metadata_fields: list[str]
+    data_policy_effective: dict[str, Any]
+    data_assessment: dict[str, Any]
 
 
 def _require_columns(frame: pd.DataFrame, *, required: set[str], label: str) -> None:
@@ -556,11 +559,41 @@ def validate_official_preflight(
                 },
             )
 
+    data_assessment = evaluate_official_data_policy(
+        framework_mode=framework_mode,
+        index_csv=index_csv,
+        data_root=data_root,
+        cache_dir=cache_dir,
+        full_index_df=frame,
+        selected_index_df=selected,
+        target_column=target_column,
+        cv_mode=cv_mode,
+        subject=subject,
+        train_subject=train_subject,
+        test_subject=test_subject,
+        filter_task=filter_task,
+        filter_modality=filter_modality,
+        official_context=official_context,
+    )
+    blocking_issues = list(data_assessment.get("blocking_issues", []))
+    if blocking_issues:
+        first_issue = blocking_issues[0] if isinstance(blocking_issues[0], dict) else {}
+        raise OfficialContractValidationError(
+            "Official data-policy validation failed with blocking issues. "
+            "See data_quality_report details.",
+            details={
+                "first_blocking_issue": first_issue,
+                "n_blocking_issues": int(len(blocking_issues)),
+            },
+        )
+
     return OfficialPreflightResult(
         selected_index_df=selected,
         index_row_count=index_row_count,
         required_run_artifacts=artifact_requirements,
         required_run_metadata_fields=metadata_fields,
+        data_policy_effective=dict(data_assessment.get("data_policy_effective", {})),
+        data_assessment=data_assessment,
     )
 
 
@@ -636,6 +669,27 @@ def validate_run_artifact_contract(
                 "metrics_metric_policy_type": type(metrics_metric_policy).__name__,
             },
             )
+
+    config_data_policy = config_payload.get("data_policy_effective")
+    metrics_data_policy = metrics_payload.get("data_policy_effective")
+    if not isinstance(config_data_policy, dict) or not isinstance(metrics_data_policy, dict):
+        raise OfficialArtifactContractError(
+            "Official run artifacts must include data_policy_effective in both config and metrics.",
+            details={
+                "config_data_policy_type": type(config_data_policy).__name__,
+                "metrics_data_policy_type": type(metrics_data_policy).__name__,
+            },
+        )
+    config_data_artifacts = config_payload.get("data_artifacts")
+    metrics_data_artifacts = metrics_payload.get("data_artifacts")
+    if not isinstance(config_data_artifacts, dict) or not isinstance(metrics_data_artifacts, dict):
+        raise OfficialArtifactContractError(
+            "Official run artifacts must include data_artifacts in both config and metrics.",
+            details={
+                "config_data_artifacts_type": type(config_data_artifacts).__name__,
+                "metrics_data_artifacts_type": type(metrics_data_artifacts).__name__,
+            },
+        )
 
     if framework_mode == FrameworkMode.CONFIRMATORY:
         config_fingerprint = config_payload.get("dataset_fingerprint")

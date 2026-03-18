@@ -36,6 +36,7 @@ from Thesis_ML.config.methodology import (
 )
 from Thesis_ML.config.paths import DEFAULT_EXPERIMENT_REPORTS_ROOT
 from Thesis_ML.experiments.cache_loading import load_features_from_cache
+from Thesis_ML.experiments.data_reporting import write_official_data_artifacts
 from Thesis_ML.experiments.errors import exception_failure_payload
 from Thesis_ML.experiments.execution_policy import (
     prepare_report_dir,
@@ -284,6 +285,7 @@ def run_experiment(
     base_run_id: str | None = None,
     evidence_run_role: str = "primary",
     evidence_policy: dict[str, Any] | None = None,
+    data_policy: dict[str, Any] | None = None,
     methodology_policy_name: str = MethodologyPolicyName.FIXED_BASELINES_ONLY.value,
     class_weight_policy: str = "none",
     tuning_enabled: bool = False,
@@ -318,6 +320,9 @@ def run_experiment(
     warnings_payload: list[dict[str, Any]] = []
     resource_summary: dict[str, Any] = {}
     dataset_fingerprint: dict[str, Any] | None = None
+    data_policy_effective: dict[str, Any] = {}
+    data_assessment: dict[str, Any] = {}
+    data_artifact_info: dict[str, Any] = {}
     required_run_artifacts: list[str] = []
     required_run_metadata_fields: list[str] = []
 
@@ -427,6 +432,18 @@ def run_experiment(
         if isinstance(evidence_policy, dict)
         else EvidencePolicy().model_dump(mode="json")
     )
+    resolved_data_policy_payload = (
+        dict(official_context.get("data_policy"))
+        if isinstance(official_context.get("data_policy"), dict)
+        else dict(data_policy)
+        if isinstance(data_policy, dict)
+        else {}
+    )
+    if (
+        resolved_framework_mode in {FrameworkMode.CONFIRMATORY, FrameworkMode.LOCKED_COMPARISON}
+        and "data_policy" not in official_context
+    ):
+        official_context["data_policy"] = dict(resolved_data_policy_payload)
     evidence_policy_model = EvidencePolicy.model_validate(resolved_evidence_policy_payload)
     stage_timings["context_resolution"] = float(perf_counter() - context_start)
 
@@ -536,6 +553,8 @@ def run_experiment(
         )
         required_run_artifacts = list(preflight.required_run_artifacts)
         required_run_metadata_fields = list(preflight.required_run_metadata_fields)
+        data_policy_effective = dict(preflight.data_policy_effective)
+        data_assessment = dict(preflight.data_assessment)
         stage_timings["preflight_validation"] = float(perf_counter() - preflight_start)
 
     run_mode = prepare_report_dir(
@@ -548,6 +567,17 @@ def run_experiment(
     fold_metrics_path = report_dir / "fold_metrics.csv"
     fold_splits_path = report_dir / "fold_splits.csv"
     predictions_path = report_dir / "predictions.csv"
+    dataset_card_json_path = report_dir / "dataset_card.json"
+    dataset_card_md_path = report_dir / "dataset_card.md"
+    dataset_summary_json_path = report_dir / "dataset_summary.json"
+    dataset_summary_csv_path = report_dir / "dataset_summary.csv"
+    data_quality_report_path = report_dir / "data_quality_report.json"
+    class_balance_report_path = report_dir / "class_balance_report.csv"
+    missingness_report_path = report_dir / "missingness_report.csv"
+    leakage_audit_path = report_dir / "leakage_audit.json"
+    external_dataset_card_path = report_dir / "external_dataset_card.json"
+    external_dataset_summary_path = report_dir / "external_dataset_summary.json"
+    external_validation_compatibility_path = report_dir / "external_validation_compatibility.json"
     metrics_path = report_dir / "metrics.json"
     subgroup_metrics_json_path = report_dir / "subgroup_metrics.json"
     subgroup_metrics_csv_path = report_dir / "subgroup_metrics.csv"
@@ -567,6 +597,73 @@ def run_experiment(
         message=f"run_mode={run_mode}",
         stage_timings_seconds=stage_timings,
     )
+    if resolved_framework_mode in {
+        FrameworkMode.CONFIRMATORY,
+        FrameworkMode.LOCKED_COMPARISON,
+    }:
+        data_artifacts_start = perf_counter()
+        try:
+            data_artifact_info = write_official_data_artifacts(
+                report_dir=report_dir,
+                assessment=data_assessment,
+                framework_mode=resolved_framework_mode,
+                index_csv=index_csv,
+                data_root=data_root,
+                cache_dir=cache_dir,
+                target_column=target_column,
+                cv_mode=cv_mode,
+                subject=subject,
+                train_subject=train_subject,
+                test_subject=test_subject,
+                filter_task=filter_task,
+                filter_modality=filter_modality,
+                sample_unit=(
+                    str(official_context.get("sample_unit"))
+                    if official_context.get("sample_unit") is not None
+                    else None
+                ),
+                label_policy=(
+                    str(official_context.get("label_policy"))
+                    if official_context.get("label_policy") is not None
+                    else None
+                ),
+                target_mapping_version=(
+                    str(confirmatory_lock_payload.get("target_mapping_version"))
+                    if confirmatory_lock_payload
+                    else None
+                ),
+                target_mapping_hash=(
+                    str(confirmatory_lock_payload.get("target_mapping_hash"))
+                    if confirmatory_lock_payload
+                    else None
+                ),
+                dataset_fingerprint=dataset_fingerprint,
+            )
+            if not data_policy_effective:
+                data_policy_effective = dict(
+                    data_artifact_info.get("data_policy_effective", {})
+                )
+        except Exception as exc:
+            failure = _failure_payload(exc)
+            stage_timings["total"] = float(perf_counter() - overall_start)
+            write_run_status(
+                report_dir,
+                run_id=resolved_run_id,
+                status="failed",
+                error=str(exc),
+                error_code=str(failure["error_code"]),
+                error_type=str(failure["error_type"]),
+                failure_stage=str(failure["failure_stage"]),
+                error_details=dict(failure["error_details"]),
+                warnings=warnings_payload,
+                warning_summary=_warning_summary(warnings_payload),
+                stage_timings_seconds=stage_timings,
+                resource_summary=resource_summary,
+            )
+            raise
+        stage_timings["data_artifact_generation"] = float(
+            perf_counter() - data_artifacts_start
+        )
     try:
         execute_start = perf_counter()
         with warnings.catch_warnings(record=True) as warning_records:
@@ -719,6 +816,16 @@ def run_experiment(
             subgroup_metrics_json_path=subgroup_metrics_json_path,
             subgroup_metrics_csv_path=subgroup_metrics_csv_path,
             metric_policy_effective=metric_policy_effective,
+            data_policy_effective=(
+                data_policy_effective
+                if data_policy_effective
+                else dict(data_artifact_info.get("data_policy_effective", {}))
+            ),
+            data_artifacts=(
+                dict(data_artifact_info.get("data_artifacts", {}))
+                if isinstance(data_artifact_info, dict)
+                else None
+            ),
             identity=identity,
             dataset_fingerprint=dataset_fingerprint,
             git_provenance=git_provenance,
@@ -793,6 +900,11 @@ def run_experiment(
             base_run_id=str(resolved_base_run_id),
             evidence_run_role=str(resolved_evidence_run_role),
             evidence_policy_effective=evidence_policy_model.model_dump(mode="json"),
+            data_policy_effective=(
+                data_policy_effective
+                if data_policy_effective
+                else dict(data_artifact_info.get("data_policy_effective", {}))
+            ),
             primary_metric_name=resolved_primary_metric_name,
             permutation_metric_name=resolved_permutation_metric_name,
             metric_policy_effective=metric_policy_effective,
@@ -812,6 +924,22 @@ def run_experiment(
             subgroup_min_samples_per_group=int(subgroup_policy.min_samples_per_group),
             subgroup_metrics_json_path=subgroup_metrics_json_path,
             subgroup_metrics_csv_path=subgroup_metrics_csv_path,
+            dataset_card_json_path=dataset_card_json_path,
+            dataset_card_md_path=dataset_card_md_path,
+            dataset_summary_json_path=dataset_summary_json_path,
+            dataset_summary_csv_path=dataset_summary_csv_path,
+            data_quality_report_path=data_quality_report_path,
+            class_balance_report_path=class_balance_report_path,
+            missingness_report_path=missingness_report_path,
+            leakage_audit_path=leakage_audit_path,
+            external_dataset_card_path=external_dataset_card_path,
+            external_dataset_summary_path=external_dataset_summary_path,
+            external_validation_compatibility_path=external_validation_compatibility_path,
+            data_artifacts=(
+                dict(data_artifact_info.get("data_artifacts", {}))
+                if isinstance(data_artifact_info, dict)
+                else None
+            ),
             filter_task=filter_task,
             filter_modality=filter_modality,
             n_permutations=n_permutations,
@@ -974,6 +1102,17 @@ def run_experiment(
         metrics_path=metrics_path,
         subgroup_metrics_json_path=subgroup_metrics_json_path,
         subgroup_metrics_csv_path=subgroup_metrics_csv_path,
+        dataset_card_json_path=dataset_card_json_path,
+        dataset_card_md_path=dataset_card_md_path,
+        dataset_summary_json_path=dataset_summary_json_path,
+        dataset_summary_csv_path=dataset_summary_csv_path,
+        data_quality_report_path=data_quality_report_path,
+        class_balance_report_path=class_balance_report_path,
+        missingness_report_path=missingness_report_path,
+        leakage_audit_path=leakage_audit_path,
+        external_dataset_card_path=external_dataset_card_path,
+        external_dataset_summary_path=external_dataset_summary_path,
+        external_validation_compatibility_path=external_validation_compatibility_path,
         tuning_summary_path=tuning_summary_path,
         tuning_best_params_path=tuning_best_params_path,
         calibration_summary_path=calibration_summary_path,
@@ -997,6 +1136,16 @@ def run_experiment(
         base_run_id=str(resolved_base_run_id),
         evidence_run_role=str(resolved_evidence_run_role),
         evidence_policy_effective=evidence_policy_model.model_dump(mode="json"),
+        data_policy_effective=(
+            data_policy_effective
+            if data_policy_effective
+            else dict(data_artifact_info.get("data_policy_effective", {}))
+        ),
+        data_artifacts=(
+            dict(data_artifact_info.get("data_artifacts", {}))
+            if isinstance(data_artifact_info, dict)
+            else None
+        ),
         metric_policy_effective=metric_policy_effective,
         methodology_policy_name=methodology_policy.policy_name.value,
         class_weight_policy=methodology_policy.class_weight_policy.value,

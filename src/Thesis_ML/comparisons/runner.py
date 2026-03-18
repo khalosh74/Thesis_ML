@@ -32,6 +32,7 @@ def _comparison_context_payload(
     decision_metric: str,
     required_run_metadata_fields: list[str],
     evidence_policy_payload: dict[str, Any],
+    data_policy_payload: dict[str, Any],
 ) -> dict[str, Any]:
     metric_policy = resolve_effective_metric_policy(
         primary_metric=spec.primary_metric,
@@ -58,6 +59,7 @@ def _comparison_context_payload(
         "subgroup_min_samples_per_group": int(spec.subgroup_min_samples_per_group),
         "artifact_requirements": list(spec.artifact_requirements),
         "required_run_metadata_fields": list(required_run_metadata_fields),
+        "data_policy": dict(data_policy_payload),
         "repeat_id": int(spec.repeat_id),
         "repeat_count": int(spec.repeat_count),
         "base_run_id": str(spec.base_run_id),
@@ -197,6 +199,7 @@ def execute_compiled_comparison(
                     evidence_policy_payload=compiled_manifest.evidence_policy.model_dump(
                         mode="json"
                     ),
+                    data_policy_payload=compiled_manifest.data_policy.model_dump(mode="json"),
                 ),
                 repeat_id=int(spec.repeat_id),
                 repeat_count=int(spec.repeat_count),

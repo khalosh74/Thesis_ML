@@ -435,6 +435,14 @@ def _suite_summary(
             "higher_is_better": bool(metric_policy_effective.higher_is_better),
         },
         "subgroup_reporting_enabled": bool(compiled_manifest.subgroup_reporting_policy.enabled),
+        "data_policy_effective": compiled_manifest.data_policy.model_dump(mode="json"),
+        "external_validation_status": {
+            "enabled": bool(compiled_manifest.data_policy.external_validation.enabled),
+            "mode": str(compiled_manifest.data_policy.external_validation.mode),
+            "require_compatible": bool(
+                compiled_manifest.data_policy.external_validation.require_compatible
+            ),
+        },
         "confirmatory_status": str(
             reporting_contract.get("deviations_from_protocol", {}).get(
                 "confirmatory_status",

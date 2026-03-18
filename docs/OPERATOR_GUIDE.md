@@ -111,6 +111,15 @@ Official metric policy:
 - calibration status is explicit in run artifacts:
   - `performed` when probability outputs are available
   - `not_applicable` when a model path has no probability outputs
+- official comparison/confirmatory contracts also declare explicit `data_policy`:
+  - structural data/leakage blockers fail official preflight
+  - class-balance and missingness thresholds warn by default unless set to blocking
+  - external validation is compatibility-only in this phase (explicitly labeled external/non-confirmatory)
+- official run artifacts include standardized data-layer outputs:
+  `dataset_card.json`, `dataset_card.md`, `dataset_summary.json`, `dataset_summary.csv`,
+  `data_quality_report.json`, `class_balance_report.csv`, `missingness_report.csv`,
+  `leakage_audit.json`, `external_dataset_card.json`, `external_dataset_summary.json`,
+  `external_validation_compatibility.json`
 
 Architecture ownership (where to extend safely):
 - runner policy resolution belongs in `src/Thesis_ML/experiments/runtime_policies.py`

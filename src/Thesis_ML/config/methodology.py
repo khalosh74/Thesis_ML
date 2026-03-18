@@ -11,6 +11,7 @@ from Thesis_ML.config.metric_policy import (
 )
 
 ALLOWED_SUBGROUP_DIMENSIONS = frozenset({"label", "task", "modality", "session", "subject"})
+ALLOWED_DATA_BALANCE_AXES = frozenset({"overall", "subject", "session", "task", "modality"})
 
 
 class _MethodologyModel(BaseModel):
@@ -260,3 +261,158 @@ class EvidencePolicy(_MethodologyModel):
     required_package: RequiredEvidencePackagePolicy = Field(
         default_factory=RequiredEvidencePackagePolicy
     )
+
+
+class ClassBalanceDataPolicy(_MethodologyModel):
+    enabled: bool = True
+    axes: list[str] = Field(
+        default_factory=lambda: ["overall", "subject", "session", "task", "modality"]
+    )
+    min_class_fraction_warning: float | None = 0.05
+    min_class_fraction_blocking: float | None = None
+
+    @model_validator(mode="after")
+    def _validate_balance_policy(self) -> ClassBalanceDataPolicy:
+        if len(set(self.axes)) != len(self.axes):
+            raise ValueError("data_policy.class_balance.axes must be unique.")
+        invalid = [value for value in self.axes if value not in ALLOWED_DATA_BALANCE_AXES]
+        if invalid:
+            allowed = ", ".join(sorted(ALLOWED_DATA_BALANCE_AXES))
+            raise ValueError(
+                "Unsupported data_policy.class_balance.axes values: "
+                + ", ".join(sorted(set(invalid)))
+                + f". Allowed values: {allowed}."
+            )
+        if self.min_class_fraction_warning is not None:
+            value = float(self.min_class_fraction_warning)
+            if value < 0.0 or value > 1.0:
+                raise ValueError(
+                    "data_policy.class_balance.min_class_fraction_warning must be in [0.0, 1.0]."
+                )
+        if self.min_class_fraction_blocking is not None:
+            value = float(self.min_class_fraction_blocking)
+            if value < 0.0 or value > 1.0:
+                raise ValueError(
+                    "data_policy.class_balance.min_class_fraction_blocking must be in [0.0, 1.0]."
+                )
+        if (
+            self.min_class_fraction_warning is not None
+            and self.min_class_fraction_blocking is not None
+            and float(self.min_class_fraction_blocking) > float(self.min_class_fraction_warning)
+        ):
+            raise ValueError(
+                "data_policy.class_balance.min_class_fraction_blocking must be <= "
+                "min_class_fraction_warning."
+            )
+        return self
+
+
+class MissingnessDataPolicy(_MethodologyModel):
+    enabled: bool = True
+    max_missing_fraction_warning: float | None = 0.1
+    max_missing_fraction_blocking: float | None = None
+
+    @model_validator(mode="after")
+    def _validate_missingness_policy(self) -> MissingnessDataPolicy:
+        if self.max_missing_fraction_warning is not None:
+            value = float(self.max_missing_fraction_warning)
+            if value < 0.0 or value > 1.0:
+                raise ValueError(
+                    "data_policy.missingness.max_missing_fraction_warning must be in [0.0, 1.0]."
+                )
+        if self.max_missing_fraction_blocking is not None:
+            value = float(self.max_missing_fraction_blocking)
+            if value < 0.0 or value > 1.0:
+                raise ValueError(
+                    "data_policy.missingness.max_missing_fraction_blocking must be in [0.0, 1.0]."
+                )
+        if (
+            self.max_missing_fraction_warning is not None
+            and self.max_missing_fraction_blocking is not None
+            and float(self.max_missing_fraction_blocking)
+            < float(self.max_missing_fraction_warning)
+        ):
+            raise ValueError(
+                "data_policy.missingness.max_missing_fraction_blocking must be >= "
+                "max_missing_fraction_warning."
+            )
+        return self
+
+
+class LeakageDataPolicy(_MethodologyModel):
+    enabled: bool = True
+    fail_on_duplicate_sample_id: bool = True
+    warn_on_duplicate_beta_path: bool = True
+    fail_on_duplicate_beta_path: bool = False
+    fail_on_subject_overlap_for_transfer: bool = True
+    fail_on_cv_group_overlap: bool = True
+
+
+class ExternalDatasetCompatibilitySpec(_MethodologyModel):
+    dataset_id: str = Field(min_length=1)
+    index_csv: str = Field(min_length=1)
+    target_column: str | None = None
+    required_columns: list[str] = Field(default_factory=list)
+    required: bool = False
+    notes: str | None = None
+
+    @model_validator(mode="after")
+    def _validate_external_dataset(self) -> ExternalDatasetCompatibilitySpec:
+        if len(set(self.required_columns)) != len(self.required_columns):
+            raise ValueError(
+                "data_policy.external_validation.datasets[].required_columns must be unique."
+            )
+        return self
+
+
+class ExternalValidationDataPolicy(_MethodologyModel):
+    enabled: bool = False
+    mode: Literal["compatibility_only"] = "compatibility_only"
+    require_compatible: bool = False
+    require_for_official_runs: bool = False
+    datasets: list[ExternalDatasetCompatibilitySpec] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _validate_external_validation_policy(self) -> ExternalValidationDataPolicy:
+        if self.require_for_official_runs and not self.enabled:
+            raise ValueError(
+                "data_policy.external_validation.require_for_official_runs=true requires enabled=true."
+            )
+        if self.enabled and self.require_for_official_runs and not self.datasets:
+            raise ValueError(
+                "data_policy.external_validation enabled+required requires at least one dataset."
+            )
+        dataset_ids = [dataset.dataset_id for dataset in self.datasets]
+        if len(set(dataset_ids)) != len(dataset_ids):
+            raise ValueError(
+                "data_policy.external_validation.datasets contains duplicate dataset_id values."
+            )
+        return self
+
+
+class DataPolicy(_MethodologyModel):
+    class_balance: ClassBalanceDataPolicy = Field(default_factory=ClassBalanceDataPolicy)
+    missingness: MissingnessDataPolicy = Field(default_factory=MissingnessDataPolicy)
+    leakage: LeakageDataPolicy = Field(default_factory=LeakageDataPolicy)
+    external_validation: ExternalValidationDataPolicy = Field(
+        default_factory=ExternalValidationDataPolicy
+    )
+    required_index_columns: list[str] = Field(default_factory=list)
+    intended_use: str = (
+        "Official confirmatory/comparison evaluation under locked protocol/comparison contracts."
+    )
+    not_intended_use: list[str] = Field(
+        default_factory=lambda: [
+            "Exploratory hypothesis generation from official artifacts.",
+            "Causal, clinical, or localization claims unsupported by the protocol.",
+        ]
+    )
+    known_limitations: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _validate_data_policy(self) -> DataPolicy:
+        if len(set(self.required_index_columns)) != len(self.required_index_columns):
+            raise ValueError("data_policy.required_index_columns must be unique.")
+        if not self.intended_use.strip():
+            raise ValueError("data_policy.intended_use must be non-empty.")
+        return self

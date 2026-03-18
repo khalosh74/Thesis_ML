@@ -355,6 +355,7 @@ def compile_protocol(
         methodology_policy=protocol.methodology_policy,
         metric_policy=protocol.metric_policy,
         subgroup_reporting_policy=protocol.subgroup_reporting_policy,
+        data_policy=protocol.data_policy,
         evidence_policy=protocol.evidence_policy,
         suite_ids=selected_suite_ids,
         runs=runs,

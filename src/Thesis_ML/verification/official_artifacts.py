@@ -33,6 +33,17 @@ _REQUIRED_COMPARISON_ARTIFACTS = (
     "paired_model_comparisons.csv",
     "report_index.csv",
 )
+_REQUIRED_DATA_RUN_ARTIFACTS = (
+    "dataset_card.json",
+    "dataset_summary.json",
+    "data_quality_report.json",
+    "class_balance_report.csv",
+    "missingness_report.csv",
+    "leakage_audit.json",
+    "external_dataset_card.json",
+    "external_dataset_summary.json",
+    "external_validation_compatibility.json",
+)
 
 
 def _add_issue(
@@ -173,6 +184,118 @@ def _verify_metric_policy(
                     path=report_dir,
                     details={"metric_name": metric_name, "primary_metric": primary_metric},
                 ) 
+
+
+def _verify_data_layer_artifacts(
+    *,
+    config_payload: dict[str, Any],
+    metrics_payload: dict[str, Any],
+    issues: list[dict[str, Any]],
+    report_dir: Path,
+) -> None:
+    config_data_policy = config_payload.get("data_policy_effective")
+    metrics_data_policy = metrics_payload.get("data_policy_effective")
+    if not isinstance(config_data_policy, dict) or not isinstance(metrics_data_policy, dict):
+        _add_issue(
+            issues,
+            code="data_policy_missing",
+            message="Run config/metrics must include data_policy_effective.",
+            path=report_dir,
+        )
+    config_data_artifacts = config_payload.get("data_artifacts")
+    metrics_data_artifacts = metrics_payload.get("data_artifacts")
+    if not isinstance(config_data_artifacts, dict) or not isinstance(metrics_data_artifacts, dict):
+        _add_issue(
+            issues,
+            code="data_artifacts_metadata_missing",
+            message="Run config/metrics must include data_artifacts metadata object.",
+            path=report_dir,
+        )
+
+    for filename in _REQUIRED_DATA_RUN_ARTIFACTS:
+        artifact_path = report_dir / filename
+        if not artifact_path.exists():
+            _add_issue(
+                issues,
+                code="data_run_artifact_missing",
+                message=f"Missing required data-layer run artifact '{filename}'.",
+                path=artifact_path,
+            )
+
+    dataset_card = _load_json(report_dir / "dataset_card.json", issues, code_prefix="dataset_card")
+    if isinstance(dataset_card, dict):
+        for key in (
+            "framework_mode",
+            "dataset_identity",
+            "target_definition",
+            "coverage",
+            "external_validation",
+        ):
+            if key not in dataset_card:
+                _add_issue(
+                    issues,
+                    code="dataset_card_field_missing",
+                    message=f"dataset_card.json missing required field '{key}'.",
+                    path=report_dir / "dataset_card.json",
+                )
+
+    quality_report = _load_json(
+        report_dir / "data_quality_report.json",
+        issues,
+        code_prefix="data_quality_report",
+    )
+    if isinstance(quality_report, dict):
+        for key in (
+            "status",
+            "n_blocking_issues",
+            "n_warnings",
+            "blocking_issues",
+            "warnings",
+            "leakage_audit_verdict",
+        ):
+            if key not in quality_report:
+                _add_issue(
+                    issues,
+                    code="data_quality_field_missing",
+                    message=f"data_quality_report.json missing required field '{key}'.",
+                    path=report_dir / "data_quality_report.json",
+                )
+
+    leakage_report = _load_json(
+        report_dir / "leakage_audit.json",
+        issues,
+        code_prefix="leakage_audit",
+    )
+    if isinstance(leakage_report, dict):
+        if "verdict" not in leakage_report:
+            _add_issue(
+                issues,
+                code="leakage_audit_verdict_missing",
+                message="leakage_audit.json must include verdict.",
+                path=report_dir / "leakage_audit.json",
+            )
+        if "checks" not in leakage_report:
+            _add_issue(
+                issues,
+                code="leakage_audit_checks_missing",
+                message="leakage_audit.json must include checks.",
+                path=report_dir / "leakage_audit.json",
+            )
+
+    external_payload = _load_json(
+        report_dir / "external_validation_compatibility.json",
+        issues,
+        code_prefix="external_validation_compatibility",
+    )
+    if isinstance(external_payload, dict):
+        for key in ("enabled", "mode", "status", "datasets"):
+            if key not in external_payload:
+                _add_issue(
+                    issues,
+                    code="external_validation_field_missing",
+                    message=f"external_validation_compatibility.json missing required field '{key}'.",
+                    path=report_dir / "external_validation_compatibility.json",
+                )
 
 
 def _verify_confirmatory_reporting_contract(
@@ -669,6 +792,12 @@ def verify_official_artifacts(
                 )
 
         _verify_metric_policy(
+            config_payload=config_payload,
+            metrics_payload=metrics_payload,
+            issues=issues,
+            report_dir=report_dir,
+        )
+        _verify_data_layer_artifacts(
             config_payload=config_payload,
             metrics_payload=metrics_payload,
             issues=issues,

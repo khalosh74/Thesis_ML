@@ -58,6 +58,60 @@
     ],
     "min_samples_per_group": 1
   },
+  "data_policy": {
+    "class_balance": {
+      "enabled": true,
+      "axes": [
+        "overall",
+        "subject",
+        "session",
+        "task",
+        "modality"
+      ],
+      "min_class_fraction_warning": 0.05,
+      "min_class_fraction_blocking": null
+    },
+    "missingness": {
+      "enabled": true,
+      "max_missing_fraction_warning": 0.1,
+      "max_missing_fraction_blocking": null
+    },
+    "leakage": {
+      "enabled": true,
+      "fail_on_duplicate_sample_id": true,
+      "warn_on_duplicate_beta_path": true,
+      "fail_on_duplicate_beta_path": false,
+      "fail_on_subject_overlap_for_transfer": true,
+      "fail_on_cv_group_overlap": true
+    },
+    "external_validation": {
+      "enabled": false,
+      "mode": "compatibility_only",
+      "require_compatible": false,
+      "require_for_official_runs": false,
+      "datasets": []
+    },
+    "required_index_columns": [
+      "sample_id",
+      "subject",
+      "session",
+      "task",
+      "modality",
+      "beta_path",
+      "mask_path",
+      "regressor_label",
+      "emotion",
+      "coarse_affect"
+    ],
+    "intended_use": "Official confirmatory thesis runs under locked canonical protocol.",
+    "not_intended_use": [
+      "Exploratory hypothesis generation from confirmatory outputs.",
+      "External generalization claims from internal-only data."
+    ],
+    "known_limitations": [
+      "External validation is compatibility-only in this phase."
+    ]
+  },
   "evidence_policy": {
     "repeat_evaluation": {
       "repeat_count": 3,
@@ -128,6 +182,17 @@
     "required_run_artifacts": [
       "config.json",
       "metrics.json",
+      "dataset_card.json",
+      "dataset_card.md",
+      "dataset_summary.json",
+      "dataset_summary.csv",
+      "data_quality_report.json",
+      "class_balance_report.csv",
+      "missingness_report.csv",
+      "leakage_audit.json",
+      "external_dataset_card.json",
+      "external_dataset_summary.json",
+      "external_validation_compatibility.json",
       "fold_metrics.csv",
       "fold_splits.csv",
       "predictions.csv",
@@ -163,6 +228,7 @@
       "repeat_count",
       "base_run_id",
       "primary_metric_name",
+      "data_policy_effective",
       "protocol_id",
       "protocol_version",
       "protocol_schema_version",

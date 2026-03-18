@@ -277,6 +277,8 @@ def test_comparison_runner_real_run_stamps_metadata(
     assert config["comparison_variant_id"] == "ridge"
     assert config["methodology_policy_name"] == "fixed_baselines_only"
     assert config["subgroup_reporting_enabled"] is True
+    assert isinstance(config["data_policy_effective"], dict)
+    assert isinstance(config["data_artifacts"], dict)
     assert config["metric_policy_effective"]["primary_metric"] == "balanced_accuracy"
     assert config["metric_policy_effective"]["decision_metric"] == "balanced_accuracy"
     assert config["metric_policy_effective"]["tuning_metric"] == "balanced_accuracy"
@@ -289,6 +291,8 @@ def test_comparison_runner_real_run_stamps_metadata(
     assert metrics["comparison_version"] == spec.comparison_version
     assert metrics["comparison_variant_id"] == "ridge"
     assert metrics["methodology_policy_name"] == "fixed_baselines_only"
+    assert isinstance(metrics["data_policy_effective"], dict)
+    assert isinstance(metrics["data_artifacts"], dict)
     assert "subgroup_reporting" in metrics
     assert metrics["decision_metric_name"] == "balanced_accuracy"
     assert metrics["tuning_metric_name"] == "balanced_accuracy"
@@ -303,6 +307,12 @@ def test_comparison_runner_real_run_stamps_metadata(
         "probabilities_required_for_validity",
     }
     assert isinstance(metrics["calibration"]["probability_support_detected"], bool)
+    assert Path(str(config["dataset_card_json_path"])).exists()
+    assert Path(str(config["dataset_summary_json_path"])).exists()
+    assert Path(str(config["data_quality_report_path"])).exists()
+    assert Path(str(config["class_balance_report_path"])).exists()
+    assert Path(str(config["missingness_report_path"])).exists()
+    assert Path(str(config["leakage_audit_path"])).exists()
 
 
 def test_comparison_runner_rejects_draft_or_retired_status(

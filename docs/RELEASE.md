@@ -67,6 +67,13 @@ RC-1 adds explicit official-run release checks for:
     `confidence_intervals.json`, `metric_intervals.csv`
   - comparison: all confirmatory evidence artifacts plus
     `paired_model_comparisons.json` and `paired_model_comparisons.csv`
+- data-layer artifact invariants for official modes:
+  - `dataset_card.json`, `dataset_card.md`
+  - `dataset_summary.json`, `dataset_summary.csv`
+  - `data_quality_report.json`, `class_balance_report.csv`, `missingness_report.csv`
+  - `leakage_audit.json`
+  - `external_dataset_card.json`, `external_dataset_summary.json`,
+    `external_validation_compatibility.json` (required when external compatibility checks are configured)
 
 ### 1) Official artifact verification
 

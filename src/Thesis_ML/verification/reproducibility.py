@@ -41,6 +41,8 @@ def _normalize_payload(value: Any) -> Any:
             key_text = str(key)
             if key_text in _NON_DETERMINISTIC_KEYS:
                 continue
+            if key_text == "data_artifacts":
+                continue
             if key_text.endswith("_path") or key_text.endswith("_path_relative"):
                 continue
             if key_text in {
@@ -134,6 +136,14 @@ def collect_official_invariants(output_dir: Path | str) -> dict[str, Any]:
         predictions_path = report_dir / "predictions.csv"
         calibration_summary_path = report_dir / "calibration_summary.json"
         calibration_table_path = report_dir / "calibration_table.csv"
+        dataset_card_path = report_dir / "dataset_card.json"
+        dataset_summary_path = report_dir / "dataset_summary.json"
+        data_quality_report_path = report_dir / "data_quality_report.json"
+        leakage_audit_path = report_dir / "leakage_audit.json"
+        external_validation_path = report_dir / "external_validation_compatibility.json"
+        class_balance_report_path = report_dir / "class_balance_report.csv"
+        missingness_report_path = report_dir / "missingness_report.csv"
+        dataset_summary_csv_path = report_dir / "dataset_summary.csv"
 
         run_payload: dict[str, Any] = {}
         if config_path.exists():
@@ -144,12 +154,32 @@ def collect_official_invariants(output_dir: Path | str) -> dict[str, Any]:
             run_payload["calibration_summary"] = _normalize_payload(
                 _load_json(calibration_summary_path)
             )
+        if dataset_card_path.exists():
+            run_payload["dataset_card"] = _normalize_payload(_load_json(dataset_card_path))
+        if dataset_summary_path.exists():
+            run_payload["dataset_summary"] = _normalize_payload(_load_json(dataset_summary_path))
+        if data_quality_report_path.exists():
+            run_payload["data_quality_report"] = _normalize_payload(
+                _load_json(data_quality_report_path)
+            )
+        if leakage_audit_path.exists():
+            run_payload["leakage_audit"] = _normalize_payload(_load_json(leakage_audit_path))
+        if external_validation_path.exists():
+            run_payload["external_validation_compatibility"] = _normalize_payload(
+                _load_json(external_validation_path)
+            )
         if fold_splits_path.exists():
             run_payload["fold_splits_sha256"] = _file_sha256(fold_splits_path)
         if predictions_path.exists():
             run_payload["predictions_sha256"] = _file_sha256(predictions_path)
         if calibration_table_path.exists():
             run_payload["calibration_table_sha256"] = _file_sha256(calibration_table_path)
+        if class_balance_report_path.exists():
+            run_payload["class_balance_report_sha256"] = _file_sha256(class_balance_report_path)
+        if missingness_report_path.exists():
+            run_payload["missingness_report_sha256"] = _file_sha256(missingness_report_path)
+        if dataset_summary_csv_path.exists():
+            run_payload["dataset_summary_csv_sha256"] = _file_sha256(dataset_summary_csv_path)
 
         invariants["run_artifacts"][run_id] = run_payload
 

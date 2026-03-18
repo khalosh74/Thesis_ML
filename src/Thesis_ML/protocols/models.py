@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from Thesis_ML.config.framework_mode import FrameworkMode
 from Thesis_ML.config.methodology import (
     ClassWeightPolicy,
+    DataPolicy,
     EvidencePolicy,
     EvidenceRunRole,
     MethodologyPolicy,
@@ -42,6 +43,17 @@ REQUIRED_PROTOCOL_ARTIFACTS = (
 REQUIRED_RUN_ARTIFACTS_BASELINE = (
     "config.json",
     "metrics.json",
+    "dataset_card.json",
+    "dataset_card.md",
+    "dataset_summary.json",
+    "dataset_summary.csv",
+    "data_quality_report.json",
+    "class_balance_report.csv",
+    "missingness_report.csv",
+    "leakage_audit.json",
+    "external_dataset_card.json",
+    "external_dataset_summary.json",
+    "external_validation_compatibility.json",
     "fold_metrics.csv",
     "fold_splits.csv",
     "predictions.csv",
@@ -261,6 +273,7 @@ class ArtifactContract(_ProtocolModel):
             "repeat_count",
             "base_run_id",
             "primary_metric_name",
+            "data_policy_effective",
             "protocol_id",
             "protocol_version",
             "protocol_schema_version",
@@ -287,7 +300,14 @@ class ArtifactContract(_ProtocolModel):
             )
         missing_run = [
             name
-            for name in ("config.json", "metrics.json")
+            for name in (
+                "config.json",
+                "metrics.json",
+                "dataset_card.json",
+                "dataset_summary.json",
+                "data_quality_report.json",
+                "leakage_audit.json",
+            )
             if name not in self.required_run_artifacts
         ]
         if missing_run:
@@ -308,6 +328,7 @@ class ArtifactContract(_ProtocolModel):
             "repeat_count",
             "base_run_id",
             "primary_metric_name",
+            "data_policy_effective",
             "protocol_id",
             "protocol_version",
             "suite_id",
@@ -397,6 +418,7 @@ class ThesisProtocol(_ProtocolModel):
     subgroup_reporting_policy: SubgroupReportingPolicy = Field(
         default_factory=SubgroupReportingPolicy
     )
+    data_policy: DataPolicy = Field(default_factory=DataPolicy)
     evidence_policy: EvidencePolicy
     control_policy: ControlPolicy
     interpretability_policy: InterpretabilityPolicy
@@ -718,6 +740,7 @@ class CompiledProtocolManifest(_ProtocolModel):
     methodology_policy: MethodologyPolicy
     metric_policy: MetricPolicy
     subgroup_reporting_policy: SubgroupReportingPolicy
+    data_policy: DataPolicy
     evidence_policy: EvidencePolicy
     suite_ids: list[str] = Field(min_length=1)
     runs: list[CompiledRunSpec] = Field(min_length=1)
@@ -740,6 +763,7 @@ class CompiledProtocolManifest(_ProtocolModel):
             "repeat_count",
             "base_run_id",
             "primary_metric_name",
+            "data_policy_effective",
             "protocol_id",
             "protocol_version",
             "protocol_schema_version",
@@ -764,6 +788,19 @@ class CompiledProtocolManifest(_ProtocolModel):
                 )
         if not self.required_run_metadata_fields:
             raise ValueError("CompiledProtocolManifest.required_run_metadata_fields must not be empty.")
+        for key in (
+            "framework_mode",
+            "canonical_run",
+            "data_policy_effective",
+            "protocol_id",
+            "protocol_version",
+            "suite_id",
+        ):
+            if key not in self.required_run_metadata_fields:
+                raise ValueError(
+                    "CompiledProtocolManifest.required_run_metadata_fields is missing required key: "
+                    + key
+                )
         return self
 
 
