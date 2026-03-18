@@ -100,6 +100,10 @@ Each comparison/protocol contract must also declare an `evidence_policy` that co
 - permutation evidence thresholds and minimum rounds
 - calibration handling policy
 - required evidence package checks
+Current official defaults in checked-in comparison/protocol specs:
+- `repeat_count=3` for stronger stability estimates
+- locked comparison `require_significant_win=true` for paired-comparison winner gating
+- calibration runs as `performed` when probabilities are available, or explicit `not_applicable` when not
 Thesis-facing active contracts do not include ROI-switch, dimensionality-reduction, or scaling-policy
 variation dimensions; those remain out of scope unless explicitly introduced as new locked specs/protocols.
 

@@ -70,7 +70,7 @@
   },
   "evidence_policy": {
     "repeat_evaluation": {
-      "repeat_count": 1,
+      "repeat_count": 3,
       "seed_stride": 1000
     },
     "confidence_intervals": {
@@ -83,7 +83,7 @@
       "method": "paired_sign_flip_permutation",
       "n_permutations": 5000,
       "alpha": 0.05,
-      "require_significant_win": false
+      "require_significant_win": true
     },
     "permutation": {
       "alpha": 0.05,

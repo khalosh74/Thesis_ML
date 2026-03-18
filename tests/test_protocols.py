@@ -93,6 +93,7 @@ def test_load_canonical_protocol_validates() -> None:
     assert protocol.scientific_contract.primary_metric == "balanced_accuracy"
     assert protocol.methodology_policy.policy_name.value == "fixed_baselines_only"
     assert protocol.metric_policy.primary_metric == "balanced_accuracy"
+    assert int(protocol.evidence_policy.repeat_evaluation.repeat_count) == 3
     assert protocol.subgroup_reporting_policy.enabled is True
     assert {suite.suite_id for suite in protocol.official_run_suites} == {
         "primary_within_subject",
@@ -111,6 +112,7 @@ def test_load_confirmatory_freeze_protocol_validates_and_adapts() -> None:
     assert protocol.scientific_contract.primary_metric == "balanced_accuracy"
     assert protocol.control_policy.dummy_baseline.enabled is True
     assert protocol.control_policy.permutation.enabled is True
+    assert int(protocol.evidence_policy.repeat_evaluation.repeat_count) == 3
 
 
 def test_confirmatory_freeze_preflight_rejects_invalid_schema_payload(
@@ -357,6 +359,7 @@ def test_protocol_compiler_expands_primary_and_transfer_suites(
     protocol_dataset: dict[str, Path],
 ) -> None:
     protocol = load_protocol(_canonical_protocol_path())
+    repeat_count = int(protocol.evidence_policy.repeat_evaluation.repeat_count)
     manifest = compile_protocol(
         protocol,
         index_csv=protocol_dataset["index_csv"],
@@ -366,8 +369,8 @@ def test_protocol_compiler_expands_primary_and_transfer_suites(
     within_runs = [run for run in manifest.runs if run.cv_mode == "within_subject_loso_session"]
     transfer_runs = [run for run in manifest.runs if run.cv_mode == "frozen_cross_person_transfer"]
 
-    assert len(within_runs) == 2
-    assert len(transfer_runs) == 2
+    assert len(within_runs) == 2 * repeat_count
+    assert len(transfer_runs) == 2 * repeat_count
     assert all(run.subject is not None for run in within_runs)
     assert all(run.train_subject is not None and run.test_subject is not None for run in transfer_runs)
 
@@ -502,7 +505,7 @@ def test_protocol_run_records_metadata_in_run_artifacts(
     assert config["metric_policy_effective"]["higher_is_better"] is True
     assert config["evidence_run_role"] == "primary"
     assert config["repeat_id"] == 1
-    assert config["repeat_count"] == 1
+    assert config["repeat_count"] == int(protocol.evidence_policy.repeat_evaluation.repeat_count)
     assert config["base_run_id"]
     assert isinstance(config["evidence_policy_effective"], dict)
     assert config["evidence_policy_effective"]["confidence_intervals"]["method"] == (
@@ -527,10 +530,15 @@ def test_protocol_run_records_metadata_in_run_artifacts(
     assert metrics["metric_policy_effective"]["higher_is_better"] is True
     assert metrics["evidence_run_role"] == "primary"
     assert metrics["repeat_id"] == 1
-    assert metrics["repeat_count"] == 1
+    assert metrics["repeat_count"] == int(protocol.evidence_policy.repeat_evaluation.repeat_count)
     assert metrics["base_run_id"]
     assert isinstance(metrics["evidence_policy_effective"], dict)
     assert metrics["calibration"]["status"] in {"performed", "not_applicable", "failed"}
+    assert metrics["calibration"]["policy_status"] in {
+        "required_if_probabilities_available",
+        "probabilities_required_for_validity",
+    }
+    assert isinstance(metrics["calibration"]["probability_support_detected"], bool)
     assert isinstance(metrics["claim_ids"], list) and metrics["claim_ids"]
     assert Path(str(config["subgroup_metrics_json_path"])).exists()
     assert Path(str(config["subgroup_metrics_csv_path"])).exists()
@@ -634,7 +642,7 @@ def test_protocol_level_report_index_is_emitted_for_completed_runs(
 
     report_index_path = Path(result["artifact_paths"]["report_index"])
     report_index = pd.read_csv(report_index_path)
-    assert len(report_index) == 2
+    assert len(report_index) == 2 * int(protocol.evidence_policy.repeat_evaluation.repeat_count)
     assert set(report_index["suite_id"].astype(str)) == {"secondary_cross_person_transfer"}
     assert set(report_index["status"].astype(str)) == {"completed"}
 
@@ -646,6 +654,7 @@ def test_nested_protocol_supports_grouped_nested_methodology(
     assert protocol.methodology_policy.policy_name.value == "grouped_nested_tuning"
     assert protocol.model_policy.selection_strategy.value == "nested_tuned"
     assert protocol.model_policy.tuning_enabled is True
+    assert int(protocol.evidence_policy.repeat_evaluation.repeat_count) == 3
 
     result = compile_and_run_protocol(
         protocol=protocol,

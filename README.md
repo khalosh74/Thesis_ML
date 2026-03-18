@@ -109,6 +109,9 @@ Evidence layer policy (official comparison + confirmatory paths):
 - grouped-bootstrap confidence intervals and paired sign-flip comparisons are emitted as machine-readable artifacts
 - calibration artifacts are always emitted (`performed` or explicit `not_applicable`)
 - required evidence package checks (dummy/permutation/untuned baseline when tuning) are reflected in mode-level summaries/decisions
+- official checked-in comparison/protocol specs use `repeat_count=3` by default
+- official checked-in locked comparison specs require significant paired wins (`require_significant_win=true`) for winner selection
+- calibration policy is explicit: calibration is performed when probability scores exist; otherwise runs emit `status=not_applicable` (no synthetic calibration)
 
 RC-1 hardening policy (official runs):
 - confirmatory and locked-comparison runs enforce strict preflight contract validation before execution

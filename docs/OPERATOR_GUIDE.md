@@ -87,6 +87,8 @@ Official-policy note:
 - default mode roots are `outputs/reports/exploratory`, `outputs/reports/comparisons`, and `outputs/reports/confirmatory`.
 - comparison/protocol contracts must choose exactly one methodology policy:
   `fixed_baselines_only` or `grouped_nested_tuning`.
+- official checked-in comparison/protocol specs use `repeat_count=3` by default.
+- locked comparison specs require significant paired wins by default (`require_significant_win=true`).
 - locked comparison runs emit `comparison_decision.json` for machine-readable selection outcomes.
 - locked comparison runs emit evidence artifacts:
   `repeated_run_metrics.csv`, `repeated_run_summary.json`,
@@ -106,6 +108,9 @@ Official metric policy:
 - artifacts include `metric_policy_effective` so operators can audit effective primary/decision/tuning/permutation metrics
 - official run artifacts include deterministic provenance (`git_provenance`, `dataset_fingerprint`) for rerun traceability
 - official run artifacts include evidence metadata (`evidence_policy_effective`, repeat metadata, `evidence_run_role`)
+- calibration status is explicit in run artifacts:
+  - `performed` when probability outputs are available
+  - `not_applicable` when a model path has no probability outputs
 
 Architecture ownership (where to extend safely):
 - runner policy resolution belongs in `src/Thesis_ML/experiments/runtime_policies.py`

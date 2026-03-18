@@ -409,7 +409,7 @@ def adapt_confirmatory_freeze_to_thesis_protocol(
         },
         "evidence_policy": {
             "repeat_evaluation": {
-                "repeat_count": 1,
+                "repeat_count": 3,
                 "seed_stride": 1000,
             },
             "confidence_intervals": {

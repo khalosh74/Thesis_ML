@@ -831,6 +831,14 @@ def execute_evaluation(section_input: EvaluationInput) -> dict[str, Any]:
     calibration_summary["require_probabilities_for_validity"] = bool(
         section_input.calibration_require_probabilities_for_validity
     )
+    calibration_summary["policy_status"] = (
+        "probabilities_required_for_validity"
+        if bool(section_input.calibration_require_probabilities_for_validity)
+        else "required_if_probabilities_available"
+    )
+    calibration_summary["probability_support_detected"] = bool(
+        str(calibration_summary.get("status")) == "performed"
+    )
     calibration_summary["summary_path"] = str(calibration_summary_path.resolve())
     calibration_summary["table_path"] = str(calibration_table_path.resolve())
     calibration_summary_path.write_text(

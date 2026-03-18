@@ -199,15 +199,20 @@ def _controls_status(
             protocol.control_policy.permutation.n_permutations,
         )
     )
+    dummy_control_suites = set(protocol.control_policy.dummy_baseline.suites)
+    permutation_control_suites = set(protocol.control_policy.permutation.suites)
     dummy_run_ids = sorted(
         spec.run_id
         for spec in compiled_manifest.runs
-        if bool(spec.controls.dummy_baseline_run) or str(spec.model) == "dummy"
+        if (
+            spec.suite_id in dummy_control_suites
+            and (bool(spec.controls.dummy_baseline_run) or str(spec.model) == "dummy")
+        )
     )
     permutation_run_ids = sorted(
         spec.run_id
         for spec in compiled_manifest.runs
-        if bool(spec.controls.permutation_enabled)
+        if spec.suite_id in permutation_control_suites
     )
     completed_by_run = {
         result.run_id: result for result in run_results if result.status == "completed"
@@ -218,7 +223,8 @@ def _controls_status(
     invalid_permutation_runs = sorted(
         spec.run_id
         for spec in compiled_manifest.runs
-        if (
+        if spec.suite_id in permutation_control_suites
+        and (
             not bool(spec.controls.permutation_enabled)
             or int(spec.controls.n_permutations) < minimum_permutations
         )

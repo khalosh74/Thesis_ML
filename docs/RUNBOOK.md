@@ -117,6 +117,8 @@ Policy note:
 - confirmatory mode must load thesis-critical settings from protocol JSON, not ad hoc CLI flags.
 - comparison/protocol specs must declare one methodology policy:
   `fixed_baselines_only` or `grouped_nested_tuning`.
+- official checked-in comparison/protocol specs use `repeat_count=3` by default.
+- locked comparison specs require significant paired wins by default (`require_significant_win=true`).
 - locked comparison outputs include `comparison_decision.json` for machine-readable winner/inconclusive/invalid decisions.
 - locked comparison outputs also include evidence artifacts:
   `repeated_run_metrics.csv`, `repeated_run_summary.json`,
@@ -137,6 +139,9 @@ Metric policy note (official runs):
 - official run artifacts include deterministic provenance blocks (`git_provenance`, `dataset_fingerprint`)
 - official run artifacts include evidence metadata:
   `evidence_policy_effective`, `repeat_id`, `repeat_count`, `base_run_id`, `evidence_run_role`
+- calibration status is explicit in official run artifacts:
+  - `performed` when probability outputs are available
+  - `not_applicable` when a model path does not expose probability outputs
 
 Implementation ownership notes (for maintainers):
 - framework/methodology/metric runtime resolution: `src/Thesis_ML/experiments/runtime_policies.py`

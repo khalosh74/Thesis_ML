@@ -97,6 +97,8 @@ def test_load_comparison_spec_validates() -> None:
         "logreg",
         "linearsvc",
     }
+    assert int(spec.evidence_policy.repeat_evaluation.repeat_count) == 3
+    assert bool(spec.evidence_policy.paired_comparisons.require_significant_win) is True
 
 
 def test_compile_comparison_expands_variants_and_subjects(
@@ -106,7 +108,12 @@ def test_compile_comparison_expands_variants_and_subjects(
     manifest = compile_comparison(spec, index_csv=comparison_dataset["index_csv"])
     assert manifest.framework_mode == "locked_comparison"
     assert set(manifest.variant_ids) == {"ridge", "logreg", "linearsvc"}
-    assert len(manifest.runs) == 6
+    expected_runs = (
+        len(spec.allowed_variants)
+        * len(pd.read_csv(comparison_dataset["index_csv"])["subject"].astype(str).unique())
+        * int(spec.evidence_policy.repeat_evaluation.repeat_count)
+    )
+    assert len(manifest.runs) == expected_runs
     assert all(run.framework_mode == "locked_comparison" for run in manifest.runs)
     assert all(run.canonical_run is False for run in manifest.runs)
     assert all(run.subject in {"sub-001", "sub-002"} for run in manifest.runs)
@@ -171,7 +178,7 @@ def test_comparison_runner_dry_run_emits_artifacts(
     )
     assert result["n_failed"] == 0
     assert result["n_completed"] == 0
-    assert result["n_planned"] == 2
+    assert result["n_planned"] == 2 * int(spec.evidence_policy.repeat_evaluation.repeat_count)
     for artifact_path in result["artifact_paths"].values():
         assert Path(artifact_path).exists()
     assert "repeated_run_metrics" in result["artifact_paths"]
@@ -291,6 +298,11 @@ def test_comparison_runner_real_run_stamps_metadata(
     assert metrics["metric_policy_effective"]["tuning_metric"] == "balanced_accuracy"
     assert metrics["metric_policy_effective"]["permutation_metric"] == "balanced_accuracy"
     assert metrics["metric_policy_effective"]["higher_is_better"] is True
+    assert metrics["calibration"]["policy_status"] in {
+        "required_if_probabilities_available",
+        "probabilities_required_for_validity",
+    }
+    assert isinstance(metrics["calibration"]["probability_support_detected"], bool)
 
 
 def test_comparison_runner_rejects_draft_or_retired_status(
@@ -326,6 +338,8 @@ def test_grouped_nested_comparison_spec_supports_dry_run(
 ) -> None:
     spec = load_comparison_spec(_nested_comparison_spec_path())
     assert spec.methodology_policy.policy_name.value == "grouped_nested_tuning"
+    assert int(spec.evidence_policy.repeat_evaluation.repeat_count) == 3
+    assert bool(spec.evidence_policy.paired_comparisons.require_significant_win) is True
     result = compile_and_run_comparison(
         comparison=spec,
         index_csv=comparison_dataset["index_csv"],
