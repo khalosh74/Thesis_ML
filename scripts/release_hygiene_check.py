@@ -15,6 +15,13 @@ NOISE_PATTERNS = (
     ".mypy_cache/",
 )
 SKIP_TOP_LEVEL = {".venv", ".venv-uv", "venv", "Data", "data"}
+REQUIRED_GOVERNANCE_FILES = (
+    "LICENSE",
+    "CITATION.cff",
+    "docs/PRIVACY_AND_DATA_HANDLING.md",
+    "docs/USE_AND_MISUSE_BOUNDARIES.md",
+    "docs/CONFIRMATORY_READY.md",
+)
 
 
 def _tracked_noise_files(repo_root: Path) -> list[str]:
@@ -47,6 +54,15 @@ def _working_tree_noise(repo_root: Path) -> list[str]:
     return sorted(set(noise_hits))
 
 
+def _missing_required_governance_files(repo_root: Path) -> list[str]:
+    missing: list[str] = []
+    for relative in REQUIRED_GOVERNANCE_FILES:
+        candidate = repo_root / relative
+        if not candidate.exists() or not candidate.is_file():
+            missing.append(relative)
+    return missing
+
+
 def _print_section(title: str, rows: list[str]) -> None:
     print(title)
     if not rows:
@@ -56,7 +72,7 @@ def _print_section(title: str, rows: list[str]) -> None:
         print(f"  - {row}")
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Checks release hygiene (tracked noise + local build/cache directories)."
     )
@@ -66,18 +82,29 @@ def main() -> int:
         default=REPO_ROOT,
         help="Repository root (defaults to this script's parent repo).",
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     repo_root = args.repo_root.resolve()
 
     tracked_noise = _tracked_noise_files(repo_root)
     working_tree_noise = _working_tree_noise(repo_root)
+    missing_governance = _missing_required_governance_files(repo_root)
 
     _print_section("Tracked noise files:", tracked_noise)
     _print_section("Working tree noise directories:", working_tree_noise)
+    _print_section("Missing required governance files:", missing_governance)
 
     if tracked_noise:
         print(
             "\nRelease hygiene failed: remove tracked noise files before cutting a release candidate.",
+            file=sys.stderr,
+        )
+        return 1
+    if missing_governance:
+        print(
+            (
+                "\nRelease hygiene failed: required governance metadata/docs are missing; "
+                "add the missing files before cutting a release candidate."
+            ),
             file=sys.stderr,
         )
         return 1

@@ -16,3 +16,6 @@ Existing focused notes:
 - `EXPERIMENTS.md`: experiment-mode semantics and leakage constraints.
 - `DECISION_SUPPORT_AUTOMATION.md`: campaign orchestration behavior and outputs.
 - `RELEASE.md`: release gate process.
+- `PRIVACY_AND_DATA_HANDLING.md`: privacy handling and publication/redaction expectations.
+- `USE_AND_MISUSE_BOUNDARIES.md`: intended use, claim boundaries, and misuse warnings.
+- `CONFIRMATORY_READY.md`: explicit governance criteria for confirmatory-ready status.

@@ -82,6 +82,19 @@ def _build_parser() -> argparse.ArgumentParser:
             "(for example: 'python scripts/verify_official_reproducibility.py ...')."
         ),
     )
+    parser.add_argument(
+        "--confirmatory-ready-dir",
+        default="",
+        help=(
+            "Optional confirmatory output directory to verify with "
+            "scripts/verify_confirmatory_ready.py."
+        ),
+    )
+    parser.add_argument(
+        "--confirmatory-ready-summary-out",
+        default="",
+        help="Optional path to write confirmatory-ready summary JSON.",
+    )
     return parser
 
 
@@ -129,6 +142,22 @@ def main(argv: list[str] | None = None) -> int:
                 cwd=REPO_ROOT,
             )
         )
+
+    if args.confirmatory_ready_dir:
+        command = [
+            "python",
+            "scripts/verify_confirmatory_ready.py",
+            "--output-dir",
+            str(args.confirmatory_ready_dir),
+        ]
+        if args.confirmatory_ready_summary_out:
+            command.extend(
+                [
+                    "--summary-out",
+                    str(args.confirmatory_ready_summary_out),
+                ]
+            )
+        steps.append(_run_step(command, cwd=REPO_ROOT))
 
     if args.repro_command:
         steps.append(_run_shell_step(args.repro_command, cwd=REPO_ROOT))

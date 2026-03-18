@@ -121,6 +121,11 @@ Official metric policy:
   `leakage_audit.json`, `external_dataset_card.json`, `external_dataset_summary.json`,
   `external_validation_compatibility.json`
 
+Governance references:
+- `docs/PRIVACY_AND_DATA_HANDLING.md`
+- `docs/USE_AND_MISUSE_BOUNDARIES.md`
+- `docs/CONFIRMATORY_READY.md`
+
 Architecture ownership (where to extend safely):
 - runner policy resolution belongs in `src/Thesis_ML/experiments/runtime_policies.py`
 - run artifact payload shaping belongs in `src/Thesis_ML/experiments/run_artifacts.py`
@@ -235,6 +240,7 @@ Run before cutting a release candidate:
 python scripts/release_hygiene_check.py
 python scripts/acceptance_smoke.py
 python scripts/verify_official_artifacts.py --output-dir <official_output_dir>
+python scripts/verify_confirmatory_ready.py --output-dir <confirmatory_output_dir>
 ```
 
 Optional lightweight performance snapshot:

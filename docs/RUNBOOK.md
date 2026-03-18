@@ -151,6 +151,10 @@ Metric policy note (official runs):
   `data_quality_report.json`, `class_balance_report.csv`, `missingness_report.csv`,
   `leakage_audit.json`, `external_dataset_card.json`, `external_dataset_summary.json`,
   `external_validation_compatibility.json`
+- governance references:
+  - `docs/PRIVACY_AND_DATA_HANDLING.md`
+  - `docs/USE_AND_MISUSE_BOUNDARIES.md`
+  - `docs/CONFIRMATORY_READY.md`
 
 Implementation ownership notes (for maintainers):
 - framework/methodology/metric runtime resolution: `src/Thesis_ML/experiments/runtime_policies.py`
@@ -263,6 +267,7 @@ Release hygiene + performance smoke:
 python scripts/release_hygiene_check.py
 python scripts/performance_smoke.py --output outputs/performance/performance_smoke_summary.json
 python scripts/verify_official_artifacts.py --output-dir <official_output_dir>
+python scripts/verify_confirmatory_ready.py --output-dir <confirmatory_output_dir>
 python scripts/verify_official_reproducibility.py --mode protocol --index-csv <...> --data-root <...> --cache-dir <...> --suite confirmatory_primary_within_subject
 python scripts/rc1_release_gate.py --run-ruff --run-pytest --run-performance-smoke
 ```

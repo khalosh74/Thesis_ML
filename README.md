@@ -9,6 +9,17 @@ feature caching, and reproducible multi-model evaluation.
 - Keep reusable logic in `src/Thesis_ML` (not notebooks).
 - Do not commit dataset files, model binaries, or generated report artifacts.
 
+## Governance and responsible use
+
+Governance policy and release-facing boundaries are explicit and versioned:
+
+- Privacy/data handling: `docs/PRIVACY_AND_DATA_HANDLING.md`
+- Intended/non-intended use and misuse warnings: `docs/USE_AND_MISUSE_BOUNDARIES.md`
+- Confirmatory-ready criteria and verification command: `docs/CONFIRMATORY_READY.md`
+
+Confirmatory-ready means contract/governance checks passed for frozen scientific runs.
+It does **not** mean deployable clinical decision support.
+
 ## Expected data layout
 
 Use a BIDS-like hierarchy under a local data root (`Data/` or `data/`):
@@ -247,6 +258,7 @@ docker run --rm thesis-ml:dev
 - Local release hygiene check: `python scripts/release_hygiene_check.py`
 - Lightweight performance smoke: `python scripts/performance_smoke.py`
 - Official artifact invariant check: `python scripts/verify_official_artifacts.py --output-dir <official_output_dir>`
+- Confirmatory-ready governance check: `python scripts/verify_confirmatory_ready.py --output-dir <confirmatory_output_dir>`
 - Deterministic rerun check: `python scripts/verify_official_reproducibility.py --mode protocol --index-csv <...> --data-root <...> --cache-dir <...> --suite confirmatory_primary_within_subject`
 - RC wrapper gate script: `python scripts/rc1_release_gate.py --run-ruff --run-pytest --run-performance-smoke`
 
@@ -255,6 +267,9 @@ docker run --rm thesis-ml:dev
 - Architecture: `docs/ARCHITECTURE.md`
 - Operator quick path: `docs/OPERATOR_GUIDE.md`
 - Runbook: `docs/RUNBOOK.md`
+- Privacy/data handling: `docs/PRIVACY_AND_DATA_HANDLING.md`
+- Use/misuse boundaries: `docs/USE_AND_MISUSE_BOUNDARIES.md`
+- Confirmatory-ready criteria: `docs/CONFIRMATORY_READY.md`
 - Workbook workflow: `docs/WORKBOOK_WORKFLOW.md`
 - Segment execution: `docs/SEGMENT_EXECUTION.md`
 - Maintainer quick path: `docs/MAINTAINER_GUIDE.md`
@@ -262,6 +277,10 @@ docker run --rm thesis-ml:dev
 - Schema/version migration notes: `docs/SCHEMA_MIGRATIONS.md`
 - Decision-support specifics: `docs/DECISION_SUPPORT_AUTOMATION.md`
 - Experiment semantics: `docs/EXPERIMENTS.md`
+
+## How to cite
+
+Use the repository citation metadata in `CITATION.cff`.
 
 ## Quickstart (end-to-end)
 

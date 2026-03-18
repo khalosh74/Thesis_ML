@@ -76,6 +76,7 @@ Core package root: `src/Thesis_ML/`
   - compatibility sheet/style helpers (`sheets/`, `styles.py`, `named_ranges.py`)
 - `verification/`
   - official artifact invariant verifier (`official_artifacts.py`)
+  - confirmatory-ready governance verifier (`confirmatory_ready.py`)
   - deterministic official-output comparator (`reproducibility.py`)
 
 ## Runtime flows

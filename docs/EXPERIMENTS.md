@@ -186,3 +186,8 @@ Confirmatory protocol execution artifacts:
 - protocol and comparison runs stamp mode + identity metadata into run artifacts
 - official run artifacts include repeat metadata (`repeat_id`, `repeat_count`, `base_run_id`),
   `evidence_run_role`, and `evidence_policy_effective`
+
+Governance references:
+- `docs/PRIVACY_AND_DATA_HANDLING.md`
+- `docs/USE_AND_MISUSE_BOUNDARIES.md`
+- `docs/CONFIRMATORY_READY.md`

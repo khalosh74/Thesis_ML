@@ -74,6 +74,12 @@ RC-1 adds explicit official-run release checks for:
   - `leakage_audit.json`
   - `external_dataset_card.json`, `external_dataset_summary.json`,
     `external_validation_compatibility.json` (required when external compatibility checks are configured)
+- governance metadata/docs presence checks via `release_hygiene_check.py`:
+  - `LICENSE`
+  - `CITATION.cff`
+  - `docs/PRIVACY_AND_DATA_HANDLING.md`
+  - `docs/USE_AND_MISUSE_BOUNDARIES.md`
+  - `docs/CONFIRMATORY_READY.md`
 
 ### 1) Official artifact verification
 
@@ -128,6 +134,15 @@ python scripts/rc1_release_gate.py \
   --verify-official-dir <official_output_dir>
 ```
 
+Optional confirmatory-ready governance check:
+
+```bash
+python scripts/rc1_release_gate.py \
+  --verify-official-dir <confirmatory_output_dir> \
+  --confirmatory-ready-dir <confirmatory_output_dir> \
+  --confirmatory-ready-summary-out outputs/release/confirmatory_ready_summary.json
+```
+
 Use `--repro-command` to include a reproducibility check in the same gate run:
 
 ```bash
@@ -149,3 +164,11 @@ Before freezing an experiment campaign:
    `python scripts/performance_smoke.py --output outputs/performance/performance_smoke_summary.json`.
 6. Archive RC gate summary:
    `python scripts/rc1_release_gate.py --summary-out outputs/release/rc1_gate_summary.json`.
+7. For final frozen campaign outputs, run confirmatory-ready verification:
+   `python scripts/verify_confirmatory_ready.py --output-dir <confirmatory_output_dir> --summary-out outputs/release/confirmatory_ready_summary.json`.
+
+## Confirmatory-ready boundary
+
+Confirmatory-ready means governance + contract + artifact checks passed for frozen
+scientific evidence. It does **not** imply clinical readiness, deployment approval, or
+unrestricted external generalization.

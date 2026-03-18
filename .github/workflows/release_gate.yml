@@ -43,6 +43,10 @@ jobs:
         run: |
           python scripts/acceptance_smoke.py
 
+      - name: Release hygiene and governance metadata
+        run: |
+          python scripts/release_hygiene_check.py
+
       - name: Installed default registry smoke
         run: |
           python - <<'PY'
