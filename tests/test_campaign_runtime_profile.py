@@ -66,11 +66,21 @@ def test_campaign_runtime_profile_summary_shape_and_positive_eta(
 
     assert summary["passed"] is True
     assert int(summary["profiling_runs_executed"]) > 0
-    assert int(summary["profiling_runs_executed"]) == int(summary["n_cohorts"])
+    assert int(summary["profiling_runs_executed"]) + int(
+        summary.get("fallback_estimates_used", 0)
+    ) == int(summary["n_cohorts"])
     assert float(summary["estimated_total_wall_time_seconds"]) > 0.0
     assert isinstance(summary["cohort_estimates"], list)
     assert summary["cohort_estimates"]
     assert all(item["status"] == "passed" for item in summary["cohort_estimates"])
+    assert all(
+        str(item.get("estimate_source")) in {"measured_profile", "conservative_fallback"}
+        for item in summary["cohort_estimates"]
+    )
+    assert all(
+        str(item.get("estimate_confidence")) in {"medium", "low"}
+        for item in summary["cohort_estimates"]
+    )
     assert "phase_estimates" in summary
     assert "model_estimates" in summary
 
@@ -152,6 +162,118 @@ def test_campaign_runtime_profile_fails_when_a_cohort_profile_run_errors(
     assert summary["passed"] is False
     issue_codes = {str(item.get("code")) for item in summary.get("issues", [])}
     assert "profiling_run_failed" in issue_codes
+
+
+def test_campaign_runtime_profile_uses_fallback_for_unprofileable_grouped_nested_cohorts(
+    tmp_path: Path, monkeypatch
+) -> None:
+    calls: list[dict[str, Any]] = []
+
+    def _fake_run_experiment(**kwargs: Any) -> dict[str, Any]:
+        calls.append(dict(kwargs))
+        run_id = str(kwargs["run_id"])
+        report_dir = Path(kwargs["reports_root"]) / run_id
+        return {
+            "run_id": run_id,
+            "report_dir": str(report_dir),
+            "run_status_path": str(report_dir / "run_status.json"),
+            "stage_timings_seconds": {"total": 3.0},
+            "metrics": {"n_folds": 1, "primary_metric_value": 0.5},
+        }
+
+    monkeypatch.setattr(runtime_profile, "run_experiment", _fake_run_experiment)
+
+    summary = runtime_profile.verify_campaign_runtime_profile(
+        index_csv=_demo_index_csv(),
+        data_root=_repo_root() / "demo_data" / "synthetic_v1" / "data_root",
+        cache_dir=_repo_root() / "demo_data" / "synthetic_v1" / "cache",
+        confirmatory_protocol=_confirmatory_protocol(),
+        comparison_specs=_comparison_specs(),
+        profile_root=tmp_path / "runtime_profiles",
+    )
+
+    assert summary["passed"] is True
+    assert int(summary.get("fallback_estimates_used", 0)) > 0
+    warning_codes = {str(item.get("code")) for item in summary.get("warnings", [])}
+    assert "profiling_fallback_used" in warning_codes
+    fallback_rows = [
+        row
+        for row in summary["cohort_estimates"]
+        if str(row.get("estimate_source")) == "conservative_fallback"
+    ]
+    assert fallback_rows
+    assert all(str(row.get("estimate_confidence")) == "low" for row in fallback_rows)
+    assert all(row.get("fallback_reason") for row in fallback_rows)
+
+
+def test_grouped_nested_cohort_selects_valid_representative_when_available(
+    tmp_path: Path,
+) -> None:
+    index_csv = tmp_path / "index.csv"
+    index_rows: list[dict[str, Any]] = []
+
+    def _add_rows(subject: str, session: str) -> None:
+        index_rows.append(
+            {
+                "sample_id": f"{subject}_{session}_anger",
+                "subject": subject,
+                "session": session,
+                "task": "passive",
+                "modality": "audio",
+                "emotion": "anger",
+                "coarse_affect": "negative",
+            }
+        )
+        index_rows.append(
+            {
+                "sample_id": f"{subject}_{session}_happy",
+                "subject": subject,
+                "session": session,
+                "task": "passive",
+                "modality": "audio",
+                "emotion": "happiness",
+                "coarse_affect": "positive",
+            }
+        )
+
+    for session in ("ses-01", "ses-02"):
+        _add_rows("sub-001", session)
+    for session in ("ses-01", "ses-02", "ses-03"):
+        _add_rows("sub-002", session)
+
+    pd.DataFrame(index_rows).to_csv(index_csv, index=False)
+
+    comparison = runtime_profile.load_comparison_spec(
+        _repo_root() / "configs" / "comparisons" / "model_family_grouped_nested_comparison_v1.json"
+    )
+    manifest = runtime_profile.compile_comparison(comparison, index_csv=index_csv)
+    candidate_runs = [
+        run
+        for run in manifest.runs
+        if str(run.model) == "ridge"
+        and str(run.cv_mode) == "within_subject_loso_session"
+        and bool(run.tuning_enabled)
+        and int(run.repeat_id) == 1
+    ]
+    assert candidate_runs
+
+    planned_records = [
+        runtime_profile._PlannedProfileRun(  # type: ignore[attr-defined]
+            phase="comparison",
+            source_id=manifest.comparison_id,
+            source_version=manifest.comparison_version,
+            run=run,
+            evidence_policy=manifest.evidence_policy.model_dump(mode="json"),
+            data_policy=manifest.data_policy.model_dump(mode="json"),
+        )
+        for run in candidate_runs
+    ]
+    representative, validity = runtime_profile._minimal_valid_profile_subset(  # type: ignore[attr-defined]
+        records=planned_records,
+        index_csv=index_csv,
+    )
+    assert validity.can_profile_measured is True
+    assert str(representative.run.subject) == "sub-002"
 
 
 def test_model_fit_outer_fold_cap_only_applies_when_profiling_flag_set(tmp_path: Path) -> None:

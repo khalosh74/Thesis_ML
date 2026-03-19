@@ -269,7 +269,10 @@ Before freezing an experiment campaign:
    `outputs/campaign/<CampaignTag>/release/precheck/campaign_runtime_profile_summary.json`.
    Profiling run artifacts are precheck-only/non-evidentiary and are written under:
    `outputs/campaign/<CampaignTag>/release/precheck/runtime_profile_runs/`.
-   If any runtime cohort profiling run fails, precheck fails with explicit `issues`.
+   Grouped nested tuning cohorts use the smallest valid profiling slice when possible.
+   If a cohort has no valid measured profiling slice on the dataset, precheck records an explicit
+   conservative fallback estimate (`estimate_source=conservative_fallback`, low confidence).
+   If profiling execution fails unexpectedly, precheck fails with explicit `issues`.
 3. Run frozen campaign confirmatory phase:
    `powershell -ExecutionPolicy Bypass -File scripts/run_frozen_campaign.ps1 -CampaignTag "campaign-YYYY-MM-DD-rc1" -IndexCsv "<index_csv>" -DataRoot "<data_root>" -CacheDir "<cache_dir>" -Phase confirmatory -ExecutionMode resume`.
 4. Run frozen campaign comparison phase:

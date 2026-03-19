@@ -8,6 +8,8 @@ from pathlib import Path
 from time import perf_counter
 from typing import Any
 
+import pandas as pd
+
 from Thesis_ML.comparisons.compiler import compile_comparison
 from Thesis_ML.comparisons.loader import load_comparison_spec
 from Thesis_ML.comparisons.models import CompiledComparisonRunSpec
@@ -28,6 +30,15 @@ class _PlannedProfileRun:
     run: CompiledRunSpec | CompiledComparisonRunSpec
     evidence_policy: dict[str, Any]
     data_policy: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class _ProfileRunValidity:
+    can_profile_measured: bool
+    expected_outer_folds: int
+    estimated_train_inner_groups_after_outer_fold: int | None
+    reason: str | None
+    profiling_subset_description: str
 
 
 def _utc_now() -> str:
@@ -125,6 +136,140 @@ def _expected_outer_folds(index_csv: Path, run: CompiledRunSpec | CompiledCompar
     return folds
 
 
+def _resolve_selected_index(
+    index_csv: Path, run: CompiledRunSpec | CompiledComparisonRunSpec
+) -> pd.DataFrame:
+    return dataset_selection(
+        DatasetSelectionInput(
+            index_csv=index_csv,
+            target_column=str(run.target),
+            cv_mode=str(run.cv_mode),
+            subject=str(run.subject) if run.subject is not None else None,
+            train_subject=str(run.train_subject) if run.train_subject is not None else None,
+            test_subject=str(run.test_subject) if run.test_subject is not None else None,
+            filter_task=str(run.filter_task) if run.filter_task is not None else None,
+            filter_modality=(str(run.filter_modality) if run.filter_modality is not None else None),
+        )
+    ).selected_index_df
+
+
+def _profiling_validity_for_run(
+    *,
+    index_csv: Path,
+    run: CompiledRunSpec | CompiledComparisonRunSpec,
+) -> _ProfileRunValidity:
+    selected = _resolve_selected_index(index_csv, run)
+    cv_mode = str(run.cv_mode)
+    expected_outer_folds = _expected_outer_folds(index_csv, run)
+    methodology = _coerce_enum(run.methodology_policy_name)
+    tuning_enabled = bool(run.tuning_enabled)
+    requires_nested_inner_groups = bool(
+        methodology == "grouped_nested_tuning"
+        and tuning_enabled
+        and str(run.model).strip().lower() != "dummy"
+    )
+
+    if cv_mode == "frozen_cross_person_transfer":
+        train_subject = str(run.train_subject)
+        train_rows = selected[selected["subject"].astype(str) == train_subject].copy()
+        train_group_count = int(train_rows["session"].astype(str).nunique(dropna=False))
+        if requires_nested_inner_groups and train_group_count < 2:
+            return _ProfileRunValidity(
+                can_profile_measured=False,
+                expected_outer_folds=int(expected_outer_folds),
+                estimated_train_inner_groups_after_outer_fold=int(train_group_count),
+                reason=(
+                    "Grouped nested tuning requires at least two inner groups in the training slice "
+                    f"for transfer profiling (train_subject='{train_subject}')."
+                ),
+                profiling_subset_description=(
+                    "one train/test pair; one repeat; one outer fold (transfer mode)"
+                ),
+            )
+        return _ProfileRunValidity(
+            can_profile_measured=True,
+            expected_outer_folds=int(expected_outer_folds),
+            estimated_train_inner_groups_after_outer_fold=int(train_group_count),
+            reason=None,
+            profiling_subset_description=(
+                "one train/test pair; one repeat; one outer fold (transfer mode)"
+            ),
+        )
+
+    if cv_mode == "within_subject_loso_session":
+        session_count = int(selected["session"].astype(str).nunique(dropna=False))
+        train_groups_after_one_outer_fold = int(max(session_count - 1, 0))
+        if requires_nested_inner_groups and train_groups_after_one_outer_fold < 2:
+            return _ProfileRunValidity(
+                can_profile_measured=False,
+                expected_outer_folds=int(expected_outer_folds),
+                estimated_train_inner_groups_after_outer_fold=int(
+                    train_groups_after_one_outer_fold
+                ),
+                reason=(
+                    "Grouped nested tuning requires at least two inner groups in the training slice "
+                    "after holding out one outer fold; this run has insufficient session groups."
+                ),
+                profiling_subset_description=(
+                    "one subject; one repeat; one outer fold (within-subject LOSO)"
+                ),
+            )
+        return _ProfileRunValidity(
+            can_profile_measured=True,
+            expected_outer_folds=int(expected_outer_folds),
+            estimated_train_inner_groups_after_outer_fold=int(train_groups_after_one_outer_fold),
+            reason=None,
+            profiling_subset_description=(
+                "one subject; one repeat; one outer fold (within-subject LOSO)"
+            ),
+        )
+
+    return _ProfileRunValidity(
+        can_profile_measured=True,
+        expected_outer_folds=int(expected_outer_folds),
+        estimated_train_inner_groups_after_outer_fold=None,
+        reason=None,
+        profiling_subset_description="one representative run; one repeat; one outer fold",
+    )
+
+
+def _minimal_valid_profile_subset(
+    *,
+    records: list[_PlannedProfileRun],
+    index_csv: Path,
+) -> tuple[_PlannedProfileRun, _ProfileRunValidity]:
+    scored_candidates: list[tuple[int, int, str, str, _PlannedProfileRun, _ProfileRunValidity]] = []
+    fallback_candidates: list[tuple[str, str, _PlannedProfileRun, _ProfileRunValidity]] = []
+    for record in records:
+        validity = _profiling_validity_for_run(index_csv=index_csv, run=record.run)
+        if validity.can_profile_measured:
+            scored_candidates.append(
+                (
+                    int(validity.expected_outer_folds),
+                    int(record.run.repeat_id),
+                    str(record.run.base_run_id),
+                    str(record.run.run_id),
+                    record,
+                    validity,
+                )
+            )
+        else:
+            fallback_candidates.append(
+                (str(record.run.base_run_id), str(record.run.run_id), record, validity)
+            )
+    if scored_candidates:
+        scored_candidates.sort(key=lambda item: item[:4])
+        _, _, _, _, chosen_record, chosen_validity = scored_candidates[0]
+        return chosen_record, chosen_validity
+
+    if fallback_candidates:
+        fallback_candidates.sort(key=lambda item: item[:2])
+        _, _, chosen_record, chosen_validity = fallback_candidates[0]
+        return chosen_record, chosen_validity
+
+    raise ValueError("No runs available to select a profiling subset.")
+
+
 def _profile_run_id(*, phase: str, cohort_id: str) -> str:
     return f"profile_{phase}_{cohort_id}"
 
@@ -198,24 +343,13 @@ def _build_planned_runs(
     return planned, issues
 
 
-def _select_representative(records: list[_PlannedProfileRun]) -> _PlannedProfileRun:
-    sorted_records = sorted(
-        records,
-        key=lambda item: (
-            int(item.run.repeat_id),
-            str(item.run.base_run_id),
-            str(item.run.run_id),
-        ),
-    )
-    return sorted_records[0]
-
-
 def _aggregate_warnings_and_recommendations(
     *,
     estimated_total_seconds: float,
     phase_totals: dict[str, float],
     model_totals: dict[str, float],
     profiling_runs_executed: int,
+    fallback_estimates_used: int,
     cohort_count: int,
     issues: list[dict[str, Any]],
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
@@ -238,6 +372,14 @@ def _aggregate_warnings_and_recommendations(
                     "profiling_runs_executed": int(profiling_runs_executed),
                     "cohort_count": int(cohort_count),
                 },
+            )
+        )
+    if fallback_estimates_used > 0:
+        warnings.append(
+            _issue(
+                "profiling_fallback_used",
+                "One or more cohorts used conservative fallback runtime estimates.",
+                details={"fallback_estimates_used": int(fallback_estimates_used)},
             )
         )
     if estimated_total_seconds > (8 * 3600):
@@ -340,10 +482,14 @@ def verify_campaign_runtime_profile(
     model_totals: dict[str, float] = {}
     profile_artifact_paths: list[str] = []
     profiling_runs_executed = 0
+    fallback_estimates_used = 0
 
     for cohort_index, cohort_key in enumerate(sorted(cohorts.keys()), start=1):
         cohort_runs = cohorts[cohort_key]
-        representative = _select_representative(cohort_runs)
+        representative, profile_validity = _minimal_valid_profile_subset(
+            records=cohort_runs,
+            index_csv=index_csv_path,
+        )
         run = representative.run
         descriptor = cohort_descriptors[cohort_key]
         digest = sha1(cohort_key.encode("utf-8")).hexdigest()[:10]
@@ -357,8 +503,52 @@ def verify_campaign_runtime_profile(
         run_result: dict[str, Any] | None = None
         run_error: str | None = None
 
+        expected_outer_folds = int(profile_validity.expected_outer_folds)
+        if not profile_validity.can_profile_measured:
+            fallback_estimates_used += 1
+            estimated_seconds_per_full_run = float(int(run.projected_runtime_seconds))
+            estimated_total_seconds = float(estimated_seconds_per_full_run) * float(
+                len(cohort_runs)
+            )
+            phase_totals[str(representative.phase)] += float(estimated_total_seconds)
+            phase_runs[str(representative.phase)] += int(len(cohort_runs))
+            model_name = str(run.model)
+            model_totals[model_name] = float(model_totals.get(model_name, 0.0)) + float(
+                estimated_total_seconds
+            )
+            cohort_estimates.append(
+                {
+                    "status": "passed",
+                    "cohort_id": cohort_id,
+                    "cohort_key": cohort_key,
+                    "cohort": descriptor,
+                    "phase": representative.phase,
+                    "source_run_id": run.run_id,
+                    "source_framework_mode": str(run.framework_mode),
+                    "n_planned_runs": int(len(cohort_runs)),
+                    "estimate_source": "conservative_fallback",
+                    "estimate_confidence": "low",
+                    "profiling_subset_description": profile_validity.profiling_subset_description,
+                    "expected_outer_folds_per_run": int(expected_outer_folds),
+                    "measured_outer_folds": None,
+                    "profile_elapsed_seconds": None,
+                    "fold_scale_factor": None,
+                    "estimated_seconds_per_full_run": float(estimated_seconds_per_full_run),
+                    "estimated_total_seconds": float(estimated_total_seconds),
+                    "estimated_total_human": _humanize_seconds(estimated_total_seconds),
+                    "projected_runtime_seconds_per_run": int(run.projected_runtime_seconds),
+                    "fallback_reason": str(profile_validity.reason or "profiling_subset_invalid"),
+                    "estimated_train_inner_groups_after_outer_fold": (
+                        int(profile_validity.estimated_train_inner_groups_after_outer_fold)
+                        if profile_validity.estimated_train_inner_groups_after_outer_fold
+                        is not None
+                        else None
+                    ),
+                }
+            )
+            continue
+
         try:
-            expected_outer_folds = _expected_outer_folds(index_csv_path, run)
             started = perf_counter()
             run_result = run_experiment(
                 index_csv=index_csv_path,
@@ -511,6 +701,9 @@ def verify_campaign_runtime_profile(
                 "source_run_id": run.run_id,
                 "source_framework_mode": str(run.framework_mode),
                 "n_planned_runs": int(len(cohort_runs)),
+                "estimate_source": "measured_profile",
+                "estimate_confidence": "medium",
+                "profiling_subset_description": profile_validity.profiling_subset_description,
                 "expected_outer_folds_per_run": int(expected_outer_folds),
                 "measured_outer_folds": int(measured_outer_folds),
                 "profile_elapsed_seconds": float(elapsed_seconds),
@@ -567,11 +760,16 @@ def verify_campaign_runtime_profile(
         phase_totals=phase_totals,
         model_totals=model_totals,
         profiling_runs_executed=profiling_runs_executed,
+        fallback_estimates_used=fallback_estimates_used,
         cohort_count=len(cohorts),
         issues=issues,
     )
 
-    passed = bool(not issues and profiling_runs_executed > 0 and len(cohorts) > 0)
+    passed = bool(
+        not issues
+        and len(cohorts) > 0
+        and (profiling_runs_executed > 0 or fallback_estimates_used > 0)
+    )
     return {
         "schema_version": "campaign-runtime-profile-summary-v1",
         "generated_at_utc": _utc_now(),
@@ -585,6 +783,7 @@ def verify_campaign_runtime_profile(
             "profile_root": str(profile_root_path),
         },
         "profiling_runs_executed": int(profiling_runs_executed),
+        "fallback_estimates_used": int(fallback_estimates_used),
         "n_cohorts": int(len(cohorts)),
         "cohort_estimates": cohort_estimates,
         "phase_estimates": phase_estimates,
