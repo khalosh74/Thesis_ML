@@ -982,11 +982,13 @@ $PhaseRunners["precheck"] = {
     if ($ExecutionMode -eq "resume") {
         $priorStatus = Get-PhaseStatusValue -PhaseName "precheck"
         $rcSummaryExisting = Join-Path $PrecheckRoot "rc1_gate_summary.json"
+        $modelCostPrecheckExisting = Join-Path $PrecheckRoot "model_cost_policy_precheck_summary.json"
         $commitExisting = Join-Path $PrecheckRoot "commit_sha.txt"
         $branchExisting = Join-Path $PrecheckRoot "branch.txt"
         if (
             $priorStatus -eq "passed" -and
             (Test-Path -LiteralPath $rcSummaryExisting -PathType Leaf) -and
+            (Test-Path -LiteralPath $modelCostPrecheckExisting -PathType Leaf) -and
             (Test-Path -LiteralPath $commitExisting -PathType Leaf) -and
             (Test-Path -LiteralPath $branchExisting -PathType Leaf)
         ) {
@@ -1006,6 +1008,7 @@ $PhaseRunners["precheck"] = {
                 $Context.extra["resume_reconciliation"] = $reused
             }
             $Context.key_outputs += $rcSummaryExisting
+            $Context.key_outputs += $modelCostPrecheckExisting
             $Context.key_outputs += $commitExisting
             $Context.key_outputs += $branchExisting
             $Context.warnings += "Resume mode reused existing passed precheck artifacts."
@@ -1045,6 +1048,20 @@ $PhaseRunners["precheck"] = {
     Invoke-PhaseCommand -Context $Context -Label "Release hygiene check" -CommandParts @("python", "scripts/release_hygiene_check.py") | Out-Null
 
     Invoke-PhaseCommand -Context $Context -Label "Full test suite" -CommandParts @("python", "-m", "pytest", "-q") | Out-Null
+
+    $modelCostPrecheckSummary = Join-Path $PrecheckRoot "model_cost_policy_precheck_summary.json"
+    $modelCostPrecheckCommand = @(
+        "python", "scripts/verify_model_cost_policy_precheck.py",
+        "--index-csv", $IndexCsv,
+        "--confirmatory-protocol", $ConfirmatoryProtocol
+    )
+    foreach ($spec in $ComparisonSpecs) {
+        $modelCostPrecheckCommand += @("--comparison-spec", $spec)
+    }
+    $modelCostPrecheckCommand += @("--summary-out", $modelCostPrecheckSummary)
+    Invoke-PhaseCommand -Context $Context -Label "Model cost policy precheck" -CommandParts $modelCostPrecheckCommand | Out-Null
+    $Context.verification_summaries += $modelCostPrecheckSummary
+    $Context.key_outputs += $modelCostPrecheckSummary
 
     $rcSummary = Join-Path $PrecheckRoot "rc1_gate_summary.json"
     Invoke-PhaseCommand -Context $Context -Label "RC1 release gate" -CommandParts @(

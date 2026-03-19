@@ -99,6 +99,8 @@ def test_load_comparison_spec_validates() -> None:
     }
     assert int(spec.evidence_policy.repeat_evaluation.repeat_count) == 3
     assert bool(spec.evidence_policy.paired_comparisons.require_significant_win) is True
+    assert "logreg" in set(spec.cost_policy.explicit_benchmark_expensive_models)
+    assert int(spec.cost_policy.max_projected_runtime_seconds_per_run) > 0
 
 
 def test_compile_comparison_expands_variants_and_subjects(

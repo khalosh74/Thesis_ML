@@ -38,6 +38,8 @@ def _write_confirmatory_output(root: Path) -> Path:
         "methodology_policy_name": "fixed_baselines_only",
         "class_weight_policy": "none",
         "tuning_enabled": False,
+        "model_cost_tier": "official_fast",
+        "projected_runtime_seconds": 1200,
         "evidence_run_role": "primary",
         "repeat_id": 1,
         "repeat_count": 1,
@@ -140,7 +142,9 @@ def _write_confirmatory_output(root: Path) -> Path:
         },
     }
 
-    (run_dir / "config.json").write_text(f"{json.dumps(config_payload, indent=2)}\n", encoding="utf-8")
+    (run_dir / "config.json").write_text(
+        f"{json.dumps(config_payload, indent=2)}\n", encoding="utf-8"
+    )
     (run_dir / "metrics.json").write_text(
         f"{json.dumps(metrics_payload, indent=2)}\n", encoding="utf-8"
     )
@@ -153,7 +157,12 @@ def _write_confirmatory_output(root: Path) -> Path:
                 "dataset_identity": {"dataset_fingerprint": dataset_fingerprint},
                 "target_definition": {"target_column": "coarse_affect"},
                 "coverage": {"selected_subset": {"n_rows": 2}},
-                "external_validation": {"enabled": False, "mode": "compatibility_only", "status": "not_configured", "datasets": []},
+                "external_validation": {
+                    "enabled": False,
+                    "mode": "compatibility_only",
+                    "status": "not_configured",
+                    "datasets": [],
+                },
             },
             indent=2,
         )
@@ -215,7 +224,12 @@ def _write_confirmatory_output(root: Path) -> Path:
     )
     (run_dir / "external_validation_compatibility.json").write_text(
         json.dumps(
-            {"enabled": False, "mode": "compatibility_only", "status": "not_configured", "datasets": []},
+            {
+                "enabled": False,
+                "mode": "compatibility_only",
+                "status": "not_configured",
+                "datasets": [],
+            },
             indent=2,
         )
         + "\n",
@@ -230,6 +244,8 @@ def _write_confirmatory_output(root: Path) -> Path:
                         "framework_mode",
                         "canonical_run",
                         "methodology_policy_name",
+                        "model_cost_tier",
+                        "projected_runtime_seconds",
                         "protocol_id",
                         "protocol_version",
                         "suite_id",
@@ -266,6 +282,8 @@ def _write_confirmatory_output(root: Path) -> Path:
                     "framework_mode",
                     "canonical_run",
                     "methodology_policy_name",
+                    "model_cost_tier",
+                    "projected_runtime_seconds",
                     "data_policy_effective",
                     "protocol_id",
                     "protocol_version",
@@ -335,7 +353,7 @@ def _write_confirmatory_output(root: Path) -> Path:
                         "confirmatory_status": "confirmatory",
                         "explicit_no_deviation_record": True,
                     },
-                }
+                },
             },
             indent=2,
         )
@@ -512,6 +530,5 @@ def test_compare_official_outputs_detects_deterministic_mismatch(tmp_path: Path)
     mismatch_summary = compare_official_outputs(left_dir=left_dir, right_dir=right_dir)
     assert mismatch_summary["passed"] is False
     assert any(
-        mismatch["code"] == "run_artifacts_mismatch"
-        for mismatch in mismatch_summary["mismatches"]
+        mismatch["code"] == "run_artifacts_mismatch" for mismatch in mismatch_summary["mismatches"]
     )

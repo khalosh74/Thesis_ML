@@ -42,6 +42,12 @@
     "n_permutations": 0,
     "dummy_baseline_enabled": false
   },
+  "cost_policy": {
+    "explicit_benchmark_expensive_models": [
+      "logreg"
+    ],
+    "max_projected_runtime_seconds_per_run": 7200
+  },
   "subgroup_reporting_policy": {
     "enabled": true,
     "subgroup_dimensions": [
@@ -228,6 +234,8 @@
       "methodology_policy_name",
       "class_weight_policy",
       "tuning_enabled",
+      "model_cost_tier",
+      "projected_runtime_seconds",
       "evidence_run_role",
       "repeat_id",
       "repeat_count",

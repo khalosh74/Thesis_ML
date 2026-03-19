@@ -8,6 +8,10 @@ import pandas as pd
 
 from Thesis_ML.config.framework_mode import FrameworkMode
 from Thesis_ML.config.methodology import EvidenceRunRole, MethodologyPolicyName
+from Thesis_ML.experiments.model_catalog import (
+    get_model_cost_entry,
+    projected_runtime_seconds,
+)
 from Thesis_ML.protocols.models import (
     CompiledProtocolManifest,
     CompiledRunControls,
@@ -168,7 +172,9 @@ def compile_protocol(
     runs: list[CompiledRunSpec] = []
     claim_to_run_map: dict[str, list[str]] = {}
     permutation_enabled_suites = set(protocol.control_policy.permutation.suites)
-    permutation_metric = protocol.control_policy.permutation.metric or protocol.metric_policy.primary_metric
+    permutation_metric = (
+        protocol.control_policy.permutation.metric or protocol.metric_policy.primary_metric
+    )
     repeat_count = int(protocol.evidence_policy.repeat_evaluation.repeat_count)
     seed_stride = int(protocol.evidence_policy.repeat_evaluation.seed_stride)
     require_untuned_baseline = bool(
@@ -192,6 +198,7 @@ def compile_protocol(
             repeated_run_id = (
                 f"{base_run_id}__r{repeat_id:03d}" if repeat_count > 1 else base_run_id
             )
+            model_cost_entry = get_model_cost_entry(model_name)
             run = CompiledRunSpec(
                 run_id=repeated_run_id,
                 base_run_id=base_run_id,
@@ -202,6 +209,13 @@ def compile_protocol(
                 claim_ids=list(suite.claim_ids),
                 target=protocol.scientific_contract.target,
                 model=model_name,
+                model_cost_tier=model_cost_entry.cost_tier,
+                projected_runtime_seconds=projected_runtime_seconds(
+                    model_name=model_name,
+                    framework_mode=FrameworkMode.CONFIRMATORY,
+                    methodology_policy=protocol.methodology_policy.policy_name,
+                    tuning_enabled=bool(protocol.methodology_policy.tuning_enabled),
+                ),
                 cv_mode=suite.split_mode,
                 subject=subject,
                 train_subject=train_subject,

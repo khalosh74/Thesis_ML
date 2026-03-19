@@ -24,6 +24,12 @@ from Thesis_ML.config.schema_versions import (
     SUPPORTED_THESIS_PROTOCOL_SCHEMA_VERSIONS,
     THESIS_PROTOCOL_SCHEMA_VERSION,
 )
+from Thesis_ML.experiments.model_catalog import (
+    ModelCostTier,
+    get_model_cost_entry,
+    projected_runtime_seconds,
+    supported_model_cost_tiers,
+)
 from Thesis_ML.experiments.model_factory import ALL_MODEL_NAMES
 from Thesis_ML.experiments.run_states import (
     RUN_STATUS_COMPLETED_LEGACY,
@@ -190,6 +196,35 @@ class ModelPolicy(_ProtocolModel):
         return self
 
 
+class ModelCostPolicy(_ProtocolModel):
+    allowed_tiers: list[ModelCostTier] = Field(
+        default_factory=lambda: [
+            ModelCostTier.OFFICIAL_FAST,
+            ModelCostTier.OFFICIAL_ALLOWED,
+        ]
+    )
+    max_projected_runtime_seconds_per_run: int = 90 * 60
+
+    @model_validator(mode="after")
+    def _validate_cost_policy(self) -> ModelCostPolicy:
+        if not self.allowed_tiers:
+            raise ValueError("model_cost_policy.allowed_tiers must contain at least one tier.")
+        if len(set(self.allowed_tiers)) != len(self.allowed_tiers):
+            raise ValueError("model_cost_policy.allowed_tiers must be unique.")
+        valid_tiers = set(supported_model_cost_tiers())
+        invalid = sorted({tier.value for tier in self.allowed_tiers if tier not in valid_tiers})
+        if invalid:
+            allowed = ", ".join(sorted(tier.value for tier in valid_tiers))
+            raise ValueError(
+                "model_cost_policy.allowed_tiers contains unsupported values: "
+                + ", ".join(invalid)
+                + f". Allowed values: {allowed}."
+            )
+        if int(self.max_projected_runtime_seconds_per_run) <= 0:
+            raise ValueError("model_cost_policy.max_projected_runtime_seconds_per_run must be > 0.")
+        return self
+
+
 class DummyBaselinePolicy(_ProtocolModel):
     enabled: bool = False
     suites: list[str] = Field(default_factory=list)
@@ -276,6 +311,8 @@ class ArtifactContract(_ProtocolModel):
             "methodology_policy_name",
             "class_weight_policy",
             "tuning_enabled",
+            "model_cost_tier",
+            "projected_runtime_seconds",
             "evidence_run_role",
             "repeat_id",
             "repeat_count",
@@ -331,6 +368,8 @@ class ArtifactContract(_ProtocolModel):
             "methodology_policy_name",
             "class_weight_policy",
             "tuning_enabled",
+            "model_cost_tier",
+            "projected_runtime_seconds",
             "evidence_run_role",
             "repeat_id",
             "repeat_count",
@@ -421,6 +460,7 @@ class ThesisProtocol(_ProtocolModel):
     scientific_contract: ScientificContract
     split_policy: SplitPolicy
     model_policy: ModelPolicy
+    model_cost_policy: ModelCostPolicy = Field(default_factory=ModelCostPolicy)
     methodology_policy: MethodologyPolicy
     metric_policy: MetricPolicy = Field(default_factory=MetricPolicy)
     subgroup_reporting_policy: SubgroupReportingPolicy = Field(
@@ -479,6 +519,40 @@ class ThesisProtocol(_ProtocolModel):
             if not self.model_policy.nested_grouped_cv:
                 raise ValueError(
                     "grouped_nested_tuning requires model_policy.nested_grouped_cv=true."
+                )
+        allowed_tiers = set(self.model_cost_policy.allowed_tiers)
+        max_runtime = int(self.model_cost_policy.max_projected_runtime_seconds_per_run)
+        protocol_models = {
+            str(model_name).strip()
+            for model_name in list(self.model_policy.models)
+            if str(model_name).strip()
+        }
+        for suite in self.official_run_suites:
+            suite_models = suite.models if suite.models is not None else self.model_policy.models
+            for model_name in suite_models:
+                if str(model_name).strip():
+                    protocol_models.add(str(model_name).strip())
+        for model_name in sorted(protocol_models):
+            catalog_entry = get_model_cost_entry(model_name)
+            if catalog_entry.cost_tier not in allowed_tiers:
+                allowed = ", ".join(sorted(tier.value for tier in allowed_tiers))
+                raise ValueError(
+                    "Confirmatory protocol model cost policy rejected model "
+                    f"'{model_name}': tier='{catalog_entry.cost_tier.value}' is not allowed. "
+                    f"Allowed tiers: {allowed}."
+                )
+            projected_runtime = projected_runtime_seconds(
+                model_name=model_name,
+                framework_mode=FrameworkMode.CONFIRMATORY,
+                methodology_policy=self.methodology_policy.policy_name,
+                tuning_enabled=bool(self.methodology_policy.tuning_enabled),
+            )
+            if int(projected_runtime) > max_runtime:
+                raise ValueError(
+                    "Confirmatory protocol model cost policy rejected model "
+                    f"'{model_name}': projected_runtime_seconds={projected_runtime} exceeds "
+                    "max_projected_runtime_seconds_per_run="
+                    f"{max_runtime}."
                 )
 
         suite_ids = [suite.suite_id for suite in self.official_run_suites]
@@ -612,6 +686,8 @@ class CompiledRunSpec(_ProtocolModel):
     claim_ids: list[str] = Field(min_length=1)
     target: str = Field(min_length=1)
     model: str = Field(min_length=1)
+    model_cost_tier: ModelCostTier = ModelCostTier.OFFICIAL_FAST
+    projected_runtime_seconds: int = 1
     cv_mode: Literal["within_subject_loso_session", "frozen_cross_person_transfer"]
     subject: str | None = None
     train_subject: str | None = None
@@ -653,6 +729,27 @@ class CompiledRunSpec(_ProtocolModel):
             allowed = ", ".join(sorted(ALL_MODEL_NAMES))
             raise ValueError(
                 f"CompiledRunSpec model '{self.model}' is unsupported. Allowed values: {allowed}."
+            )
+        catalog_entry = get_model_cost_entry(self.model)
+        if self.model_cost_tier != catalog_entry.cost_tier:
+            raise ValueError(
+                f"CompiledRunSpec '{self.run_id}' model_cost_tier='{self.model_cost_tier.value}' "
+                f"does not match catalog tier '{catalog_entry.cost_tier.value}' for model "
+                f"'{self.model}'."
+            )
+        expected_projected_runtime = projected_runtime_seconds(
+            model_name=self.model,
+            framework_mode=FrameworkMode.CONFIRMATORY,
+            methodology_policy=self.methodology_policy_name,
+            tuning_enabled=bool(self.tuning_enabled),
+        )
+        if int(self.projected_runtime_seconds) <= 0:
+            raise ValueError("CompiledRunSpec.projected_runtime_seconds must be > 0.")
+        if int(self.projected_runtime_seconds) != int(expected_projected_runtime):
+            raise ValueError(
+                f"CompiledRunSpec '{self.run_id}' projected_runtime_seconds="
+                f"{self.projected_runtime_seconds} does not match expected "
+                f"{expected_projected_runtime} for model '{self.model}'."
             )
         if self.cv_mode == "within_subject_loso_session":
             if self.subject is None:
@@ -768,6 +865,8 @@ class CompiledProtocolManifest(_ProtocolModel):
             "methodology_policy_name",
             "class_weight_policy",
             "tuning_enabled",
+            "model_cost_tier",
+            "projected_runtime_seconds",
             "evidence_run_role",
             "repeat_id",
             "repeat_count",
@@ -803,6 +902,8 @@ class CompiledProtocolManifest(_ProtocolModel):
         for key in (
             "framework_mode",
             "canonical_run",
+            "model_cost_tier",
+            "projected_runtime_seconds",
             "data_policy_effective",
             "protocol_id",
             "protocol_version",

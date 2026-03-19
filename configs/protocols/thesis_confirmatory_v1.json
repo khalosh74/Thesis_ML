@@ -41,6 +41,13 @@
     "class_weight_policy": "none",
     "seed": 42
   },
+  "model_cost_policy": {
+    "allowed_tiers": [
+      "official_fast",
+      "official_allowed"
+    ],
+    "max_projected_runtime_seconds_per_run": 5400
+  },
   "controls": {
     "dummy_baseline": true,
     "permutation_test": true,

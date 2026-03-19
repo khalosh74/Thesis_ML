@@ -95,6 +95,11 @@ def test_load_canonical_protocol_validates() -> None:
     assert protocol.methodology_policy.policy_name.value == "fixed_baselines_only"
     assert protocol.metric_policy.primary_metric == "balanced_accuracy"
     assert int(protocol.evidence_policy.repeat_evaluation.repeat_count) == 3
+    assert {tier.value for tier in protocol.model_cost_policy.allowed_tiers} == {
+        "official_fast",
+        "official_allowed",
+    }
+    assert int(protocol.model_cost_policy.max_projected_runtime_seconds_per_run) > 0
     assert protocol.subgroup_reporting_policy.enabled is True
     assert {suite.suite_id for suite in protocol.official_run_suites} == {
         "primary_within_subject",
@@ -748,6 +753,7 @@ def test_nested_protocol_supports_grouped_nested_methodology(
     assert protocol.methodology_policy.policy_name.value == "grouped_nested_tuning"
     assert protocol.model_policy.selection_strategy.value == "nested_tuned"
     assert protocol.model_policy.tuning_enabled is True
+    assert {model for model in protocol.model_policy.models} == {"ridge", "linearsvc"}
     assert int(protocol.evidence_policy.repeat_evaluation.repeat_count) == 3
 
     result = compile_and_run_protocol(
@@ -779,8 +785,13 @@ def test_nested_protocol_compiler_expands_repeats_and_untuned_ablation(
     untuned_runs = [
         run for run in manifest.runs if run.evidence_run_role.value == "untuned_baseline"
     ]
-    assert len(primary_runs) == 12
-    assert len(untuned_runs) == 12
+    n_subjects = len(pd.read_csv(protocol_dataset["index_csv"])["subject"].astype(str).unique())
+    n_models = len(protocol.model_policy.models)
+    expected_runs = (
+        n_subjects * n_models * int(protocol.evidence_policy.repeat_evaluation.repeat_count)
+    )
+    assert len(primary_runs) == expected_runs
+    assert len(untuned_runs) == expected_runs
     assert {run.repeat_id for run in primary_runs} == {1, 2}
     assert {run.repeat_count for run in primary_runs} == {2}
     assert all(run.tuning_enabled is True for run in primary_runs)

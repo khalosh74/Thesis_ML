@@ -48,6 +48,12 @@ from Thesis_ML.experiments.metrics import (
     extract_linear_coefficients,
     scores_for_predictions,
 )
+from Thesis_ML.experiments.model_catalog import (
+    get_model_cost_entry,
+)
+from Thesis_ML.experiments.model_catalog import (
+    projected_runtime_seconds as resolve_projected_runtime_seconds,
+)
 from Thesis_ML.experiments.model_factory import MODEL_NAMES, make_model
 from Thesis_ML.experiments.official_contracts import (
     validate_official_preflight,
@@ -310,6 +316,8 @@ def run_experiment(
     force: bool = False,
     resume: bool = False,
     reuse_completed_artifacts: bool = False,
+    model_cost_tier: str | None = None,
+    projected_runtime_seconds: int | None = None,
     timeout_policy_effective: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Run one leakage-safe grouped-CV experiment and write standardized artifacts."""
@@ -442,6 +450,44 @@ def run_experiment(
         if isinstance(data_policy, dict)
         else {}
     )
+    context_model_cost_tier = official_context.get("model_cost_tier")
+    context_projected_runtime_seconds = official_context.get("projected_runtime_seconds")
+    if (
+        resolved_framework_mode in {FrameworkMode.CONFIRMATORY, FrameworkMode.LOCKED_COMPARISON}
+        and context_model_cost_tier is None
+        and model_cost_tier is not None
+    ):
+        raise ValueError(
+            "Illegal override for official run key 'model_cost_tier'. "
+            "Use protocol/comparison spec values only."
+        )
+    if (
+        resolved_framework_mode in {FrameworkMode.CONFIRMATORY, FrameworkMode.LOCKED_COMPARISON}
+        and context_projected_runtime_seconds is None
+        and projected_runtime_seconds is not None
+    ):
+        raise ValueError(
+            "Illegal override for official run key 'projected_runtime_seconds'. "
+            "Use protocol/comparison spec values only."
+        )
+    if (
+        context_model_cost_tier is not None
+        and model_cost_tier is not None
+        and str(context_model_cost_tier).strip().lower() != str(model_cost_tier).strip().lower()
+    ):
+        raise ValueError(
+            "Illegal override for official run key 'model_cost_tier'. "
+            "Use protocol/comparison spec values only."
+        )
+    if (
+        context_projected_runtime_seconds is not None
+        and projected_runtime_seconds is not None
+        and int(context_projected_runtime_seconds) != int(projected_runtime_seconds)
+    ):
+        raise ValueError(
+            "Illegal override for official run key 'projected_runtime_seconds'. "
+            "Use protocol/comparison spec values only."
+        )
     if (
         resolved_framework_mode in {FrameworkMode.CONFIRMATORY, FrameworkMode.LOCKED_COMPARISON}
         and "data_policy" not in official_context
@@ -497,6 +543,48 @@ def run_experiment(
             effective_tuning_inner_cv_scheme = "grouped_leave_one_group_out"
         if effective_tuning_inner_group_field is None:
             effective_tuning_inner_group_field = "session"
+
+    catalog_cost_entry = get_model_cost_entry(model)
+    catalog_tier = catalog_cost_entry.cost_tier.value
+    resolved_model_cost_tier = (
+        str(context_model_cost_tier).strip()
+        if context_model_cost_tier is not None
+        else str(model_cost_tier).strip()
+        if model_cost_tier is not None
+        else str(catalog_tier)
+    )
+    if resolved_model_cost_tier != str(catalog_tier):
+        raise ValueError(
+            "Model cost tier mismatch for run model. "
+            f"model='{model}' expected_tier='{catalog_tier}' "
+            f"but received '{resolved_model_cost_tier}'."
+        )
+
+    computed_projected_runtime_seconds = int(
+        resolve_projected_runtime_seconds(
+            model_name=model,
+            framework_mode=resolved_framework_mode,
+            methodology_policy=methodology_policy.policy_name,
+            tuning_enabled=bool(methodology_policy.tuning_enabled),
+        )
+    )
+    resolved_projected_runtime_seconds = (
+        int(context_projected_runtime_seconds)
+        if context_projected_runtime_seconds is not None
+        else int(projected_runtime_seconds)
+        if projected_runtime_seconds is not None
+        else int(computed_projected_runtime_seconds)
+    )
+    if int(resolved_projected_runtime_seconds) <= 0:
+        raise ValueError("projected_runtime_seconds must be > 0.")
+    if resolved_framework_mode in {
+        FrameworkMode.CONFIRMATORY,
+        FrameworkMode.LOCKED_COMPARISON,
+    } and int(resolved_projected_runtime_seconds) != int(computed_projected_runtime_seconds):
+        raise ValueError(
+            "Illegal override for official run key 'projected_runtime_seconds'. "
+            "Use protocol/comparison spec values only."
+        )
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     resolved_run_id = run_id or f"{timestamp}_{model}_{target_column}"
@@ -808,6 +896,8 @@ def run_experiment(
             methodology_policy_name=methodology_policy.policy_name.value,
             class_weight_policy=methodology_policy.class_weight_policy.value,
             tuning_enabled=bool(methodology_policy.tuning_enabled),
+            model_cost_tier=str(resolved_model_cost_tier),
+            projected_runtime_seconds=int(resolved_projected_runtime_seconds),
             tuning_summary_path=tuning_summary_path,
             tuning_best_params_path=tuning_best_params_path,
             subgroup_metrics_json_path=subgroup_metrics_json_path,
@@ -909,6 +999,8 @@ def run_experiment(
             methodology_policy_name=methodology_policy.policy_name.value,
             class_weight_policy=methodology_policy.class_weight_policy.value,
             tuning_enabled=bool(methodology_policy.tuning_enabled),
+            model_cost_tier=str(resolved_model_cost_tier),
+            projected_runtime_seconds=int(resolved_projected_runtime_seconds),
             tuning_search_space_id=effective_tuning_space_id,
             tuning_search_space_version=effective_tuning_space_version,
             tuning_inner_cv_scheme=effective_tuning_inner_cv_scheme,
@@ -1149,6 +1241,8 @@ def run_experiment(
         methodology_policy_name=methodology_policy.policy_name.value,
         class_weight_policy=methodology_policy.class_weight_policy.value,
         tuning_enabled=bool(methodology_policy.tuning_enabled),
+        model_cost_tier=str(resolved_model_cost_tier),
+        projected_runtime_seconds=int(resolved_projected_runtime_seconds),
         protocol_context=resolved_protocol_context,
         comparison_context=resolved_comparison_context,
         stage_timings_seconds=stage_timings,

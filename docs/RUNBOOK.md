@@ -100,6 +100,25 @@ Phase dependencies and blocking semantics:
 - Confirmatory readiness blockers: `precheck`, `confirmatory`.
 - Campaign sign-off blockers: all phases.
 
+Model cost policy (official paths):
+
+- model runtime cost is enforced as policy before frozen execution, not only by timeout fallback.
+- cost tiers:
+  - `official_fast`
+  - `official_allowed`
+  - `benchmark_expensive`
+  - `exploratory_only`
+- confirmatory protocols may only use `official_fast` and `official_allowed`.
+- `benchmark_expensive` variants in locked comparisons must be declared in
+  `cost_policy.explicit_benchmark_expensive_models`.
+- projected runtime per run must be below the declared policy threshold:
+  - confirmatory: `model_cost_policy.max_projected_runtime_seconds_per_run`
+  - comparison: `cost_policy.max_projected_runtime_seconds_per_run`
+- frozen campaign `precheck` runs:
+  `scripts/verify_model_cost_policy_precheck.py`
+  and writes:
+  `outputs/campaign/<CampaignTag>/release/precheck/model_cost_policy_precheck_summary.json`
+
 Timeout watchdog policy (official runs):
 
 - terminal run statuses are explicit:

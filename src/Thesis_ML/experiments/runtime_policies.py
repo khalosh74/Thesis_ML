@@ -16,6 +16,7 @@ from Thesis_ML.config.metric_policy import (
     resolve_effective_metric_policy,
     validate_metric_name,
 )
+from Thesis_ML.experiments.model_catalog import model_timeout_overrides_seconds
 
 CONFIRMATORY_PROTOCOL_CONTEXT_REQUIRED_KEYS: tuple[str, ...] = (
     "framework_mode",
@@ -32,6 +33,8 @@ CONFIRMATORY_PROTOCOL_CONTEXT_REQUIRED_KEYS: tuple[str, ...] = (
     "subgroup_min_samples_per_group",
     "metric_policy",
     "data_policy",
+    "model_cost_tier",
+    "projected_runtime_seconds",
     "required_run_metadata_fields",
 )
 
@@ -48,6 +51,8 @@ LOCKED_COMPARISON_CONTEXT_REQUIRED_KEYS: tuple[str, ...] = (
     "subgroup_min_samples_per_group",
     "metric_policy",
     "data_policy",
+    "model_cost_tier",
+    "projected_runtime_seconds",
     "required_run_metadata_fields",
 )
 
@@ -58,9 +63,7 @@ _DEFAULT_TIMEOUT_POLICY: dict[str, Any] = {
         FrameworkMode.CONFIRMATORY.value: 45 * 60,
         FrameworkMode.LOCKED_COMPARISON.value: 90 * 60,
     },
-    "model_timeouts_seconds": {
-        "logreg": 120 * 60,
-    },
+    "model_timeouts_seconds": model_timeout_overrides_seconds(),
     "shutdown_grace_seconds": 30,
     "absolute_hard_ceiling_seconds": 180 * 60,
 }

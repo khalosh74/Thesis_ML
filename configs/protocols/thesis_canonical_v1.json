@@ -35,6 +35,13 @@
     "nested_grouped_cv": false,
     "class_weight_policy": "none"
   },
+  "model_cost_policy": {
+    "allowed_tiers": [
+      "official_fast",
+      "official_allowed"
+    ],
+    "max_projected_runtime_seconds_per_run": 5400
+  },
   "methodology_policy": {
     "policy_name": "fixed_baselines_only",
     "class_weight_policy": "none",
@@ -223,6 +230,8 @@
       "methodology_policy_name",
       "class_weight_policy",
       "tuning_enabled",
+      "model_cost_tier",
+      "projected_runtime_seconds",
       "evidence_run_role",
       "repeat_id",
       "repeat_count",

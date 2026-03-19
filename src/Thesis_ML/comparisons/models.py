@@ -18,6 +18,11 @@ from Thesis_ML.config.methodology import (
     SubgroupReportingPolicy,
 )
 from Thesis_ML.config.metric_policy import SUPPORTED_CLASSIFICATION_METRICS, validate_metric_name
+from Thesis_ML.experiments.model_catalog import (
+    ModelCostTier,
+    get_model_cost_entry,
+    projected_runtime_seconds,
+)
 from Thesis_ML.experiments.model_factory import ALL_MODEL_NAMES
 from Thesis_ML.experiments.run_states import (
     RUN_STATUS_COMPLETED_LEGACY,
@@ -246,6 +251,8 @@ class ComparisonArtifactContract(_ComparisonModel):
             "methodology_policy_name",
             "class_weight_policy",
             "tuning_enabled",
+            "model_cost_tier",
+            "projected_runtime_seconds",
             "evidence_run_role",
             "repeat_id",
             "repeat_count",
@@ -288,6 +295,8 @@ class ComparisonArtifactContract(_ComparisonModel):
         for key in (
             "framework_mode",
             "canonical_run",
+            "model_cost_tier",
+            "projected_runtime_seconds",
             "data_policy_effective",
             "comparison_id",
             "comparison_version",
@@ -295,6 +304,29 @@ class ComparisonArtifactContract(_ComparisonModel):
         ):
             if key not in self.required_run_metadata_fields:
                 raise ValueError("required_run_metadata_fields is missing required key: " + key)
+        return self
+
+
+class ComparisonCostPolicy(_ComparisonModel):
+    explicit_benchmark_expensive_models: list[str] = Field(default_factory=list)
+    max_projected_runtime_seconds_per_run: int = 120 * 60
+
+    @model_validator(mode="after")
+    def _validate_cost_policy(self) -> ComparisonCostPolicy:
+        if len(set(self.explicit_benchmark_expensive_models)) != len(
+            self.explicit_benchmark_expensive_models
+        ):
+            raise ValueError("cost_policy.explicit_benchmark_expensive_models must be unique.")
+        if int(self.max_projected_runtime_seconds_per_run) <= 0:
+            raise ValueError("cost_policy.max_projected_runtime_seconds_per_run must be > 0.")
+        supported_models = set(ALL_MODEL_NAMES)
+        for model_name in self.explicit_benchmark_expensive_models:
+            if model_name not in supported_models:
+                allowed = ", ".join(sorted(supported_models))
+                raise ValueError(
+                    "cost_policy.explicit_benchmark_expensive_models references unsupported "
+                    f"model '{model_name}'. Allowed values: {allowed}."
+                )
         return self
 
 
@@ -310,6 +342,7 @@ class ComparisonSpec(_ComparisonModel):
     methodology_policy: MethodologyPolicy
     metric_policy: MetricPolicy = Field(default_factory=MetricPolicy)
     control_policy: ComparisonControlPolicy = Field(default_factory=ComparisonControlPolicy)
+    cost_policy: ComparisonCostPolicy = Field(default_factory=ComparisonCostPolicy)
     subgroup_reporting_policy: SubgroupReportingPolicy = Field(
         default_factory=SubgroupReportingPolicy
     )
@@ -395,6 +428,36 @@ class ComparisonSpec(_ComparisonModel):
                 "model_family comparison with fixed_baselines_only requires at least two distinct models."
             )
 
+        explicitly_allowed_expensive = set(self.cost_policy.explicit_benchmark_expensive_models)
+        max_runtime = int(self.cost_policy.max_projected_runtime_seconds_per_run)
+        for variant in self.allowed_variants:
+            catalog_entry = get_model_cost_entry(variant.model)
+            expensive_model_requires_explicit_allow = bool(
+                catalog_entry.cost_tier == ModelCostTier.BENCHMARK_EXPENSIVE
+                or catalog_entry.requires_explicit_comparison_spec
+            )
+            if (
+                expensive_model_requires_explicit_allow
+                and variant.model not in explicitly_allowed_expensive
+            ):
+                raise ValueError(
+                    "comparison cost_policy requires explicit_benchmark_expensive_models to "
+                    f"include model '{variant.model}' (variant_id='{variant.variant_id}')."
+                )
+            projected_runtime = projected_runtime_seconds(
+                model_name=variant.model,
+                framework_mode=FrameworkMode.LOCKED_COMPARISON,
+                methodology_policy=self.methodology_policy.policy_name,
+                tuning_enabled=bool(self.methodology_policy.tuning_enabled),
+            )
+            if int(projected_runtime) > max_runtime:
+                raise ValueError(
+                    "comparison cost_policy rejected variant "
+                    f"'{variant.variant_id}' (model '{variant.model}'): projected_runtime_seconds="
+                    f"{projected_runtime} exceeds max_projected_runtime_seconds_per_run="
+                    f"{max_runtime}."
+                )
+
         return self
 
 
@@ -415,6 +478,8 @@ class CompiledComparisonRunSpec(_ComparisonModel):
     claim_ids: list[str] = Field(min_length=1)
     target: str = Field(min_length=1)
     model: str = Field(min_length=1)
+    model_cost_tier: ModelCostTier = ModelCostTier.OFFICIAL_FAST
+    projected_runtime_seconds: int = 1
     cv_mode: Literal["within_subject_loso_session", "frozen_cross_person_transfer"]
     subject: str | None = None
     train_subject: str | None = None
@@ -454,6 +519,27 @@ class CompiledComparisonRunSpec(_ComparisonModel):
         if self.canonical_run:
             raise ValueError(
                 f"CompiledComparisonRunSpec '{self.run_id}' must set canonical_run=false."
+            )
+        catalog_entry = get_model_cost_entry(self.model)
+        if self.model_cost_tier != catalog_entry.cost_tier:
+            raise ValueError(
+                f"CompiledComparisonRunSpec '{self.run_id}' model_cost_tier="
+                f"'{self.model_cost_tier.value}' does not match catalog tier "
+                f"'{catalog_entry.cost_tier.value}' for model '{self.model}'."
+            )
+        expected_projected_runtime = projected_runtime_seconds(
+            model_name=self.model,
+            framework_mode=FrameworkMode.LOCKED_COMPARISON,
+            methodology_policy=self.methodology_policy_name,
+            tuning_enabled=bool(self.tuning_enabled),
+        )
+        if int(self.projected_runtime_seconds) <= 0:
+            raise ValueError("CompiledComparisonRunSpec.projected_runtime_seconds must be > 0.")
+        if int(self.projected_runtime_seconds) != int(expected_projected_runtime):
+            raise ValueError(
+                f"CompiledComparisonRunSpec '{self.run_id}' projected_runtime_seconds="
+                f"{self.projected_runtime_seconds} does not match expected "
+                f"{expected_projected_runtime} for model '{self.model}'."
             )
         if self.cv_mode == "within_subject_loso_session" and self.subject is None:
             raise ValueError(f"CompiledComparisonRunSpec '{self.run_id}' requires subject.")
@@ -545,6 +631,8 @@ class CompiledComparisonManifest(_ComparisonModel):
             "methodology_policy_name",
             "class_weight_policy",
             "tuning_enabled",
+            "model_cost_tier",
+            "projected_runtime_seconds",
             "evidence_run_role",
             "repeat_id",
             "repeat_count",
@@ -568,6 +656,8 @@ class CompiledComparisonManifest(_ComparisonModel):
         for key in (
             "framework_mode",
             "canonical_run",
+            "model_cost_tier",
+            "projected_runtime_seconds",
             "data_policy_effective",
             "comparison_id",
             "comparison_version",

@@ -17,6 +17,10 @@ from Thesis_ML.comparisons.models import (
 )
 from Thesis_ML.config.framework_mode import FrameworkMode
 from Thesis_ML.config.methodology import EvidenceRunRole, MethodologyPolicyName
+from Thesis_ML.experiments.model_catalog import (
+    get_model_cost_entry,
+    projected_runtime_seconds,
+)
 
 
 def _slug(value: str) -> str:
@@ -158,6 +162,7 @@ def compile_comparison(
             repeated_run_id = (
                 f"{base_run_id}__r{repeat_id:03d}" if repeat_count > 1 else base_run_id
             )
+            model_cost_entry = get_model_cost_entry(model_name)
             run = CompiledComparisonRunSpec(
                 run_id=repeated_run_id,
                 base_run_id=base_run_id,
@@ -172,6 +177,13 @@ def compile_comparison(
                 claim_ids=list(claim_ids),
                 target=contract.target,
                 model=model_name,
+                model_cost_tier=model_cost_entry.cost_tier,
+                projected_runtime_seconds=projected_runtime_seconds(
+                    model_name=model_name,
+                    framework_mode=FrameworkMode.LOCKED_COMPARISON,
+                    methodology_policy=comparison.methodology_policy.policy_name,
+                    tuning_enabled=bool(comparison.methodology_policy.tuning_enabled),
+                ),
                 cv_mode=contract.split_mode,
                 subject=subject,
                 train_subject=train_subject,

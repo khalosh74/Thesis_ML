@@ -163,6 +163,34 @@
         }
       }
     },
+    "model_cost_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "allowed_tiers",
+        "max_projected_runtime_seconds_per_run"
+      ],
+      "properties": {
+        "allowed_tiers": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "enum": [
+              "official_fast",
+              "official_allowed",
+              "benchmark_expensive",
+              "exploratory_only"
+            ]
+          },
+          "uniqueItems": true
+        },
+        "max_projected_runtime_seconds_per_run": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
     "controls": {
       "type": "object",
       "additionalProperties": false,

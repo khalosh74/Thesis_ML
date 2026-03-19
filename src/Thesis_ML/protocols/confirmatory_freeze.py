@@ -52,7 +52,9 @@ def _resolve_target_mapping_path(mapping_version: str) -> Path:
     return DEFAULT_TARGET_CONFIGS_DIR / mapping_filename
 
 
-def _require_target_mapping_hash_match(payload: dict[str, Any], protocol_path: Path) -> dict[str, str]:
+def _require_target_mapping_hash_match(
+    payload: dict[str, Any], protocol_path: Path
+) -> dict[str, str]:
     target_payload = payload.get("target")
     if not isinstance(target_payload, dict):
         raise ValueError(
@@ -103,9 +105,7 @@ def _validate_schema_node(
             "boolean": isinstance(value, bool),
         }.get(schema_type, True)
         if not type_valid:
-            errors.append(
-                f"{path}: expected type '{schema_type}', got '{type(value).__name__}'."
-            )
+            errors.append(f"{path}: expected type '{schema_type}', got '{type(value).__name__}'.")
             return
 
     if "const" in schema and value != schema["const"]:
@@ -182,9 +182,7 @@ def validate_confirmatory_freeze_preflight(
     resolved_protocol_path = Path(protocol_path)
     resolved_schema_path = Path(schema_path)
     if not resolved_schema_path.exists():
-        raise FileNotFoundError(
-            f"Confirmatory schema file was not found: {resolved_schema_path}"
-        )
+        raise FileNotFoundError(f"Confirmatory schema file was not found: {resolved_schema_path}")
 
     payload = _load_json_object(resolved_protocol_path)
     schema_payload = _load_json_object(resolved_schema_path)
@@ -256,9 +254,7 @@ def build_confirmatory_lock_context(
         "subgroup_min_samples_per_group": int(subgroups.get("min_samples_per_group", 1)),
         "subgroup_min_classes_per_group": int(subgroups.get("min_classes_per_group", 1)),
         "subgroup_report_small_groups": bool(subgroups.get("report_small_groups", False)),
-        "multiplicity_primary_hypotheses": int(
-            multiplicity.get("primary_hypotheses", 1)
-        ),
+        "multiplicity_primary_hypotheses": int(multiplicity.get("primary_hypotheses", 1)),
         "multiplicity_primary_alpha": float(multiplicity.get("primary_alpha", 0.05)),
         "multiplicity_secondary_policy": str(
             multiplicity.get("secondary_policy", "descriptive_only")
@@ -277,9 +273,7 @@ def build_confirmatory_lock_context(
         "reporting_require_interpretation_limits": bool(
             reporting.get("require_interpretation_limits", True)
         ),
-        "reporting_require_deviation_log": bool(
-            reporting.get("require_deviation_log", True)
-        ),
+        "reporting_require_deviation_log": bool(reporting.get("require_deviation_log", True)),
     }
 
 
@@ -294,6 +288,7 @@ def adapt_confirmatory_freeze_to_thesis_protocol(
     controls = dict(payload.get("controls", {}))
     subgroups = dict(payload.get("subgroups", {}))
     secondary_analyses = list(payload.get("secondary_analyses", []))
+    model_cost_policy = dict(payload.get("model_cost_policy", {}))
     confirmatory_lock = build_confirmatory_lock_context(payload, source_path=source_path)
 
     primary_metric = str(primary_analysis.get("metric", "balanced_accuracy"))
@@ -315,9 +310,7 @@ def adapt_confirmatory_freeze_to_thesis_protocol(
     seed = int(primary_analysis.get("seed", 42))
 
     methodology_policy_name = (
-        "fixed_baselines_only"
-        if hyperparameter_policy == "fixed"
-        else "grouped_nested_tuning"
+        "fixed_baselines_only" if hyperparameter_policy == "fixed" else "grouped_nested_tuning"
     )
     tuning_enabled = methodology_policy_name == "grouped_nested_tuning"
 
@@ -341,10 +334,7 @@ def adapt_confirmatory_freeze_to_thesis_protocol(
         "status": ProtocolStatus.LOCKED.value,
         "description": "Adapted confirmatory freeze protocol.",
         "confirmatory_lock": confirmatory_lock,
-        "notes": (
-            "Auto-adapted from confirmatory freeze protocol "
-            f"source='{source_path}'"
-        ),
+        "notes": (f"Auto-adapted from confirmatory freeze protocol source='{source_path}'"),
         "scientific_contract": {
             "sample_unit": str(payload.get("sample_unit", "beta_event")),
             "target": str(target.get("name", "coarse_affect")),
@@ -360,9 +350,7 @@ def adapt_confirmatory_freeze_to_thesis_protocol(
             },
         },
         "split_policy": {
-            "primary_mode": str(
-                primary_analysis.get("split", "within_subject_loso_session")
-            ),
+            "primary_mode": str(primary_analysis.get("split", "within_subject_loso_session")),
             "secondary_mode": "frozen_cross_person_transfer",
             "grouping_field": "session",
             "transfer_constraints": (
@@ -382,15 +370,29 @@ def adapt_confirmatory_freeze_to_thesis_protocol(
             "nested_grouped_cv": tuning_enabled,
             "class_weight_policy": class_weight_policy,
         },
+        "model_cost_policy": {
+            "allowed_tiers": list(
+                model_cost_policy.get(
+                    "allowed_tiers",
+                    ["official_fast", "official_allowed"],
+                )
+            ),
+            "max_projected_runtime_seconds_per_run": int(
+                model_cost_policy.get(
+                    "max_projected_runtime_seconds_per_run",
+                    90 * 60,
+                )
+            ),
+        },
         "methodology_policy": {
             "policy_name": methodology_policy_name,
             "class_weight_policy": class_weight_policy,
             "tuning_enabled": tuning_enabled,
-            "inner_cv_scheme": (
-                "grouped_leave_one_group_out" if tuning_enabled else None
-            ),
+            "inner_cv_scheme": ("grouped_leave_one_group_out" if tuning_enabled else None),
             "inner_group_field": ("session" if tuning_enabled else None),
-            "tuning_search_space_id": (f"{model_family}_grouped_nested_v1" if tuning_enabled else None),
+            "tuning_search_space_id": (
+                f"{model_family}_grouped_nested_v1" if tuning_enabled else None
+            ),
             "tuning_search_space_version": ("v1" if tuning_enabled else None),
         },
         "metric_policy": {
@@ -400,7 +402,8 @@ def adapt_confirmatory_freeze_to_thesis_protocol(
         "subgroup_reporting_policy": {
             "enabled": bool(subgroups.get("enabled", True)),
             "subgroup_dimensions": [
-                str(value) for value in list(subgroups.get("allowed", ["subject", "task", "modality"]))
+                str(value)
+                for value in list(subgroups.get("allowed", ["subject", "task", "modality"]))
             ],
             "min_samples_per_group": int(subgroups.get("min_samples_per_group", 20)),
         },
@@ -432,19 +435,14 @@ def adapt_confirmatory_freeze_to_thesis_protocol(
                 "datasets": [],
             },
             "required_index_columns": [
-                str(value)
-                for value in list(dataset_contract.get("allowed_index_columns", []))
+                str(value) for value in list(dataset_contract.get("allowed_index_columns", []))
             ],
-            "intended_use": (
-                "Frozen confirmatory internal validation for thesis_confirmatory_v1."
-            ),
+            "intended_use": ("Frozen confirmatory internal validation for thesis_confirmatory_v1."),
             "not_intended_use": [
                 "External generalization claims from internal confirmatory runs.",
                 "Causal or clinical claims.",
             ],
-            "known_limitations": [
-                "External validation is compatibility-only in this phase."
-            ],
+            "known_limitations": ["External validation is compatibility-only in this phase."],
         },
         "evidence_policy": {
             "repeat_evaluation": {
@@ -499,9 +497,7 @@ def adapt_confirmatory_freeze_to_thesis_protocol(
             "supporting_evidence_only": True,
         },
         "sensitivity_policy": {
-            "role": (
-                "official_secondary_analyses" if include_secondary else "exploratory_only"
-            ),
+            "role": ("official_secondary_analyses" if include_secondary else "exploratory_only"),
             "suites": ([secondary_suite_id] if include_secondary else []),
         },
         "artifact_contract": ArtifactContract().model_dump(mode="json"),

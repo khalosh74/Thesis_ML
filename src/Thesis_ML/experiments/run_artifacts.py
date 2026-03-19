@@ -99,6 +99,8 @@ def stamp_metrics_artifact(
     methodology_policy_name: str,
     class_weight_policy: str,
     tuning_enabled: bool,
+    model_cost_tier: str,
+    projected_runtime_seconds: int,
     tuning_summary_path: Path,
     tuning_best_params_path: Path,
     subgroup_metrics_json_path: Path,
@@ -133,6 +135,8 @@ def stamp_metrics_artifact(
     persisted_metrics["methodology_policy_name"] = methodology_policy_name
     persisted_metrics["class_weight_policy"] = class_weight_policy
     persisted_metrics["tuning_enabled"] = bool(tuning_enabled)
+    persisted_metrics["model_cost_tier"] = str(model_cost_tier)
+    persisted_metrics["projected_runtime_seconds"] = int(projected_runtime_seconds)
     persisted_metrics["tuning_summary_path"] = str(tuning_summary_path.resolve())
     persisted_metrics["tuning_summary_path_relative"] = _relative_path(tuning_summary_path)
     persisted_metrics["tuning_best_params_path"] = str(tuning_best_params_path.resolve())
@@ -209,6 +213,8 @@ def build_run_config_payload(
     methodology_policy_name: str,
     class_weight_policy: str,
     tuning_enabled: bool,
+    model_cost_tier: str,
+    projected_runtime_seconds: int,
     tuning_search_space_id: str | None,
     tuning_search_space_version: str | None,
     tuning_inner_cv_scheme: str | None,
@@ -310,6 +316,8 @@ def build_run_config_payload(
         "methodology_policy_name": methodology_policy_name,
         "class_weight_policy": class_weight_policy,
         "tuning_enabled": bool(tuning_enabled),
+        "model_cost_tier": str(model_cost_tier),
+        "projected_runtime_seconds": int(projected_runtime_seconds),
         "tuning_search_space_id": tuning_search_space_id,
         "tuning_search_space_version": tuning_search_space_version,
         "tuning_inner_cv_scheme": tuning_inner_cv_scheme,
@@ -469,6 +477,8 @@ def build_run_result_payload(
     methodology_policy_name: str,
     class_weight_policy: str,
     tuning_enabled: bool,
+    model_cost_tier: str,
+    projected_runtime_seconds: int,
     protocol_context: dict[str, Any],
     comparison_context: dict[str, Any],
     stage_timings_seconds: dict[str, float] | None = None,
@@ -561,6 +571,8 @@ def build_run_result_payload(
         "methodology_policy_name": methodology_policy_name,
         "class_weight_policy": class_weight_policy,
         "tuning_enabled": bool(tuning_enabled),
+        "model_cost_tier": str(model_cost_tier),
+        "projected_runtime_seconds": int(projected_runtime_seconds),
         "protocol_context": protocol_context if protocol_context else None,
         "comparison_context": comparison_context if comparison_context else None,
         "stage_timings_seconds": (

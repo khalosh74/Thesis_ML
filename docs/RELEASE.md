@@ -264,6 +264,8 @@ Before freezing an experiment campaign:
    `powershell -ExecutionPolicy Bypass -File scripts/prepare_frozen_campaign.ps1 -CampaignTag "campaign-YYYY-MM-DD-rc1"`.
 2. Run frozen campaign precheck phase:
    `powershell -ExecutionPolicy Bypass -File scripts/run_frozen_campaign.ps1 -CampaignTag "campaign-YYYY-MM-DD-rc1" -IndexCsv "<index_csv>" -DataRoot "<data_root>" -CacheDir "<cache_dir>" -Phase precheck -ExecutionMode fresh`.
+   This phase includes formal model-cost policy validation and writes:
+   `outputs/campaign/<CampaignTag>/release/precheck/model_cost_policy_precheck_summary.json`.
 3. Run frozen campaign confirmatory phase:
    `powershell -ExecutionPolicy Bypass -File scripts/run_frozen_campaign.ps1 -CampaignTag "campaign-YYYY-MM-DD-rc1" -IndexCsv "<index_csv>" -DataRoot "<data_root>" -CacheDir "<cache_dir>" -Phase confirmatory -ExecutionMode resume`.
 4. Run frozen campaign comparison phase:
@@ -274,6 +276,16 @@ Before freezing an experiment campaign:
    `powershell -ExecutionPolicy Bypass -File scripts/run_frozen_campaign.ps1 -CampaignTag "campaign-YYYY-MM-DD-rc1" -IndexCsv "<index_csv>" -DataRoot "<data_root>" -CacheDir "<cache_dir>" -Phase bundle -ExecutionMode resume`.
 7. Optional one-command equivalent:
    `powershell -ExecutionPolicy Bypass -File scripts/run_frozen_campaign.ps1 -CampaignTag "campaign-YYYY-MM-DD-rc1" -IndexCsv "<index_csv>" -DataRoot "<data_root>" -CacheDir "<cache_dir>" -Phase all -ExecutionMode resume`.
+
+Model-cost policy enforcement in official paths:
+
+- confirmatory protocols must restrict models to `official_fast`/`official_allowed` tiers.
+- locked comparison specs must explicitly allow `benchmark_expensive` variants via:
+  `cost_policy.explicit_benchmark_expensive_models`.
+- projected runtime limits are policy fields in the spec/protocol contracts:
+  - `model_cost_policy.max_projected_runtime_seconds_per_run`
+  - `cost_policy.max_projected_runtime_seconds_per_run`
+- timeout watchdogs remain fallback safety; policy precheck is the primary guardrail.
 
 ## Confirmatory-ready boundary
 
