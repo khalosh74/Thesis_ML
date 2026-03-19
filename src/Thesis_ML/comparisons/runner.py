@@ -707,7 +707,6 @@ def execute_compiled_comparison(
         started_at = str(dispatched.get("started_at_utc") or metadata["started_at"])
         ended_at = str(dispatched.get("ended_at_utc") or _utc_now_iso())
 
-        run_result: ComparisonRunResult
         execution_error = dispatched.get("execution_error")
         if isinstance(execution_error, dict):
             failure_payload_raw = execution_error.get("failure_payload")
