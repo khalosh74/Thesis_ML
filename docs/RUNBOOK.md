@@ -119,6 +119,20 @@ Model cost policy (official paths):
   and writes:
   `outputs/campaign/<CampaignTag>/release/precheck/model_cost_policy_precheck_summary.json`
 
+Runtime profiling precheck (non-evidentiary):
+
+- frozen campaign `precheck` also runs:
+  `scripts/verify_campaign_runtime_profile.py`
+- it compiles the official confirmatory/comparison plans, profiles one representative run per
+  runtime cohort with a profiling-only fold cap (`max_outer_folds=1`), and scales ETA estimates.
+- summary artifact:
+  `outputs/campaign/<CampaignTag>/release/precheck/campaign_runtime_profile_summary.json`
+- profiling run artifacts are isolated under:
+  `outputs/campaign/<CampaignTag>/release/precheck/runtime_profile_runs/`
+- profiling outputs are precheck-only and non-canonical; do not use them as thesis evidence.
+- if any runtime cohort cannot be profiled successfully, precheck fails and records the failing
+  cohorts in `issues`.
+
 Timeout watchdog policy (official runs):
 
 - terminal run statuses are explicit:

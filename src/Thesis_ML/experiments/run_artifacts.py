@@ -115,6 +115,7 @@ def stamp_metrics_artifact(
     resource_summary: dict[str, Any] | None = None,
     warning_summary: dict[str, Any] | None = None,
     timeout_policy_effective: dict[str, Any] | None = None,
+    profiling_context: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     if not metrics_path.exists():
         return None
@@ -183,6 +184,9 @@ def stamp_metrics_artifact(
         persisted_metrics["warning_summary"] = dict(warning_summary)
     if timeout_policy_effective is not None:
         persisted_metrics["timeout_policy_effective"] = dict(timeout_policy_effective)
+    if profiling_context is not None:
+        persisted_metrics["profiling_context"] = dict(profiling_context)
+        persisted_metrics["profiling_only"] = bool(profiling_context.get("profiling_only", False))
     metrics_path.write_text(f"{json.dumps(persisted_metrics, indent=2)}\n", encoding="utf-8")
     return persisted_metrics
 
@@ -282,6 +286,7 @@ def build_run_config_payload(
     resource_summary: dict[str, Any] | None = None,
     warning_summary: dict[str, Any] | None = None,
     timeout_policy_effective: dict[str, Any] | None = None,
+    profiling_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     return {
         "run_id": run_id,
@@ -426,6 +431,14 @@ def build_run_config_payload(
         "timeout_policy_effective": (
             dict(timeout_policy_effective) if isinstance(timeout_policy_effective, dict) else None
         ),
+        "profiling_context": (
+            dict(profiling_context) if isinstance(profiling_context, dict) else None
+        ),
+        "profiling_only": (
+            bool(profiling_context.get("profiling_only", False))
+            if isinstance(profiling_context, dict)
+            else False
+        ),
     }
 
 
@@ -486,6 +499,7 @@ def build_run_result_payload(
     warning_summary: dict[str, Any] | None = None,
     dataset_fingerprint: dict[str, Any] | None = None,
     timeout_policy_effective: dict[str, Any] | None = None,
+    profiling_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     return {
         "run_id": run_id,
@@ -585,5 +599,13 @@ def build_run_result_payload(
         "dataset_fingerprint": dict(dataset_fingerprint) if dataset_fingerprint else None,
         "timeout_policy_effective": (
             dict(timeout_policy_effective) if isinstance(timeout_policy_effective, dict) else None
+        ),
+        "profiling_context": (
+            dict(profiling_context) if isinstance(profiling_context, dict) else None
+        ),
+        "profiling_only": (
+            bool(profiling_context.get("profiling_only", False))
+            if isinstance(profiling_context, dict)
+            else False
         ),
     }

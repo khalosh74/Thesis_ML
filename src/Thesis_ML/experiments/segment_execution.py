@@ -116,6 +116,7 @@ class SegmentExecutionRequest:
     calibration_n_bins: int = 10
     calibration_require_probabilities_for_validity: bool = False
     interpretability_enabled_override: bool | None = None
+    max_outer_folds: int | None = None
     start_section: str | SectionName | None = None
     end_section: str | SectionName | None = None
     base_artifact_id: str | None = None
@@ -398,6 +399,7 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
                     tuning_summary_path=request.tuning_summary_path,
                     tuning_best_params_path=request.tuning_best_params_path,
                     interpretability_enabled=request.interpretability_enabled_override,
+                    max_outer_folds=request.max_outer_folds,
                     run_id=request.run_id,
                     config_filename=request.config_filename,
                     report_dir=request.report_dir,

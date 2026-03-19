@@ -120,6 +120,7 @@ class ModelFitInput(_SectionModel):
     tuning_summary_path: Path | None = None
     tuning_best_params_path: Path | None = None
     interpretability_enabled: bool | None = None
+    max_outer_folds: int | None = None
     run_id: str = Field(min_length=1)
     config_filename: str = Field(min_length=1)
     report_dir: Path

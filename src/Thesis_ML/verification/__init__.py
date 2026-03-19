@@ -1,3 +1,4 @@
+from Thesis_ML.verification.campaign_runtime_profile import verify_campaign_runtime_profile
 from Thesis_ML.verification.confirmatory_ready import verify_confirmatory_ready
 from Thesis_ML.verification.official_artifacts import verify_official_artifacts
 from Thesis_ML.verification.repro_manifest import (
@@ -9,6 +10,7 @@ from Thesis_ML.verification.reproducibility import compare_official_outputs
 __all__ = [
     "build_reproducibility_manifest",
     "compare_official_outputs",
+    "verify_campaign_runtime_profile",
     "verify_confirmatory_ready",
     "verify_official_artifacts",
     "write_reproducibility_manifest",

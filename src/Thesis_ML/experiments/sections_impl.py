@@ -86,6 +86,15 @@ def execute_model_fit(section_input: ModelFitInput) -> dict[str, Any]:
         if len(splits) < 2:
             raise ValueError("Grouped CV produced fewer than 2 folds.")
 
+    planned_outer_folds = int(len(splits))
+    max_outer_folds = section_input.max_outer_folds
+    if max_outer_folds is not None:
+        resolved_max_outer_folds = int(max_outer_folds)
+        if resolved_max_outer_folds <= 0:
+            raise ValueError("max_outer_folds must be > 0 when provided.")
+        if planned_outer_folds > resolved_max_outer_folds:
+            splits = splits[:resolved_max_outer_folds]
+
     pipeline_template = section_input.build_pipeline_fn(
         model_name=section_input.model,
         seed=section_input.seed,
@@ -393,6 +402,9 @@ def execute_model_fit(section_input: ModelFitInput) -> dict[str, Any]:
         "inner_cv_scheme": section_input.tuning_inner_cv_scheme,
         "inner_group_field": section_input.tuning_inner_group_field,
         "total_outer_folds": int(len(splits)),
+        "planned_outer_folds": int(planned_outer_folds),
+        "executed_outer_folds": int(len(splits)),
+        "profiling_outer_fold_cap": (int(max_outer_folds) if max_outer_folds is not None else None),
         "n_tuned_folds": int(sum(row["status"] == "tuned" for row in tuning_rows)),
         "n_skipped_folds": int(sum(row["status"] != "tuned" for row in tuning_rows)),
         "best_params_path": str(tuning_best_params_path.resolve()),
@@ -513,15 +525,10 @@ def _compute_subgroup_metrics(
             y_pred = subset["y_pred"].astype(str).tolist()
             n_classes = int(pd.Series(y_true).nunique(dropna=False))
             class_distribution = (
-                pd.Series(y_true)
-                .value_counts(dropna=False)
-                .sort_index()
-                .astype(int)
-                .to_dict()
+                pd.Series(y_true).value_counts(dropna=False).sort_index().astype(int).to_dict()
             )
-            interpretable = (
-                n_samples >= int(min_samples_per_group)
-                and n_classes >= int(min_classes_per_group)
+            interpretable = n_samples >= int(min_samples_per_group) and n_classes >= int(
+                min_classes_per_group
             )
             insufficient_reasons: list[str] = []
             if n_samples < int(min_samples_per_group):
@@ -716,18 +723,15 @@ def execute_evaluation(section_input: EvaluationInput) -> dict[str, Any]:
             >= int(section_input.permutation_minimum_required)
         )
         p_value = permutation_payload.get("p_value")
-        passes_threshold = (
-            isinstance(p_value, (int, float))
-            and float(p_value) <= float(section_input.permutation_alpha)
+        passes_threshold = isinstance(p_value, (int, float)) and float(p_value) <= float(
+            section_input.permutation_alpha
         )
         permutation_payload["passes_threshold"] = bool(passes_threshold)
         permutation_payload["require_pass_for_validity"] = bool(
             section_input.permutation_require_pass_for_validity
         )
         permutation_payload["interpretation_status"] = (
-            "passes_threshold"
-            if bool(passes_threshold)
-            else "fails_threshold"
+            "passes_threshold" if bool(passes_threshold) else "fails_threshold"
         )
         metrics["permutation_test"] = permutation_payload
 
@@ -800,9 +804,8 @@ def execute_evaluation(section_input: EvaluationInput) -> dict[str, Any]:
             section_input.prediction_rows,
             n_bins=int(section_input.calibration_n_bins),
         )
-        if (
-            str(calibration_summary.get("status")) == "not_applicable"
-            and bool(section_input.calibration_require_probabilities_for_validity)
+        if str(calibration_summary.get("status")) == "not_applicable" and bool(
+            section_input.calibration_require_probabilities_for_validity
         ):
             calibration_summary["status"] = "failed"
             calibration_summary["reason"] = "probabilities_required_but_missing"

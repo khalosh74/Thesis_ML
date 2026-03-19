@@ -983,12 +983,14 @@ $PhaseRunners["precheck"] = {
         $priorStatus = Get-PhaseStatusValue -PhaseName "precheck"
         $rcSummaryExisting = Join-Path $PrecheckRoot "rc1_gate_summary.json"
         $modelCostPrecheckExisting = Join-Path $PrecheckRoot "model_cost_policy_precheck_summary.json"
+        $runtimeProfilePrecheckExisting = Join-Path $PrecheckRoot "campaign_runtime_profile_summary.json"
         $commitExisting = Join-Path $PrecheckRoot "commit_sha.txt"
         $branchExisting = Join-Path $PrecheckRoot "branch.txt"
         if (
             $priorStatus -eq "passed" -and
             (Test-Path -LiteralPath $rcSummaryExisting -PathType Leaf) -and
             (Test-Path -LiteralPath $modelCostPrecheckExisting -PathType Leaf) -and
+            (Test-Path -LiteralPath $runtimeProfilePrecheckExisting -PathType Leaf) -and
             (Test-Path -LiteralPath $commitExisting -PathType Leaf) -and
             (Test-Path -LiteralPath $branchExisting -PathType Leaf)
         ) {
@@ -1009,6 +1011,7 @@ $PhaseRunners["precheck"] = {
             }
             $Context.key_outputs += $rcSummaryExisting
             $Context.key_outputs += $modelCostPrecheckExisting
+            $Context.key_outputs += $runtimeProfilePrecheckExisting
             $Context.key_outputs += $commitExisting
             $Context.key_outputs += $branchExisting
             $Context.warnings += "Resume mode reused existing passed precheck artifacts."
@@ -1062,6 +1065,27 @@ $PhaseRunners["precheck"] = {
     Invoke-PhaseCommand -Context $Context -Label "Model cost policy precheck" -CommandParts $modelCostPrecheckCommand | Out-Null
     $Context.verification_summaries += $modelCostPrecheckSummary
     $Context.key_outputs += $modelCostPrecheckSummary
+
+    $runtimeProfileSummary = Join-Path $PrecheckRoot "campaign_runtime_profile_summary.json"
+    $runtimeProfileRunsRoot = Join-Path $PrecheckRoot "runtime_profile_runs"
+    $runtimeProfileCommand = @(
+        "python", "scripts/verify_campaign_runtime_profile.py",
+        "--index-csv", $IndexCsv,
+        "--data-root", $DataRoot,
+        "--cache-dir", $CacheDir,
+        "--confirmatory-protocol", $ConfirmatoryProtocol
+    )
+    foreach ($spec in $ComparisonSpecs) {
+        $runtimeProfileCommand += @("--comparison-spec", $spec)
+    }
+    $runtimeProfileCommand += @(
+        "--profile-root", $runtimeProfileRunsRoot,
+        "--summary-out", $runtimeProfileSummary
+    )
+    Invoke-PhaseCommand -Context $Context -Label "Campaign runtime profiling precheck" -CommandParts $runtimeProfileCommand | Out-Null
+    $Context.verification_summaries += $runtimeProfileSummary
+    $Context.key_outputs += $runtimeProfileSummary
+    $Context.key_outputs += $runtimeProfileRunsRoot
 
     $rcSummary = Join-Path $PrecheckRoot "rc1_gate_summary.json"
     Invoke-PhaseCommand -Context $Context -Label "RC1 release gate" -CommandParts @(

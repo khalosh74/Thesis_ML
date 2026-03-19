@@ -264,8 +264,12 @@ Before freezing an experiment campaign:
    `powershell -ExecutionPolicy Bypass -File scripts/prepare_frozen_campaign.ps1 -CampaignTag "campaign-YYYY-MM-DD-rc1"`.
 2. Run frozen campaign precheck phase:
    `powershell -ExecutionPolicy Bypass -File scripts/run_frozen_campaign.ps1 -CampaignTag "campaign-YYYY-MM-DD-rc1" -IndexCsv "<index_csv>" -DataRoot "<data_root>" -CacheDir "<cache_dir>" -Phase precheck -ExecutionMode fresh`.
-   This phase includes formal model-cost policy validation and writes:
+   This phase includes formal model-cost policy validation and runtime profiling precheck, and writes:
    `outputs/campaign/<CampaignTag>/release/precheck/model_cost_policy_precheck_summary.json`.
+   `outputs/campaign/<CampaignTag>/release/precheck/campaign_runtime_profile_summary.json`.
+   Profiling run artifacts are precheck-only/non-evidentiary and are written under:
+   `outputs/campaign/<CampaignTag>/release/precheck/runtime_profile_runs/`.
+   If any runtime cohort profiling run fails, precheck fails with explicit `issues`.
 3. Run frozen campaign confirmatory phase:
    `powershell -ExecutionPolicy Bypass -File scripts/run_frozen_campaign.ps1 -CampaignTag "campaign-YYYY-MM-DD-rc1" -IndexCsv "<index_csv>" -DataRoot "<data_root>" -CacheDir "<cache_dir>" -Phase confirmatory -ExecutionMode resume`.
 4. Run frozen campaign comparison phase:

@@ -319,6 +319,7 @@ def run_experiment(
     model_cost_tier: str | None = None,
     projected_runtime_seconds: int | None = None,
     timeout_policy_effective: dict[str, Any] | None = None,
+    profiling_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Run one leakage-safe grouped-CV experiment and write standardized artifacts."""
     index_csv = Path(index_csv)
@@ -329,6 +330,8 @@ def run_experiment(
     stage_timings: dict[str, float] = {}
     warnings_payload: list[dict[str, Any]] = []
     resource_summary: dict[str, Any] = {}
+    resolved_profiling_context: dict[str, Any] | None = None
+    profiling_max_outer_folds: int | None = None
     dataset_fingerprint: dict[str, Any] | None = None
     data_policy_effective: dict[str, Any] = {}
     data_assessment: dict[str, Any] = {}
@@ -357,6 +360,27 @@ def run_experiment(
         test_subject = str(test_subject).strip()
         if train_subject == test_subject:
             raise ValueError("train_subject and test_subject must be different.")
+
+    if profiling_context is not None:
+        if not isinstance(profiling_context, dict):
+            raise ValueError("profiling_context must be an object when provided.")
+        profile_source = str(profiling_context.get("source", "")).strip()
+        if profile_source != "campaign_runtime_profile_precheck":
+            raise ValueError(
+                "profiling_context.source must be 'campaign_runtime_profile_precheck'."
+            )
+        if not bool(profiling_context.get("profiling_only", False)):
+            raise ValueError("profiling_context.profiling_only must be true.")
+        if not bool(profiling_context.get("precheck_only", False)):
+            raise ValueError("profiling_context.precheck_only must be true.")
+        profiling_max_outer_folds = int(profiling_context.get("max_outer_folds", 1))
+        if profiling_max_outer_folds <= 0:
+            raise ValueError("profiling_context.max_outer_folds must be > 0.")
+        resolved_profiling_context = dict(profiling_context)
+        resolved_profiling_context["source"] = profile_source
+        resolved_profiling_context["profiling_only"] = True
+        resolved_profiling_context["precheck_only"] = True
+        resolved_profiling_context["max_outer_folds"] = int(profiling_max_outer_folds)
 
     target_column = _resolve_target_column(target)
     context_start = perf_counter()
@@ -809,6 +833,7 @@ def run_experiment(
                             evidence_policy_model.calibration.require_probabilities_for_validity
                         ),
                         interpretability_enabled_override=interpretability_enabled_override,
+                        max_outer_folds=profiling_max_outer_folds,
                         run_id=resolved_run_id,
                         config_filename=config_path.name,
                         report_dir=report_dir,
@@ -920,6 +945,7 @@ def run_experiment(
             resource_summary=resource_summary,
             warning_summary=warning_summary,
             timeout_policy_effective=timeout_policy_effective,
+            profiling_context=resolved_profiling_context,
         )
     except Exception as exc:
         failure = _failure_payload(exc)
@@ -1072,6 +1098,7 @@ def run_experiment(
             resource_summary=resource_summary,
             warning_summary=warning_summary,
             timeout_policy_effective=timeout_policy_effective,
+            profiling_context=resolved_profiling_context,
         )
         config_path.write_text(f"{json.dumps(config, indent=2)}\n", encoding="utf-8")
     except Exception as exc:
@@ -1250,6 +1277,7 @@ def run_experiment(
         warning_summary=warning_summary,
         dataset_fingerprint=dataset_fingerprint,
         timeout_policy_effective=timeout_policy_effective,
+        profiling_context=resolved_profiling_context,
     )
 
 
