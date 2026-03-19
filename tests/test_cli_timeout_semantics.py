@@ -20,6 +20,7 @@ def test_protocol_cli_returns_nonzero_for_timed_out_runs(monkeypatch, tmp_path: 
             "n_timed_out": 1,
             "n_skipped_due_to_policy": 0,
             "n_planned": 0,
+            "max_parallel_runs_effective": 1,
             "artifact_paths": {},
         },
     )
@@ -52,6 +53,7 @@ def test_comparison_cli_allows_timed_out_without_forced_nonzero(
             "n_timed_out": 2,
             "n_skipped_due_to_policy": 0,
             "n_planned": 0,
+            "max_parallel_runs_effective": 1,
             "artifact_paths": {},
         },
     )

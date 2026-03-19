@@ -10,6 +10,7 @@ from Thesis_ML.comparisons.models import (
     CompiledComparisonRunSpec,
 )
 from Thesis_ML.config.framework_mode import FrameworkMode
+from Thesis_ML.experiments.model_catalog import get_model_cost_entry, projected_runtime_seconds
 
 
 def _base_comparison_spec() -> ComparisonSpec:
@@ -44,6 +45,9 @@ def _base_comparison_spec() -> ComparisonSpec:
                 "permutation_metric": "balanced_accuracy",
                 "n_permutations": 0,
                 "dummy_baseline_enabled": False,
+            },
+            "cost_policy": {
+                "explicit_benchmark_expensive_models": ["logreg"],
             },
             "subgroup_reporting_policy": {
                 "enabled": True,
@@ -119,6 +123,13 @@ def _compiled_manifest() -> CompiledComparisonManifest:
             claim_ids=["c1"],
             target="coarse_affect",
             model="ridge",
+            model_cost_tier=get_model_cost_entry("ridge").cost_tier,
+            projected_runtime_seconds=projected_runtime_seconds(
+                model_name="ridge",
+                framework_mode=FrameworkMode.LOCKED_COMPARISON,
+                methodology_policy="fixed_baselines_only",
+                tuning_enabled=False,
+            ),
             cv_mode="within_subject_loso_session",
             subject="sub-001",
             seed=42,
@@ -143,6 +154,13 @@ def _compiled_manifest() -> CompiledComparisonManifest:
             claim_ids=["c2"],
             target="coarse_affect",
             model="logreg",
+            model_cost_tier=get_model_cost_entry("logreg").cost_tier,
+            projected_runtime_seconds=projected_runtime_seconds(
+                model_name="logreg",
+                framework_mode=FrameworkMode.LOCKED_COMPARISON,
+                methodology_policy="fixed_baselines_only",
+                tuning_enabled=False,
+            ),
             cv_mode="within_subject_loso_session",
             subject="sub-001",
             seed=42,
