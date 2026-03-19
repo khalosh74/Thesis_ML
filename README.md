@@ -153,14 +153,6 @@ RC-1 hardening policy (official runs):
   - model override: `logreg` 120 minutes
   - shutdown grace period: 30 seconds
   - absolute hard ceiling: 180 minutes
-- model runtime cost is also enforced as spec/protocol policy:
-  - tiers: `official_fast`, `official_allowed`, `benchmark_expensive`, `exploratory_only`
-  - confirmatory protocols are restricted to `official_fast`/`official_allowed`
-  - expensive comparison variants must be explicitly listed in
-    `cost_policy.explicit_benchmark_expensive_models`
-  - projected runtime limits are enforced via
-    `model_cost_policy.max_projected_runtime_seconds_per_run` (protocol)
-    and `cost_policy.max_projected_runtime_seconds_per_run` (comparison)
 - timed-out runs emit `timeout_diagnostics.json` under the run report directory
 - mode-level runners verify official artifact completeness/invariants before returning success
 
@@ -290,8 +282,6 @@ docker run --rm thesis-ml:dev
 
 Frozen campaign phase output roots:
 - `outputs/campaign/<CampaignTag>/release/precheck/`
-- precheck model-cost summary:
-  `outputs/campaign/<CampaignTag>/release/precheck/model_cost_policy_precheck_summary.json`
 - `outputs/campaign/<CampaignTag>/confirmatory/`
 - `outputs/campaign/<CampaignTag>/comparison/`
 - `outputs/campaign/<CampaignTag>/release/replay/`

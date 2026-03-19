@@ -33,7 +33,6 @@ Core package root: `src/Thesis_ML/`
   - indexing, cache extraction, SPM utilities
 - `experiments/`
   - full pipeline wrapper (`run_experiment.py`)
-  - canonical model cost catalog + projected runtime metadata (`model_catalog.py`)
   - official preflight + artifact contract validation (`official_contracts.py`)
   - official data-policy evaluation + data artifact writer (`data_reporting.py`)
   - structured error taxonomy for machine-readable failures (`errors.py`)
@@ -79,7 +78,6 @@ Core package root: `src/Thesis_ML/`
   - official artifact invariant verifier (`official_artifacts.py`)
   - confirmatory-ready governance verifier (`confirmatory_ready.py`)
   - deterministic official-output comparator (`reproducibility.py`)
-  - model-cost policy precheck compiler/validator (`model_cost_policy.py`)
   - centralized reproducibility manifest builder (`repro_manifest.py`)
 
 ## Runtime flows
@@ -155,7 +153,6 @@ Framework guardrails:
 - run-level status artifacts (`run_status.json`) include structured failure diagnostics (`error_code`, `error_type`, `failure_stage`) plus warning/timing/resource summaries.
 - official run artifacts persist deterministic provenance blocks (`git_provenance`, `dataset_fingerprint`) for rerun auditability.
 - reproducibility orchestration scripts (`scripts/replay_official_paths.py`, `scripts/build_publishable_bundle.py`, `scripts/verify_publishable_bundle.py`) compose existing runners/verifiers without altering framework-mode contracts.
-- frozen campaign precheck now includes `scripts/verify_model_cost_policy_precheck.py`, which compiles official protocol/comparison specs and fails early on model-tier or projected-runtime policy violations.
 
 Compatibility wrappers are still present but deprecated:
 
