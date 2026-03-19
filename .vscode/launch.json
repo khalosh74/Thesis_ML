@@ -1,0 +1,188 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Exploratory: run_experiment (within-subject)",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "Thesis_ML.experiments.run_experiment",
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src"
+            },
+            "args": [
+                "--index-csv",
+                "${input:indexCsv}",
+                "--data-root",
+                "${input:dataRoot}",
+                "--cache-dir",
+                "${input:cacheDir}",
+                "--target",
+                "${input:exploratoryTarget}",
+                "--model",
+                "${input:exploratoryModel}",
+                "--cv",
+                "within_subject_loso_session",
+                "--subject",
+                "${input:subjectId}",
+                "--seed",
+                "42",
+                "--reports-root",
+                "${workspaceFolder}/outputs/reports"
+            ]
+        },
+        {
+            "name": "Locked Comparison: comparison_runner (single variant)",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "Thesis_ML.cli.comparison_runner",
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src",
+                "THESIS_ML_INDEX_CSV": "${input:indexCsv}",
+                "THESIS_ML_DATA_ROOT": "${input:dataRoot}",
+                "THESIS_ML_CACHE_DIR": "${input:cacheDir}"
+            },
+            "args": [
+                "--comparison",
+                "${input:comparisonSpec}",
+                "--variant",
+                "${input:comparisonVariant}",
+                "--reports-root",
+                "${workspaceFolder}/outputs/reports",
+                "--max-parallel-runs",
+                "1"
+            ]
+        },
+        {
+            "name": "Confirmatory: protocol_runner (single suite)",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "Thesis_ML.cli.protocol_runner",
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src",
+                "THESIS_ML_INDEX_CSV": "${input:indexCsv}",
+                "THESIS_ML_DATA_ROOT": "${input:dataRoot}",
+                "THESIS_ML_CACHE_DIR": "${input:cacheDir}"
+            },
+            "args": [
+                "--protocol",
+                "${input:protocolSpec}",
+                "--suite",
+                "${input:protocolSuite}",
+                "--reports-root",
+                "${workspaceFolder}/outputs/reports",
+                "--max-parallel-runs",
+                "1"
+            ]
+        },
+        {
+            "name": "Confirmatory: protocol_runner (dry-run all suites)",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "Thesis_ML.cli.protocol_runner",
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src",
+                "THESIS_ML_INDEX_CSV": "${input:indexCsv}",
+                "THESIS_ML_DATA_ROOT": "${input:dataRoot}",
+                "THESIS_ML_CACHE_DIR": "${input:cacheDir}"
+            },
+            "args": [
+                "--protocol",
+                "${input:protocolSpec}",
+                "--all-suites",
+                "--dry-run",
+                "--reports-root",
+                "${workspaceFolder}/outputs/reports",
+                "--max-parallel-runs",
+                "1"
+            ]
+        }
+    ],
+    "inputs": [
+        {
+            "id": "indexCsv",
+            "type": "promptString",
+            "description": "Path to dataset_index.csv",
+            "default": "${workspaceFolder}/demo_data/synthetic_v1/dataset_index.csv"
+        },
+        {
+            "id": "dataRoot",
+            "type": "promptString",
+            "description": "Path to data root",
+            "default": "${workspaceFolder}/demo_data/synthetic_v1/data_root"
+        },
+        {
+            "id": "cacheDir",
+            "type": "promptString",
+            "description": "Path to feature cache directory",
+            "default": "${workspaceFolder}/demo_data/synthetic_v1/cache"
+        },
+        {
+            "id": "subjectId",
+            "type": "promptString",
+            "description": "Subject ID for within-subject runs",
+            "default": "sub-001"
+        },
+        {
+            "id": "exploratoryTarget",
+            "type": "pickString",
+            "description": "Exploratory target",
+            "options": [
+                "coarse_affect",
+                "emotion",
+                "modality",
+                "task",
+                "regressor_label"
+            ],
+            "default": "coarse_affect"
+        },
+        {
+            "id": "exploratoryModel",
+            "type": "pickString",
+            "description": "Exploratory model",
+            "options": [
+                "ridge",
+                "linearsvc",
+                "logreg",
+                "dummy",
+                "all"
+            ],
+            "default": "ridge"
+        },
+        {
+            "id": "comparisonSpec",
+            "type": "promptString",
+            "description": "Path to comparison spec JSON",
+            "default": "${workspaceFolder}/configs/comparisons/model_family_comparison_v1.json"
+        },
+        {
+            "id": "comparisonVariant",
+            "type": "promptString",
+            "description": "Comparison variant ID",
+            "default": "ridge"
+        },
+        {
+            "id": "protocolSpec",
+            "type": "promptString",
+            "description": "Path to protocol JSON",
+            "default": "${workspaceFolder}/configs/protocols/thesis_canonical_v1.json"
+        },
+        {
+            "id": "protocolSuite",
+            "type": "promptString",
+            "description": "Protocol suite ID",
+            "default": "primary_within_subject"
+        }
+    ]
+}
