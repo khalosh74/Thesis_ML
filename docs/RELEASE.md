@@ -248,6 +248,13 @@ Timeout watchdog and terminal status semantics:
 - comparison phase can be recorded as `partial` when timed-out/skipped runs are present.
 - replay/bundle remain dependency-gated and will not proceed unless required upstream phases are `passed`.
 
+Operational parallel scheduling control:
+
+- protocol/comparison runners accept `--max-parallel-runs <N>` (default `1`).
+- frozen campaign orchestration forwards `-MaxParallelRuns <N>` to official protocol/comparison phases.
+- ordering of run-level reporting artifacts is deterministic after parallel execution (sorted by compiled plan order).
+- this control is operational only; it does not alter splits, metrics, models, or evidence policy.
+
 Machine-readable orchestration artifacts:
 
 - campaign manifest: `outputs/campaign/<CampaignTag>/campaign_manifest.json`
@@ -255,6 +262,12 @@ Machine-readable orchestration artifacts:
 - per-phase summary: `<phase_root>/phase_summary.json`
 - per-run resumability index (confirmatory/comparison): `<official_output_dir>/run_index.json`
 - per-run reconciliation summary (confirmatory/comparison): `<official_output_dir>/resume_reconciliation.json`
+
+Additive timing artifacts (Phase A Slice 1):
+
+- run-level `fold_metrics.csv` includes per-fold fit/search timing fields.
+- tuned `best_params_per_fold.csv` includes search timing summary columns.
+- each run emits `fit_timing_summary.json`; path is stamped in `config.json` and `metrics.json`.
 
 ## Official RC checklist
 

@@ -78,6 +78,12 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Compile comparison and emit artifacts without executing runs.",
     )
+    parser.add_argument(
+        "--max-parallel-runs",
+        type=int,
+        default=1,
+        help="Operational scheduling control for independent run fan-out. Default: 1 (serial).",
+    )
     return parser
 
 
@@ -101,6 +107,7 @@ def main(argv: list[str] | None = None) -> int:
         force=bool(args.force),
         resume=bool(args.resume),
         dry_run=bool(args.dry_run),
+        max_parallel_runs=int(args.max_parallel_runs),
     )
 
     print(
@@ -115,6 +122,7 @@ def main(argv: list[str] | None = None) -> int:
                 "n_timed_out": result["n_timed_out"],
                 "n_skipped_due_to_policy": result["n_skipped_due_to_policy"],
                 "n_planned": result["n_planned"],
+                "max_parallel_runs_effective": result["max_parallel_runs_effective"],
                 "artifact_paths": result["artifact_paths"],
             },
             indent=2,

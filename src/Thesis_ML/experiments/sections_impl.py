@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from time import perf_counter
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -21,6 +22,19 @@ if TYPE_CHECKING:
         InterpretabilityInput,
         ModelFitInput,
     )
+
+
+def _safe_float_from_cv_results(
+    cv_results: dict[str, Any],
+    key: str,
+) -> float | None:
+    raw = cv_results.get(key)
+    if raw is None:
+        return None
+    values = np.asarray(raw, dtype=np.float64)
+    if values.size == 0:
+        return None
+    return float(np.nanmean(values))
 
 
 def execute_model_fit(section_input: ModelFitInput) -> dict[str, Any]:
@@ -109,6 +123,11 @@ def execute_model_fit(section_input: ModelFitInput) -> dict[str, Any]:
         if section_input.tuning_best_params_path is not None
         else section_input.report_dir / "best_params_per_fold.csv"
     )
+    fit_timing_summary_path = (
+        section_input.fit_timing_summary_path
+        if section_input.fit_timing_summary_path is not None
+        else section_input.report_dir / "fit_timing_summary.json"
+    )
     methodology_policy_name = str(section_input.methodology_policy_name).strip()
     tuning_enabled = bool(section_input.tuning_enabled)
     if methodology_policy_name == "fixed_baselines_only" and tuning_enabled:
@@ -140,6 +159,7 @@ def execute_model_fit(section_input: ModelFitInput) -> dict[str, Any]:
     y_pred_all: list[str] = []
 
     for fold_index, (train_idx, test_idx) in enumerate(splits):
+        outer_fold_start = perf_counter()
         train_meta = section_input.metadata_df.iloc[train_idx].reset_index(drop=True)
         test_meta = section_input.metadata_df.iloc[test_idx].reset_index(drop=True)
         train_subjects = sorted(train_meta["subject"].astype(str).unique().tolist())
@@ -168,9 +188,18 @@ def execute_model_fit(section_input: ModelFitInput) -> dict[str, Any]:
                 )
 
         estimator = clone(pipeline_template)
+        estimator_fit_elapsed_seconds: float | None = None
+        tuned_search_elapsed_seconds: float | None = None
+        tuned_search_candidate_count = 0
+        cv_mean_fit_time_seconds: float | None = None
+        cv_std_fit_time_seconds: float | None = None
+        cv_mean_score_time_seconds: float | None = None
+        cv_std_score_time_seconds: float | None = None
         if tuning_enabled and methodology_policy_name == "grouped_nested_tuning":
             if section_input.model == "dummy":
+                fit_start = perf_counter()
                 estimator.fit(section_input.x_matrix[train_idx], y[train_idx])
+                estimator_fit_elapsed_seconds = float(perf_counter() - fit_start)
                 tuning_rows.append(
                     {
                         "fold": int(fold_index),
@@ -183,6 +212,12 @@ def execute_model_fit(section_input: ModelFitInput) -> dict[str, Any]:
                         "search_space_version": section_input.tuning_search_space_version,
                         "primary_metric_name": section_input.primary_metric_name,
                         "inner_group_field": section_input.tuning_inner_group_field,
+                        "estimator_fit_elapsed_seconds": estimator_fit_elapsed_seconds,
+                        "tuned_search_elapsed_seconds": pd.NA,
+                        "cv_mean_fit_time_seconds": pd.NA,
+                        "cv_std_fit_time_seconds": pd.NA,
+                        "cv_mean_score_time_seconds": pd.NA,
+                        "cv_std_score_time_seconds": pd.NA,
                     }
                 )
             else:
@@ -210,12 +245,31 @@ def execute_model_fit(section_input: ModelFitInput) -> dict[str, Any]:
                     refit=True,
                     n_jobs=1,
                 )
+                search_start = perf_counter()
                 search.fit(
                     section_input.x_matrix[train_idx],
                     y[train_idx],
                     groups=inner_groups,
                 )
+                tuned_search_elapsed_seconds = float(perf_counter() - search_start)
                 estimator = search.best_estimator_
+                tuned_search_candidate_count = int(len(search.cv_results_["params"]))
+                cv_mean_fit_time_seconds = _safe_float_from_cv_results(
+                    search.cv_results_,
+                    "mean_fit_time",
+                )
+                cv_std_fit_time_seconds = _safe_float_from_cv_results(
+                    search.cv_results_,
+                    "std_fit_time",
+                )
+                cv_mean_score_time_seconds = _safe_float_from_cv_results(
+                    search.cv_results_,
+                    "mean_score_time",
+                )
+                cv_std_score_time_seconds = _safe_float_from_cv_results(
+                    search.cv_results_,
+                    "std_score_time",
+                )
                 tuning_rows.append(
                     {
                         "fold": int(fold_index),
@@ -223,15 +277,23 @@ def execute_model_fit(section_input: ModelFitInput) -> dict[str, Any]:
                         "model": section_input.model,
                         "best_score": float(search.best_score_),
                         "best_params_json": json.dumps(search.best_params_, sort_keys=True),
-                        "n_candidates": int(len(search.cv_results_["params"])),
+                        "n_candidates": int(tuned_search_candidate_count),
                         "search_space_id": section_input.tuning_search_space_id,
                         "search_space_version": resolved_space_version,
                         "primary_metric_name": section_input.primary_metric_name,
                         "inner_group_field": section_input.tuning_inner_group_field,
+                        "estimator_fit_elapsed_seconds": pd.NA,
+                        "tuned_search_elapsed_seconds": tuned_search_elapsed_seconds,
+                        "cv_mean_fit_time_seconds": cv_mean_fit_time_seconds,
+                        "cv_std_fit_time_seconds": cv_std_fit_time_seconds,
+                        "cv_mean_score_time_seconds": cv_mean_score_time_seconds,
+                        "cv_std_score_time_seconds": cv_std_score_time_seconds,
                     }
                 )
         else:
+            fit_start = perf_counter()
             estimator.fit(section_input.x_matrix[train_idx], y[train_idx])
+            estimator_fit_elapsed_seconds = float(perf_counter() - fit_start)
 
         if interpretability_enabled:
             if interpretability_dir is None:
@@ -303,6 +365,13 @@ def execute_model_fit(section_input: ModelFitInput) -> dict[str, Any]:
                 "target": section_input.target_column,
                 "model": section_input.model,
                 "seed": int(section_input.seed),
+                "estimator_fit_elapsed_seconds": estimator_fit_elapsed_seconds,
+                "tuned_search_elapsed_seconds": tuned_search_elapsed_seconds,
+                "tuned_search_candidate_count": int(tuned_search_candidate_count),
+                "cv_mean_fit_time_seconds": cv_mean_fit_time_seconds,
+                "cv_std_fit_time_seconds": cv_std_fit_time_seconds,
+                "cv_mean_score_time_seconds": cv_mean_score_time_seconds,
+                "cv_std_score_time_seconds": cv_std_score_time_seconds,
                 "accuracy": classification_metric_score(
                     y_true=y_true,
                     y_pred=y_pred,
@@ -387,6 +456,7 @@ def execute_model_fit(section_input: ModelFitInput) -> dict[str, Any]:
 
         y_true_all.extend(y_true.tolist())
         y_pred_all.extend(y_pred.tolist())
+        fold_rows[-1]["outer_fold_elapsed_seconds"] = float(perf_counter() - outer_fold_start)
 
     tuning_summary = {
         "methodology_policy_name": methodology_policy_name,
@@ -408,6 +478,17 @@ def execute_model_fit(section_input: ModelFitInput) -> dict[str, Any]:
         "n_tuned_folds": int(sum(row["status"] == "tuned" for row in tuning_rows)),
         "n_skipped_folds": int(sum(row["status"] != "tuned" for row in tuning_rows)),
         "best_params_path": str(tuning_best_params_path.resolve()),
+        "timing_totals_seconds": {
+            "outer_fold_total": float(
+                sum(float(row.get("outer_fold_elapsed_seconds") or 0.0) for row in fold_rows)
+            ),
+            "estimator_fit_total": float(
+                sum(float(row.get("estimator_fit_elapsed_seconds") or 0.0) for row in fold_rows)
+            ),
+            "tuned_search_total": float(
+                sum(float(row.get("tuned_search_elapsed_seconds") or 0.0) for row in fold_rows)
+            ),
+        },
     }
     tuning_summary_path.write_text(
         f"{json.dumps(tuning_summary, indent=2)}\n",
@@ -427,9 +508,78 @@ def execute_model_fit(section_input: ModelFitInput) -> dict[str, Any]:
                 "search_space_version",
                 "primary_metric_name",
                 "inner_group_field",
+                "estimator_fit_elapsed_seconds",
+                "tuned_search_elapsed_seconds",
+                "cv_mean_fit_time_seconds",
+                "cv_std_fit_time_seconds",
+                "cv_mean_score_time_seconds",
+                "cv_std_score_time_seconds",
             ]
         )
     tuning_frame.to_csv(tuning_best_params_path, index=False)
+
+    fit_timing_summary = {
+        "status": "captured",
+        "methodology_policy_name": methodology_policy_name,
+        "model": section_input.model,
+        "cv_mode": section_input.cv_mode,
+        "n_folds": int(len(fold_rows)),
+        "n_tuned_folds": int(sum(row["status"] == "tuned" for row in tuning_rows)),
+        "n_untuned_or_skipped_folds": int(sum(row["status"] != "tuned" for row in tuning_rows)),
+        "totals_seconds": {
+            "outer_fold": float(
+                sum(float(row.get("outer_fold_elapsed_seconds") or 0.0) for row in fold_rows)
+            ),
+            "estimator_fit": float(
+                sum(float(row.get("estimator_fit_elapsed_seconds") or 0.0) for row in fold_rows)
+            ),
+            "tuned_search": float(
+                sum(float(row.get("tuned_search_elapsed_seconds") or 0.0) for row in fold_rows)
+            ),
+        },
+        "fold_timings": [
+            {
+                "fold": int(row.get("fold", -1)),
+                "outer_fold_elapsed_seconds": float(row.get("outer_fold_elapsed_seconds") or 0.0),
+                "estimator_fit_elapsed_seconds": (
+                    float(row.get("estimator_fit_elapsed_seconds"))
+                    if row.get("estimator_fit_elapsed_seconds") is not None
+                    else None
+                ),
+                "tuned_search_elapsed_seconds": (
+                    float(row.get("tuned_search_elapsed_seconds"))
+                    if row.get("tuned_search_elapsed_seconds") is not None
+                    else None
+                ),
+                "tuned_search_candidate_count": int(row.get("tuned_search_candidate_count") or 0),
+                "cv_mean_fit_time_seconds": (
+                    float(row.get("cv_mean_fit_time_seconds"))
+                    if row.get("cv_mean_fit_time_seconds") is not None
+                    else None
+                ),
+                "cv_std_fit_time_seconds": (
+                    float(row.get("cv_std_fit_time_seconds"))
+                    if row.get("cv_std_fit_time_seconds") is not None
+                    else None
+                ),
+                "cv_mean_score_time_seconds": (
+                    float(row.get("cv_mean_score_time_seconds"))
+                    if row.get("cv_mean_score_time_seconds") is not None
+                    else None
+                ),
+                "cv_std_score_time_seconds": (
+                    float(row.get("cv_std_score_time_seconds"))
+                    if row.get("cv_std_score_time_seconds") is not None
+                    else None
+                ),
+            }
+            for row in fold_rows
+        ],
+    }
+    fit_timing_summary_path.write_text(
+        f"{json.dumps(fit_timing_summary, indent=2)}\n",
+        encoding="utf-8",
+    )
 
     return {
         "y": y,
@@ -449,6 +599,8 @@ def execute_model_fit(section_input: ModelFitInput) -> dict[str, Any]:
         "tuning_records": tuning_rows,
         "tuning_summary_path": tuning_summary_path,
         "tuning_best_params_path": tuning_best_params_path,
+        "fit_timing_summary": fit_timing_summary,
+        "fit_timing_summary_path": fit_timing_summary_path,
     }
 
 

@@ -10,6 +10,10 @@ from Thesis_ML.config.framework_mode import FrameworkMode
 from Thesis_ML.config.metric_policy import resolve_effective_metric_policy
 from Thesis_ML.experiments.errors import exception_failure_payload
 from Thesis_ML.experiments.execution_policy import read_run_status
+from Thesis_ML.experiments.parallel_execution import (
+    OfficialRunJob,
+    execute_official_run_jobs,
+)
 from Thesis_ML.experiments.run_states import (
     RUN_STATUS_FAILED,
     RUN_STATUS_PLANNED,
@@ -399,11 +403,15 @@ def execute_compiled_protocol(
     dry_run: bool,
     compile_duration_seconds: float | None = None,
     timeout_policy_overrides: dict[str, Any] | None = None,
+    max_parallel_runs: int = 1,
 ) -> dict[str, Any]:
     if force and resume:
         raise ValueError(
             "force=True and resume=True are mutually exclusive for protocol execution."
         )
+    if int(max_parallel_runs) <= 0:
+        raise ValueError("max_parallel_runs must be >= 1.")
+    resolved_max_parallel_runs = int(max_parallel_runs)
 
     run_results: list[ProtocolRunResult] = []
     run_index_rows: list[dict[str, Any]] = []
@@ -485,6 +493,7 @@ def execute_compiled_protocol(
             f"{preview}. Use resume mode to reuse/rerun selectively or force mode to rerun all."
         )
 
+    pending_run_executions: list[dict[str, Any]] = []
     for planned in run_plan:
         spec = planned["spec"]
         if not isinstance(spec, CompiledRunSpec):
@@ -565,9 +574,32 @@ def execute_compiled_protocol(
             elif existing_classification == "missing":
                 run_force = False
                 run_resume = False
+        pending_run_executions.append(
+            {
+                "spec": spec,
+                "run_dir": run_dir,
+                "action": action,
+                "existing_classification": existing_classification,
+                "run_force": bool(run_force),
+                "run_resume": bool(run_resume),
+            }
+        )
 
+    dispatch_jobs: list[OfficialRunJob] = []
+    job_metadata_by_order: dict[int, dict[str, Any]] = {}
+    for order_index, pending in enumerate(pending_run_executions):
+        spec = pending["spec"]
+        if not isinstance(spec, CompiledRunSpec):
+            raise TypeError("Protocol pending execution produced invalid spec entry.")
+        run_dir = pending["run_dir"]
+        if not isinstance(run_dir, Path):
+            raise TypeError("Protocol pending execution produced invalid run directory entry.")
+        action = str(pending["action"])
+        existing_classification = str(pending["existing_classification"])
+        run_force = bool(pending["run_force"])
+        run_resume = bool(pending["run_resume"])
         started_at = _utc_now_iso()
-        run_result: ProtocolRunResult
+
         try:
             timeout_policy_effective = resolve_run_timeout_policy(
                 framework_mode=FrameworkMode.CONFIRMATORY,
@@ -631,17 +663,106 @@ def execute_compiled_protocol(
                 "evidence_policy": compiled_manifest.evidence_policy.model_dump(mode="json"),
                 "timeout_policy_effective": dict(timeout_policy_effective),
             }
-            supervised_result = execute_run_with_timeout_watchdog(
-                run_kwargs=run_kwargs,
-                timeout_policy=timeout_policy_effective,
-                phase_name=FrameworkMode.CONFIRMATORY.value,
-                run_identity={
-                    "run_id": spec.run_id,
-                    "suite_id": spec.suite_id,
-                    "variant_id": None,
-                },
+            dispatch_jobs.append(
+                OfficialRunJob(
+                    order_index=order_index,
+                    run_id=spec.run_id,
+                    run_kwargs=run_kwargs,
+                    timeout_policy=timeout_policy_effective,
+                    phase_name=FrameworkMode.CONFIRMATORY.value,
+                    run_identity={
+                        "run_id": spec.run_id,
+                        "suite_id": spec.suite_id,
+                        "variant_id": None,
+                    },
+                )
             )
-            run_status = str(supervised_result.get("status", "failed"))
+            job_metadata_by_order[order_index] = {
+                "spec": spec,
+                "run_dir": run_dir,
+                "action": action,
+                "existing_classification": existing_classification,
+                "started_at": started_at,
+            }
+        except Exception as exc:
+            ended_at = _utc_now_iso()
+            failure_payload = exception_failure_payload(exc, default_stage="runtime")
+            run_result = ProtocolRunResult(
+                run_id=spec.run_id,
+                suite_id=spec.suite_id,
+                framework_mode=FrameworkMode.CONFIRMATORY.value,
+                status=RUN_STATUS_FAILED,
+                error=str(exc),
+                error_code=str(failure_payload["error_code"]),
+                error_type=str(failure_payload["error_type"]),
+                failure_stage=str(failure_payload["failure_stage"]),
+                error_details=dict(failure_payload["error_details"]),
+            )
+            run_results.append(run_result)
+            run_index_rows.append(
+                _run_index_row(
+                    spec=spec,
+                    status=run_result.status,
+                    output_dir=run_dir,
+                    execution_mode=execution_mode,
+                    action=action,
+                    existing_classification=existing_classification,
+                    started_at=started_at,
+                    ended_at=ended_at,
+                    last_updated=_resolve_last_updated_utc(
+                        run_dir=run_dir,
+                        status_payload=None,
+                    ),
+                )
+            )
+
+    dispatch_results = execute_official_run_jobs(
+        jobs=dispatch_jobs,
+        max_parallel_runs=resolved_max_parallel_runs,
+        watchdog_executor=execute_run_with_timeout_watchdog,
+    )
+    for dispatched in dispatch_results:
+        order_index = int(dispatched["order_index"])
+        metadata = job_metadata_by_order.get(order_index)
+        if metadata is None:
+            raise RuntimeError("Protocol parallel execution returned unknown job order index.")
+        spec = metadata["spec"]
+        if not isinstance(spec, CompiledRunSpec):
+            raise TypeError("Protocol parallel execution metadata contains invalid spec entry.")
+        run_dir = metadata["run_dir"]
+        if not isinstance(run_dir, Path):
+            raise TypeError(
+                "Protocol parallel execution metadata contains invalid run directory entry."
+            )
+        action = str(metadata["action"])
+        existing_classification = str(metadata["existing_classification"])
+        started_at = str(dispatched.get("started_at_utc") or metadata["started_at"])
+        ended_at = str(dispatched.get("ended_at_utc") or _utc_now_iso())
+
+        run_result: ProtocolRunResult
+        execution_error = dispatched.get("execution_error")
+        if isinstance(execution_error, dict):
+            failure_payload_raw = execution_error.get("failure_payload")
+            failure_payload = (
+                dict(failure_payload_raw) if isinstance(failure_payload_raw, dict) else {}
+            )
+            run_result = ProtocolRunResult(
+                run_id=spec.run_id,
+                suite_id=spec.suite_id,
+                framework_mode=FrameworkMode.CONFIRMATORY.value,
+                status=RUN_STATUS_FAILED,
+                error=str(execution_error.get("error") or "run_execution_failed"),
+                error_code=str(failure_payload.get("error_code") or "run_execution_failed"),
+                error_type=str(failure_payload.get("error_type") or "RuntimeError"),
+                failure_stage=str(failure_payload.get("failure_stage") or "runtime"),
+                error_details=dict(failure_payload.get("error_details") or {}),
+            )
+        else:
+            supervised_result_raw = dispatched.get("watchdog_result")
+            supervised_result = (
+                dict(supervised_result_raw) if isinstance(supervised_result_raw, dict) else {}
+            )
+            run_status = str(supervised_result.get("status", RUN_STATUS_FAILED))
             supervised_error_details_raw = supervised_result.get("error_details")
             supervised_error_details = (
                 dict(supervised_error_details_raw)
@@ -651,8 +772,19 @@ def execute_compiled_protocol(
             if run_status == RUN_STATUS_SUCCESS:
                 run_payload = supervised_result.get("run_payload")
                 if not isinstance(run_payload, dict):
-                    raise RuntimeError("Watchdog run returned success without run payload.")
-                run_result = _to_run_result_success(spec, run_payload)
+                    run_result = ProtocolRunResult(
+                        run_id=spec.run_id,
+                        suite_id=spec.suite_id,
+                        framework_mode=FrameworkMode.CONFIRMATORY.value,
+                        status=RUN_STATUS_FAILED,
+                        error="Watchdog run returned success without run payload.",
+                        error_code="watchdog_worker_invalid_result",
+                        error_type="RuntimeError",
+                        failure_stage="watchdog_worker",
+                        error_details={},
+                    )
+                else:
+                    run_result = _to_run_result_success(spec, run_payload)
             elif run_status == RUN_STATUS_TIMED_OUT:
                 run_result = ProtocolRunResult(
                     run_id=spec.run_id,
@@ -704,20 +836,7 @@ def execute_compiled_protocol(
                     failure_stage=str(supervised_result.get("failure_stage") or "runtime"),
                     error_details=supervised_error_details,
                 )
-        except Exception as exc:
-            failure_payload = exception_failure_payload(exc, default_stage="runtime")
-            run_result = ProtocolRunResult(
-                run_id=spec.run_id,
-                suite_id=spec.suite_id,
-                framework_mode=FrameworkMode.CONFIRMATORY.value,
-                status=RUN_STATUS_FAILED,
-                error=str(exc),
-                error_code=str(failure_payload["error_code"]),
-                error_type=str(failure_payload["error_type"]),
-                failure_stage=str(failure_payload["failure_stage"]),
-                error_details=dict(failure_payload["error_details"]),
-            )
-        ended_at = _utc_now_iso()
+
         run_results.append(run_result)
         run_index_rows.append(
             _run_index_row(
@@ -741,6 +860,7 @@ def execute_compiled_protocol(
     protocol_output_dir = _protocol_output_dir(protocol, reports_root=reports_root_path)
     stage_timings: dict[str, float] = {
         "run_execution": float(run_loop_duration_seconds),
+        "run_parallelism": float(resolved_max_parallel_runs),
     }
     if compile_duration_seconds is not None:
         stage_timings["compile"] = float(compile_duration_seconds)
@@ -811,6 +931,7 @@ def execute_compiled_protocol(
         "n_timed_out": int(n_timed_out),
         "n_skipped_due_to_policy": int(n_skipped_due_to_policy),
         "n_planned": int(n_planned),
+        "max_parallel_runs_effective": int(resolved_max_parallel_runs),
         "stage_timings_seconds": {key: round(value, 6) for key, value in stage_timings.items()},
         "artifact_paths": artifact_paths,
         "artifact_verification": artifact_verification,
@@ -830,6 +951,7 @@ def compile_and_run_protocol(
     resume: bool = False,
     dry_run: bool = False,
     timeout_policy_overrides: dict[str, Any] | None = None,
+    max_parallel_runs: int = 1,
 ) -> dict[str, Any]:
     if isinstance(protocol.confirmatory_lock, dict):
         analysis_status = str(protocol.confirmatory_lock.get("analysis_status", "")).strip().lower()
@@ -863,4 +985,5 @@ def compile_and_run_protocol(
         dry_run=dry_run,
         compile_duration_seconds=compile_duration_seconds,
         timeout_policy_overrides=timeout_policy_overrides,
+        max_parallel_runs=max_parallel_runs,
     )

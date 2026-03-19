@@ -162,6 +162,7 @@ def test_confirmatory_freeze_protocol_dry_run_executes_with_locked_gates(
 
     assert result["n_failed"] == 0
     assert result["n_planned"] > 0
+    assert int(result["max_parallel_runs_effective"]) == 1
     deviation_log = json.loads(
         Path(result["artifact_paths"]["deviation_log"]).read_text(encoding="utf-8")
     )
@@ -1162,3 +1163,20 @@ def test_protocol_runner_resume_reruns_only_missing_runs(
     assert int(reconciliation["n_missing"]) == 1
     assert int(reconciliation["n_rerun"]) == 1
     assert int(reconciliation["n_reused"]) == planned_runs - 1
+
+
+def test_protocol_runner_rejects_nonpositive_max_parallel_runs(
+    protocol_dataset: dict[str, Path],
+) -> None:
+    protocol = load_protocol(_canonical_protocol_path())
+    with pytest.raises(ValueError, match="max_parallel_runs must be >= 1"):
+        compile_and_run_protocol(
+            protocol=protocol,
+            index_csv=protocol_dataset["index_csv"],
+            data_root=protocol_dataset["data_root"],
+            cache_dir=protocol_dataset["cache_dir"],
+            reports_root=protocol_dataset["reports_root"],
+            suite_ids=["primary_within_subject"],
+            dry_run=True,
+            max_parallel_runs=0,
+        )

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -55,6 +56,7 @@ def execute_run_with_timeout_watchdog(
     timeout_policy: dict[str, Any],
     phase_name: str,
     run_identity: dict[str, Any],
+    subprocess_env_overrides: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     run_id = str(run_kwargs.get("run_id"))
     report_dir = _report_dir_from_run_kwargs(run_kwargs)
@@ -83,11 +85,19 @@ def execute_run_with_timeout_watchdog(
             "--output",
             str(output_path),
         ]
+        process_env = os.environ.copy()
+        if isinstance(subprocess_env_overrides, dict):
+            for key, value in subprocess_env_overrides.items():
+                key_text = str(key).strip()
+                if not key_text:
+                    continue
+                process_env[key_text] = str(value)
         process = subprocess.Popen(
             command,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
+            env=process_env,
         )
         pid = int(process.pid)
 

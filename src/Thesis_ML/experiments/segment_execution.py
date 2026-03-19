@@ -76,6 +76,7 @@ class SegmentExecutionRequest:
     subgroup_metrics_csv_path: Path
     tuning_summary_path: Path
     tuning_best_params_path: Path
+    fit_timing_summary_path: Path
     spatial_report_path: Path
     calibration_summary_path: Path
     calibration_table_path: Path
@@ -398,6 +399,7 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
                     tuning_inner_group_field=request.tuning_inner_group_field,
                     tuning_summary_path=request.tuning_summary_path,
                     tuning_best_params_path=request.tuning_best_params_path,
+                    fit_timing_summary_path=request.fit_timing_summary_path,
                     interpretability_enabled=request.interpretability_enabled_override,
                     max_outer_folds=request.max_outer_folds,
                     run_id=request.run_id,

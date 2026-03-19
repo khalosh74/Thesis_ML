@@ -699,6 +699,7 @@ def run_experiment(
     config_path = report_dir / "config.json"
     tuning_summary_path = report_dir / "tuning_summary.json"
     tuning_best_params_path = report_dir / "best_params_per_fold.csv"
+    fit_timing_summary_path = report_dir / "fit_timing_summary.json"
     spatial_compatibility_report_path = report_dir / "spatial_compatibility_report.json"
     calibration_summary_path = report_dir / "calibration_summary.json"
     calibration_table_path = report_dir / "calibration_table.csv"
@@ -848,6 +849,7 @@ def run_experiment(
                         subgroup_metrics_csv_path=subgroup_metrics_csv_path,
                         tuning_summary_path=tuning_summary_path,
                         tuning_best_params_path=tuning_best_params_path,
+                        fit_timing_summary_path=fit_timing_summary_path,
                         spatial_report_path=spatial_compatibility_report_path,
                         calibration_summary_path=calibration_summary_path,
                         calibration_table_path=calibration_table_path,
@@ -925,6 +927,7 @@ def run_experiment(
             projected_runtime_seconds=int(resolved_projected_runtime_seconds),
             tuning_summary_path=tuning_summary_path,
             tuning_best_params_path=tuning_best_params_path,
+            fit_timing_summary_path=fit_timing_summary_path,
             subgroup_metrics_json_path=subgroup_metrics_json_path,
             subgroup_metrics_csv_path=subgroup_metrics_csv_path,
             metric_policy_effective=metric_policy_effective,
@@ -1033,6 +1036,7 @@ def run_experiment(
             tuning_inner_group_field=effective_tuning_inner_group_field,
             tuning_summary_path=tuning_summary_path,
             tuning_best_params_path=tuning_best_params_path,
+            fit_timing_summary_path=fit_timing_summary_path,
             calibration_summary_path=calibration_summary_path,
             calibration_table_path=calibration_table_path,
             subgroup_reporting_enabled=bool(subgroup_policy.enabled),
@@ -1233,6 +1237,7 @@ def run_experiment(
         external_validation_compatibility_path=external_validation_compatibility_path,
         tuning_summary_path=tuning_summary_path,
         tuning_best_params_path=tuning_best_params_path,
+        fit_timing_summary_path=fit_timing_summary_path,
         calibration_summary_path=calibration_summary_path,
         calibration_table_path=calibration_table_path,
         fold_metrics_path=fold_metrics_path,

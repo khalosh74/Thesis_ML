@@ -29,12 +29,17 @@ param(
     [ValidateSet("fresh", "resume", "force")]
     [string]$ExecutionMode = "resume",
 
+    [int]$MaxParallelRuns = 1,
+
     [switch]$SkipGitCleanCheck,
     [switch]$SkipTagCreation
 )
 
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
+if ($MaxParallelRuns -lt 1) {
+    throw "MaxParallelRuns must be >= 1."
+}
 
 function Write-Step {
     param([string]$Message)
@@ -529,6 +534,7 @@ function New-PhaseContext {
             confirmatory_protocol   = $ConfirmatoryProtocol
             comparison_specs        = @($ComparisonSpecs)
             primary_comparison_spec = $PrimaryComparisonSpec
+            max_parallel_runs       = [int]$MaxParallelRuns
             skip_git_clean_check    = [bool]$SkipGitCleanCheck
             skip_tag_creation       = [bool]$SkipTagCreation
         }
@@ -1117,7 +1123,8 @@ $PhaseRunners["confirmatory"] = {
         "python", "-m", "Thesis_ML.cli.protocol_runner",
         "--protocol", $ConfirmatoryProtocol,
         "--all-suites",
-        "--reports-root", $ConfirmatoryRoot
+        "--reports-root", $ConfirmatoryRoot,
+        "--max-parallel-runs", [string]$MaxParallelRuns
     )
     $protocolCommand += (Get-RunnerExecutionArgs)
 
@@ -1208,7 +1215,8 @@ $PhaseRunners["comparison"] = {
             "python", "-m", "Thesis_ML.cli.comparison_runner",
             "--comparison", $spec,
             "--all-variants",
-            "--reports-root", $specRoot
+            "--reports-root", $specRoot,
+            "--max-parallel-runs", [string]$MaxParallelRuns
         )
         $comparisonCommand += (Get-RunnerExecutionArgs)
 
@@ -1506,6 +1514,7 @@ Write-Step "Campaign phase execution"
 Write-Host "Campaign tag: $CampaignTag"
 Write-Host "Campaign root: $CampaignRoot"
 Write-Host "Execution mode: $ExecutionMode"
+Write-Host "Max parallel runs: $MaxParallelRuns"
 Write-Host "Requested phase: $Phase"
 Write-Host "Execution order: $($PhasesToRun -join ', ')"
 

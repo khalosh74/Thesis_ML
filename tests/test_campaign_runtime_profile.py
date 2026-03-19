@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -14,6 +15,10 @@ from Thesis_ML.experiments.run_experiment import (
 )
 from Thesis_ML.experiments.section_models import ModelFitInput
 from Thesis_ML.experiments.sections_impl import execute_model_fit
+from Thesis_ML.experiments.tuning_search_spaces import (
+    LINEAR_GROUPED_NESTED_SEARCH_SPACE_ID,
+    LINEAR_GROUPED_NESTED_SEARCH_SPACE_VERSION,
+)
 
 
 def _repo_root() -> Path:
@@ -274,6 +279,235 @@ def test_grouped_nested_cohort_selects_valid_representative_when_available(
     )
     assert validity.can_profile_measured is True
     assert str(representative.run.subject) == "sub-002"
+
+
+def test_model_fit_writes_fold_level_timing_fields(tmp_path: Path) -> None:
+    metadata_df = pd.DataFrame(
+        [
+            {
+                "sample_id": "s1",
+                "subject": "sub-001",
+                "session": "ses-01",
+                "bas": "BAS2",
+                "task": "passive",
+                "modality": "audio",
+                "emotion": "anger",
+                "coarse_affect": "negative",
+            },
+            {
+                "sample_id": "s2",
+                "subject": "sub-001",
+                "session": "ses-01",
+                "bas": "BAS2",
+                "task": "passive",
+                "modality": "video",
+                "emotion": "happiness",
+                "coarse_affect": "positive",
+            },
+            {
+                "sample_id": "s3",
+                "subject": "sub-001",
+                "session": "ses-02",
+                "bas": "BAS2",
+                "task": "passive",
+                "modality": "audio",
+                "emotion": "anger",
+                "coarse_affect": "negative",
+            },
+            {
+                "sample_id": "s4",
+                "subject": "sub-001",
+                "session": "ses-02",
+                "bas": "BAS2",
+                "task": "passive",
+                "modality": "video",
+                "emotion": "happiness",
+                "coarse_affect": "positive",
+            },
+            {
+                "sample_id": "s5",
+                "subject": "sub-001",
+                "session": "ses-03",
+                "bas": "BAS2",
+                "task": "passive",
+                "modality": "audio",
+                "emotion": "anger",
+                "coarse_affect": "negative",
+            },
+            {
+                "sample_id": "s6",
+                "subject": "sub-001",
+                "session": "ses-03",
+                "bas": "BAS2",
+                "task": "passive",
+                "modality": "video",
+                "emotion": "happiness",
+                "coarse_affect": "positive",
+            },
+        ]
+    )
+    x_matrix = np.asarray(
+        [
+            [0.0, 1.0],
+            [1.0, 0.0],
+            [0.2, 1.1],
+            [1.1, 0.3],
+            [0.1, 1.3],
+            [1.2, 0.1],
+        ],
+        dtype=np.float64,
+    )
+
+    output = execute_model_fit(
+        ModelFitInput(
+            x_matrix=x_matrix,
+            metadata_df=metadata_df,
+            target_column="coarse_affect",
+            cv_mode="within_subject_loso_session",
+            model="ridge",
+            subject="sub-001",
+            seed=42,
+            run_id="timing_fold_fields",
+            config_filename="config.json",
+            report_dir=tmp_path,
+            build_pipeline_fn=lambda model_name, seed: _build_pipeline(
+                model_name=model_name,
+                seed=seed,
+                class_weight_policy="none",
+            ),
+            scores_for_predictions_fn=_scores_for_predictions,
+            extract_linear_coefficients_fn=_extract_linear_coefficients,
+        )
+    )
+
+    assert output["fold_rows"]
+    for row in output["fold_rows"]:
+        assert float(row["outer_fold_elapsed_seconds"]) >= 0.0
+        assert float(row["estimator_fit_elapsed_seconds"]) >= 0.0
+        assert row["tuned_search_elapsed_seconds"] is None
+        assert int(row["tuned_search_candidate_count"]) == 0
+    fit_timing_summary_path = Path(str(output["fit_timing_summary_path"]))
+    assert fit_timing_summary_path.exists()
+    fit_timing_payload = json.loads(fit_timing_summary_path.read_text(encoding="utf-8"))
+    assert fit_timing_payload["status"] == "captured"
+    assert int(fit_timing_payload["n_folds"]) == len(output["fold_rows"])
+
+
+def test_model_fit_tuned_rows_include_search_timing_summary(tmp_path: Path) -> None:
+    metadata_df = pd.DataFrame(
+        [
+            {
+                "sample_id": "s1",
+                "subject": "sub-001",
+                "session": "ses-01",
+                "bas": "BAS2",
+                "task": "passive",
+                "modality": "audio",
+                "emotion": "anger",
+                "coarse_affect": "negative",
+            },
+            {
+                "sample_id": "s2",
+                "subject": "sub-001",
+                "session": "ses-01",
+                "bas": "BAS2",
+                "task": "passive",
+                "modality": "video",
+                "emotion": "happiness",
+                "coarse_affect": "positive",
+            },
+            {
+                "sample_id": "s3",
+                "subject": "sub-001",
+                "session": "ses-02",
+                "bas": "BAS2",
+                "task": "passive",
+                "modality": "audio",
+                "emotion": "anger",
+                "coarse_affect": "negative",
+            },
+            {
+                "sample_id": "s4",
+                "subject": "sub-001",
+                "session": "ses-02",
+                "bas": "BAS2",
+                "task": "passive",
+                "modality": "video",
+                "emotion": "happiness",
+                "coarse_affect": "positive",
+            },
+            {
+                "sample_id": "s5",
+                "subject": "sub-001",
+                "session": "ses-03",
+                "bas": "BAS2",
+                "task": "passive",
+                "modality": "audio",
+                "emotion": "anger",
+                "coarse_affect": "negative",
+            },
+            {
+                "sample_id": "s6",
+                "subject": "sub-001",
+                "session": "ses-03",
+                "bas": "BAS2",
+                "task": "passive",
+                "modality": "video",
+                "emotion": "happiness",
+                "coarse_affect": "positive",
+            },
+        ]
+    )
+    x_matrix = np.asarray(
+        [
+            [0.0, 1.0],
+            [1.0, 0.0],
+            [0.2, 1.1],
+            [1.1, 0.3],
+            [0.1, 1.3],
+            [1.2, 0.1],
+        ],
+        dtype=np.float64,
+    )
+
+    output = execute_model_fit(
+        ModelFitInput(
+            x_matrix=x_matrix,
+            metadata_df=metadata_df,
+            target_column="coarse_affect",
+            cv_mode="within_subject_loso_session",
+            model="ridge",
+            subject="sub-001",
+            seed=42,
+            primary_metric_name="balanced_accuracy",
+            methodology_policy_name="grouped_nested_tuning",
+            tuning_enabled=True,
+            tuning_search_space_id=LINEAR_GROUPED_NESTED_SEARCH_SPACE_ID,
+            tuning_search_space_version=LINEAR_GROUPED_NESTED_SEARCH_SPACE_VERSION,
+            tuning_inner_cv_scheme="grouped_leave_one_group_out",
+            tuning_inner_group_field="session",
+            run_id="timing_tuned_fields",
+            config_filename="config.json",
+            report_dir=tmp_path,
+            build_pipeline_fn=lambda model_name, seed: _build_pipeline(
+                model_name=model_name,
+                seed=seed,
+                class_weight_policy="none",
+            ),
+            scores_for_predictions_fn=_scores_for_predictions,
+            extract_linear_coefficients_fn=_extract_linear_coefficients,
+        )
+    )
+
+    tuned_rows = [row for row in output["tuning_records"] if str(row.get("status")) == "tuned"]
+    assert tuned_rows
+    for row in tuned_rows:
+        assert int(row["n_candidates"]) > 0
+        assert float(row["tuned_search_elapsed_seconds"]) >= 0.0
+        assert float(row["cv_mean_fit_time_seconds"]) >= 0.0
+        assert float(row["cv_std_fit_time_seconds"]) >= 0.0
+        assert float(row["cv_mean_score_time_seconds"]) >= 0.0
+        assert float(row["cv_std_score_time_seconds"]) >= 0.0
 
 
 def test_model_fit_outer_fold_cap_only_applies_when_profiling_flag_set(tmp_path: Path) -> None:

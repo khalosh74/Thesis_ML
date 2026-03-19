@@ -181,6 +181,7 @@ def test_comparison_runner_dry_run_emits_artifacts(
     assert result["n_failed"] == 0
     assert result["n_completed"] == 0
     assert result["n_planned"] == 2 * int(spec.evidence_policy.repeat_evaluation.repeat_count)
+    assert int(result["max_parallel_runs_effective"]) == 1
     for artifact_path in result["artifact_paths"].values():
         assert Path(artifact_path).exists()
     assert "repeated_run_metrics" in result["artifact_paths"]
@@ -828,4 +829,21 @@ def test_comparison_runner_fresh_refuses_existing_outputs(
             reports_root=comparison_dataset["reports_root"],
             variant_ids=["ridge"],
             dry_run=False,
+        )
+
+
+def test_comparison_runner_rejects_nonpositive_max_parallel_runs(
+    comparison_dataset: dict[str, Path],
+) -> None:
+    spec = load_comparison_spec(_comparison_spec_path())
+    with pytest.raises(ValueError, match="max_parallel_runs must be >= 1"):
+        compile_and_run_comparison(
+            comparison=spec,
+            index_csv=comparison_dataset["index_csv"],
+            data_root=comparison_dataset["data_root"],
+            cache_dir=comparison_dataset["cache_dir"],
+            reports_root=comparison_dataset["reports_root"],
+            variant_ids=["ridge"],
+            dry_run=True,
+            max_parallel_runs=0,
         )

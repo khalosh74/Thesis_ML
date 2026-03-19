@@ -119,6 +119,7 @@ class ModelFitInput(_SectionModel):
     tuning_inner_group_field: str | None = None
     tuning_summary_path: Path | None = None
     tuning_best_params_path: Path | None = None
+    fit_timing_summary_path: Path | None = None
     interpretability_enabled: bool | None = None
     max_outer_folds: int | None = None
     run_id: str = Field(min_length=1)
@@ -146,6 +147,8 @@ class ModelFitOutput(_SectionModel):
     tuning_records: list[dict[str, Any]]
     tuning_summary_path: Path
     tuning_best_params_path: Path
+    fit_timing_summary: dict[str, Any]
+    fit_timing_summary_path: Path
 
 
 class InterpretabilityInput(_SectionModel):

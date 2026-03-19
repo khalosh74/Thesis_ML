@@ -78,6 +78,9 @@ Frozen campaign phased execution (`scripts/run_frozen_campaign.ps1`):
 - `-Phase replay`
 - `-Phase bundle`
 - `-Phase all` (runs in order: `precheck -> confirmatory -> comparison -> replay -> bundle`)
+- operational parallel fan-out control:
+  - `-MaxParallelRuns <N>` (default `1`, serial-safe)
+  - affects scheduling only; scientific methodology/artifact contracts remain unchanged
 
 Execution modes (`-ExecutionMode`, default `resume`):
 
@@ -167,6 +170,18 @@ Phase output roots:
 - `outputs/campaign/<CampaignTag>/release/replay/`
 - `outputs/campaign/<CampaignTag>/bundle/`
 - `outputs/campaign/<CampaignTag>/logs/<phase>/`
+
+Additive fit/search timing outputs:
+
+- `fold_metrics.csv` now includes per-fold fit/search timing fields:
+  - `outer_fold_elapsed_seconds`
+  - `estimator_fit_elapsed_seconds`
+  - `tuned_search_elapsed_seconds`
+  - `tuned_search_candidate_count`
+  - `cv_mean_fit_time_seconds`, `cv_std_fit_time_seconds`
+  - `cv_mean_score_time_seconds`, `cv_std_score_time_seconds`
+- `best_params_per_fold.csv` now includes tuned-search timing summary columns.
+- `fit_timing_summary.json` is written per run and referenced from `config.json`, `metrics.json`, and run result payloads.
 
 Campaign manifest and per-phase machine-readable artifacts:
 

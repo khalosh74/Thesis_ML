@@ -103,6 +103,7 @@ def stamp_metrics_artifact(
     projected_runtime_seconds: int,
     tuning_summary_path: Path,
     tuning_best_params_path: Path,
+    fit_timing_summary_path: Path,
     subgroup_metrics_json_path: Path,
     subgroup_metrics_csv_path: Path,
     metric_policy_effective: EffectiveMetricPolicy,
@@ -142,6 +143,8 @@ def stamp_metrics_artifact(
     persisted_metrics["tuning_summary_path_relative"] = _relative_path(tuning_summary_path)
     persisted_metrics["tuning_best_params_path"] = str(tuning_best_params_path.resolve())
     persisted_metrics["tuning_best_params_path_relative"] = _relative_path(tuning_best_params_path)
+    persisted_metrics["fit_timing_summary_path"] = str(fit_timing_summary_path.resolve())
+    persisted_metrics["fit_timing_summary_path_relative"] = _relative_path(fit_timing_summary_path)
     persisted_metrics["subgroup_metrics_json_path"] = str(subgroup_metrics_json_path.resolve())
     persisted_metrics["subgroup_metrics_json_path_relative"] = _relative_path(
         subgroup_metrics_json_path
@@ -225,6 +228,7 @@ def build_run_config_payload(
     tuning_inner_group_field: str | None,
     tuning_summary_path: Path,
     tuning_best_params_path: Path,
+    fit_timing_summary_path: Path,
     calibration_summary_path: Path,
     calibration_table_path: Path,
     subgroup_reporting_enabled: bool,
@@ -331,6 +335,8 @@ def build_run_config_payload(
         "tuning_summary_path_relative": _relative_path(tuning_summary_path),
         "tuning_best_params_path": str(tuning_best_params_path.resolve()),
         "tuning_best_params_path_relative": _relative_path(tuning_best_params_path),
+        "fit_timing_summary_path": str(fit_timing_summary_path.resolve()),
+        "fit_timing_summary_path_relative": _relative_path(fit_timing_summary_path),
         "calibration_summary_path": str(calibration_summary_path.resolve()),
         "calibration_summary_path_relative": _relative_path(calibration_summary_path),
         "calibration_table_path": str(calibration_table_path.resolve()),
@@ -463,6 +469,7 @@ def build_run_result_payload(
     external_validation_compatibility_path: Path,
     tuning_summary_path: Path,
     tuning_best_params_path: Path,
+    fit_timing_summary_path: Path,
     calibration_summary_path: Path,
     calibration_table_path: Path,
     fold_metrics_path: Path,
@@ -543,6 +550,8 @@ def build_run_result_payload(
         "tuning_summary_path_relative": _relative_path(tuning_summary_path),
         "tuning_best_params_path": str(tuning_best_params_path.resolve()),
         "tuning_best_params_path_relative": _relative_path(tuning_best_params_path),
+        "fit_timing_summary_path": str(fit_timing_summary_path.resolve()),
+        "fit_timing_summary_path_relative": _relative_path(fit_timing_summary_path),
         "calibration_summary_path": str(calibration_summary_path.resolve()),
         "calibration_summary_path_relative": _relative_path(calibration_summary_path),
         "calibration_table_path": str(calibration_table_path.resolve()),
