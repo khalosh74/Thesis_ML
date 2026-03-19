@@ -278,7 +278,7 @@ docker run --rm thesis-ml:dev
   - `python scripts/build_publishable_bundle.py --output-dir <bundle_dir> --comparison-output <...> --confirmatory-output <...> --replay-summary <...> --replay-verification-summary <...> --repro-manifest <...>`
   - `python scripts/verify_publishable_bundle.py --bundle-dir <bundle_dir>`
 - RC wrapper gate script: `python scripts/rc1_release_gate.py --run-ruff --run-pytest --run-performance-smoke`
-- Frozen campaign phased orchestrator: `powershell -ExecutionPolicy Bypass -File scripts/run_frozen_campaign.ps1 -CampaignTag <tag> -IndexCsv <...> -DataRoot <...> -CacheDir <...> -Phase <precheck|confirmatory|comparison|replay|bundle|all>`
+- Frozen campaign phased orchestrator: `powershell -ExecutionPolicy Bypass -File scripts/run_frozen_campaign.ps1 -CampaignTag <tag> -IndexCsv <...> -DataRoot <...> -CacheDir <...> -Phase <precheck|confirmatory|comparison|replay|bundle|all> -ExecutionMode <fresh|resume|force>`
 
 Frozen campaign phase output roots:
 - `outputs/campaign/<CampaignTag>/release/precheck/`
@@ -288,10 +288,21 @@ Frozen campaign phase output roots:
 - `outputs/campaign/<CampaignTag>/bundle/`
 - campaign/phase metadata: `outputs/campaign/<CampaignTag>/campaign_manifest.json`, `<phase_root>/phase_status.json`, `<phase_root>/phase_summary.json`
 - phase summaries include run-state counts: `n_success`, `n_failed`, `n_timed_out`, `n_skipped_due_to_policy`
+- phase summaries also include resumability counters:
+  - `n_existing_success`, `n_existing_failed`, `n_existing_timed_out`, `n_existing_skipped_due_to_policy`
+  - `n_missing`, `n_rerun`, `n_reused`, `n_skipped_as_already_complete`
+- confirmatory/comparison outputs include resumability artifacts:
+  - `run_index.json`
+  - `resume_reconciliation.json`
 - phase timeout/failure semantics:
   - confirmatory: timed-out runs are blocking (phase does not pass)
   - comparison: timed-out runs are explicit and phase may be `partial`
   - replay/bundle: blocked unless upstream dependency phases are `passed`
+
+Execution mode semantics:
+- `fresh`: fail on existing phase artifacts; do not reuse.
+- `resume` (default): reuse successful work; rerun only missing/failed/timed_out units; skip replay/bundle when existing verification artifacts already pass.
+- `force`: rerun selected phase from scratch.
 
 ## Operator documentation
 

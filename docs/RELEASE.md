@@ -212,6 +212,12 @@ python scripts/rc1_release_gate.py \
 - `bundle`
 - `all` (ordered execution: `precheck -> confirmatory -> comparison -> replay -> bundle`)
 
+Execution modes (`-ExecutionMode`):
+
+- `fresh`: refuse to run when selected phase root contains prior artifacts.
+- `resume` (default): reuse completed artifacts and rerun only missing/failed/`timed_out` units.
+- `force`: rerun selected phase work from scratch.
+
 Dependency enforcement:
 
 - `confirmatory` requires `precheck=passed`.
@@ -247,6 +253,8 @@ Machine-readable orchestration artifacts:
 - campaign manifest: `outputs/campaign/<CampaignTag>/campaign_manifest.json`
 - per-phase status: `<phase_root>/phase_status.json`
 - per-phase summary: `<phase_root>/phase_summary.json`
+- per-run resumability index (confirmatory/comparison): `<official_output_dir>/run_index.json`
+- per-run reconciliation summary (confirmatory/comparison): `<official_output_dir>/resume_reconciliation.json`
 
 ## Official RC checklist
 
@@ -255,17 +263,17 @@ Before freezing an experiment campaign:
 1. Prepare a clean campaign output root and archive legacy output folders:
    `powershell -ExecutionPolicy Bypass -File scripts/prepare_frozen_campaign.ps1 -CampaignTag "campaign-YYYY-MM-DD-rc1"`.
 2. Run frozen campaign precheck phase:
-   `powershell -ExecutionPolicy Bypass -File scripts/run_frozen_campaign.ps1 -CampaignTag "campaign-YYYY-MM-DD-rc1" -IndexCsv "<index_csv>" -DataRoot "<data_root>" -CacheDir "<cache_dir>" -Phase precheck`.
+   `powershell -ExecutionPolicy Bypass -File scripts/run_frozen_campaign.ps1 -CampaignTag "campaign-YYYY-MM-DD-rc1" -IndexCsv "<index_csv>" -DataRoot "<data_root>" -CacheDir "<cache_dir>" -Phase precheck -ExecutionMode fresh`.
 3. Run frozen campaign confirmatory phase:
-   `powershell -ExecutionPolicy Bypass -File scripts/run_frozen_campaign.ps1 -CampaignTag "campaign-YYYY-MM-DD-rc1" -IndexCsv "<index_csv>" -DataRoot "<data_root>" -CacheDir "<cache_dir>" -Phase confirmatory`.
+   `powershell -ExecutionPolicy Bypass -File scripts/run_frozen_campaign.ps1 -CampaignTag "campaign-YYYY-MM-DD-rc1" -IndexCsv "<index_csv>" -DataRoot "<data_root>" -CacheDir "<cache_dir>" -Phase confirmatory -ExecutionMode resume`.
 4. Run frozen campaign comparison phase:
-   `powershell -ExecutionPolicy Bypass -File scripts/run_frozen_campaign.ps1 -CampaignTag "campaign-YYYY-MM-DD-rc1" -IndexCsv "<index_csv>" -DataRoot "<data_root>" -CacheDir "<cache_dir>" -Phase comparison`.
+   `powershell -ExecutionPolicy Bypass -File scripts/run_frozen_campaign.ps1 -CampaignTag "campaign-YYYY-MM-DD-rc1" -IndexCsv "<index_csv>" -DataRoot "<data_root>" -CacheDir "<cache_dir>" -Phase comparison -ExecutionMode resume`.
 5. Run frozen campaign replay phase:
-   `powershell -ExecutionPolicy Bypass -File scripts/run_frozen_campaign.ps1 -CampaignTag "campaign-YYYY-MM-DD-rc1" -IndexCsv "<index_csv>" -DataRoot "<data_root>" -CacheDir "<cache_dir>" -Phase replay`.
+   `powershell -ExecutionPolicy Bypass -File scripts/run_frozen_campaign.ps1 -CampaignTag "campaign-YYYY-MM-DD-rc1" -IndexCsv "<index_csv>" -DataRoot "<data_root>" -CacheDir "<cache_dir>" -Phase replay -ExecutionMode resume`.
 6. Run frozen campaign bundle phase:
-   `powershell -ExecutionPolicy Bypass -File scripts/run_frozen_campaign.ps1 -CampaignTag "campaign-YYYY-MM-DD-rc1" -IndexCsv "<index_csv>" -DataRoot "<data_root>" -CacheDir "<cache_dir>" -Phase bundle`.
+   `powershell -ExecutionPolicy Bypass -File scripts/run_frozen_campaign.ps1 -CampaignTag "campaign-YYYY-MM-DD-rc1" -IndexCsv "<index_csv>" -DataRoot "<data_root>" -CacheDir "<cache_dir>" -Phase bundle -ExecutionMode resume`.
 7. Optional one-command equivalent:
-   `powershell -ExecutionPolicy Bypass -File scripts/run_frozen_campaign.ps1 -CampaignTag "campaign-YYYY-MM-DD-rc1" -IndexCsv "<index_csv>" -DataRoot "<data_root>" -CacheDir "<cache_dir>" -Phase all`.
+   `powershell -ExecutionPolicy Bypass -File scripts/run_frozen_campaign.ps1 -CampaignTag "campaign-YYYY-MM-DD-rc1" -IndexCsv "<index_csv>" -DataRoot "<data_root>" -CacheDir "<cache_dir>" -Phase all -ExecutionMode resume`.
 
 ## Confirmatory-ready boundary
 

@@ -79,6 +79,18 @@ Frozen campaign phased execution (`scripts/run_frozen_campaign.ps1`):
 - `-Phase bundle`
 - `-Phase all` (runs in order: `precheck -> confirmatory -> comparison -> replay -> bundle`)
 
+Execution modes (`-ExecutionMode`, default `resume`):
+
+- `fresh`
+  - fails if the selected phase output root already contains artifacts (other than `phase_status.json`)
+  - never silently reuses old outputs
+- `resume`
+  - reuses completed work from disk
+  - reruns only missing / failed / `timed_out` runs in confirmatory/comparison phases
+  - replay/bundle phases are skipped when existing verification artifacts already report `passed=true`
+- `force`
+  - reruns selected phase work from scratch, ignoring existing outputs
+
 Phase dependencies and blocking semantics:
 
 - `confirmatory` depends on `precheck`.
@@ -122,6 +134,12 @@ Campaign manifest and per-phase machine-readable artifacts:
 - `<phase_root>/phase_status.json`
 - `<phase_root>/phase_summary.json`
 - phase summaries include `n_success`, `n_failed`, `n_timed_out`, `n_skipped_due_to_policy`, `n_planned`
+- phase summaries also include resumability counters:
+  - `n_existing_success`, `n_existing_failed`, `n_existing_timed_out`, `n_existing_skipped_due_to_policy`
+  - `n_missing`, `n_rerun`, `n_reused`, `n_skipped_as_already_complete`
+- confirmatory/comparison official outputs now include:
+  - `run_index.json`
+  - `resume_reconciliation.json`
 
 Example phased commands:
 
@@ -132,7 +150,8 @@ powershell -ExecutionPolicy Bypass -File scripts/run_frozen_campaign.ps1 `
   -IndexCsv "<index_csv>" `
   -DataRoot "<data_root>" `
   -CacheDir "<cache_dir>" `
-  -Phase precheck
+  -Phase precheck `
+  -ExecutionMode fresh
 
 # confirmatory only
 powershell -ExecutionPolicy Bypass -File scripts/run_frozen_campaign.ps1 `
@@ -140,7 +159,8 @@ powershell -ExecutionPolicy Bypass -File scripts/run_frozen_campaign.ps1 `
   -IndexCsv "<index_csv>" `
   -DataRoot "<data_root>" `
   -CacheDir "<cache_dir>" `
-  -Phase confirmatory
+  -Phase confirmatory `
+  -ExecutionMode resume
 
 # comparison only
 powershell -ExecutionPolicy Bypass -File scripts/run_frozen_campaign.ps1 `
@@ -148,7 +168,8 @@ powershell -ExecutionPolicy Bypass -File scripts/run_frozen_campaign.ps1 `
   -IndexCsv "<index_csv>" `
   -DataRoot "<data_root>" `
   -CacheDir "<cache_dir>" `
-  -Phase comparison
+  -Phase comparison `
+  -ExecutionMode resume
 
 # replay only
 powershell -ExecutionPolicy Bypass -File scripts/run_frozen_campaign.ps1 `
@@ -156,7 +177,8 @@ powershell -ExecutionPolicy Bypass -File scripts/run_frozen_campaign.ps1 `
   -IndexCsv "<index_csv>" `
   -DataRoot "<data_root>" `
   -CacheDir "<cache_dir>" `
-  -Phase replay
+  -Phase replay `
+  -ExecutionMode resume
 
 # bundle only
 powershell -ExecutionPolicy Bypass -File scripts/run_frozen_campaign.ps1 `
@@ -164,7 +186,8 @@ powershell -ExecutionPolicy Bypass -File scripts/run_frozen_campaign.ps1 `
   -IndexCsv "<index_csv>" `
   -DataRoot "<data_root>" `
   -CacheDir "<cache_dir>" `
-  -Phase bundle
+  -Phase bundle `
+  -ExecutionMode resume
 
 # all phases
 powershell -ExecutionPolicy Bypass -File scripts/run_frozen_campaign.ps1 `
@@ -172,7 +195,8 @@ powershell -ExecutionPolicy Bypass -File scripts/run_frozen_campaign.ps1 `
   -IndexCsv "<index_csv>" `
   -DataRoot "<data_root>" `
   -CacheDir "<cache_dir>" `
-  -Phase all
+  -Phase all `
+  -ExecutionMode resume
 ```
 
 Exploratory run:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
 
 import nibabel as nib
@@ -788,3 +789,365 @@ def test_nested_protocol_compiler_expands_repeats_and_untuned_ablation(
     for primary in primary_runs:
         expected_untuned = f"{primary.run_id}__untuned"
         assert any(run.run_id == expected_untuned for run in untuned_runs)
+
+
+def test_protocol_runner_resume_reuses_completed_runs_without_rerun(
+    protocol_dataset: dict[str, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    protocol = load_protocol(_canonical_protocol_path())
+    call_counter = {"count": 0}
+
+    def _successful_watchdog(*, run_kwargs: dict[str, object], **_: object) -> dict[str, object]:
+        call_counter["count"] += 1
+        run_id = str(run_kwargs["run_id"])
+        report_dir = Path(str(run_kwargs["reports_root"])) / run_id
+        report_dir.mkdir(parents=True, exist_ok=True)
+        config_path = report_dir / "config.json"
+        metrics_path = report_dir / "metrics.json"
+        metrics_payload = {
+            "balanced_accuracy": 0.5,
+            "macro_f1": 0.5,
+            "accuracy": 0.5,
+            "n_folds": 1,
+            "primary_metric_name": "balanced_accuracy",
+            "primary_metric_value": 0.5,
+        }
+        config_path.write_text(f"{json.dumps({'run_id': run_id}, indent=2)}\n", encoding="utf-8")
+        metrics_path.write_text(f"{json.dumps(metrics_payload, indent=2)}\n", encoding="utf-8")
+        (report_dir / "run_status.json").write_text(
+            json.dumps(
+                {
+                    "run_id": run_id,
+                    "status": "success",
+                    "updated_at_utc": "2026-03-19T00:00:00+00:00",
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        return {
+            "status": "success",
+            "run_payload": {
+                "report_dir": str(report_dir),
+                "config_path": str(config_path),
+                "metrics_path": str(metrics_path),
+                "metrics": metrics_payload,
+            },
+        }
+
+    monkeypatch.setattr(
+        "Thesis_ML.protocols.runner.execute_run_with_timeout_watchdog",
+        _successful_watchdog,
+    )
+    monkeypatch.setattr(
+        "Thesis_ML.protocols.runner.verify_official_artifacts",
+        lambda **_: {"passed": True, "issues": []},
+    )
+
+    initial = compile_and_run_protocol(
+        protocol=protocol,
+        index_csv=protocol_dataset["index_csv"],
+        data_root=protocol_dataset["data_root"],
+        cache_dir=protocol_dataset["cache_dir"],
+        reports_root=protocol_dataset["reports_root"],
+        suite_ids=["primary_within_subject"],
+        dry_run=False,
+    )
+    assert initial["n_success"] > 0
+    assert call_counter["count"] == int(initial["n_success"])
+
+    call_counter["count"] = 0
+    resumed = compile_and_run_protocol(
+        protocol=protocol,
+        index_csv=protocol_dataset["index_csv"],
+        data_root=protocol_dataset["data_root"],
+        cache_dir=protocol_dataset["cache_dir"],
+        reports_root=protocol_dataset["reports_root"],
+        suite_ids=["primary_within_subject"],
+        resume=True,
+        dry_run=False,
+    )
+    assert resumed["n_failed"] == 0
+    assert resumed["n_timed_out"] == 0
+    assert call_counter["count"] == 0
+    reconciliation = resumed["resume_reconciliation"]
+    assert int(reconciliation["n_reused"]) == int(resumed["n_success"])
+    assert int(reconciliation["n_rerun"]) == 0
+
+    run_index_path = Path(str(resumed["artifact_paths"]["run_index"]))
+    run_index_payload = json.loads(run_index_path.read_text(encoding="utf-8"))
+    assert {str(row["status"]) for row in run_index_payload["runs"]} == {"success"}
+    assert set(str(row["action"]) for row in run_index_payload["runs"]) == {"reuse_success"}
+
+
+def test_protocol_runner_resume_reruns_only_timed_out_runs(
+    protocol_dataset: dict[str, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    protocol = load_protocol(_canonical_protocol_path())
+    call_counter = {"count": 0}
+
+    def _successful_watchdog(*, run_kwargs: dict[str, object], **_: object) -> dict[str, object]:
+        call_counter["count"] += 1
+        run_id = str(run_kwargs["run_id"])
+        report_dir = Path(str(run_kwargs["reports_root"])) / run_id
+        report_dir.mkdir(parents=True, exist_ok=True)
+        config_path = report_dir / "config.json"
+        metrics_path = report_dir / "metrics.json"
+        metrics_payload = {
+            "balanced_accuracy": 0.5,
+            "macro_f1": 0.5,
+            "accuracy": 0.5,
+            "n_folds": 1,
+            "primary_metric_name": "balanced_accuracy",
+            "primary_metric_value": 0.5,
+        }
+        config_path.write_text(f"{json.dumps({'run_id': run_id}, indent=2)}\n", encoding="utf-8")
+        metrics_path.write_text(f"{json.dumps(metrics_payload, indent=2)}\n", encoding="utf-8")
+        (report_dir / "run_status.json").write_text(
+            json.dumps(
+                {
+                    "run_id": run_id,
+                    "status": "success",
+                    "updated_at_utc": "2026-03-19T00:00:00+00:00",
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        return {
+            "status": "success",
+            "run_payload": {
+                "report_dir": str(report_dir),
+                "config_path": str(config_path),
+                "metrics_path": str(metrics_path),
+                "metrics": metrics_payload,
+            },
+        }
+
+    monkeypatch.setattr(
+        "Thesis_ML.protocols.runner.execute_run_with_timeout_watchdog",
+        _successful_watchdog,
+    )
+    monkeypatch.setattr(
+        "Thesis_ML.protocols.runner.verify_official_artifacts",
+        lambda **_: {"passed": True, "issues": []},
+    )
+
+    initial = compile_and_run_protocol(
+        protocol=protocol,
+        index_csv=protocol_dataset["index_csv"],
+        data_root=protocol_dataset["data_root"],
+        cache_dir=protocol_dataset["cache_dir"],
+        reports_root=protocol_dataset["reports_root"],
+        suite_ids=["primary_within_subject"],
+        dry_run=False,
+    )
+    assert initial["n_success"] > 0
+
+    first_run_id = str(initial["run_results"][0]["run_id"])
+    first_report_dir = Path(str(initial["run_results"][0]["report_dir"]))
+    (first_report_dir / "run_status.json").write_text(
+        json.dumps(
+            {
+                "run_id": first_run_id,
+                "status": "timed_out",
+                "updated_at_utc": "2026-03-19T00:10:00+00:00",
+                "error": "run_exceeded_timeout_budget",
+                "error_code": "run_timeout",
+                "error_type": "RunTimeoutError",
+                "failure_stage": "watchdog_timeout",
+                "timeout_seconds": 1.0,
+                "elapsed_seconds": 1.2,
+                "timeout_diagnostics_path": str(first_report_dir / "timeout_diagnostics.json"),
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    call_counter["count"] = 0
+    resumed = compile_and_run_protocol(
+        protocol=protocol,
+        index_csv=protocol_dataset["index_csv"],
+        data_root=protocol_dataset["data_root"],
+        cache_dir=protocol_dataset["cache_dir"],
+        reports_root=protocol_dataset["reports_root"],
+        suite_ids=["primary_within_subject"],
+        resume=True,
+        dry_run=False,
+    )
+    assert call_counter["count"] == 1
+    reconciliation = resumed["resume_reconciliation"]
+    assert int(reconciliation["n_existing_timed_out"]) == 1
+    assert int(reconciliation["n_rerun"]) == 1
+
+
+def test_protocol_runner_fresh_refuses_existing_outputs(
+    protocol_dataset: dict[str, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    protocol = load_protocol(_canonical_protocol_path())
+
+    def _successful_watchdog(*, run_kwargs: dict[str, object], **_: object) -> dict[str, object]:
+        run_id = str(run_kwargs["run_id"])
+        report_dir = Path(str(run_kwargs["reports_root"])) / run_id
+        report_dir.mkdir(parents=True, exist_ok=True)
+        config_path = report_dir / "config.json"
+        metrics_path = report_dir / "metrics.json"
+        metrics_payload = {
+            "balanced_accuracy": 0.5,
+            "macro_f1": 0.5,
+            "accuracy": 0.5,
+            "n_folds": 1,
+            "primary_metric_name": "balanced_accuracy",
+            "primary_metric_value": 0.5,
+        }
+        config_path.write_text(f"{json.dumps({'run_id': run_id}, indent=2)}\n", encoding="utf-8")
+        metrics_path.write_text(f"{json.dumps(metrics_payload, indent=2)}\n", encoding="utf-8")
+        (report_dir / "run_status.json").write_text(
+            json.dumps(
+                {
+                    "run_id": run_id,
+                    "status": "success",
+                    "updated_at_utc": "2026-03-19T00:00:00+00:00",
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        return {
+            "status": "success",
+            "run_payload": {
+                "report_dir": str(report_dir),
+                "config_path": str(config_path),
+                "metrics_path": str(metrics_path),
+                "metrics": metrics_payload,
+            },
+        }
+
+    monkeypatch.setattr(
+        "Thesis_ML.protocols.runner.execute_run_with_timeout_watchdog",
+        _successful_watchdog,
+    )
+    monkeypatch.setattr(
+        "Thesis_ML.protocols.runner.verify_official_artifacts",
+        lambda **_: {"passed": True, "issues": []},
+    )
+
+    first = compile_and_run_protocol(
+        protocol=protocol,
+        index_csv=protocol_dataset["index_csv"],
+        data_root=protocol_dataset["data_root"],
+        cache_dir=protocol_dataset["cache_dir"],
+        reports_root=protocol_dataset["reports_root"],
+        suite_ids=["primary_within_subject"],
+        dry_run=False,
+    )
+    assert first["n_success"] > 0
+
+    with pytest.raises(RuntimeError, match="Fresh protocol execution refused"):
+        compile_and_run_protocol(
+            protocol=protocol,
+            index_csv=protocol_dataset["index_csv"],
+            data_root=protocol_dataset["data_root"],
+            cache_dir=protocol_dataset["cache_dir"],
+            reports_root=protocol_dataset["reports_root"],
+            suite_ids=["primary_within_subject"],
+            dry_run=False,
+        )
+
+
+def test_protocol_runner_resume_reruns_only_missing_runs(
+    protocol_dataset: dict[str, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    protocol = load_protocol(_canonical_protocol_path())
+    call_counter = {"count": 0}
+
+    def _successful_watchdog(*, run_kwargs: dict[str, object], **_: object) -> dict[str, object]:
+        call_counter["count"] += 1
+        run_id = str(run_kwargs["run_id"])
+        report_dir = Path(str(run_kwargs["reports_root"])) / run_id
+        report_dir.mkdir(parents=True, exist_ok=True)
+        config_path = report_dir / "config.json"
+        metrics_path = report_dir / "metrics.json"
+        metrics_payload = {
+            "balanced_accuracy": 0.5,
+            "macro_f1": 0.5,
+            "accuracy": 0.5,
+            "n_folds": 1,
+            "primary_metric_name": "balanced_accuracy",
+            "primary_metric_value": 0.5,
+        }
+        config_path.write_text(f"{json.dumps({'run_id': run_id}, indent=2)}\n", encoding="utf-8")
+        metrics_path.write_text(f"{json.dumps(metrics_payload, indent=2)}\n", encoding="utf-8")
+        (report_dir / "run_status.json").write_text(
+            json.dumps(
+                {
+                    "run_id": run_id,
+                    "status": "success",
+                    "updated_at_utc": "2026-03-19T00:00:00+00:00",
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        return {
+            "status": "success",
+            "run_payload": {
+                "report_dir": str(report_dir),
+                "config_path": str(config_path),
+                "metrics_path": str(metrics_path),
+                "metrics": metrics_payload,
+            },
+        }
+
+    monkeypatch.setattr(
+        "Thesis_ML.protocols.runner.execute_run_with_timeout_watchdog",
+        _successful_watchdog,
+    )
+    monkeypatch.setattr(
+        "Thesis_ML.protocols.runner.verify_official_artifacts",
+        lambda **_: {"passed": True, "issues": []},
+    )
+
+    initial = compile_and_run_protocol(
+        protocol=protocol,
+        index_csv=protocol_dataset["index_csv"],
+        data_root=protocol_dataset["data_root"],
+        cache_dir=protocol_dataset["cache_dir"],
+        reports_root=protocol_dataset["reports_root"],
+        suite_ids=["primary_within_subject"],
+        dry_run=False,
+    )
+    assert initial["n_success"] > 1
+    planned_runs = int(initial["n_success"])
+
+    missing_run_dir = Path(str(initial["run_results"][0]["report_dir"]))
+    assert missing_run_dir.exists()
+    for child in missing_run_dir.iterdir():
+        if child.is_file():
+            child.unlink()
+        elif child.is_dir():
+            shutil.rmtree(child)
+    missing_run_dir.rmdir()
+    assert not missing_run_dir.exists()
+
+    call_counter["count"] = 0
+    resumed = compile_and_run_protocol(
+        protocol=protocol,
+        index_csv=protocol_dataset["index_csv"],
+        data_root=protocol_dataset["data_root"],
+        cache_dir=protocol_dataset["cache_dir"],
+        reports_root=protocol_dataset["reports_root"],
+        suite_ids=["primary_within_subject"],
+        resume=True,
+        dry_run=False,
+    )
+    assert call_counter["count"] == 1
+    reconciliation = resumed["resume_reconciliation"]
+    assert int(reconciliation["n_missing"]) == 1
+    assert int(reconciliation["n_rerun"]) == 1
+    assert int(reconciliation["n_reused"]) == planned_runs - 1

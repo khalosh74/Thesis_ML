@@ -26,6 +26,9 @@ param(
     [ValidateSet("precheck", "confirmatory", "comparison", "replay", "bundle", "all")]
     [string]$Phase = "all",
 
+    [ValidateSet("fresh", "resume", "force")]
+    [string]$ExecutionMode = "resume",
+
     [switch]$SkipGitCleanCheck,
     [switch]$SkipTagCreation
 )
@@ -117,12 +120,44 @@ function New-RunStatusCounts {
     }
 }
 
+function New-ResumeReconciliationCounts {
+    return [ordered]@{
+        n_existing_success               = 0
+        n_existing_failed                = 0
+        n_existing_timed_out             = 0
+        n_existing_skipped_due_to_policy = 0
+        n_missing                        = 0
+        n_rerun                          = 0
+        n_reused                         = 0
+        n_skipped_as_already_complete    = 0
+    }
+}
+
 function Add-RunStatusCounts {
     param(
         [Parameter(Mandatory = $true)][System.Collections.IDictionary]$Accumulator,
         [Parameter(Mandatory = $true)][System.Collections.IDictionary]$Increment
     )
     foreach ($key in @("n_success", "n_failed", "n_timed_out", "n_skipped_due_to_policy", "n_planned")) {
+        $Accumulator[$key] = [int]$Accumulator[$key] + [int]$Increment[$key]
+    }
+}
+
+function Add-ResumeReconciliationCounts {
+    param(
+        [Parameter(Mandatory = $true)][System.Collections.IDictionary]$Accumulator,
+        [Parameter(Mandatory = $true)][System.Collections.IDictionary]$Increment
+    )
+    foreach ($key in @(
+            "n_existing_success",
+            "n_existing_failed",
+            "n_existing_timed_out",
+            "n_existing_skipped_due_to_policy",
+            "n_missing",
+            "n_rerun",
+            "n_reused",
+            "n_skipped_as_already_complete"
+        )) {
         $Accumulator[$key] = [int]$Accumulator[$key] + [int]$Increment[$key]
     }
 }
@@ -151,6 +186,62 @@ function Get-RunStatusCountsFromExecutionStatus {
     return $counts
 }
 
+function Get-ResumeReconciliationCountsFromSummary {
+    param([string]$SummaryPath)
+
+    $counts = New-ResumeReconciliationCounts
+    $payload = Read-JsonFile -Path $SummaryPath
+    if ($null -eq $payload) {
+        return $counts
+    }
+    $candidate = $null
+    if ($payload -is [System.Collections.IDictionary]) {
+        if ($payload.Contains("resume_reconciliation")) {
+            $candidate = $payload["resume_reconciliation"]
+        }
+        elseif (
+            $payload.Contains("n_existing_success") -or
+            $payload.Contains("n_rerun") -or
+            $payload.Contains("n_reused")
+        ) {
+            $candidate = $payload
+        }
+    }
+    elseif ($payload.PSObject.Properties.Name -contains "resume_reconciliation") {
+        $candidate = $payload.resume_reconciliation
+    }
+    elseif (
+        ($payload.PSObject.Properties.Name -contains "n_existing_success") -or
+        ($payload.PSObject.Properties.Name -contains "n_rerun") -or
+        ($payload.PSObject.Properties.Name -contains "n_reused")
+    ) {
+        $candidate = $payload
+    }
+    if ($null -eq $candidate) {
+        return $counts
+    }
+    foreach ($key in @(
+            "n_existing_success",
+            "n_existing_failed",
+            "n_existing_timed_out",
+            "n_existing_skipped_due_to_policy",
+            "n_missing",
+            "n_rerun",
+            "n_reused",
+            "n_skipped_as_already_complete"
+        )) {
+        if ($candidate -is [System.Collections.IDictionary]) {
+            if ($candidate.Contains($key)) {
+                $counts[$key] = [int]$candidate[$key]
+            }
+        }
+        elseif ($candidate.PSObject.Properties.Name -contains $key) {
+            $counts[$key] = [int]$candidate.$key
+        }
+    }
+    return $counts
+}
+
 function Resolve-ContextRunStatusCounts {
     param($Context)
 
@@ -171,6 +262,48 @@ function Resolve-ContextRunStatusCounts {
     }
     if ($hasCandidate -and $null -ne $candidate) {
         foreach ($key in @("n_success", "n_failed", "n_timed_out", "n_skipped_due_to_policy", "n_planned")) {
+            if ($candidate -is [System.Collections.IDictionary]) {
+                if ($candidate.Contains($key)) {
+                    $counts[$key] = [int]$candidate[$key]
+                }
+            }
+            elseif ($candidate.PSObject.Properties.Name -contains $key) {
+                $counts[$key] = [int]$candidate.$key
+            }
+        }
+    }
+    return $counts
+}
+
+function Resolve-ContextResumeReconciliationCounts {
+    param($Context)
+
+    $counts = New-ResumeReconciliationCounts
+    $candidate = $null
+    $hasCandidate = $false
+    if ($null -ne $Context -and $null -ne $Context.extra) {
+        if ($Context.extra -is [System.Collections.IDictionary]) {
+            if ($Context.extra.Contains("resume_reconciliation")) {
+                $candidate = $Context.extra["resume_reconciliation"]
+                $hasCandidate = $true
+            }
+        }
+        elseif ($Context.extra.PSObject.Properties.Name -contains "resume_reconciliation") {
+            $candidate = $Context.extra.resume_reconciliation
+            $hasCandidate = $true
+        }
+    }
+    if ($hasCandidate -and $null -ne $candidate) {
+        foreach ($key in @(
+                "n_existing_success",
+                "n_existing_failed",
+                "n_existing_timed_out",
+                "n_existing_skipped_due_to_policy",
+                "n_missing",
+                "n_rerun",
+                "n_reused",
+                "n_skipped_as_already_complete"
+            )) {
             if ($candidate -is [System.Collections.IDictionary]) {
                 if ($candidate.Contains($key)) {
                     $counts[$key] = [int]$candidate[$key]
@@ -293,6 +426,82 @@ function Get-UnmetDependencies {
     }
     return @($missing)
 }
+
+function Get-RunnerExecutionArgs {
+    if ($ExecutionMode -eq "force") {
+        return @("--force")
+    }
+    if ($ExecutionMode -eq "resume") {
+        return @("--resume")
+    }
+    return @()
+}
+
+function Get-PhaseFreshConflicts {
+    param([string]$PhaseName)
+
+    if ($ExecutionMode -ne "fresh") {
+        return @()
+    }
+
+    $root = Get-PhaseOutputRoot -PhaseName $PhaseName
+    if (-not (Test-Path -LiteralPath $root -PathType Container)) {
+        return @()
+    }
+
+    $conflicts = @()
+    $entries = Get-ChildItem -LiteralPath $root -Force
+    foreach ($entry in $entries) {
+        if (-not $entry.PSIsContainer -and $entry.Name -eq "phase_status.json") {
+            continue
+        }
+        $conflicts += $entry.FullName
+    }
+    return @($conflicts)
+}
+
+function Get-BoolField {
+    param(
+        $Payload,
+        [string]$FieldName
+    )
+    if ($null -eq $Payload) {
+        return $false
+    }
+    if ($Payload -is [System.Collections.IDictionary]) {
+        if ($Payload.Contains($FieldName)) {
+            return [bool]$Payload[$FieldName]
+        }
+    }
+    elseif ($Payload.PSObject.Properties.Name -contains $FieldName) {
+        return [bool]$Payload.$FieldName
+    }
+    return $false
+}
+
+function Normalize-PathText {
+    param([string]$PathText)
+    if ([string]::IsNullOrWhiteSpace($PathText)) {
+        return ""
+    }
+    try {
+        return (Resolve-Path -LiteralPath $PathText).ProviderPath
+    }
+    catch {
+        try {
+            return [System.IO.Path]::GetFullPath($PathText)
+        }
+        catch {
+            return $PathText
+        }
+    }
+}
+
+function Get-PhaseSummaryRecord {
+    param([string]$PhaseName)
+    return Read-JsonFile -Path (Get-PhaseSummaryPath -PhaseName $PhaseName)
+}
+
 function New-PhaseContext {
     param([string]$PhaseName)
 
@@ -313,6 +522,7 @@ function New-PhaseContext {
         inputs                 = [ordered]@{
             campaign_tag            = $CampaignTag
             campaign_root           = $CampaignRoot
+            execution_mode          = $ExecutionMode
             index_csv               = $IndexCsv
             data_root               = $DataRoot
             cache_dir               = $CacheDir
@@ -412,18 +622,29 @@ function Write-PhaseSummary {
     }
 
     $runStatusCounts = Resolve-ContextRunStatusCounts -Context $Context
+    $resumeCounts = Resolve-ContextResumeReconciliationCounts -Context $Context
 
     $summary = [ordered]@{
         phase                       = $phaseName
         phase_status                = $Status
         status                      = $Status
+        execution_mode              = $ExecutionMode
         output_root                 = $Context.output_root
         n_success                   = [int]$runStatusCounts.n_success
         n_failed                    = [int]$runStatusCounts.n_failed
         n_timed_out                 = [int]$runStatusCounts.n_timed_out
         n_skipped_due_to_policy     = [int]$runStatusCounts.n_skipped_due_to_policy
         n_planned                   = [int]$runStatusCounts.n_planned
+        n_existing_success          = [int]$resumeCounts.n_existing_success
+        n_existing_failed           = [int]$resumeCounts.n_existing_failed
+        n_existing_timed_out        = [int]$resumeCounts.n_existing_timed_out
+        n_existing_skipped_due_to_policy = [int]$resumeCounts.n_existing_skipped_due_to_policy
+        n_missing                   = [int]$resumeCounts.n_missing
+        n_rerun                     = [int]$resumeCounts.n_rerun
+        n_reused                    = [int]$resumeCounts.n_reused
+        n_skipped_as_already_complete = [int]$resumeCounts.n_skipped_as_already_complete
         run_status_counts           = $runStatusCounts
+        resume_reconciliation       = $resumeCounts
         inputs                      = $Context.inputs
         dependency_status           = $dependencyStatus
         commands_executed           = @($Context.commands)
@@ -480,6 +701,7 @@ function Update-CampaignManifest {
 
     $phaseStatuses = [ordered]@{}
     $phaseRunStatusCounts = [ordered]@{}
+    $phaseResumeCounts = [ordered]@{}
     foreach ($phaseName in $OrderedPhases) {
         $phaseStatuses[$phaseName] = Get-PhaseStatusRecord -PhaseName $phaseName
         $summaryPayload = Read-JsonFile -Path (Get-PhaseSummaryPath -PhaseName $phaseName)
@@ -506,6 +728,7 @@ function Update-CampaignManifest {
         else {
             $phaseRunStatusCounts[$phaseName] = New-RunStatusCounts
         }
+        $phaseResumeCounts[$phaseName] = Get-ResumeReconciliationCountsFromSummary -SummaryPath (Get-PhaseSummaryPath -PhaseName $phaseName)
     }
 
     $commitSha = Try-ReadFirstLine -Path (Join-Path $PrecheckRoot "commit_sha.txt")
@@ -535,6 +758,7 @@ function Update-CampaignManifest {
         schema_version = "frozen-campaign-manifest-v1"
         campaign_tag   = $CampaignTag
         campaign_root  = $CampaignRoot
+        execution_mode = $ExecutionMode
         created_at_utc = $createdAt
         updated_at_utc = (Get-UtcNow)
         frozen_context = [ordered]@{
@@ -565,6 +789,7 @@ function Update-CampaignManifest {
         }
         phase_statuses = $phaseStatuses
         phase_run_status_counts = $phaseRunStatusCounts
+        phase_resume_counts = $phaseResumeCounts
         blocking_model = [ordered]@{
             confirmatory_readiness_blockers = @("precheck", "confirmatory")
             campaign_signoff_blockers       = @($OrderedPhases)
@@ -633,14 +858,31 @@ function Invoke-Phase {
             throw "Dependencies not satisfied for phase '$PhaseName': $missingDetails"
         }
 
+        $freshConflicts = @(Get-PhaseFreshConflicts -PhaseName $PhaseName)
+        if ($freshConflicts.Count -gt 0) {
+            $preview = ($freshConflicts | Select-Object -First 5) -join "; "
+            throw (
+                "ExecutionMode=fresh refused to run phase '$PhaseName' because existing artifacts were found in " +
+                "the phase output root: $preview"
+            )
+        }
+
         & $Runner $context
 
         $resolvedPhaseStatus = "passed"
-        if ($null -ne $context.extra -and $null -ne $context.extra.phase_status_override) {
-            $candidate = [string]$context.extra.phase_status_override
-            if (@("passed", "partial", "skipped", "failed") -contains $candidate) {
-                $resolvedPhaseStatus = $candidate
+        $candidate = ""
+        if ($null -ne $context.extra) {
+            if ($context.extra -is [System.Collections.IDictionary]) {
+                if ($context.extra.Contains("phase_status_override")) {
+                    $candidate = [string]$context.extra["phase_status_override"]
+                }
             }
+            elseif ($context.extra.PSObject.Properties.Name -contains "phase_status_override") {
+                $candidate = [string]$context.extra.phase_status_override
+            }
+        }
+        if ((-not [string]::IsNullOrWhiteSpace($candidate)) -and (@("passed", "partial", "skipped", "failed") -contains $candidate)) {
+            $resolvedPhaseStatus = $candidate
         }
 
         Write-PhaseSummary -Context $context -Status $resolvedPhaseStatus
@@ -737,6 +979,40 @@ $PhaseRunners = [ordered]@{}
 $PhaseRunners["precheck"] = {
     param($Context)
 
+    if ($ExecutionMode -eq "resume") {
+        $priorStatus = Get-PhaseStatusValue -PhaseName "precheck"
+        $rcSummaryExisting = Join-Path $PrecheckRoot "rc1_gate_summary.json"
+        $commitExisting = Join-Path $PrecheckRoot "commit_sha.txt"
+        $branchExisting = Join-Path $PrecheckRoot "branch.txt"
+        if (
+            $priorStatus -eq "passed" -and
+            (Test-Path -LiteralPath $rcSummaryExisting -PathType Leaf) -and
+            (Test-Path -LiteralPath $commitExisting -PathType Leaf) -and
+            (Test-Path -LiteralPath $branchExisting -PathType Leaf)
+        ) {
+            $priorSummary = Get-PhaseSummaryRecord -PhaseName "precheck"
+            if ($null -ne $priorSummary) {
+                if ($priorSummary.PSObject.Properties.Name -contains "run_status_counts") {
+                    $Context.extra["run_status_counts"] = $priorSummary.run_status_counts
+                }
+                if ($priorSummary.PSObject.Properties.Name -contains "resume_reconciliation") {
+                    $Context.extra["resume_reconciliation"] = $priorSummary.resume_reconciliation
+                }
+            }
+            if (-not ($Context.extra.Contains("resume_reconciliation"))) {
+                $reused = New-ResumeReconciliationCounts
+                $reused.n_reused = 1
+                $reused.n_skipped_as_already_complete = 1
+                $Context.extra["resume_reconciliation"] = $reused
+            }
+            $Context.key_outputs += $rcSummaryExisting
+            $Context.key_outputs += $commitExisting
+            $Context.key_outputs += $branchExisting
+            $Context.warnings += "Resume mode reused existing passed precheck artifacts."
+            return
+        }
+    }
+
     $gitStatusPath = Join-Path $PrecheckRoot "git_status_porcelain.txt"
     if (-not $SkipGitCleanCheck) {
         $statusResult = Invoke-PhaseCommand -Context $Context -Label "Repository clean check" -CommandParts @("git", "status", "--porcelain=v1")
@@ -796,13 +1072,15 @@ $PhaseRunners["precheck"] = {
 $PhaseRunners["confirmatory"] = {
     param($Context)
 
-    $protocolRunResult = Invoke-PhaseCommand -Context $Context -Label "Run frozen confirmatory protocol" -CommandParts @(
+    $protocolCommand = @(
         "python", "-m", "Thesis_ML.cli.protocol_runner",
         "--protocol", $ConfirmatoryProtocol,
         "--all-suites",
-        "--reports-root", $ConfirmatoryRoot,
-        "--force"
-    ) -ContinueOnError
+        "--reports-root", $ConfirmatoryRoot
+    )
+    $protocolCommand += (Get-RunnerExecutionArgs)
+
+    $protocolRunResult = Invoke-PhaseCommand -Context $Context -Label "Run frozen confirmatory protocol" -CommandParts $protocolCommand -ContinueOnError
 
     $protocolRunsRoot = Join-Path $ConfirmatoryRoot "protocol_runs"
     if (-not (Test-Path -LiteralPath $protocolRunsRoot -PathType Container)) {
@@ -845,12 +1123,21 @@ $PhaseRunners["confirmatory"] = {
     $Context.extra["resolved_confirmatory_output_dir"] = $resolvedConfirmatoryDir.FullName
     $Context.extra["protocol_runs_root"] = $protocolRunsRoot
     $confirmatoryExecutionStatus = Join-Path $resolvedConfirmatoryDir.FullName "execution_status.json"
+    $confirmatoryResumeSummary = Join-Path $resolvedConfirmatoryDir.FullName "resume_reconciliation.json"
+    $confirmatoryRunIndex = Join-Path $resolvedConfirmatoryDir.FullName "run_index.json"
     $confirmatoryCounts = Get-RunStatusCountsFromExecutionStatus -ExecutionStatusPath $confirmatoryExecutionStatus
     $Context.extra["run_status_counts"] = $confirmatoryCounts
+    $Context.extra["resume_reconciliation"] = Get-ResumeReconciliationCountsFromSummary -SummaryPath $confirmatoryResumeSummary
     $Context.key_outputs += $resolvedConfirmatoryDir.FullName
     $Context.key_outputs += $confirmatoryArtifactSummary
     $Context.key_outputs += $confirmatoryReadySummary
     $Context.key_outputs += $confirmatoryExecutionStatus
+    if (Test-Path -LiteralPath $confirmatoryResumeSummary -PathType Leaf) {
+        $Context.key_outputs += $confirmatoryResumeSummary
+    }
+    if (Test-Path -LiteralPath $confirmatoryRunIndex -PathType Leaf) {
+        $Context.key_outputs += $confirmatoryRunIndex
+    }
     $Context.verification_summaries += $confirmatoryArtifactSummary
     $Context.verification_summaries += $confirmatoryReadySummary
 
@@ -870,18 +1157,21 @@ $PhaseRunners["comparison"] = {
     $specOutputs = [ordered]@{}
     $primaryOutputDir = ""
     $aggregateCounts = New-RunStatusCounts
+    $aggregateResumeCounts = New-ResumeReconciliationCounts
 
     foreach ($spec in $ComparisonSpecs) {
         $specName = Get-SpecName -SpecPath $spec
         $specRoot = Join-Path $ComparisonRoot $specName
 
-        Invoke-PhaseCommand -Context $Context -Label "Run comparison: $specName" -CommandParts @(
+        $comparisonCommand = @(
             "python", "-m", "Thesis_ML.cli.comparison_runner",
             "--comparison", $spec,
             "--all-variants",
-            "--reports-root", $specRoot,
-            "--force"
-        ) | Out-Null
+            "--reports-root", $specRoot
+        )
+        $comparisonCommand += (Get-RunnerExecutionArgs)
+
+        Invoke-PhaseCommand -Context $Context -Label "Run comparison: $specName" -CommandParts $comparisonCommand | Out-Null
 
         $comparisonRunDir = Join-Path $specRoot "comparison_runs"
         if (-not (Test-Path -LiteralPath $comparisonRunDir -PathType Container)) {
@@ -912,10 +1202,21 @@ $PhaseRunners["comparison"] = {
         $specCounts = Get-RunStatusCountsFromExecutionStatus -ExecutionStatusPath $executionStatusPath
         Add-RunStatusCounts -Accumulator $aggregateCounts -Increment $specCounts
         $specOutputs[$spec]["run_status_counts"] = $specCounts
+        $resumeSummaryPath = Join-Path $resolvedComparisonDir.FullName "resume_reconciliation.json"
+        $runIndexPath = Join-Path $resolvedComparisonDir.FullName "run_index.json"
+        $specResumeCounts = Get-ResumeReconciliationCountsFromSummary -SummaryPath $resumeSummaryPath
+        Add-ResumeReconciliationCounts -Accumulator $aggregateResumeCounts -Increment $specResumeCounts
+        $specOutputs[$spec]["resume_reconciliation"] = $specResumeCounts
 
         $Context.key_outputs += $resolvedComparisonDir.FullName
         $Context.key_outputs += $artifactSummaryPath
         $Context.key_outputs += $executionStatusPath
+        if (Test-Path -LiteralPath $resumeSummaryPath -PathType Leaf) {
+            $Context.key_outputs += $resumeSummaryPath
+        }
+        if (Test-Path -LiteralPath $runIndexPath -PathType Leaf) {
+            $Context.key_outputs += $runIndexPath
+        }
         $Context.verification_summaries += $artifactSummaryPath
 
         $resolvedSpecPath = (Resolve-Path -LiteralPath $spec).ProviderPath
@@ -931,6 +1232,7 @@ $PhaseRunners["comparison"] = {
     $Context.extra["spec_outputs"] = $specOutputs
     $Context.extra["primary_comparison_output_dir"] = $primaryOutputDir
     $Context.extra["run_status_counts"] = $aggregateCounts
+    $Context.extra["resume_reconciliation"] = $aggregateResumeCounts
     if ([int]$aggregateCounts.n_timed_out -gt 0 -or [int]$aggregateCounts.n_skipped_due_to_policy -gt 0) {
         $Context.extra["phase_status_override"] = "partial"
         $Context.warnings += "Comparison phase completed with timed_out/skipped_due_to_policy runs."
@@ -945,6 +1247,66 @@ $PhaseRunners["replay"] = {
 
     $determinismComparisonReports = Join-Path $ReplayRoot "determinism_comparison"
     $determinismComparisonSummary = Join-Path $ReplayRoot "determinism_comparison_summary.json"
+    $determinismConfirmatoryReports = Join-Path $ReplayRoot "determinism_confirmatory"
+    $determinismConfirmatorySummary = Join-Path $ReplayRoot "determinism_confirmatory_summary.json"
+    $officialReplayRoot = Join-Path $ReplayRoot "official_replay"
+    $replaySummaryPath = Join-Path $ReplayRoot "replay_summary.json"
+    $replayVerificationPath = Join-Path $ReplayRoot "replay_verification_summary.json"
+    $manifestPath = Join-Path $ReplayRoot "reproducibility_manifest.json"
+
+    if (
+        $ExecutionMode -eq "resume" -and
+        (Test-Path -LiteralPath $replaySummaryPath -PathType Leaf) -and
+        (Test-Path -LiteralPath $replayVerificationPath -PathType Leaf) -and
+        (Test-Path -LiteralPath $manifestPath -PathType Leaf)
+    ) {
+        $replayVerification = Read-JsonFile -Path $replayVerificationPath
+        $priorReplaySummary = Get-PhaseSummaryRecord -PhaseName "replay"
+        $priorConfirmatory = ""
+        $priorComparison = ""
+        if ($null -ne $priorReplaySummary -and $null -ne $priorReplaySummary.phase_details) {
+            $phaseDetails = $priorReplaySummary.phase_details
+            if ($phaseDetails -is [System.Collections.IDictionary]) {
+                if ($phaseDetails.Contains("upstream_confirmatory_output_dir")) {
+                    $priorConfirmatory = [string]$phaseDetails["upstream_confirmatory_output_dir"]
+                }
+                if ($phaseDetails.Contains("upstream_primary_comparison_output_dir")) {
+                    $priorComparison = [string]$phaseDetails["upstream_primary_comparison_output_dir"]
+                }
+            }
+            else {
+                if ($phaseDetails.PSObject.Properties.Name -contains "upstream_confirmatory_output_dir") {
+                    $priorConfirmatory = [string]$phaseDetails.upstream_confirmatory_output_dir
+                }
+                if ($phaseDetails.PSObject.Properties.Name -contains "upstream_primary_comparison_output_dir") {
+                    $priorComparison = [string]$phaseDetails.upstream_primary_comparison_output_dir
+                }
+            }
+        }
+        $sameUpstream = (
+            (Normalize-PathText -PathText $priorConfirmatory) -eq (Normalize-PathText -PathText $confirmatoryDir) -and
+            (Normalize-PathText -PathText $priorComparison) -eq (Normalize-PathText -PathText $primaryComparisonDir)
+        )
+        if ((Get-BoolField -Payload $replayVerification -FieldName "passed") -and $sameUpstream) {
+            $resumeCounts = New-ResumeReconciliationCounts
+            $resumeCounts.n_reused = 1
+            $resumeCounts.n_skipped_as_already_complete = 1
+            $Context.extra["resume_reconciliation"] = $resumeCounts
+            $Context.key_outputs += $replaySummaryPath
+            $Context.key_outputs += $replayVerificationPath
+            $Context.key_outputs += $manifestPath
+            if (Test-Path -LiteralPath $determinismComparisonSummary -PathType Leaf) {
+                $Context.key_outputs += $determinismComparisonSummary
+            }
+            if (Test-Path -LiteralPath $determinismConfirmatorySummary -PathType Leaf) {
+                $Context.key_outputs += $determinismConfirmatorySummary
+            }
+            $Context.verification_summaries += $replayVerificationPath
+            $Context.warnings += "Resume mode reused existing replay outputs (verification passed)."
+            return
+        }
+    }
+
     Invoke-PhaseCommand -Context $Context -Label "Deterministic comparison reproducibility" -CommandParts @(
         "python", "scripts/verify_official_reproducibility.py",
         "--mode", "comparison",
@@ -957,8 +1319,6 @@ $PhaseRunners["replay"] = {
         "--summary-out", $determinismComparisonSummary
     ) | Out-Null
 
-    $determinismConfirmatoryReports = Join-Path $ReplayRoot "determinism_confirmatory"
-    $determinismConfirmatorySummary = Join-Path $ReplayRoot "determinism_confirmatory_summary.json"
     Invoke-PhaseCommand -Context $Context -Label "Deterministic confirmatory reproducibility" -CommandParts @(
         "python", "scripts/verify_official_reproducibility.py",
         "--mode", "protocol",
@@ -971,10 +1331,6 @@ $PhaseRunners["replay"] = {
         "--summary-out", $determinismConfirmatorySummary
     ) | Out-Null
 
-    $officialReplayRoot = Join-Path $ReplayRoot "official_replay"
-    $replaySummaryPath = Join-Path $ReplayRoot "replay_summary.json"
-    $replayVerificationPath = Join-Path $ReplayRoot "replay_verification_summary.json"
-    $manifestPath = Join-Path $ReplayRoot "reproducibility_manifest.json"
     Invoke-PhaseCommand -Context $Context -Label "Official replay orchestration" -CommandParts @(
         "python", "scripts/replay_official_paths.py",
         "--mode", "both",
@@ -991,6 +1347,9 @@ $PhaseRunners["replay"] = {
     $Context.extra["upstream_confirmatory_output_dir"] = $confirmatoryDir
     $Context.extra["upstream_primary_comparison_output_dir"] = $primaryComparisonDir
     $Context.extra["official_replay_reports_root"] = $officialReplayRoot
+    $replayResumeCounts = New-ResumeReconciliationCounts
+    $replayResumeCounts.n_rerun = 1
+    $Context.extra["resume_reconciliation"] = $replayResumeCounts
 
     foreach ($path in @(
             $determinismComparisonSummary,
@@ -1008,6 +1367,53 @@ $PhaseRunners["bundle"] = {
 
     $confirmatoryOutputDir = Get-ConfirmatoryOutputDirFromSummary
     $primaryComparisonOutputDir = Get-PrimaryComparisonOutputDirFromSummary
+
+    $bundleManifest = Join-Path $BundleRoot "bundle_manifest.json"
+    $bundleVerificationSummary = Join-Path $BundleRoot "bundle_verification_summary.json"
+    if (
+        $ExecutionMode -eq "resume" -and
+        (Test-Path -LiteralPath $bundleManifest -PathType Leaf) -and
+        (Test-Path -LiteralPath $bundleVerificationSummary -PathType Leaf)
+    ) {
+        $bundleVerificationPayload = Read-JsonFile -Path $bundleVerificationSummary
+        $priorBundleSummary = Get-PhaseSummaryRecord -PhaseName "bundle"
+        $priorConfirmatory = ""
+        $priorComparison = ""
+        if ($null -ne $priorBundleSummary -and $null -ne $priorBundleSummary.phase_details) {
+            $phaseDetails = $priorBundleSummary.phase_details
+            if ($phaseDetails -is [System.Collections.IDictionary]) {
+                if ($phaseDetails.Contains("upstream_confirmatory_output_dir")) {
+                    $priorConfirmatory = [string]$phaseDetails["upstream_confirmatory_output_dir"]
+                }
+                if ($phaseDetails.Contains("upstream_primary_comparison_output_dir")) {
+                    $priorComparison = [string]$phaseDetails["upstream_primary_comparison_output_dir"]
+                }
+            }
+            else {
+                if ($phaseDetails.PSObject.Properties.Name -contains "upstream_confirmatory_output_dir") {
+                    $priorConfirmatory = [string]$phaseDetails.upstream_confirmatory_output_dir
+                }
+                if ($phaseDetails.PSObject.Properties.Name -contains "upstream_primary_comparison_output_dir") {
+                    $priorComparison = [string]$phaseDetails.upstream_primary_comparison_output_dir
+                }
+            }
+        }
+        $sameUpstream = (
+            (Normalize-PathText -PathText $priorConfirmatory) -eq (Normalize-PathText -PathText $confirmatoryOutputDir) -and
+            (Normalize-PathText -PathText $priorComparison) -eq (Normalize-PathText -PathText $primaryComparisonOutputDir)
+        )
+        if ((Get-BoolField -Payload $bundleVerificationPayload -FieldName "passed") -and $sameUpstream) {
+            $resumeCounts = New-ResumeReconciliationCounts
+            $resumeCounts.n_reused = 1
+            $resumeCounts.n_skipped_as_already_complete = 1
+            $Context.extra["resume_reconciliation"] = $resumeCounts
+            $Context.key_outputs += $bundleManifest
+            $Context.key_outputs += $bundleVerificationSummary
+            $Context.verification_summaries += $bundleVerificationSummary
+            $Context.warnings += "Resume mode reused existing publishable bundle (verification passed)."
+            return
+        }
+    }
 
     $confirmatoryReadySummary = Join-Path $ConfirmatoryRoot "confirmatory_ready_summary.json"
     $replaySummary = Join-Path $ReplayRoot "replay_summary.json"
@@ -1031,16 +1437,17 @@ $PhaseRunners["bundle"] = {
         "--repro-manifest", $reproManifest
     ) | Out-Null
 
-    $bundleVerificationSummary = Join-Path $BundleRoot "bundle_verification_summary.json"
     Invoke-PhaseCommand -Context $Context -Label "Verify publishable bundle" -CommandParts @(
         "python", "scripts/verify_publishable_bundle.py",
         "--bundle-dir", $BundleRoot,
         "--summary-out", $bundleVerificationSummary
     ) | Out-Null
 
-    $bundleManifest = Join-Path $BundleRoot "bundle_manifest.json"
     $Context.extra["upstream_confirmatory_output_dir"] = $confirmatoryOutputDir
     $Context.extra["upstream_primary_comparison_output_dir"] = $primaryComparisonOutputDir
+    $bundleResumeCounts = New-ResumeReconciliationCounts
+    $bundleResumeCounts.n_rerun = 1
+    $Context.extra["resume_reconciliation"] = $bundleResumeCounts
     $Context.key_outputs += $bundleManifest
     $Context.key_outputs += $bundleVerificationSummary
     $Context.verification_summaries += $bundleVerificationSummary
@@ -1057,6 +1464,7 @@ else {
 Write-Step "Campaign phase execution"
 Write-Host "Campaign tag: $CampaignTag"
 Write-Host "Campaign root: $CampaignRoot"
+Write-Host "Execution mode: $ExecutionMode"
 Write-Host "Requested phase: $Phase"
 Write-Host "Execution order: $($PhasesToRun -join ', ')"
 
