@@ -1,615 +1,934 @@
-# GPU Acceleration Enablement Plan
-## CPU-only (default) + GPU-only + GPU+CPU Hybrid
+# GPU Backend Implementation Plan
 
-Status: Planning document (no code implementation in this document)  
-Audience: maintainers implementing runtime infrastructure and reviewers validating contract safety
+## Goal
 
----
-
-## 1. Executive Summary
-
-This document defines an implementation-ready plan to add GPU execution capabilities to the Thesis_ML framework while preserving:
-
-1. Official-path boundaries (`exploratory`, `locked_comparison`, `confirmatory`).
-2. Scientific contract strictness (no science-affecting drift through hardware flags).
-3. Reproducibility and artifact integrity.
-
-The system must support three operational hardware modes:
-
-1. `cpu_only` (default, current baseline behavior).
-2. `gpu_only` (GPU required; fail fast if invalid/unavailable).
-3. `gpu_cpu_hybrid` (GPU lane + CPU lane concurrently; deterministic scheduling).
-
-`cpu_only` remains the baseline/default mode. `gpu_only` and `gpu_cpu_hybrid` are additional opt-in operational modes.
-
----
-
-## 2. Hard Requirements and Repository Invariants
-
-The following are non-negotiable:
-
-1. Official mode entrypoints remain unchanged in meaning:
-   - `thesisml-run-experiment` = exploratory only
-   - `thesisml-run-comparison` = locked comparison only
-   - `thesisml-run-protocol` = confirmatory only
-2. Hardware flags are operational controls only; they must not alter scientific declarations from comparison/protocol specs.
-3. Existing official artifact contracts are preserved:
-   - no removal/rename of required artifacts
-   - no weakening of required metadata keys currently validated
-4. Primary metric governance remains unchanged.
-5. Methodology policy governance remains unchanged.
-6. Default behavior remains `cpu_only` unless user explicitly opts into GPU modes.
-
----
-
-## 3. Scope and Non-Goals
-
-### 3.1 In Scope
-
-1. Add runtime compute policy contracts.
-2. Add GPU capability detection and validation.
-3. Add backend abstraction for model fitting and tuning.
-4. Add GPU execution paths for supported models.
-5. Add dual-lane CPU/GPU scheduling for official and decision-support orchestration.
-6. Add compute observability metadata to run artifacts (additive only).
-7. Add deterministic controls and GPU failure taxonomy.
-8. Extend runtime profiling/precheck to estimate hybrid execution.
-
-### 3.2 Out of Scope
-
-1. Changing official science contracts in protocol/comparison specs.
-2. Changing target definitions, split logic, metric policies, or methodology governance semantics.
-3. Changing feature cache schema as part of initial GPU rollout.
-4. Multi-node/distributed cluster execution.
-5. Rewriting non-model sections (dataset selection, spatial validation) for GPU.
-
----
-
-## 4. Hardware Operating Modes (Normative)
-
-### 4.1 `cpu_only` (default)
-
-1. All sections run on CPU using current baseline implementation.
-2. GPU detection may run for diagnostics only; no GPU compute is used.
-3. Any GPU-related error is non-blocking in this mode.
-
-### 4.2 `gpu_only`
-
-1. GPU-capable path is mandatory for GPU-eligible model-fit/tuning operations.
-2. If GPU capability checks fail, run fails before execution.
-3. No automatic fallback to CPU.
-
-### 4.3 `gpu_cpu_hybrid`
-
-1. Scheduler manages two lanes:
-   - GPU lane for GPU-eligible work
-   - CPU lane for CPU-only/non-eligible work
-2. Lane execution can be concurrent.
-3. GPU failures may fallback to CPU only if fallback policy explicitly allows.
-
-### 4.4 Mode Precedence
-
-1. Explicit CLI flag overrides defaults.
-2. If no flag is provided: `cpu_only`.
-3. For official paths, any mode must remain operational-only and cannot override scientific run-spec values.
-
----
-
-## 5. Minimum Compatibility Target
-
-1. Baseline GPU target includes GTX 1070-class hardware (Pascal, compute capability 6.1).
-2. Initial compatibility target uses CUDA 11.8-compatible package stack.
-3. If environment does not satisfy GPU runtime compatibility, behavior follows selected mode rules:
-   - `gpu_only`: fail
-   - `gpu_cpu_hybrid`: fallback according to policy
-   - `cpu_only`: continue
-
----
-
-## 6. Compute Policy Contract
-
-Introduce a normalized compute-policy object resolved at run start.
-
-Required fields:
-
-1. `hardware_mode`: `cpu_only | gpu_only | gpu_cpu_hybrid`
-2. `gpu_device_ids`: list of non-negative ints
-3. `max_parallel_gpu_runs`: int >= 0
-4. `max_parallel_cpu_runs`: int >= 1
-5. `deterministic_compute`: bool
-6. `gpu_memory_budget_mb`: int or null
-7. `fallback_policy`: `none | gpu_to_cpu_on_oom | gpu_to_cpu_on_runtime_error`
-
-Default values:
-
-1. `hardware_mode=cpu_only`
-2. `gpu_device_ids=[0]`
-3. `max_parallel_gpu_runs=1`
-4. `max_parallel_cpu_runs=1` (official paths continue honoring current serial default unless explicitly increased)
-5. `deterministic_compute=true`
-6. `gpu_memory_budget_mb=null`
-7. `fallback_policy=none` for `cpu_only` and `gpu_only`; explicit-only for `gpu_cpu_hybrid`
-
-Validation rules:
-
-1. `gpu_only` requires non-empty `gpu_device_ids`.
-2. `gpu_cpu_hybrid` requires `max_parallel_cpu_runs >= 1`.
-3. `max_parallel_gpu_runs` must not exceed `len(gpu_device_ids)` unless a multiplexing policy is explicitly added (not in v1).
-4. Invalid combinations fail during argument validation, before run dispatch.
-
----
-
-## 7. Hardware Capability Resolver
-
-Add a resolver that returns a normalized capability payload.
-
-Payload fields:
-
-1. `gpu_available` (bool)
-2. `detected_device_count` (int)
-3. `devices` (array with `id`, `name`, `compute_capability`, `total_memory_mb`)
-4. `cuda_runtime_version` (str or null)
-5. `cuda_driver_version` (str or null)
-6. `torch_version` (str or null)
-7. `cupy_version` (str or null)
-8. `compatibility_status` (`compatible | incompatible | unavailable`)
-9. `incompatibility_reasons` (list of strings)
-
-Required checks:
-
-1. CUDA runtime availability.
-2. Device visibility and IDs requested by user.
-3. Compute capability threshold for configured backend.
-4. Basic backend import checks (`torch`, `cupy`) when GPU modes are requested.
-
----
-
-## 8. Backend Abstraction for Model Fit
-
-Add an execution backend abstraction with at least:
-
-1. `cpu_sklearn_backend` (current baseline behavior).
-2. `gpu_torch_backend` (new).
-
-The section contract (`model_fit` and downstream artifacts) must remain stable:
-
-1. `fold_rows`, `split_rows`, `prediction_rows` schemas unchanged.
-2. `metrics.json` schema unchanged except additive compute metadata.
-3. `tuning_summary.json` and `best_params_per_fold.csv` retained.
-
----
-
-## 9. GPU Estimator Coverage
-
-Supported in v1:
-
-1. `ridge` via torch implementation.
-2. `logreg` via torch implementation.
-3. `linearsvc` via torch implementation.
-4. `dummy` remains CPU-only.
-
-Implementation expectations:
-
-1. Deterministic initialization and seed control.
-2. Chunked operations for high-dimensional voxel data to avoid OOM.
-3. Class-weight handling parity with existing CPU semantics (`none` / `balanced`).
-4. Scoring outputs compatible with existing evaluation functions.
-
----
-
-## 10. GPU Nested Tuning Engine
-
-For `grouped_nested_tuning` in GPU modes:
-
-1. Preserve existing search-space source (`tuning_search_spaces.py`).
-2. Preserve grouped inner-CV semantics (`grouped_leave_one_group_out`).
-3. Preserve artifact schema:
-   - `tuning_summary.json`
-   - `best_params_per_fold.csv`
-4. Preserve metric objective semantics (declared primary metric).
-
-Control behavior:
-
-1. `dummy` still bypasses tuning as today.
-2. If GPU tuning cannot run:
-   - `gpu_only`: fail
-   - `gpu_cpu_hybrid`: fallback only if policy allows
-
----
-
-## 11. CLI and Interface Changes (Operational Only)
-
-### 11.1 `thesisml-run-experiment`
-
-Add flags:
-
-1. `--hardware-mode {cpu_only,gpu_only,gpu_cpu_hybrid}`
-2. `--gpu-device-ids <comma-separated>`
-3. `--deterministic-compute {true,false}`
-4. `--gpu-memory-budget-mb <int>`
-
-Defaults:
-
-1. `--hardware-mode cpu_only`
-2. `--deterministic-compute true`
-
-### 11.2 `thesisml-run-comparison` and `thesisml-run-protocol`
-
-Add flags:
-
-1. `--hardware-mode {cpu_only,gpu_only,gpu_cpu_hybrid}`
-2. `--gpu-device-ids <comma-separated>`
-3. `--max-parallel-gpu-runs <int>`
-4. `--max-parallel-cpu-runs <int>`
-
-Defaults:
-
-1. `--hardware-mode cpu_only`
-2. existing official operational defaults remain conservative
-
-### 11.3 `thesisml-run-decision-support`
-
-Add flags:
-
-1. `--hardware-mode {cpu_only,gpu_only,gpu_cpu_hybrid}`
-2. `--gpu-device-ids <comma-separated>`
-3. `--max-parallel-gpu-runs <int>`
-4. `--max-parallel-cpu-runs <int>`
-
-Defaults:
-
-1. `--hardware-mode cpu_only`
-
----
-
-## 12. Scheduler Design for `gpu_cpu_hybrid`
-
-### 12.1 Goals
-
-1. Deterministic queue ordering.
-2. No GPU oversubscription by default.
-3. Preserve current CPU thread-cap behavior for CPU workers.
-
-### 12.2 Dispatch Model
-
-1. Build a stable ordered run queue (existing `order_index` semantics).
-2. Tag each run as:
-   - `gpu_eligible`
-   - `cpu_only`
-3. Route to lanes:
-   - GPU lane for `gpu_eligible`
-   - CPU lane for `cpu_only`
-4. GPU lane workers bind `CUDA_VISIBLE_DEVICES=<assigned_id>`.
-5. CPU lane workers set `CUDA_VISIBLE_DEVICES=""` and preserve existing BLAS/OpenMP caps.
-
-### 12.3 Fallback Handling
-
-When GPU lane run fails:
-
-1. If fallback policy allows reroute, enqueue rerun on CPU lane with same `run_id` policy behavior and explicit fallback metadata.
-2. If fallback is not allowed, mark as failed with GPU-specific error code.
-
----
-
-## 13. Determinism and Reproducibility Controls
-
-Controls to enforce when `deterministic_compute=true`:
-
-1. Set and log all seeds used by numpy/torch/cupy.
-2. Enable deterministic algorithms in GPU backend where supported.
-3. Record warning metadata when strict determinism cannot be guaranteed by backend/platform.
-
-Reproducibility invariants:
-
-1. Fold split generation remains CPU deterministic and unchanged by hardware mode.
-2. Artifact naming and required file set remain stable.
-3. Report metadata must capture the effective backend and fallback path.
-
----
-
-## 14. Memory, OOM, and Failure Taxonomy
-
-Add explicit failure categories and codes:
-
-1. `gpu_dependency_missing`
-2. `gpu_unavailable`
-3. `gpu_incompatible_capability`
-4. `gpu_oom`
-5. `gpu_device_assignment_error`
-6. `gpu_runtime_error`
-
-Mode behavior:
-
-1. `cpu_only`: GPU failures are diagnostics only.
-2. `gpu_only`: fail immediately on GPU failure.
-3. `gpu_cpu_hybrid`: optional reroute to CPU per fallback policy.
-
----
-
-## 15. Artifact Metadata Additions (Additive, Non-Breaking)
-
-Add to both `config.json` and `metrics.json`:
-
-1. `hardware_mode_requested`
-2. `hardware_mode_effective`
-3. `compute_backend_effective`
-4. `gpu_device_ids_requested`
-5. `gpu_device_id_effective`
-6. `gpu_device_name_effective`
-7. `cuda_runtime_version`
-8. `torch_version`
-9. `cupy_version`
-10. `deterministic_compute`
-11. `fallback_policy`
-12. `fallback_applied`
-13. `fallback_reason`
-14. `gpu_peak_memory_mb` (nullable)
-15. `gpu_memory_budget_mb` (nullable)
-
-Contract note:
-
-1. Existing required metadata keys remain unchanged in v1.
-2. New keys are additive and must not break official validators.
-
----
-
-## 16. Runtime Profiling and Precheck Updates
-
-Enhance runtime profile cohorts to include backend mode:
+Add a compute-backend system that supports three operational modes without weakening the repository’s scientific contracts:
 
 1. `cpu_only`
 2. `gpu_only`
-3. `gpu_cpu_hybrid`
+3. `max_both` (the user-facing name for a bounded mixed CPU+GPU execution mode)
 
-Add lane-aware estimator outputs:
+The critical constraint is that these are **operational execution policies**, not scientific method changes. The same protocol, comparison spec, target, metric policy, split policy, tuning policy, artifact contract, and confirmatory governance must remain authoritative.
 
-1. estimated GPU lane wall-time
-2. estimated CPU lane wall-time
-3. estimated total wall-time as lane max plus overhead
-4. recommended lane caps for single-GPU 8GB-class hardware
+This plan is intentionally conservative. It is optimized for correctness, artifact integrity, parity validation, and staged rollout.
 
 ---
 
-## 17. Workbook and Reporting Updates
+## Executive decision
 
-Current workbook bridge writes `gpu=not_recorded`. Update to:
+The implementation should **not** begin with all three modes at once.
 
-1. Detect and record effective GPU/device string.
-2. Record selected hardware mode in notes.
-3. Keep worksheet schema unchanged.
+The correct order is:
 
----
+### Stage 1
+Build the backend contract, capability resolver, metadata stamping, and `cpu_only` / `gpu_only` support for exploratory runs.
 
-## 18. File-Level Implementation Workstreams
+### Stage 2
+Extend `gpu_only` into locked comparison and then confirmatory, but only with strict parity and deterministic-compute gates.
 
-### 18.1 Compute policy and capability
+### Stage 3
+Add `max_both` only after the GPU estimator path is stable, measurable, and artifact-safe.
 
-Primary files:
-
-1. `src/Thesis_ML/experiments/run_experiment.py`
-2. `src/Thesis_ML/experiments/section_models.py`
-3. new module for capability resolution (recommended: `src/Thesis_ML/experiments/compute_capability.py`)
-4. new module for compute policy validation (recommended: `src/Thesis_ML/experiments/compute_policy.py`)
-
-### 18.2 Backend and model-fit integration
-
-Primary files:
-
-1. `src/Thesis_ML/experiments/model_factory.py`
-2. `src/Thesis_ML/experiments/sections_impl.py`
-3. `src/Thesis_ML/experiments/segment_execution.py`
-4. new GPU backend module(s) (recommended: `src/Thesis_ML/experiments/gpu_backend.py`)
-
-### 18.3 Scheduler integration
-
-Primary files:
-
-1. `src/Thesis_ML/experiments/parallel_execution.py`
-2. `src/Thesis_ML/protocols/runner.py`
-3. `src/Thesis_ML/comparisons/runner.py`
-4. `src/Thesis_ML/orchestration/campaign_engine.py`
-
-### 18.4 CLI integration
-
-Primary files:
-
-1. `src/Thesis_ML/experiments/run_experiment.py` (parser)
-2. `src/Thesis_ML/cli/protocol_runner.py`
-3. `src/Thesis_ML/cli/comparison_runner.py`
-4. `src/Thesis_ML/orchestration/campaign_cli.py`
-
-### 18.5 Reporting and workbook
-
-Primary files:
-
-1. `src/Thesis_ML/experiments/run_artifacts.py`
-2. `src/Thesis_ML/orchestration/workbook_bridge.py`
-
-### 18.6 Runtime projection
-
-Primary files:
-
-1. `src/Thesis_ML/verification/campaign_runtime_profile.py`
-2. `src/Thesis_ML/experiments/model_catalog.py` (if runtime projections are extended by backend mode)
+This is still a three-mode design, but the implementation sequence must be staged.
 
 ---
 
-## 19. Dependency Matrix (Planned)
+## Non-negotiable repository invariants
 
-Target compatibility baseline:
+These must remain true throughout the redesign.
 
-1. Python: repo-supported version range.
-2. CUDA runtime compatibility: 11.8 baseline target.
-3. PyTorch: CUDA-enabled build compatible with CUDA 11.8.
-4. CuPy: CUDA 11.x compatible build.
+### Workflow boundaries
+- `thesisml-run-experiment` remains exploratory only.
+- `thesisml-run-comparison` remains locked comparison only.
+- `thesisml-run-protocol` remains confirmatory only.
 
-Operational installation policy:
+### Governance boundaries
+- Hardware mode must remain an operational control.
+- It must never silently change the scientific meaning of a protocol or comparison.
+- Primary metric, methodology policy, and split policy remain unchanged.
+- Confirmatory evidence must still come only from canonical protocol execution.
 
-1. CPU-only install remains valid and sufficient for default behavior.
-2. GPU extras must be optional dependency path.
-3. Missing GPU dependencies must produce clear runtime diagnostics.
+### Artifact boundaries
+- Existing official artifacts remain required.
+- New compute metadata must be additive.
+- Existing downstream validators must continue to pass unless intentionally updated in lockstep.
 
----
-
-## 20. Test Plan and Acceptance Criteria
-
-### 20.1 Compute-policy validation tests
-
-1. Parse and normalize all hardware modes.
-2. Reject invalid mode/flag combinations.
-3. Validate fallback policy gating by mode.
-
-### 20.2 Capability resolver tests
-
-1. GPU absent path.
-2. GPU present and compatible path.
-3. Unsupported capability path.
-4. GTX 1070-compatible path acceptance.
-
-### 20.3 Backend parity tests
-
-1. Fixed synthetic data for `ridge`, `logreg`, `linearsvc`.
-2. CPU vs GPU metric drift thresholds documented and enforced.
-3. Class-weight behavior parity tests.
-
-### 20.4 Determinism tests
-
-1. Same seed, same backend, same mode => stable splits and stable metrics where deterministic backend guarantees apply.
-2. Determinism warning path validated when strict determinism is unavailable.
-
-### 20.5 GPU tuning tests
-
-1. Grouped nested tuning artifact schema unchanged.
-2. Candidate count and selected-params serialization validated.
-
-### 20.6 Scheduler tests
-
-1. GPU device assignment correctness.
-2. CPU thread caps preserved.
-3. Hybrid concurrent execution without oversubscription.
-4. Stable final output ordering regardless of completion ordering.
-
-### 20.7 Artifact contract regression
-
-1. Existing official contract tests must pass unchanged.
-2. Added compute metadata appears in config and metrics artifacts.
-
-### 20.8 Runtime profiling tests
-
-1. Backend-aware cohort generation.
-2. Hybrid wall-time estimate logic.
-3. Fallback estimate warnings.
-
-### 20.9 End-to-end smoke tests
-
-1. Exploratory one-run smoke per mode.
-2. Decision-support mini-campaign smoke in hybrid mode.
-3. Official dry-run plus small real run in opt-in `gpu_only` and `gpu_cpu_hybrid`.
+### Safety rule
+- `cpu_only` remains the default for all official paths until explicit promotion gates are passed.
 
 ---
 
-## 21. Rollout Gates
+## Current repository reality
 
-### Gate 1: Exploratory Enablement
+The current codebase is strongly sklearn-shaped and CPU-shaped.
 
-Exit criteria:
+### Existing strengths we can reuse
+- `src/Thesis_ML/experiments/run_experiment.py` already centralizes execution control.
+- `src/Thesis_ML/experiments/model_factory.py` already centralizes model construction.
+- `src/Thesis_ML/experiments/sections_impl.py` centralizes fit/tuning logic.
+- `src/Thesis_ML/experiments/segment_execution.py` and `section_models.py` already carry structured run inputs.
+- `src/Thesis_ML/protocols/runner.py` and `src/Thesis_ML/comparisons/runner.py` already orchestrate official runs.
+- `src/Thesis_ML/experiments/run_artifacts.py` already stamps metadata and writes artifacts.
+- Phase A already introduced timing visibility and run-level parallelism.
 
-1. compute-policy tests passing
-2. capability tests passing
-3. backend parity and determinism checks passing
-4. artifact contract regressions clean
+### Existing constraints we must respect
+- sklearn `Pipeline`, `clone`, and `GridSearchCV` shape the fit stack.
+- Downstream reporting expects sklearn-like estimator methods and attributes.
+- Current performance evidence indicates a large amount of non-fit overhead, so GPU work must not be sold as an automatic near-term speedup.
 
-### Gate 2: Decision-Support Hybrid Enablement
-
-Exit criteria:
-
-1. dual-lane scheduler validated in campaign runner
-2. dry-run manifests include hardware mode visibility
-3. mini hybrid campaign smoke passes
-
-### Gate 3: Official Opt-In Enablement
-
-Exit criteria:
-
-1. comparison/protocol operational flags integrated
-2. official regression suites pass
-3. timeout and failure handling validated for GPU modes
-
-### Gate 4: Default Policy Review
-
-Exit criteria:
-
-1. repeated-run reproducibility evidence meets acceptance thresholds
-2. operational stability evidence collected
-3. if criteria not met, retain `cpu_only` as default indefinitely
+### Practical implication
+The safest design is a **backend abstraction layer with sklearn-compatible estimators first**, not a wholesale replacement of the training engine.
 
 ---
 
-## 22. Operations Runbook (Planned CLI Examples)
+## Definitions
 
-### 22.1 Exploratory
+### `cpu_only`
+All model fitting and scoring happen on CPU using the current sklearn-backed reference path.
 
-CPU default:
+### `gpu_only`
+The selected estimator backend is GPU-native. The run is still orchestrated by the existing repository machinery, but model fit/predict/decision paths are routed through a GPU estimator wrapper.
 
-```bash
-thesisml-run-experiment ... --hardware-mode cpu_only
-```
+### `max_both`
+A bounded mixed compute mode where the scheduler is allowed to use both CPU and GPU lanes at the run level. It does **not** mean one estimator fit is simultaneously split across CPU and GPU. It means the execution engine may schedule some runs on GPU and some on CPU according to a policy.
 
-GPU-only:
-
-```bash
-thesisml-run-experiment ... --hardware-mode gpu_only --gpu-device-ids 0
-```
-
-Hybrid:
-
-```bash
-thesisml-run-experiment ... --hardware-mode gpu_cpu_hybrid --gpu-device-ids 0
-```
-
-### 22.2 Locked comparison
-
-```bash
-thesisml-run-comparison \
-  --comparison configs/comparisons/...json \
-  --hardware-mode gpu_cpu_hybrid \
-  --gpu-device-ids 0 \
-  --max-parallel-gpu-runs 1 \
-  --max-parallel-cpu-runs 2
-```
-
-### 22.3 Confirmatory
-
-```bash
-thesisml-run-protocol \
-  --protocol configs/protocols/...json \
-  --hardware-mode cpu_only
-```
+This definition is important. It keeps `max_both` operationally tractable and scientifically auditable.
 
 ---
 
-## 23. Troubleshooting Matrix (Planned)
+## Core design principle
 
-1. GPU dependency import error -> install GPU extras or run `cpu_only`.
-2. Device not visible -> validate `gpu_device_ids` and environment visibility.
-3. CUDA mismatch -> use compatible CUDA runtime and package versions.
-4. GPU OOM -> reduce lane concurrency, apply chunking, configure memory budget, or fallback if allowed.
-5. Determinism mismatch -> enforce deterministic flags and verify backend deterministic support.
+Separate the system into three layers.
+
+### Layer A: scientific plan layer
+This is the existing protocol/comparison/experiment declaration layer.
+
+Examples:
+- target
+- split policy
+- methodology policy
+- primary metric
+- suite / variant identity
+- artifact requirements
+
+This layer must remain backend-agnostic.
+
+### Layer B: compute policy layer
+This is a new operational layer that resolves how a run is executed.
+
+Examples:
+- `hardware_mode`
+- `gpu_device_id`
+- deterministic compute
+- backend family
+- effective device
+- mixed-lane scheduling policy
+
+This layer may affect runtime and hardware use, but must not affect scientific declarations.
+
+### Layer C: backend implementation layer
+This is where concrete CPU and GPU estimators live.
+
+Examples:
+- sklearn CPU estimator implementations
+- torch GPU estimator wrappers
+- backend capability probes
+- scheduler lane selection
 
 ---
 
-## 24. What Does Not Change
+## Final target architecture
 
-1. Official workflow boundaries and meanings.
-2. Protocol/comparison scientific governance and lock semantics.
-3. Required official artifacts and current minimum required metadata keys.
-4. Default operational behavior (`cpu_only`).
-5. Target/split/model/methodology policy definitions as scientific controls.
+## 1. Compute policy object
+
+Introduce a normalized compute policy object resolved at run start.
+
+### Required fields for v1
+- `hardware_mode`: `cpu_only | gpu_only | max_both`
+- `requested_backend_family`: `sklearn_cpu | torch_gpu | auto_mixed`
+- `effective_backend_family`: resolved backend actually used
+- `gpu_device_id`: integer or `null`
+- `deterministic_compute`: boolean
+- `gpu_memory_soft_limit_mb`: integer or `null`
+- `allow_backend_fallback`: boolean
+- `fallback_reason`: string or `null`
+- `run_parallel_lane`: `cpu | gpu | null`
+- `backend_stack_id`: versioned identifier of the tested stack
+
+### Policy rules
+- `cpu_only` must never require GPU capability.
+- `gpu_only` must fail clearly if a compatible GPU stack is unavailable.
+- `max_both` must never silently reroute official runs unless explicitly allowed by policy.
+- Official `gpu_only` or `max_both` runs must stamp deterministic compute settings and backend metadata.
+- In the first official rollout, `gpu_only` and `max_both` should force conservative scheduler settings.
 
 ---
 
-## 25. Final Implementation Directive
+## 2. Capability resolver
 
-The implementation must be staged and gated exactly as defined above.  
-`cpu_only` stays default and baseline.  
-`gpu_only` and `gpu_cpu_hybrid` are additional, explicit, opt-in operational modes.
+Create a hardware capability resolver.
+
+### New module
+- `src/Thesis_ML/experiments/compute_capabilities.py`
+
+### Responsibilities
+- detect whether torch is installed
+- detect whether CUDA is available
+- enumerate visible devices
+- validate requested device id
+- capture device name and memory
+- capture torch and CUDA version metadata
+- return a structured capability payload
+
+### Output fields
+- `gpu_available`
+- `gpu_count`
+- `requested_device_visible`
+- `device_id`
+- `device_name`
+- `device_total_memory_mb`
+- `torch_version`
+- `cuda_runtime_version`
+- `compatibility_status`
+- `incompatibility_reasons`
+- `tested_stack_id`
+
+### v1 rule
+The resolver should be torch-based only. CuPy is not required for v1.
+
+---
+
+## 3. Backend registry
+
+Introduce a backend registry that maps a model family plus compute policy to a concrete estimator implementation.
+
+### New module
+- `src/Thesis_ML/experiments/backend_registry.py`
+
+### Responsibilities
+- map `(model_name, hardware_mode, backend_family)` to a constructor
+- expose backend support matrix
+- refuse unsupported combinations clearly
+
+### Example support matrix at rollout start
+- `ridge`:
+  - `cpu_only`: supported
+  - `gpu_only`: supported
+  - `max_both`: supported via lane scheduling
+- `logreg`:
+  - `cpu_only`: supported
+  - `gpu_only`: experimental first, then gated
+  - `max_both`: only after `gpu_only` is stable
+- `linearsvc`:
+  - `cpu_only`: supported
+  - `gpu_only`: deferred
+  - `max_both`: deferred
+- `dummy`:
+  - `cpu_only`: supported
+  - `gpu_only`: unnecessary, keep CPU
+  - `max_both`: CPU lane only
+
+---
+
+## 4. Estimator wrapper design
+
+Do not replace the entire fit stack initially. Instead, add sklearn-shaped wrappers around GPU-native implementations.
+
+### New package
+- `src/Thesis_ML/experiments/backends/`
+
+### Submodules
+- `cpu_reference.py`
+- `torch_ridge.py`
+- `torch_logreg.py`
+- `common.py`
+
+### Required wrapper behavior
+Each wrapper must provide sklearn-like behavior where downstream code expects it.
+
+Required methods/attributes where applicable:
+- `fit(X, y)`
+- `predict(X)`
+- `decision_function(X)`
+- `predict_proba(X)` if supported
+- `get_params(deep=True)`
+- `set_params(**kwargs)`
+- `classes_`
+- `coef_`
+- `intercept_`
+- `n_features_in_`
+
+### Important design choice
+For v1, wrappers may still accept NumPy arrays on input and handle CPU→GPU tensor conversion internally. This is slower than a full GPU-native pipeline, but far safer for integration.
+
+---
+
+## 5. Scheduler semantics for `max_both`
+
+`max_both` must be defined carefully.
+
+### Recommended meaning
+It is a run-level mixed-lane scheduler.
+
+It does not mean:
+- the same fit uses both CPU and GPU together
+- one fold is partly on CPU and partly on GPU
+- automatic per-batch migration inside a run
+
+It means:
+- some runs can execute on CPU lanes
+- some runs can execute on GPU lanes
+- the scheduler chooses the lane using explicit policy
+
+### Why this is the right first implementation
+- it matches the current run-level orchestration design
+- it keeps official artifacts easy to audit
+- it avoids mixed numerical semantics inside one estimator fit
+- it is feasible with the current process-based runner design
+
+---
+
+## Detailed staged implementation plan
+
+## Stage 0: branch, scoping, and contract freeze
+
+### Objective
+Create an isolated redesign branch and freeze the current CPU path as the scientific reference.
+
+### Actions
+1. Create a new branch, for example:
+   - `feature/backend-compute-redesign`
+2. Do not modify checked-in canonical protocol/comparison semantics at this stage.
+3. Create a reference benchmark record for the current CPU path.
+4. Freeze a small parity workload for regression testing.
+
+### Deliverables
+- branch created
+- baseline benchmark artifact committed under `outputs/tmp` or a docs artifact directory if that fits repo policy
+- reference parity cases documented
+
+### No-code deliverable
+Add a short architecture note explaining that CPU remains the reference backend.
+
+---
+
+## Stage 1: compute policy and capability plumbing
+
+### Objective
+Add the compute-policy abstraction without changing model behavior.
+
+### Files to create
+- `src/Thesis_ML/experiments/compute_capabilities.py`
+- `src/Thesis_ML/experiments/compute_policy.py`
+
+### Files to modify
+- `src/Thesis_ML/experiments/run_experiment.py`
+- `src/Thesis_ML/experiments/segment_execution.py`
+- `src/Thesis_ML/experiments/section_models.py`
+- `src/Thesis_ML/experiments/run_artifacts.py`
+- `src/Thesis_ML/protocols/runner.py`
+- `src/Thesis_ML/comparisons/runner.py`
+- `src/Thesis_ML/cli/protocol_runner.py`
+- `src/Thesis_ML/cli/comparison_runner.py`
+
+### What to add
+#### CLI and runtime inputs
+Add operational flags such as:
+- `--hardware-mode` with values `cpu_only | gpu_only | max_both`
+- `--gpu-device-id`
+- `--deterministic-compute`
+- `--allow-backend-fallback` for exploratory only in v1
+
+### Important constraints
+- exploratory can accept these flags directly
+- comparison/protocol may accept them only as operational controls, not spec-level scientific overrides
+
+#### Resolved compute policy
+At run start, resolve the requested policy into an effective policy.
+
+#### Artifact metadata
+Stamp additive fields into:
+- `config.json`
+- `metrics.json`
+- run result payloads
+- execution status summaries where appropriate
+
+### Artifact fields to add
+- `hardware_mode_requested`
+- `hardware_mode_effective`
+- `requested_backend_family`
+- `effective_backend_family`
+- `gpu_device_id`
+- `gpu_device_name`
+- `gpu_device_total_memory_mb`
+- `deterministic_compute`
+- `backend_stack_id`
+- `backend_fallback_used`
+- `backend_fallback_reason`
+
+### Tests
+Create:
+- `tests/test_compute_policy.py`
+- `tests/test_compute_capabilities.py`
+
+Cover:
+- cpu-only resolution with no GPU
+- gpu-only failure when torch/CUDA unavailable
+- valid device selection
+- artifact metadata presence
+- official-path restrictions preserved
+
+### Done condition
+No GPU estimator exists yet, but the repository can now resolve and record compute policy safely.
+
+---
+
+## Stage 2: backend registry and CPU reference integration
+
+### Objective
+Introduce the backend abstraction while keeping behavior exactly identical for CPU.
+
+### Files to create
+- `src/Thesis_ML/experiments/backend_registry.py`
+- `src/Thesis_ML/experiments/backends/__init__.py`
+- `src/Thesis_ML/experiments/backends/common.py`
+- `src/Thesis_ML/experiments/backends/cpu_reference.py`
+
+### Files to modify
+- `src/Thesis_ML/experiments/model_factory.py`
+- `src/Thesis_ML/experiments/sections_impl.py`
+
+### What to do
+#### In `model_factory.py`
+Split responsibilities:
+- keep hyperparameter-space and model-family declarations
+- delegate estimator construction to the backend registry when compute policy is present
+
+#### In `backend_registry.py`
+Map requested model/backend pairs to concrete constructors.
+
+#### In `cpu_reference.py`
+Wrap current sklearn estimators in a stable interface so the GPU path later targets the same contract.
+
+### Tests
+- `tests/test_backend_registry.py`
+- parity tests proving CPU path is unchanged
+
+### Done condition
+The repository still runs only CPU fits, but now through a backend abstraction with no result drift.
+
+---
+
+## Stage 3: GPU exploratory v1 for ridge only
+
+### Objective
+Add the first real GPU estimator path in exploratory mode only.
+
+### Files to create
+- `src/Thesis_ML/experiments/backends/torch_ridge.py`
+- optionally `src/Thesis_ML/experiments/backends/torch_utils.py`
+
+### Files to modify
+- `src/Thesis_ML/experiments/backend_registry.py`
+- `src/Thesis_ML/experiments/sections_impl.py`
+- `src/Thesis_ML/experiments/run_artifacts.py`
+
+### Why ridge first
+- lowest implementation risk
+- linear, interpretable, stable baseline
+- easiest to compare with CPU behavior
+
+### Implementation specifics
+#### Wrapper behavior
+The torch ridge wrapper must:
+- accept NumPy input from the current pipeline
+- convert to tensors on the configured device
+- fit with deterministic settings where possible
+- expose sklearn-shaped outputs for downstream reporting
+- return CPU NumPy arrays for artifact writers when needed
+
+#### Determinism controls
+If `deterministic_compute=true`:
+- enable deterministic torch settings where supported
+- record any determinism limitations in metadata
+
+### Artifact additions
+Add optional GPU fit diagnostics:
+- `gpu_memory_peak_mb` if available
+- `device_transfer_seconds` if easy to capture
+- `torch_deterministic_enforced`
+
+### Tests
+Create:
+- `tests/test_torch_ridge_backend.py`
+
+Cover:
+- fit/predict shape parity vs CPU
+- metric tolerance parity on fixed seed small data
+- metadata stamping
+- graceful failure when torch/CUDA unavailable
+
+### Rollout gate
+Do not expose this in comparison/protocol yet.
+
+### Done condition
+Exploratory `ridge` can run in `gpu_only` mode on one device with artifact-compatible outputs.
+
+---
+
+## Stage 4: exploratory logreg GPU path
+
+### Objective
+Add GPU `logreg` only after ridge v1 is stable.
+
+### Files to create
+- `src/Thesis_ML/experiments/backends/torch_logreg.py`
+
+### Why later than ridge
+- greater parity risk
+- solver behavior and convergence behavior need closer validation
+- current CPU `logreg` is operationally expensive, so this backend matters, but it must be validated carefully
+
+### Implementation specifics
+The wrapper must expose:
+- `decision_function`
+- `predict_proba` if supported by implementation
+- `coef_`
+- `intercept_`
+- classes and thresholds matching repository expectations as closely as possible
+
+### Important caution
+Do not claim exact sklearn equivalence. Define tolerance-based parity thresholds instead.
+
+### Tests
+Create:
+- `tests/test_torch_logreg_backend.py`
+
+Cover:
+- convergence behavior on representative small datasets
+- metric parity tolerance
+- reporting compatibility
+- failure paths when GPU unavailable
+
+### Done condition
+Exploratory `logreg` can run in `gpu_only`, but remains explicitly experimental.
+
+---
+
+## Stage 5: exploratory `max_both` scheduler
+
+### Objective
+Introduce the third requested mode as a safe run-level mixed-lane scheduler.
+
+### Files to create
+- `src/Thesis_ML/experiments/compute_scheduler.py`
+
+### Files to modify
+- `src/Thesis_ML/experiments/parallel_execution.py`
+- `src/Thesis_ML/protocols/runner.py`
+- `src/Thesis_ML/comparisons/runner.py`
+- `src/Thesis_ML/experiments/supervised_worker.py`
+- `src/Thesis_ML/experiments/timeout_watchdog.py`
+
+### Scheduler design
+#### Inputs
+- run plan
+- hardware mode
+- backend availability
+- supported model/backend matrix
+- `max_parallel_runs`
+- `max_parallel_gpu_runs`
+- device ids
+- memory soft limits
+
+#### Scheduling policy for v1
+For `max_both`:
+- GPU-eligible runs may be assigned to GPU lanes
+- unsupported or disallowed runs go to CPU lanes
+- scheduling is explicit and recorded
+- no automatic in-run migration
+
+### Default rule set
+- `ridge`: GPU-eligible
+- `logreg`: GPU-eligible only after Stage 4 gate passes
+- `linearsvc`: CPU lane only
+- `dummy`: CPU lane only
+
+### Metadata
+Each run must stamp:
+- requested mode: `max_both`
+- assigned lane: `cpu` or `gpu`
+- assigned backend family
+- reason for lane selection
+
+### Tests
+Create:
+- `tests/test_compute_scheduler.py`
+
+Cover:
+- deterministic lane assignment
+- mixed plans preserve order and artifacts
+- unsupported models remain CPU lane only
+- scheduler obeys GPU lane limit
+
+### Done condition
+Exploratory runs can use `max_both` safely with recorded lane assignment.
+
+---
+
+## Stage 6: official-path admission gates
+
+### Objective
+Promote selected GPU support from exploratory into comparison and confirmatory, but only under strict gates.
+
+### Promotion order
+1. locked comparison
+2. confirmatory
+
+### Required evidence before comparison rollout
+- CPU parity suite passes for `ridge`
+- timing and artifact parity validated
+- no validator breakage
+- explicit docs updated
+
+### Required evidence before confirmatory rollout
+- comparison-path stability on representative workloads
+- reproducibility checks under deterministic mode
+- artifact completeness and official verification intact
+
+### Official policy rules for first official rollout
+- `cpu_only` remains default
+- `gpu_only` official runs require deterministic compute
+- `gpu_only` official runs force conservative scheduler settings
+- `max_both` official runs are disallowed until after comparison-stage stability
+
+### Files to modify
+- `src/Thesis_ML/experiments/runtime_policies.py`
+- `src/Thesis_ML/protocols/models.py`
+- `src/Thesis_ML/comparisons/models.py`
+- relevant verification modules under `src/Thesis_ML/verification/`
+
+### Tests
+Add official-path verification tests proving:
+- unsupported GPU official requests fail clearly
+- supported official GPU requests stamp required metadata
+- CPU default remains unchanged
+
+### Done condition
+Official comparison may optionally use `gpu_only` for approved model families. Confirmatory follows only after explicit gate review.
+
+---
+
+## Stage 7: confirmatory GPU eligibility
+
+### Objective
+Allow carefully gated confirmatory `gpu_only` for approved backends.
+
+### Critical rule
+No automatic fallback in confirmatory mode. If requested GPU capability is unavailable or invalid, fail clearly.
+
+### Why
+Silent backend fallback would weaken auditability of thesis evidence.
+
+### Required documentation changes
+- `docs/RUNBOOK.md`
+- `docs/RELEASE.md`
+- confirmatory runbook notes explaining when GPU use is allowed and how it is recorded
+
+### Done condition
+Canonical protocol runs may request `gpu_only` only if the backend/model family is approved and all deterministic/audit conditions are satisfied.
+
+---
+
+## Stage 8: official `max_both` consideration
+
+### Objective
+Only after GPU-only official support is stable, evaluate whether `max_both` should be admitted to locked comparison, then possibly confirmatory.
+
+### Default recommendation
+Keep official `max_both` disabled for a long time.
+
+### Reason
+It complicates:
+- reproducibility
+- device assignment auditability
+- timing comparability
+- backend drift interpretation
+
+### If eventually allowed
+It must stamp lane assignment per run and remain fully deterministic at the run-plan level.
+
+---
+
+## Cross-cutting implementation details
+
+## A. Metadata design
+
+Do not rely on a single coarse field like `compute_backend_family` only.
+
+### Recommended additive metadata
+- `hardware_mode_requested`
+- `hardware_mode_effective`
+- `assigned_compute_lane`
+- `feature_backend_effective`
+- `preprocessing_backend_effective`
+- `estimator_backend_effective`
+- `gpu_device_id`
+- `gpu_device_name`
+- `gpu_device_total_memory_mb`
+- `deterministic_compute`
+- `torch_version`
+- `cuda_runtime_version`
+- `backend_stack_id`
+- `backend_fallback_used`
+- `backend_fallback_reason`
+
+This is more honest and more future-proof than one coarse field.
+
+---
+
+## B. Determinism policy
+
+### Exploratory
+- deterministic compute optional
+- failures may fall back if explicitly allowed
+
+### Comparison
+- deterministic compute strongly recommended
+- fallback should be explicit and likely disallowed once backend is considered stable
+
+### Confirmatory
+- deterministic compute required
+- no silent fallback
+- backend stack must be fully stamped in artifacts
+
+---
+
+## C. Scheduler policy for `max_both`
+
+### v1 scheduling rule
+Do not schedule more GPU-lane runs than the configured lane limit.
+
+### Required knobs
+- `max_parallel_runs`
+- `max_parallel_gpu_runs`
+- `gpu_device_id` or visible device list
+- `gpu_memory_soft_limit_mb`
+
+### Safety rule
+If the scheduler cannot assign a GPU lane safely, either:
+- fail, or
+- assign CPU lane explicitly if policy allows
+
+Never silently drift.
+
+---
+
+## D. Performance-gain gate
+
+A GPU backend should not be promoted just because it works.
+
+Add an explicit benchmark gate requiring:
+- artifact parity
+- metric parity within tolerance
+- meaningful throughput benefit on representative workloads
+
+### Promotion requirement
+A backend/model family should not move into official use unless it yields a meaningful operational benefit or a scientifically necessary capability.
+
+---
+
+## E. Relationship to existing Phase A work
+
+This plan must not replace Phase A conclusions.
+
+Current evidence suggests non-fit overhead is still substantial. Therefore:
+- GPU backend work should be understood as backend capability work and future architecture work
+- it should not be sold internally as the next guaranteed speedup
+- worker-local feature reuse may still be the higher-value mainline optimization even if GPU work begins on a separate branch
+
+---
+
+## File-by-file implementation map
+
+## New modules to create
+- `src/Thesis_ML/experiments/compute_policy.py`
+- `src/Thesis_ML/experiments/compute_capabilities.py`
+- `src/Thesis_ML/experiments/backend_registry.py`
+- `src/Thesis_ML/experiments/compute_scheduler.py`
+- `src/Thesis_ML/experiments/backends/__init__.py`
+- `src/Thesis_ML/experiments/backends/common.py`
+- `src/Thesis_ML/experiments/backends/cpu_reference.py`
+- `src/Thesis_ML/experiments/backends/torch_ridge.py`
+- `src/Thesis_ML/experiments/backends/torch_logreg.py`
+- `tests/test_compute_policy.py`
+- `tests/test_compute_capabilities.py`
+- `tests/test_backend_registry.py`
+- `tests/test_torch_ridge_backend.py`
+- `tests/test_torch_logreg_backend.py`
+- `tests/test_compute_scheduler.py`
+
+## Existing files likely to modify
+- `src/Thesis_ML/experiments/run_experiment.py`
+- `src/Thesis_ML/experiments/model_factory.py`
+- `src/Thesis_ML/experiments/sections_impl.py`
+- `src/Thesis_ML/experiments/segment_execution.py`
+- `src/Thesis_ML/experiments/section_models.py`
+- `src/Thesis_ML/experiments/parallel_execution.py`
+- `src/Thesis_ML/experiments/supervised_worker.py`
+- `src/Thesis_ML/experiments/timeout_watchdog.py`
+- `src/Thesis_ML/experiments/runtime_policies.py`
+- `src/Thesis_ML/experiments/run_artifacts.py`
+- `src/Thesis_ML/protocols/runner.py`
+- `src/Thesis_ML/comparisons/runner.py`
+- `src/Thesis_ML/cli/protocol_runner.py`
+- `src/Thesis_ML/cli/comparison_runner.py`
+- relevant verification modules under `src/Thesis_ML/verification/`
+- `docs/RUNBOOK.md`
+- `docs/RELEASE.md`
+- `docs/ARCHITECTURE.md`
+- `pyproject.toml`
+
+---
+
+## Validation strategy
+
+## 1. CPU parity regression suite
+Before any GPU work is trusted, create a frozen CPU parity suite.
+
+### Cases
+- exploratory ridge
+- exploratory logreg
+- one comparison variant
+- one protocol suite
+- one tuned path if cheap enough
+
+### Assertions
+- same run count
+- same artifact set
+- same required metadata plus additive compute fields
+- same metrics within exact or current tolerance
+
+---
+
+## 2. GPU estimator parity suite
+
+### Ridge parity requirements
+- prediction parity tolerance defined and checked
+- metric parity tolerance defined and checked
+- artifact-writing path identical except additive compute metadata
+
+### Logreg parity requirements
+- same as ridge, plus convergence and probability behavior checks where relevant
+
+---
+
+## 3. Scheduler parity suite
+For `max_both`, verify:
+- deterministic lane assignment
+- stable output order
+- no artifact drift beyond additive compute metadata
+- run results remain attributable to the correct scientific spec and run id
+
+---
+
+## 4. Official verification suite
+Before official rollout, extend existing verification to assert:
+- backend metadata present when requested
+- unsupported official GPU requests fail clearly
+- fallback behavior is absent where forbidden
+- bundle/release steps still pass
+
+---
+
+## Risk register
+
+## High-risk items
+### 1. Overstating performance benefit
+Mitigation:
+- require benchmark gate before promotion
+- document that v1 may remain CPU-heavy outside estimator fit
+
+### 2. Numerical parity drift
+Mitigation:
+- model-by-model rollout
+- tolerance-based parity tests
+- do not admit unstable models to official paths
+
+### 3. Artifact contract drift
+Mitigation:
+- additive fields only
+- validator and test updates in lockstep
+
+### 4. Mixed-backend audit ambiguity
+Mitigation:
+- explicit lane and backend metadata
+- conservative `max_both` semantics
+
+### 5. Scheduler complexity explosion
+Mitigation:
+- exploratory-first rollout
+- no multi-GPU v1
+- no in-run hybrid v1
+
+---
+
+## Recommended implementation order by pull request
+
+## PR 1
+Compute policy, capability resolver, additive metadata, no behavioral change.
+
+## PR 2
+Backend registry and CPU reference path through the abstraction, no result drift.
+
+## PR 3
+Exploratory `gpu_only` ridge backend.
+
+## PR 4
+Exploratory `gpu_only` logreg backend, if parity is acceptable.
+
+## PR 5
+Exploratory `max_both` scheduler using run-level CPU/GPU lanes.
+
+## PR 6
+Locked comparison GPU admission gates.
+
+## PR 7
+Confirmatory GPU admission gates.
+
+## PR 8
+Only later, consider official `max_both`.
+
+---
+
+## Recommendation on naming
+
+For internal code and docs, keep the external names the user wants, but internally use precise names.
+
+### External user-facing names
+- `cpu_only`
+- `gpu_only`
+- `max_both`
+
+### Internal descriptive names
+- `cpu_only`
+- `gpu_only`
+- `mixed_run_lanes`
+
+This keeps `max_both` understandable to users while making the internal implementation honest.
+
+---
+
+## Final recommendation
+
+Build this as a **backend redesign branch**, not as a quick optimization patch on mainline.
+
+The right mental model is:
+- preserve the current CPU system as the scientific reference
+- add backend abstraction first
+- admit GPU model families gradually
+- define `max_both` as run-level mixed scheduling, not in-fit hybrid compute
+- promote GPU into official paths only after parity, artifact, and performance gates pass
+
+That gives you the three modes you want while keeping the thesis framework scientifically defensible and maintainable.
+
