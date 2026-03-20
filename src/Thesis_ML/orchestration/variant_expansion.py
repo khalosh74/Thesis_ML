@@ -24,6 +24,12 @@ def variant_label(params: dict[str, Any]) -> str:
         "test_subject",
         "filter_task",
         "filter_modality",
+        "methodology_policy_name",
+        "class_weight_policy",
+        "tuning_search_space_id",
+        "tuning_search_space_version",
+        "tuning_inner_cv_scheme",
+        "tuning_inner_group_field",
     ]
     parts: list[str] = []
     for key in keys:

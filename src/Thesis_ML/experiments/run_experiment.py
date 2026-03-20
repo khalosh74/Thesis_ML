@@ -91,10 +91,16 @@ from Thesis_ML.experiments.tuning_search_spaces import (
 
 LOGGER = logging.getLogger(__name__)
 
-_CV_MODES = ("loso_session", "within_subject_loso_session", "frozen_cross_person_transfer")
+_CV_MODES = (
+    "loso_session",
+    "within_subject_loso_session",
+    "frozen_cross_person_transfer",
+    "record_random_split",
+)
 _TARGET_ALIASES = {
     "emotion": "emotion",
     "coarse_affect": "coarse_affect",
+    "binary_valence_like": "binary_valence_like",
     "modality": "modality",
     "task": "task",
     "regressor_label": "regressor_label",
@@ -1312,7 +1318,8 @@ def _build_parser() -> argparse.ArgumentParser:
         help=(
             "Experiment mode. Required. within_subject_loso_session=primary thesis mode; "
             "frozen_cross_person_transfer=secondary transfer mode; "
-            "loso_session=auxiliary grouped mode."
+            "loso_session=auxiliary grouped mode; "
+            "record_random_split=record-wise random split stress-test mode."
         ),
     )
     parser.add_argument(

@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 from sklearn.base import clone
 from sklearn.metrics import confusion_matrix
-from sklearn.model_selection import GridSearchCV, LeaveOneGroupOut
+from sklearn.model_selection import GridSearchCV, LeaveOneGroupOut, StratifiedKFold
 
 from Thesis_ML.config.metric_policy import metric_bundle, metric_scorer
 from Thesis_ML.experiments.evidence_statistics import build_calibration_outputs
@@ -82,7 +82,7 @@ def execute_model_fit(section_input: ModelFitInput) -> dict[str, Any]:
         splits = list(splitter.split(section_input.x_matrix, y, groups))
         if len(splits) < 2:
             raise ValueError("Grouped CV produced fewer than 2 folds.")
-    else:
+    elif section_input.cv_mode == "loso_session":
         groups = (
             section_input.metadata_df["subject"].astype(str)
             + "_"
@@ -99,6 +99,35 @@ def execute_model_fit(section_input: ModelFitInput) -> dict[str, Any]:
         splits = list(splitter.split(section_input.x_matrix, y, groups))
         if len(splits) < 2:
             raise ValueError("Grouped CV produced fewer than 2 folds.")
+    elif section_input.cv_mode == "record_random_split":
+        groups = (
+            section_input.metadata_df["subject"].astype(str)
+            + "_"
+            + section_input.metadata_df["session"].astype(str)
+        ).to_numpy()
+        unique_labels = np.unique(y)
+        if len(unique_labels) < 2:
+            raise ValueError("Classification requires at least 2 target classes.")
+        min_class_count = int(pd.Series(y).value_counts().min())
+        if min_class_count < 2:
+            raise ValueError(
+                "record_random_split requires at least 2 samples per class for stratified folds."
+            )
+        n_splits = int(min(5, min_class_count))
+        if n_splits < 2:
+            raise ValueError(
+                "record_random_split produced fewer than 2 stratified folds from selected data."
+            )
+        splitter = StratifiedKFold(
+            n_splits=n_splits,
+            shuffle=True,
+            random_state=int(section_input.seed),
+        )
+        splits = list(splitter.split(section_input.x_matrix, y))
+        if len(splits) < 2:
+            raise ValueError("record_random_split produced fewer than 2 folds.")
+    else:
+        raise ValueError(f"Unsupported cv_mode '{section_input.cv_mode}'.")
 
     planned_outer_folds = int(len(splits))
     max_outer_folds = section_input.max_outer_folds

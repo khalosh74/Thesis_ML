@@ -112,6 +112,51 @@ def test_dataset_selection_section_isolation(tmp_path: Path) -> None:
     assert set(selected["coarse_affect"].astype(str).tolist()) == {"negative", "positive"}
 
 
+def test_dataset_selection_binary_valence_like_drops_neutral(tmp_path: Path) -> None:
+    index_csv = tmp_path / "dataset_index.csv"
+    index_df = pd.DataFrame(
+        [
+            {
+                "sample_id": "s1",
+                "subject": "sub-001",
+                "session": "ses-01",
+                "task": "passive",
+                "modality": "audio",
+                "emotion": "anger",
+            },
+            {
+                "sample_id": "s2",
+                "subject": "sub-001",
+                "session": "ses-01",
+                "task": "passive",
+                "modality": "video",
+                "emotion": "happiness",
+            },
+            {
+                "sample_id": "s3",
+                "subject": "sub-001",
+                "session": "ses-02",
+                "task": "passive",
+                "modality": "audio",
+                "emotion": "neutral",
+            },
+        ]
+    )
+    index_df.to_csv(index_csv, index=False)
+
+    selected = dataset_selection(
+        DatasetSelectionInput(
+            index_csv=index_csv,
+            target_column="binary_valence_like",
+            cv_mode="within_subject_loso_session",
+            subject="sub-001",
+        )
+    ).selected_index_df
+
+    assert set(selected["sample_id"].astype(str).tolist()) == {"s1", "s2"}
+    assert set(selected["binary_valence_like"].astype(str).tolist()) == {"negative", "positive"}
+
+
 def test_run_experiment_registers_section_boundary_artifacts(tmp_path: Path) -> None:
     data_root = tmp_path / "Data"
     labels = [
@@ -360,3 +405,128 @@ def test_extracted_sections_model_fit_interpretability_evaluation(tmp_path: Path
     )
     assert metrics_record is not None
     assert metrics_record.upstream_artifact_ids == ["feature_matrix_bundle_test"]
+
+
+def test_model_fit_record_random_split_generates_non_empty_folds(tmp_path: Path) -> None:
+    report_dir = tmp_path / "record_split_fit"
+    report_dir.mkdir(parents=True, exist_ok=True)
+    metadata_df = pd.DataFrame(
+        [
+            {
+                "sample_id": "s1",
+                "subject": "sub-001",
+                "session": "ses-01",
+                "bas": "BAS2",
+                "task": "passive",
+                "modality": "audio",
+                "emotion": "anger",
+                "coarse_affect": "negative",
+            },
+            {
+                "sample_id": "s2",
+                "subject": "sub-001",
+                "session": "ses-01",
+                "bas": "BAS2",
+                "task": "passive",
+                "modality": "video",
+                "emotion": "happiness",
+                "coarse_affect": "positive",
+            },
+            {
+                "sample_id": "s3",
+                "subject": "sub-001",
+                "session": "ses-02",
+                "bas": "BAS2",
+                "task": "passive",
+                "modality": "audio",
+                "emotion": "anger",
+                "coarse_affect": "negative",
+            },
+            {
+                "sample_id": "s4",
+                "subject": "sub-001",
+                "session": "ses-02",
+                "bas": "BAS2",
+                "task": "passive",
+                "modality": "video",
+                "emotion": "happiness",
+                "coarse_affect": "positive",
+            },
+            {
+                "sample_id": "s5",
+                "subject": "sub-002",
+                "session": "ses-01",
+                "bas": "BAS2",
+                "task": "passive",
+                "modality": "audio",
+                "emotion": "anger",
+                "coarse_affect": "negative",
+            },
+            {
+                "sample_id": "s6",
+                "subject": "sub-002",
+                "session": "ses-01",
+                "bas": "BAS2",
+                "task": "passive",
+                "modality": "video",
+                "emotion": "happiness",
+                "coarse_affect": "positive",
+            },
+            {
+                "sample_id": "s7",
+                "subject": "sub-002",
+                "session": "ses-02",
+                "bas": "BAS2",
+                "task": "passive",
+                "modality": "audio",
+                "emotion": "anger",
+                "coarse_affect": "negative",
+            },
+            {
+                "sample_id": "s8",
+                "subject": "sub-002",
+                "session": "ses-02",
+                "bas": "BAS2",
+                "task": "passive",
+                "modality": "video",
+                "emotion": "happiness",
+                "coarse_affect": "positive",
+            },
+        ]
+    )
+    x_matrix = np.asarray(
+        [
+            [4.2, 0.2, 0.1, 0.0],
+            [-4.1, -0.2, -0.1, 0.0],
+            [4.0, 0.1, 0.2, 0.1],
+            [-4.0, -0.1, -0.2, -0.1],
+            [4.1, 0.3, 0.2, 0.2],
+            [-4.2, -0.3, -0.2, -0.2],
+            [4.3, 0.2, 0.3, 0.1],
+            [-4.3, -0.2, -0.3, -0.1],
+        ],
+        dtype=np.float32,
+    )
+
+    fit_output = model_fit(
+        ModelFitInput(
+            x_matrix=x_matrix,
+            metadata_df=metadata_df,
+            target_column="coarse_affect",
+            cv_mode="record_random_split",
+            model="ridge",
+            seed=19,
+            run_id="record_random_split_model_fit",
+            config_filename="config.json",
+            report_dir=report_dir,
+            build_pipeline_fn=_build_pipeline,
+            scores_for_predictions_fn=_scores_for_predictions,
+            extract_linear_coefficients_fn=_extract_linear_coefficients,
+        )
+    )
+
+    assert fit_output.interpretability_enabled is False
+    assert len(fit_output.splits) == 4
+    for train_idx, test_idx in fit_output.splits:
+        assert int(len(train_idx)) > 0
+        assert int(len(test_idx)) > 0

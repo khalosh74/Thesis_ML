@@ -10,7 +10,7 @@ from Thesis_ML.artifacts.registry import (
     compute_config_hash,
     register_artifact,
 )
-from Thesis_ML.data.affect_labels import with_coarse_affect
+from Thesis_ML.data.affect_labels import with_binary_valence_like, with_coarse_affect
 from Thesis_ML.experiments.section_models import (
     DatasetSelectionInput,
     DatasetSelectionOutput,
@@ -35,6 +35,11 @@ def dataset_selection(section_input: DatasetSelectionInput) -> DatasetSelectionO
     if index_df.empty:
         raise ValueError(f"Dataset index is empty: {section_input.index_csv}")
     index_df = with_coarse_affect(index_df, emotion_column="emotion", coarse_column="coarse_affect")
+    index_df = with_binary_valence_like(
+        index_df,
+        coarse_column="coarse_affect",
+        binary_column="binary_valence_like",
+    )
 
     for required in (
         "sample_id",
@@ -123,6 +128,11 @@ def feature_matrix_load(section_input: FeatureMatrixLoadInput) -> FeatureMatrixL
     )
     metadata_df = with_coarse_affect(
         metadata_df, emotion_column="emotion", coarse_column="coarse_affect"
+    )
+    metadata_df = with_binary_valence_like(
+        metadata_df,
+        coarse_column="coarse_affect",
+        binary_column="binary_valence_like",
     )
 
     artifact = register_artifact(

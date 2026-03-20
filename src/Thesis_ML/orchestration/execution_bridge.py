@@ -13,6 +13,11 @@ from Thesis_ML.artifacts.registry import (
     compute_config_hash,
     register_artifact,
 )
+from Thesis_ML.config.methodology import (
+    ClassWeightPolicy,
+    MethodologyPolicy,
+    MethodologyPolicyName,
+)
 from Thesis_ML.config.metric_policy import extract_metric_value, validate_metric_name
 from Thesis_ML.orchestration.reporting import build_dataset_subset_label
 from Thesis_ML.orchestration.variant_expansion import variant_label
@@ -40,6 +45,64 @@ def _optional_int(value: Any) -> int | None:
         return None
 
 
+def _optional_str(value: Any) -> str | None:
+    if value in (None, ""):
+        return None
+    value_text = str(value).strip()
+    return value_text or None
+
+
+def _resolve_methodology_params(params: dict[str, Any]) -> dict[str, Any]:
+    raw_policy_name = _optional_str(params.get("methodology_policy_name"))
+    raw_class_weight = _optional_str(params.get("class_weight_policy"))
+    raw_tuning_space_id = _optional_str(params.get("tuning_search_space_id"))
+    raw_tuning_space_version = _optional_str(params.get("tuning_search_space_version"))
+    raw_tuning_inner_cv = _optional_str(params.get("tuning_inner_cv_scheme"))
+    raw_tuning_inner_group = _optional_str(params.get("tuning_inner_group_field"))
+
+    policy_name = raw_policy_name or MethodologyPolicyName.FIXED_BASELINES_ONLY.value
+    class_weight_policy = raw_class_weight or ClassWeightPolicy.NONE.value
+    tuning_enabled = policy_name == MethodologyPolicyName.GROUPED_NESTED_TUNING.value
+
+    if tuning_enabled:
+        required = {
+            "tuning_search_space_id": raw_tuning_space_id,
+            "tuning_search_space_version": raw_tuning_space_version,
+            "tuning_inner_cv_scheme": raw_tuning_inner_cv,
+            "tuning_inner_group_field": raw_tuning_inner_group,
+        }
+        missing = [key for key, value in required.items() if value is None]
+        if missing:
+            raise ValueError(
+                "grouped_nested_tuning requires explicit template params: "
+                + ", ".join(sorted(missing))
+                + "."
+            )
+
+    try:
+        validated = MethodologyPolicy(
+            policy_name=MethodologyPolicyName(policy_name),
+            class_weight_policy=ClassWeightPolicy(class_weight_policy),
+            tuning_enabled=tuning_enabled,
+            inner_cv_scheme=raw_tuning_inner_cv,
+            inner_group_field=raw_tuning_inner_group,
+            tuning_search_space_id=raw_tuning_space_id,
+            tuning_search_space_version=raw_tuning_space_version,
+        )
+    except Exception as exc:
+        raise ValueError(f"Invalid methodology parameters in variant params: {exc}") from exc
+
+    return {
+        "methodology_policy_name": validated.policy_name.value,
+        "class_weight_policy": validated.class_weight_policy.value,
+        "tuning_enabled": bool(validated.tuning_enabled),
+        "tuning_search_space_id": validated.tuning_search_space_id,
+        "tuning_search_space_version": validated.tuning_search_space_version,
+        "tuning_inner_cv_scheme": validated.inner_cv_scheme,
+        "tuning_inner_group_field": validated.inner_group_field,
+    }
+
+
 def build_command(
     index_csv: Path,
     data_root: Path,
@@ -53,6 +116,10 @@ def build_command(
     end_section: str | None = None,
     base_artifact_id: str | None = None,
     reuse_policy: str | None = None,
+    methodology_policy_name: str | None = None,
+    class_weight_policy: str | None = None,
+    tuning_search_space_id: str | None = None,
+    tuning_search_space_version: str | None = None,
 ) -> list[str]:
     command = [
         sys.executable,
@@ -89,6 +156,14 @@ def build_command(
         command.extend(["--filter-task", str(params["filter_task"])])
     if params.get("filter_modality"):
         command.extend(["--filter-modality", str(params["filter_modality"])])
+    if methodology_policy_name:
+        command.extend(["--methodology-policy", str(methodology_policy_name)])
+    if class_weight_policy:
+        command.extend(["--class-weight-policy", str(class_weight_policy)])
+    if tuning_search_space_id:
+        command.extend(["--tuning-search-space-id", str(tuning_search_space_id)])
+    if tuning_search_space_version:
+        command.extend(["--tuning-search-space-version", str(tuning_search_space_version)])
     if start_section:
         command.extend(["--start-section", str(start_section)])
     if end_section:
@@ -182,56 +257,75 @@ def execute_variant(
     if not supported:
         status = "blocked"
     else:
-        command = build_command(
-            index_csv=index_csv,
-            data_root=data_root,
-            cache_dir=cache_dir,
-            reports_root=reports_root,
-            run_id=run_id,
-            seed=effective_seed,
-            n_permutations=n_permutations,
-            params=params,
-            start_section=start_section,
-            end_section=end_section,
-            base_artifact_id=base_artifact_id,
-            reuse_policy=reuse_policy,
-        )
-        command_text = command_to_text(command)
-        if dry_run:
-            status = "dry_run"
+        try:
+            methodology_params = _resolve_methodology_params(params)
+        except ValueError as exc:
+            status = "blocked"
+            blocked_reason = str(exc)
         else:
-            try:
-                result = run_experiment_fn(
-                    index_csv=index_csv,
-                    data_root=data_root,
-                    cache_dir=cache_dir,
-                    target=str(params["target"]),
-                    model=str(params["model"]),
-                    cv=str(params["cv"]),
-                    subject=(str(params["subject"]) if params.get("subject") else None),
-                    train_subject=(
-                        str(params["train_subject"]) if params.get("train_subject") else None
-                    ),
-                    test_subject=(
-                        str(params["test_subject"]) if params.get("test_subject") else None
-                    ),
-                    seed=effective_seed,
-                    filter_task=(str(params["filter_task"]) if params.get("filter_task") else None),
-                    filter_modality=(
-                        str(params["filter_modality"]) if params.get("filter_modality") else None
-                    ),
-                    n_permutations=n_permutations,
-                    run_id=run_id,
-                    reports_root=reports_root,
-                    start_section=start_section,
-                    end_section=end_section,
-                    base_artifact_id=base_artifact_id,
-                    reuse_policy=reuse_policy,
-                )
-                status = "completed"
-            except Exception as exc:
-                status = "failed"
-                error = str(exc)
+            command = build_command(
+                index_csv=index_csv,
+                data_root=data_root,
+                cache_dir=cache_dir,
+                reports_root=reports_root,
+                run_id=run_id,
+                seed=effective_seed,
+                n_permutations=n_permutations,
+                params=params,
+                start_section=start_section,
+                end_section=end_section,
+                base_artifact_id=base_artifact_id,
+                reuse_policy=reuse_policy,
+                methodology_policy_name=methodology_params["methodology_policy_name"],
+                class_weight_policy=methodology_params["class_weight_policy"],
+                tuning_search_space_id=methodology_params["tuning_search_space_id"],
+                tuning_search_space_version=methodology_params["tuning_search_space_version"],
+            )
+            command_text = command_to_text(command)
+            if dry_run:
+                status = "dry_run"
+            else:
+                try:
+                    result = run_experiment_fn(
+                        index_csv=index_csv,
+                        data_root=data_root,
+                        cache_dir=cache_dir,
+                        target=str(params["target"]),
+                        model=str(params["model"]),
+                        cv=str(params["cv"]),
+                        subject=(str(params["subject"]) if params.get("subject") else None),
+                        train_subject=(
+                            str(params["train_subject"]) if params.get("train_subject") else None
+                        ),
+                        test_subject=(
+                            str(params["test_subject"]) if params.get("test_subject") else None
+                        ),
+                        seed=effective_seed,
+                        filter_task=(
+                            str(params["filter_task"]) if params.get("filter_task") else None
+                        ),
+                        filter_modality=(
+                            str(params["filter_modality"]) if params.get("filter_modality") else None
+                        ),
+                        n_permutations=n_permutations,
+                        methodology_policy_name=methodology_params["methodology_policy_name"],
+                        class_weight_policy=methodology_params["class_weight_policy"],
+                        tuning_enabled=bool(methodology_params["tuning_enabled"]),
+                        tuning_search_space_id=methodology_params["tuning_search_space_id"],
+                        tuning_search_space_version=methodology_params["tuning_search_space_version"],
+                        tuning_inner_cv_scheme=methodology_params["tuning_inner_cv_scheme"],
+                        tuning_inner_group_field=methodology_params["tuning_inner_group_field"],
+                        run_id=run_id,
+                        reports_root=reports_root,
+                        start_section=start_section,
+                        end_section=end_section,
+                        base_artifact_id=base_artifact_id,
+                        reuse_policy=reuse_policy,
+                    )
+                    status = "completed"
+                except Exception as exc:
+                    status = "failed"
+                    error = str(exc)
 
     now_end = _utc_timestamp()
     metrics = dict(result.get("metrics", {})) if result else {}

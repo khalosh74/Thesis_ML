@@ -10,7 +10,7 @@
       "manipulated_factor": "Target definition",
       "fixed_controls": "ridge model, within_subject_loso_session split, seed=42, no task/modality filter.",
       "dataset_scope": "Internal BAS2 repeated-session index.",
-      "target_definition": "coarse_affect vs emotion (binary valence-like currently not implemented).",
+      "target_definition": "coarse_affect vs emotion vs binary valence-like.",
       "split_logic": "within_subject_loso_session, per subject.",
       "models": [
         "ridge"
@@ -21,12 +21,10 @@
         "accuracy"
       ],
       "output_dir": "outputs/artifacts/decision_support/E01",
-      "notes": "Binary valence-like target remains blocked until implemented in runner target aliases.",
+      "notes": "Compares emotion, coarse affect, and binary valence-like targets under matched split/model controls.",
       "executable_now": true,
-      "execution_status": "partially_blocked",
-      "blocked_reasons": [
-        "binary valence-like target not implemented in thesisml-run-experiment target choices."
-      ],
+      "execution_status": "executable",
+      "blocked_reasons": [],
       "variant_templates": [
         {
           "template_id": "coarse_affect_within_subject",
@@ -54,8 +52,15 @@
         },
         {
           "template_id": "binary_valence_like",
-          "supported": false,
-          "unsupported_reason": "target alias 'binary_valence_like' not implemented."
+          "supported": true,
+          "params": {
+            "target": "binary_valence_like",
+            "model": "ridge",
+            "cv": "within_subject_loso_session"
+          },
+          "expand": {
+            "subject": "subjects"
+          }
         }
       ]
     },
@@ -170,7 +175,7 @@
       "fixed_controls": "coarse_affect target, ridge model, seed=42.",
       "dataset_scope": "Internal BAS2 repeated-session index.",
       "target_definition": "coarse_affect",
-      "split_logic": "loso_session vs within_subject_loso_session (record-wise random split blocked).",
+      "split_logic": "loso_session vs within_subject_loso_session vs record_random_split.",
       "models": [
         "ridge"
       ],
@@ -180,12 +185,10 @@
         "accuracy"
       ],
       "output_dir": "outputs/artifacts/decision_support/E04",
-      "notes": "Record-wise random split not available in current runner.",
+      "notes": "Includes weak record-wise random split as stress-test against grouped/session-held-out splits.",
       "executable_now": true,
-      "execution_status": "partially_blocked",
-      "blocked_reasons": [
-        "record-wise random split mode is not implemented in runner."
-      ],
+      "execution_status": "executable",
+      "blocked_reasons": [],
       "variant_templates": [
         {
           "template_id": "aux_grouped_loso_session",
@@ -210,8 +213,12 @@
         },
         {
           "template_id": "record_random_split",
-          "supported": false,
-          "unsupported_reason": "record-wise random split not implemented."
+          "supported": true,
+          "params": {
+            "target": "coarse_affect",
+            "model": "ridge",
+            "cv": "record_random_split"
+          }
         }
       ]
     },
@@ -315,13 +322,42 @@
         "accuracy"
       ],
       "output_dir": "outputs/artifacts/decision_support/E07",
-      "notes": "Blocked until class weighting is exposed as runner parameter.",
-      "executable_now": false,
-      "execution_status": "blocked",
-      "blocked_reasons": [
-        "No class weighting flag/parameter exposed in thesisml-run-experiment."
-      ],
-      "variant_templates": []
+      "notes": "Compares none vs balanced class weighting under fixed-baseline methodology.",
+      "executable_now": true,
+      "execution_status": "executable",
+      "blocked_reasons": [],
+      "variant_templates": [
+        {
+          "template_id": "class_weight_none",
+          "supported": true,
+          "params": {
+            "target": "coarse_affect",
+            "model": "ridge",
+            "cv": "within_subject_loso_session",
+            "methodology_policy_name": "fixed_baselines_only",
+            "class_weight_policy": "none"
+          },
+          "expand": {
+            "subject": "subjects",
+            "model": "models_linear"
+          }
+        },
+        {
+          "template_id": "class_weight_balanced",
+          "supported": true,
+          "params": {
+            "target": "coarse_affect",
+            "model": "ridge",
+            "cv": "within_subject_loso_session",
+            "methodology_policy_name": "fixed_baselines_only",
+            "class_weight_policy": "balanced"
+          },
+          "expand": {
+            "subject": "subjects",
+            "model": "models_linear"
+          }
+        }
+      ]
     },
     {
       "experiment_id": "E08",
@@ -344,13 +380,46 @@
         "accuracy"
       ],
       "output_dir": "outputs/artifacts/decision_support/E08",
-      "notes": "Blocked until nested tuning/fixed strategy switch is implemented.",
-      "executable_now": false,
-      "execution_status": "blocked",
-      "blocked_reasons": [
-        "No nested tuning strategy option is implemented in current runner."
-      ],
-      "variant_templates": []
+      "notes": "Compares fixed baselines against grouped nested tuning under matched splits/models.",
+      "executable_now": true,
+      "execution_status": "executable",
+      "blocked_reasons": [],
+      "variant_templates": [
+        {
+          "template_id": "strategy_fixed_baselines",
+          "supported": true,
+          "params": {
+            "target": "coarse_affect",
+            "model": "ridge",
+            "cv": "within_subject_loso_session",
+            "methodology_policy_name": "fixed_baselines_only",
+            "class_weight_policy": "none"
+          },
+          "expand": {
+            "subject": "subjects",
+            "model": "models_linear"
+          }
+        },
+        {
+          "template_id": "strategy_grouped_nested",
+          "supported": true,
+          "params": {
+            "target": "coarse_affect",
+            "model": "ridge",
+            "cv": "within_subject_loso_session",
+            "methodology_policy_name": "grouped_nested_tuning",
+            "class_weight_policy": "none",
+            "tuning_search_space_id": "linear-grouped-nested-v1",
+            "tuning_search_space_version": "1.0.0",
+            "tuning_inner_cv_scheme": "grouped_leave_one_group_out",
+            "tuning_inner_group_field": "session"
+          },
+          "expand": {
+            "subject": "subjects",
+            "model": "models_linear"
+          }
+        }
+      ]
     },
     {
       "experiment_id": "E09",

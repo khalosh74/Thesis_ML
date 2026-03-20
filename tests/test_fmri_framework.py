@@ -515,6 +515,74 @@ def test_experiment_cli_accepts_coarse_affect_target() -> None:
     assert args.cv == "loso_session"
 
 
+def test_experiment_cli_accepts_binary_valence_like_target() -> None:
+    parser = _build_parser()
+    args = parser.parse_args(
+        [
+            "--index-csv",
+            "dataset_index.csv",
+            "--data-root",
+            "Data",
+            "--cache-dir",
+            "cache",
+            "--target",
+            "binary_valence_like",
+            "--model",
+            "ridge",
+            "--cv",
+            "within_subject_loso_session",
+            "--subject",
+            "sub-001",
+        ]
+    )
+    assert args.target == "binary_valence_like"
+    assert args.cv == "within_subject_loso_session"
+
+
+def test_experiment_runner_binary_valence_like_target(tmp_path: Path) -> None:
+    data_root = tmp_path / "Data"
+    labels = [
+        "run-1_passive_anger_audio",
+        "run-1_passive_happiness_audio",
+        "run-1_passive_neutral_video",
+    ]
+    for subject in ("sub-001", "sub-002"):
+        for session in ("ses-01", "ses-02"):
+            _create_glm_session(
+                glm_dir=data_root / subject / session / "BAS2",
+                labels=labels,
+                class_signal=True,
+            )
+
+    index_csv = tmp_path / "dataset_index.csv"
+    build_dataset_index(data_root=data_root, out_csv=index_csv)
+
+    reports_root = tmp_path / "reports" / "experiments"
+    result = run_experiment(
+        index_csv=index_csv,
+        data_root=data_root,
+        cache_dir=tmp_path / "cache",
+        target="binary_valence_like",
+        model="ridge",
+        cv="within_subject_loso_session",
+        subject="sub-001",
+        seed=42,
+        run_id="binary_valence_like_sub001",
+        reports_root=reports_root,
+    )
+
+    report_dir = Path(result["report_dir"])
+    metrics = json.loads((report_dir / "metrics.json").read_text(encoding="utf-8"))
+    config = json.loads((report_dir / "config.json").read_text(encoding="utf-8"))
+    predictions = pd.read_csv(report_dir / "predictions.csv")
+
+    assert metrics["target"] == "binary_valence_like"
+    assert config["target"] == "binary_valence_like"
+    assert set(predictions["y_true"].astype(str).unique().tolist()) <= {"negative", "positive"}
+    assert set(predictions["y_pred"].astype(str).unique().tolist()) <= {"negative", "positive"}
+    assert "neutral" not in set(predictions["y_true"].astype(str).tolist())
+
+
 def test_baseline_models_use_fixed_explicit_settings() -> None:
     logreg = _make_model(name="logreg", seed=13)
     linearsvc = _make_model(name="linearsvc", seed=13)
@@ -598,6 +666,7 @@ def test_experiment_cli_help_describes_modes() -> None:
     assert "within_subject_loso_session" in help_text
     assert "frozen_cross_person_transfer" in help_text
     assert "loso_session" in help_text
+    assert "record_random_split" in help_text
     assert "primary thesis mode" in help_text
 
 
@@ -623,6 +692,88 @@ def test_experiment_cli_accepts_within_subject_mode() -> None:
     )
     assert args.cv == "within_subject_loso_session"
     assert args.subject == "sub-001"
+
+
+def test_experiment_cli_accepts_record_random_split_mode() -> None:
+    parser = _build_parser()
+    args = parser.parse_args(
+        [
+            "--index-csv",
+            "dataset_index.csv",
+            "--data-root",
+            "Data",
+            "--cache-dir",
+            "cache",
+            "--target",
+            "coarse_affect",
+            "--model",
+            "ridge",
+            "--cv",
+            "record_random_split",
+        ]
+    )
+    assert args.cv == "record_random_split"
+
+
+def test_experiment_runner_record_random_split_is_deterministic(tmp_path: Path) -> None:
+    data_root = tmp_path / "Data"
+    labels = [
+        "run-1_passive_anger_audio",
+        "run-1_passive_happiness_audio",
+        "run-1_passive_anger_video",
+        "run-1_passive_happiness_video",
+    ]
+    for subject in ("sub-001", "sub-002"):
+        for session in ("ses-01", "ses-02", "ses-03"):
+            _create_glm_session(
+                glm_dir=data_root / subject / session / "BAS2",
+                labels=labels,
+                class_signal=True,
+            )
+
+    index_csv = tmp_path / "dataset_index.csv"
+    build_dataset_index(data_root=data_root, out_csv=index_csv)
+    reports_root = tmp_path / "reports" / "experiments"
+
+    first = run_experiment(
+        index_csv=index_csv,
+        data_root=data_root,
+        cache_dir=tmp_path / "cache",
+        target="coarse_affect",
+        model="ridge",
+        cv="record_random_split",
+        seed=17,
+        run_id="record_random_split_a",
+        reports_root=reports_root,
+    )
+    second = run_experiment(
+        index_csv=index_csv,
+        data_root=data_root,
+        cache_dir=tmp_path / "cache",
+        target="coarse_affect",
+        model="ridge",
+        cv="record_random_split",
+        seed=17,
+        run_id="record_random_split_b",
+        reports_root=reports_root,
+    )
+
+    first_report = Path(first["report_dir"])
+    second_report = Path(second["report_dir"])
+    first_metrics = json.loads((first_report / "metrics.json").read_text(encoding="utf-8"))
+    second_metrics = json.loads((second_report / "metrics.json").read_text(encoding="utf-8"))
+    first_splits = pd.read_csv(first_report / "fold_splits.csv")
+    second_splits = pd.read_csv(second_report / "fold_splits.csv")
+
+    expected_folds = 5
+    assert int(first_metrics["n_folds"]) == expected_folds
+    assert int(second_metrics["n_folds"]) == expected_folds
+
+    compare_columns = [column for column in first_splits.columns if column != "run_id"]
+    pd.testing.assert_frame_equal(
+        first_splits[compare_columns].reset_index(drop=True),
+        second_splits[compare_columns].reset_index(drop=True),
+    )
 
 
 def test_within_subject_mode_requires_subject(tmp_path: Path) -> None:
