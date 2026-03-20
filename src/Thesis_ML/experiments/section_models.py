@@ -8,6 +8,8 @@ import numpy as np
 import pandas as pd
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from Thesis_ML.experiments.compute_policy import ResolvedComputePolicy
+
 
 class _SectionModel(BaseModel):
     model_config = ConfigDict(
@@ -122,6 +124,7 @@ class ModelFitInput(_SectionModel):
     fit_timing_summary_path: Path | None = None
     interpretability_enabled: bool | None = None
     max_outer_folds: int | None = None
+    compute_policy: ResolvedComputePolicy | None = None
     run_id: str = Field(min_length=1)
     config_filename: str = Field(min_length=1)
     report_dir: Path

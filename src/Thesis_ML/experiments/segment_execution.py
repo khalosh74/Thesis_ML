@@ -17,6 +17,7 @@ from Thesis_ML.artifacts.registry import (
     compute_config_hash,
     get_artifact,
 )
+from Thesis_ML.experiments.compute_policy import ResolvedComputePolicy
 from Thesis_ML.experiments.section_models import (
     DatasetSelectionInput,
     EvaluationInput,
@@ -118,6 +119,7 @@ class SegmentExecutionRequest:
     calibration_require_probabilities_for_validity: bool = False
     interpretability_enabled_override: bool | None = None
     max_outer_folds: int | None = None
+    compute_policy: ResolvedComputePolicy | None = None
     start_section: str | SectionName | None = None
     end_section: str | SectionName | None = None
     base_artifact_id: str | None = None
@@ -402,6 +404,7 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
                     fit_timing_summary_path=request.fit_timing_summary_path,
                     interpretability_enabled=request.interpretability_enabled_override,
                     max_outer_folds=request.max_outer_folds,
+                    compute_policy=request.compute_policy,
                     run_id=request.run_id,
                     config_filename=request.config_filename,
                     report_dir=request.report_dir,

@@ -8,6 +8,10 @@ from typing import Any
 
 from Thesis_ML.config.framework_mode import FrameworkMode
 from Thesis_ML.config.metric_policy import resolve_effective_metric_policy
+from Thesis_ML.experiments.compute_policy import (
+    extract_compute_policy_payload,
+    resolve_compute_policy,
+)
 from Thesis_ML.experiments.errors import exception_failure_payload
 from Thesis_ML.experiments.execution_policy import read_run_status
 from Thesis_ML.experiments.parallel_execution import (
@@ -190,6 +194,7 @@ def _to_run_result_success(
             str(run_payload.get("config_path")) if run_payload.get("config_path") else None
         ),
         metrics=metrics,
+        compute_policy=extract_compute_policy_payload(run_payload),
     )
 
 
@@ -247,6 +252,20 @@ def _metrics_snapshot_from_file(
         if isinstance(value, (float, int, str, bool)) or value is None:
             snapshot[key] = value
     return snapshot
+
+
+def _compute_policy_snapshot_from_artifacts(
+    metrics_path: Path | None,
+    config_path: Path | None,
+) -> dict[str, Any] | None:
+    for candidate in (metrics_path, config_path):
+        if candidate is None:
+            continue
+        payload = _read_json_object(candidate)
+        extracted = extract_compute_policy_payload(payload)
+        if extracted is not None:
+            return extracted
+    return None
 
 
 def _classify_existing_run(
@@ -332,6 +351,10 @@ def _reused_run_result(
             metrics_path=metrics_path_value,
             config_path=config_path_value,
             metrics=_metrics_snapshot_from_file(metrics_path if metrics_path.exists() else None),
+            compute_policy=_compute_policy_snapshot_from_artifacts(
+                metrics_path if metrics_path.exists() else None,
+                config_path if config_path.exists() else None,
+            ),
         )
     if normalized == RUN_STATUS_SKIPPED_DUE_TO_POLICY:
         reason = str(
@@ -404,6 +427,10 @@ def execute_compiled_protocol(
     compile_duration_seconds: float | None = None,
     timeout_policy_overrides: dict[str, Any] | None = None,
     max_parallel_runs: int = 1,
+    hardware_mode: str = "cpu_only",
+    gpu_device_id: int | None = None,
+    deterministic_compute: bool = False,
+    allow_backend_fallback: bool = False,
 ) -> dict[str, Any]:
     if force and resume:
         raise ValueError(
@@ -412,6 +439,13 @@ def execute_compiled_protocol(
     if int(max_parallel_runs) <= 0:
         raise ValueError("max_parallel_runs must be >= 1.")
     resolved_max_parallel_runs = int(max_parallel_runs)
+    resolve_compute_policy(
+        framework_mode=FrameworkMode.CONFIRMATORY,
+        hardware_mode=hardware_mode,
+        gpu_device_id=gpu_device_id,
+        deterministic_compute=deterministic_compute,
+        allow_backend_fallback=allow_backend_fallback,
+    )
 
     run_results: list[ProtocolRunResult] = []
     run_index_rows: list[dict[str, Any]] = []
@@ -662,6 +696,10 @@ def execute_compiled_protocol(
                 "evidence_run_role": spec.evidence_run_role.value,
                 "evidence_policy": compiled_manifest.evidence_policy.model_dump(mode="json"),
                 "timeout_policy_effective": dict(timeout_policy_effective),
+                "hardware_mode": hardware_mode,
+                "gpu_device_id": gpu_device_id,
+                "deterministic_compute": bool(deterministic_compute),
+                "allow_backend_fallback": bool(allow_backend_fallback),
             }
             dispatch_jobs.append(
                 OfficialRunJob(
@@ -951,6 +989,10 @@ def compile_and_run_protocol(
     dry_run: bool = False,
     timeout_policy_overrides: dict[str, Any] | None = None,
     max_parallel_runs: int = 1,
+    hardware_mode: str = "cpu_only",
+    gpu_device_id: int | None = None,
+    deterministic_compute: bool = False,
+    allow_backend_fallback: bool = False,
 ) -> dict[str, Any]:
     if isinstance(protocol.confirmatory_lock, dict):
         analysis_status = str(protocol.confirmatory_lock.get("analysis_status", "")).strip().lower()
@@ -985,4 +1027,8 @@ def compile_and_run_protocol(
         compile_duration_seconds=compile_duration_seconds,
         timeout_policy_overrides=timeout_policy_overrides,
         max_parallel_runs=max_parallel_runs,
+        hardware_mode=hardware_mode,
+        gpu_device_id=gpu_device_id,
+        deterministic_compute=deterministic_compute,
+        allow_backend_fallback=allow_backend_fallback,
     )

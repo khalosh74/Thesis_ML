@@ -319,6 +319,13 @@ Policy note:
 - exploratory mode is flexible and not confirmatory evidence.
 - locked comparison mode allows only declared variants from comparison specs.
 - confirmatory mode must load thesis-critical settings from protocol JSON, not ad hoc CLI flags.
+- compute controls are operational only in PR 1:
+  `--hardware-mode {cpu_only,gpu_only,max_both}`, `--gpu-device-id`,
+  `--deterministic-compute`, `--allow-backend-fallback`.
+- exploratory runs can request and record `gpu_only` or `max_both`, but PR 1 still executes the CPU reference path and records the resolved policy/backend metadata.
+- official comparison/protocol runs remain conservative in PR 1:
+  `--hardware-mode` must stay `cpu_only`, `--allow-backend-fallback` is rejected,
+  and `--gpu-device-id` is invalid with `cpu_only`.
 - comparison/protocol specs must declare one methodology policy:
   `fixed_baselines_only` or `grouped_nested_tuning`.
 - official checked-in comparison/protocol specs use `repeat_count=3` by default.
@@ -333,6 +340,7 @@ Policy note:
   `confidence_intervals.json`, `metric_intervals.csv`.
 - official comparison/confirmatory paths enforce strict preflight contracts and fail fast on violations.
 - `run_status.json` now includes structured failure diagnostics (`error_code`, `error_type`, `failure_stage`) and warning/timing/resource summaries.
+- `config.json`, `metrics.json`, and official execution status rows now also stamp additive compute-policy metadata for auditability.
 
 Metric policy note (official runs):
 - one declared `primary_metric` governs tuning, decision selection, permutation testing, and headline reporting

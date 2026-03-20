@@ -698,6 +698,7 @@ class ComparisonRunResult(_ComparisonModel):
     timeout_diagnostics_path: str | None = None
     policy_reason: str | None = None
     metrics: dict[str, float | int | str | bool | None | dict[str, Any]] | None = None
+    compute_policy: dict[str, Any] | None = None
 
     @model_validator(mode="after")
     def _validate_result(self) -> ComparisonRunResult:

@@ -6,6 +6,10 @@ from pathlib import Path
 from typing import Any
 
 from Thesis_ML.config.metric_policy import EffectiveMetricPolicy
+from Thesis_ML.experiments.compute_policy import (
+    ResolvedComputePolicy,
+    stamp_compute_policy_metadata,
+)
 from Thesis_ML.experiments.segment_execution import SegmentExecutionResult
 
 
@@ -117,6 +121,7 @@ def stamp_metrics_artifact(
     warning_summary: dict[str, Any] | None = None,
     timeout_policy_effective: dict[str, Any] | None = None,
     profiling_context: dict[str, Any] | None = None,
+    compute_policy: ResolvedComputePolicy | None = None,
 ) -> dict[str, Any] | None:
     if not metrics_path.exists():
         return None
@@ -190,6 +195,10 @@ def stamp_metrics_artifact(
     if profiling_context is not None:
         persisted_metrics["profiling_context"] = dict(profiling_context)
         persisted_metrics["profiling_only"] = bool(profiling_context.get("profiling_only", False))
+    stamp_compute_policy_metadata(
+        payload=persisted_metrics,
+        compute_policy=compute_policy,
+    )
     metrics_path.write_text(f"{json.dumps(persisted_metrics, indent=2)}\n", encoding="utf-8")
     return persisted_metrics
 
@@ -291,8 +300,9 @@ def build_run_config_payload(
     warning_summary: dict[str, Any] | None = None,
     timeout_policy_effective: dict[str, Any] | None = None,
     profiling_context: dict[str, Any] | None = None,
+    compute_policy: ResolvedComputePolicy | None = None,
 ) -> dict[str, Any]:
-    return {
+    payload = {
         "run_id": run_id,
         "timestamp": timestamp,
         "index_csv": str(index_csv.resolve()),
@@ -446,6 +456,11 @@ def build_run_config_payload(
             else False
         ),
     }
+    stamp_compute_policy_metadata(
+        payload=payload,
+        compute_policy=compute_policy,
+    )
+    return payload
 
 
 def build_run_result_payload(
@@ -507,8 +522,9 @@ def build_run_result_payload(
     dataset_fingerprint: dict[str, Any] | None = None,
     timeout_policy_effective: dict[str, Any] | None = None,
     profiling_context: dict[str, Any] | None = None,
+    compute_policy: ResolvedComputePolicy | None = None,
 ) -> dict[str, Any]:
-    return {
+    payload = {
         "run_id": run_id,
         "report_dir": str(report_dir.resolve()),
         "report_dir_relative": _relative_path(report_dir),
@@ -618,3 +634,8 @@ def build_run_result_payload(
             else False
         ),
     }
+    stamp_compute_policy_metadata(
+        payload=payload,
+        compute_policy=compute_policy,
+    )
+    return payload

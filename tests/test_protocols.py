@@ -436,6 +436,36 @@ def test_protocol_runner_dry_run_emits_protocol_artifacts(
     assert manifest_payload["metric_policy_effective"]["decision_metric"] == "balanced_accuracy"
 
 
+def test_protocol_runner_rejects_non_cpu_compute_controls(
+    protocol_dataset: dict[str, Path],
+) -> None:
+    protocol = load_protocol(_canonical_protocol_path())
+
+    with pytest.raises(ValueError, match="hardware_mode must remain 'cpu_only'"):
+        compile_and_run_protocol(
+            protocol=protocol,
+            index_csv=protocol_dataset["index_csv"],
+            data_root=protocol_dataset["data_root"],
+            cache_dir=protocol_dataset["cache_dir"],
+            reports_root=protocol_dataset["reports_root"],
+            suite_ids=["primary_within_subject"],
+            dry_run=True,
+            hardware_mode="gpu_only",
+        )
+
+    with pytest.raises(ValueError, match="allow_backend_fallback is exploratory-only"):
+        compile_and_run_protocol(
+            protocol=protocol,
+            index_csv=protocol_dataset["index_csv"],
+            data_root=protocol_dataset["data_root"],
+            cache_dir=protocol_dataset["cache_dir"],
+            reports_root=protocol_dataset["reports_root"],
+            suite_ids=["primary_within_subject"],
+            dry_run=True,
+            allow_backend_fallback=True,
+        )
+
+
 def test_protocol_runner_surfaces_structured_failure_metadata(
     protocol_dataset: dict[str, Path],
     monkeypatch: pytest.MonkeyPatch,
@@ -526,6 +556,20 @@ def test_protocol_run_records_metadata_in_run_artifacts(
     assert config["metric_policy_effective"]["tuning_metric"] == "balanced_accuracy"
     assert config["metric_policy_effective"]["permutation_metric"] == "balanced_accuracy"
     assert config["metric_policy_effective"]["higher_is_better"] is True
+    assert config["hardware_mode_requested"] == "cpu_only"
+    assert config["hardware_mode_effective"] == "cpu_only"
+    assert config["requested_backend_family"] == "sklearn_cpu"
+    assert config["effective_backend_family"] == "sklearn_cpu"
+    assert config["gpu_device_id"] is None
+    assert config["gpu_device_name"] is None
+    assert config["gpu_device_total_memory_mb"] is None
+    assert config["deterministic_compute"] is False
+    assert config["allow_backend_fallback"] is False
+    assert config["backend_stack_id"] == "sklearn_cpu_reference_v1"
+    assert config["backend_fallback_used"] is False
+    assert config["backend_fallback_reason"] is None
+    assert isinstance(config["compute_policy"], dict)
+    assert config["compute_policy"]["hardware_mode_effective"] == "cpu_only"
     assert config["evidence_run_role"] == "primary"
     assert config["repeat_id"] == 1
     assert config["repeat_count"] == int(protocol.evidence_policy.repeat_evaluation.repeat_count)
@@ -553,6 +597,20 @@ def test_protocol_run_records_metadata_in_run_artifacts(
     assert metrics["metric_policy_effective"]["tuning_metric"] == "balanced_accuracy"
     assert metrics["metric_policy_effective"]["permutation_metric"] == "balanced_accuracy"
     assert metrics["metric_policy_effective"]["higher_is_better"] is True
+    assert metrics["hardware_mode_requested"] == "cpu_only"
+    assert metrics["hardware_mode_effective"] == "cpu_only"
+    assert metrics["requested_backend_family"] == "sklearn_cpu"
+    assert metrics["effective_backend_family"] == "sklearn_cpu"
+    assert metrics["gpu_device_id"] is None
+    assert metrics["gpu_device_name"] is None
+    assert metrics["gpu_device_total_memory_mb"] is None
+    assert metrics["deterministic_compute"] is False
+    assert metrics["allow_backend_fallback"] is False
+    assert metrics["backend_stack_id"] == "sklearn_cpu_reference_v1"
+    assert metrics["backend_fallback_used"] is False
+    assert metrics["backend_fallback_reason"] is None
+    assert isinstance(metrics["compute_policy"], dict)
+    assert metrics["compute_policy"]["hardware_mode_effective"] == "cpu_only"
     assert metrics["evidence_run_role"] == "primary"
     assert metrics["repeat_id"] == 1
     assert metrics["repeat_count"] == int(protocol.evidence_policy.repeat_evaluation.repeat_count)
@@ -582,6 +640,16 @@ def test_protocol_run_records_metadata_in_run_artifacts(
     assert Path(str(config["tuning_best_params_path"])).exists()
     assert Path(str(config["calibration_summary_path"])).exists()
     assert Path(str(config["calibration_table_path"])).exists()
+
+    execution_status = json.loads(
+        Path(result["artifact_paths"]["execution_status"]).read_text(encoding="utf-8")
+    )
+    successful_rows = [row for row in execution_status["runs"] if row["status"] == "success"]
+    assert successful_rows
+    assert successful_rows[0]["compute_policy"]["hardware_mode_requested"] == "cpu_only"
+    assert successful_rows[0]["compute_policy"]["hardware_mode_effective"] == "cpu_only"
+    assert successful_rows[0]["compute_policy"]["backend_stack_id"] == "sklearn_cpu_reference_v1"
+    assert successful_rows[0]["compute_policy"]["backend_fallback_used"] is False
 
 
 def test_protocol_runner_timed_out_runs_are_explicit(

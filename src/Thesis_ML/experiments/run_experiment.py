@@ -36,6 +36,10 @@ from Thesis_ML.config.methodology import (
 )
 from Thesis_ML.config.paths import DEFAULT_EXPERIMENT_REPORTS_ROOT
 from Thesis_ML.experiments.cache_loading import load_features_from_cache
+from Thesis_ML.experiments.compute_policy import (
+    HARDWARE_MODE_CHOICES,
+    resolve_compute_policy,
+)
 from Thesis_ML.experiments.data_reporting import write_official_data_artifacts
 from Thesis_ML.experiments.errors import exception_failure_payload
 from Thesis_ML.experiments.execution_policy import (
@@ -326,6 +330,10 @@ def run_experiment(
     projected_runtime_seconds: int | None = None,
     timeout_policy_effective: dict[str, Any] | None = None,
     profiling_context: dict[str, Any] | None = None,
+    hardware_mode: str = "cpu_only",
+    gpu_device_id: int | None = None,
+    deterministic_compute: bool = False,
+    allow_backend_fallback: bool = False,
 ) -> dict[str, Any]:
     """Run one leakage-safe grouped-CV experiment and write standardized artifacts."""
     index_csv = Path(index_csv)
@@ -336,6 +344,7 @@ def run_experiment(
     stage_timings: dict[str, float] = {}
     warnings_payload: list[dict[str, Any]] = []
     resource_summary: dict[str, Any] = {}
+    resolved_compute_policy = None
     resolved_profiling_context: dict[str, Any] | None = None
     profiling_max_outer_folds: int | None = None
     dataset_fingerprint: dict[str, Any] | None = None
@@ -559,6 +568,18 @@ def run_experiment(
         comparison_context=resolved_comparison_context,
     )
     stage_timings["methodology_resolution"] = float(perf_counter() - methodology_start)
+
+    compute_policy_start = perf_counter()
+    resolved_compute_policy = resolve_compute_policy(
+        framework_mode=resolved_framework_mode,
+        hardware_mode=hardware_mode,
+        gpu_device_id=gpu_device_id,
+        deterministic_compute=deterministic_compute,
+        allow_backend_fallback=allow_backend_fallback,
+    )
+    stage_timings["compute_policy_resolution"] = float(
+        perf_counter() - compute_policy_start
+    )
 
     effective_tuning_space_id = methodology_policy.tuning_search_space_id
     effective_tuning_space_version = methodology_policy.tuning_search_space_version
@@ -841,6 +862,7 @@ def run_experiment(
                         ),
                         interpretability_enabled_override=interpretability_enabled_override,
                         max_outer_folds=profiling_max_outer_folds,
+                        compute_policy=resolved_compute_policy,
                         run_id=resolved_run_id,
                         config_filename=config_path.name,
                         report_dir=report_dir,
@@ -955,6 +977,7 @@ def run_experiment(
             warning_summary=warning_summary,
             timeout_policy_effective=timeout_policy_effective,
             profiling_context=resolved_profiling_context,
+            compute_policy=resolved_compute_policy,
         )
     except Exception as exc:
         failure = _failure_payload(exc)
@@ -1109,6 +1132,7 @@ def run_experiment(
             warning_summary=warning_summary,
             timeout_policy_effective=timeout_policy_effective,
             profiling_context=resolved_profiling_context,
+            compute_policy=resolved_compute_policy,
         )
         config_path.write_text(f"{json.dumps(config, indent=2)}\n", encoding="utf-8")
     except Exception as exc:
@@ -1289,6 +1313,7 @@ def run_experiment(
         dataset_fingerprint=dataset_fingerprint,
         timeout_policy_effective=timeout_policy_effective,
         profiling_context=resolved_profiling_context,
+        compute_policy=resolved_compute_policy,
     )
 
 
@@ -1439,6 +1464,34 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Allow reusing completed same-run section artifacts when available.",
     )
+    parser.add_argument(
+        "--hardware-mode",
+        default="cpu_only",
+        choices=list(HARDWARE_MODE_CHOICES),
+        help=(
+            "Operational compute policy only. "
+            "PR 1 resolves and records cpu_only | gpu_only | max_both without changing model-fit behavior."
+        ),
+    )
+    parser.add_argument(
+        "--gpu-device-id",
+        type=int,
+        default=None,
+        help="Optional GPU device ID for gpu_only or max_both operational modes.",
+    )
+    parser.add_argument(
+        "--deterministic-compute",
+        action="store_true",
+        help="Record deterministic compute intent in compute metadata.",
+    )
+    parser.add_argument(
+        "--allow-backend-fallback",
+        action="store_true",
+        help=(
+            "Allow exploratory gpu_only requests to fall back to the CPU reference backend in PR 1. "
+            "Official paths reject this flag."
+        ),
+    )
     return parser
 
 
@@ -1500,6 +1553,10 @@ def main(argv: list[str] | None = None) -> int:
             force=bool(args.force),
             resume=bool(args.resume),
             reuse_completed_artifacts=bool(args.reuse_completed_artifacts),
+            hardware_mode=args.hardware_mode,
+            gpu_device_id=args.gpu_device_id,
+            deterministic_compute=bool(args.deterministic_compute),
+            allow_backend_fallback=bool(args.allow_backend_fallback),
         )
         results.append(
             {

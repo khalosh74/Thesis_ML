@@ -10,6 +10,7 @@ from Thesis_ML.config.paths import (
     DEFAULT_THESIS_CONFIRMATORY_PROTOCOL_PATH,
     PROJECT_ROOT,
 )
+from Thesis_ML.experiments.compute_policy import HARDWARE_MODE_CHOICES
 from Thesis_ML.protocols.loader import load_protocol
 from Thesis_ML.protocols.runner import compile_and_run_protocol
 
@@ -87,6 +88,31 @@ def _build_parser() -> argparse.ArgumentParser:
         default=1,
         help="Operational scheduling control for independent run fan-out. Default: 1 (serial).",
     )
+    parser.add_argument(
+        "--hardware-mode",
+        default="cpu_only",
+        choices=list(HARDWARE_MODE_CHOICES),
+        help=(
+            "Operational compute control only. "
+            "PR 1 official runs remain conservative and admit cpu_only only."
+        ),
+    )
+    parser.add_argument(
+        "--gpu-device-id",
+        type=int,
+        default=None,
+        help="Optional GPU device ID for future GPU-capable operational modes.",
+    )
+    parser.add_argument(
+        "--deterministic-compute",
+        action="store_true",
+        help="Record deterministic compute intent in additive compute metadata.",
+    )
+    parser.add_argument(
+        "--allow-backend-fallback",
+        action="store_true",
+        help="Exploratory-only compute fallback flag. Official PR 1 paths reject it.",
+    )
     return parser
 
 
@@ -111,6 +137,10 @@ def main(argv: list[str] | None = None) -> int:
         resume=bool(args.resume),
         dry_run=bool(args.dry_run),
         max_parallel_runs=int(args.max_parallel_runs),
+        hardware_mode=args.hardware_mode,
+        gpu_device_id=args.gpu_device_id,
+        deterministic_compute=bool(args.deterministic_compute),
+        allow_backend_fallback=bool(args.allow_backend_fallback),
     )
 
     print(
