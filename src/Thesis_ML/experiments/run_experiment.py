@@ -1482,7 +1482,7 @@ def _build_parser() -> argparse.ArgumentParser:
         choices=list(HARDWARE_MODE_CHOICES),
         help=(
             "Operational compute policy only. "
-            "PR 3 enables exploratory torch-gpu execution for ridge in gpu_only mode when capability is available."
+            "PR 4 enables exploratory torch-gpu execution for ridge/logreg in gpu_only mode when capability is available."
         ),
     )
     parser.add_argument(

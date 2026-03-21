@@ -322,10 +322,10 @@ Policy note:
 - compute controls are operational:
   `--hardware-mode {cpu_only,gpu_only,max_both}`, `--gpu-device-id`,
   `--deterministic-compute`, `--allow-backend-fallback`.
-- PR 3 exploratory behavior:
-  `gpu_only` can execute `ridge` through the torch GPU backend when capability is valid;
+- PR 4 exploratory behavior:
+  `gpu_only` can execute `ridge` and `logreg` through the torch GPU backend when capability is valid;
   `max_both` remains metadata/policy only with CPU reference execution.
-- official comparison/protocol runs remain conservative in PR 3:
+- official comparison/protocol runs remain conservative in PR 4:
   `--hardware-mode` must stay `cpu_only`, `--allow-backend-fallback` is rejected,
   and `--gpu-device-id` is invalid with `cpu_only`.
 - comparison/protocol specs must declare one methodology policy:

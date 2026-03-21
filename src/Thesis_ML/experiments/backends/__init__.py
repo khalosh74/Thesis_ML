@@ -19,21 +19,31 @@ from Thesis_ML.experiments.backends.torch_ridge import (
     make_torch_ridge_estimator,
     resolve_torch_ridge_class_weight,
 )
+from Thesis_ML.experiments.backends.torch_logreg import (
+    TORCH_LOGREG_BACKEND_ID,
+    TorchLogisticRegression,
+    make_torch_logreg_estimator,
+    resolve_torch_logreg_class_weight,
+)
 
 __all__ = [
     "BackendResolution",
     "BackendSupport",
     "CPU_REFERENCE_BACKEND_ID",
     "CPU_REFERENCE_MODEL_CONSTRUCTORS",
+    "TORCH_LOGREG_BACKEND_ID",
     "TORCH_RIDGE_BACKEND_ID",
+    "TorchLogisticRegression",
     "TorchRidgeClassifier",
     "EstimatorConstructor",
     "build_cpu_reference_pipeline",
     "effective_backend_family_for_resolution",
     "make_cpu_reference_model",
+    "make_torch_logreg_estimator",
     "make_torch_ridge_estimator",
     "normalize_model_name",
     "resolve_cpu_reference_class_weight",
     "resolve_cpu_reference_constructor",
+    "resolve_torch_logreg_class_weight",
     "resolve_torch_ridge_class_weight",
 ]

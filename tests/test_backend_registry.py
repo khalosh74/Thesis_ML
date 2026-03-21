@@ -11,6 +11,10 @@ from Thesis_ML.experiments.backend_registry import (
     resolve_backend_support,
 )
 from Thesis_ML.experiments.backends.cpu_reference import build_cpu_reference_pipeline
+from Thesis_ML.experiments.backends.torch_logreg import (
+    TORCH_LOGREG_BACKEND_ID,
+    TorchLogisticRegression,
+)
 from Thesis_ML.experiments.backends.torch_ridge import (
     TORCH_RIDGE_BACKEND_ID,
     TorchRidgeClassifier,
@@ -128,13 +132,16 @@ def test_supported_models_resolve_to_cpu_reference_backend(
 
 
 @pytest.mark.parametrize(
-    ("hardware_mode_requested", "hardware_mode_effective", "requested_backend_family"),
+    ("model_name", "hardware_mode_requested", "hardware_mode_effective", "requested_backend_family"),
     [
-        ("gpu_only", "gpu_only", "torch_gpu"),
-        ("max_both", "max_both", "auto_mixed"),
+        ("ridge", "gpu_only", "gpu_only", "torch_gpu"),
+        ("logreg", "gpu_only", "gpu_only", "torch_gpu"),
+        ("ridge", "max_both", "max_both", "auto_mixed"),
+        ("logreg", "max_both", "max_both", "auto_mixed"),
     ],
 )
 def test_effective_backend_family_controls_resolution_not_hardware_mode_metadata(
+    model_name: str,
     hardware_mode_requested: str,
     hardware_mode_effective: str,
     requested_backend_family: str,
@@ -146,13 +153,16 @@ def test_effective_backend_family_controls_resolution_not_hardware_mode_metadata
     )
 
     estimator = make_model(
-        name="ridge",
+        name=model_name,
         seed=7,
         class_weight_policy="balanced",
         compute_policy=compute_policy,
     )
 
-    assert isinstance(estimator, RidgeClassifier)
+    if model_name == "ridge":
+        assert isinstance(estimator, RidgeClassifier)
+    else:
+        assert isinstance(estimator, LogisticRegression)
     assert estimator.class_weight == "balanced"
     assert int(estimator.random_state) == 7
 
@@ -189,7 +199,20 @@ def test_ridge_resolves_to_torch_backend_when_effective_backend_family_is_torch_
     assert estimator.class_weight == "balanced"
 
 
-@pytest.mark.parametrize("model_name", ["logreg", "linearsvc", "dummy"])
+def test_logreg_resolves_to_torch_backend_when_effective_backend_family_is_torch_gpu() -> None:
+    compute_policy = _resolved_torch_policy(model_requested="logreg")
+    resolution = resolve_backend_constructor("logreg", compute_policy)
+    estimator = resolution.build_estimator(seed=11, class_weight_policy="balanced")
+
+    assert resolution.backend_id == TORCH_LOGREG_BACKEND_ID
+    assert resolution.effective_backend_family == "torch_gpu"
+    assert isinstance(estimator, TorchLogisticRegression)
+    assert estimator.gpu_device_id == 0
+    assert estimator.deterministic_compute is True
+    assert estimator.class_weight == "balanced"
+
+
+@pytest.mark.parametrize("model_name", ["linearsvc", "dummy"])
 def test_torch_backend_requests_for_unsupported_models_fail_clearly(model_name: str) -> None:
     compute_policy = _resolved_torch_policy(model_requested=model_name)
 
@@ -197,9 +220,9 @@ def test_torch_backend_requests_for_unsupported_models_fail_clearly(model_name: 
     assert support.supported is False
     assert support.backend_id is None
     assert support.reason is not None
-    assert "Only ridge is implemented for torch_gpu" in support.reason
+    assert "Only ridge and logreg are implemented for torch_gpu" in support.reason
 
-    with pytest.raises(ValueError, match="Only ridge is implemented for torch_gpu"):
+    with pytest.raises(ValueError, match="Only ridge and logreg are implemented for torch_gpu"):
         resolve_backend_constructor(model_name, compute_policy)
 
 

@@ -10,6 +10,10 @@ from Thesis_ML.experiments.backends.cpu_reference import (
     CPU_REFERENCE_BACKEND_ID,
     resolve_cpu_reference_constructor,
 )
+from Thesis_ML.experiments.backends.torch_logreg import (
+    TORCH_LOGREG_BACKEND_ID,
+    make_torch_logreg_estimator,
+)
 from Thesis_ML.experiments.backends.torch_ridge import (
     TORCH_RIDGE_BACKEND_ID,
     make_torch_ridge_estimator,
@@ -23,17 +27,17 @@ def _unsupported_backend_message(
     effective_backend_family: str,
 ) -> str:
     return (
-        "Unsupported backend resolution for PR 3: "
+        "Unsupported backend resolution for PR 4: "
         f"model='{model_name}', effective_backend_family='{effective_backend_family}'. "
         "Supported backend families are: 'sklearn_cpu' for all models and "
-        "'torch_gpu' for ridge only."
+        "'torch_gpu' for ridge/logreg only."
     )
 
 
 def _unsupported_torch_gpu_model_message(model_name: str) -> str:
     return (
-        "Unsupported torch_gpu backend request for PR 3: "
-        f"model='{model_name}'. Only ridge is implemented for torch_gpu."
+        "Unsupported torch_gpu backend request for PR 4: "
+        f"model='{model_name}'. Only ridge and logreg are implemented for torch_gpu."
     )
 
 
@@ -65,7 +69,7 @@ def resolve_backend_support(
         )
 
     if effective_backend_family == "torch_gpu":
-        if normalized_model_name != "ridge":
+        if normalized_model_name not in {"ridge", "logreg"}:
             return BackendSupport(
                 model_name=normalized_model_name,
                 effective_backend_family=effective_backend_family,
@@ -73,11 +77,16 @@ def resolve_backend_support(
                 backend_id=None,
                 reason=_unsupported_torch_gpu_model_message(normalized_model_name),
             )
+        backend_id = (
+            TORCH_RIDGE_BACKEND_ID
+            if normalized_model_name == "ridge"
+            else TORCH_LOGREG_BACKEND_ID
+        )
         return BackendSupport(
             model_name=normalized_model_name,
             effective_backend_family=effective_backend_family,
             supported=True,
-            backend_id=TORCH_RIDGE_BACKEND_ID,
+            backend_id=backend_id,
             reason=None,
         )
     return BackendSupport(
@@ -116,6 +125,20 @@ def resolve_backend_constructor(
 
         def constructor(*, seed: int, class_weight_policy: str = "none"):
             return make_torch_ridge_estimator(
+                seed=seed,
+                class_weight_policy=class_weight_policy,
+                gpu_device_id=int(compute_policy.gpu_device_id),
+                deterministic_compute=bool(compute_policy.deterministic_compute),
+            )
+
+    elif support.backend_id == TORCH_LOGREG_BACKEND_ID:
+        if compute_policy is None or compute_policy.gpu_device_id is None:
+            raise ValueError(
+                "torch_gpu backend resolution requires compute_policy with a resolved gpu_device_id."
+            )
+
+        def constructor(*, seed: int, class_weight_policy: str = "none"):
+            return make_torch_logreg_estimator(
                 seed=seed,
                 class_weight_policy=class_weight_policy,
                 gpu_device_id=int(compute_policy.gpu_device_id),
