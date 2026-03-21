@@ -6,8 +6,9 @@ from Thesis_ML.config.framework_mode import FrameworkMode
 from Thesis_ML.experiments.compute_capabilities import ComputeCapabilitySnapshot
 from Thesis_ML.experiments.compute_policy import (
     CPU_REFERENCE_BACKEND_STACK_ID,
-    GPU_BACKEND_NOT_IMPLEMENTED_REASON,
+    TORCH_GPU_BACKEND_STACK_ID_FALLBACK,
     resolve_compute_policy,
+    stamp_compute_policy_metadata,
 )
 
 
@@ -70,11 +71,10 @@ def test_gpu_only_fails_clearly_when_capability_is_unavailable() -> None:
         )
 
 
-def test_gpu_only_uses_cpu_reference_fallback_when_allowed() -> None:
+def test_gpu_only_resolves_to_torch_backend_when_capable() -> None:
     resolved = resolve_compute_policy(
         framework_mode=FrameworkMode.EXPLORATORY,
         hardware_mode="gpu_only",
-        allow_backend_fallback=True,
         deterministic_compute=True,
         capability_snapshot=_gpu_capability_snapshot(device_id=1),
     )
@@ -82,12 +82,30 @@ def test_gpu_only_uses_cpu_reference_fallback_when_allowed() -> None:
     assert resolved.hardware_mode_requested == "gpu_only"
     assert resolved.hardware_mode_effective == "gpu_only"
     assert resolved.requested_backend_family == "torch_gpu"
-    assert resolved.effective_backend_family == "sklearn_cpu"
+    assert resolved.effective_backend_family == "torch_gpu"
     assert resolved.gpu_device_id == 1
+    assert resolved.backend_stack_id in {"torch_2.4.1__cuda_12.1", TORCH_GPU_BACKEND_STACK_ID_FALLBACK}
+    assert resolved.backend_fallback_used is False
+    assert resolved.backend_fallback_reason is None
+    assert resolved.deterministic_compute is True
+
+
+def test_gpu_only_can_fallback_to_cpu_when_capability_is_unavailable_and_allowed() -> None:
+    resolved = resolve_compute_policy(
+        framework_mode=FrameworkMode.EXPLORATORY,
+        hardware_mode="gpu_only",
+        allow_backend_fallback=True,
+        capability_snapshot=_missing_gpu_snapshot(),
+    )
+
+    assert resolved.hardware_mode_requested == "gpu_only"
+    assert resolved.hardware_mode_effective == "cpu_only"
+    assert resolved.requested_backend_family == "torch_gpu"
+    assert resolved.effective_backend_family == "sklearn_cpu"
     assert resolved.backend_stack_id == CPU_REFERENCE_BACKEND_STACK_ID
     assert resolved.backend_fallback_used is True
-    assert resolved.backend_fallback_reason == GPU_BACKEND_NOT_IMPLEMENTED_REASON
-    assert resolved.deterministic_compute is True
+    assert resolved.backend_fallback_reason is not None
+    assert "gpu_capability_unavailable" in resolved.backend_fallback_reason
 
 
 def test_max_both_without_gpu_degrades_to_cpu_only_without_fallback() -> None:
@@ -133,3 +151,27 @@ def test_official_paths_reject_non_cpu_modes_and_backend_fallback() -> None:
             hardware_mode="cpu_only",
             allow_backend_fallback=True,
         )
+
+
+def test_compute_policy_stamping_includes_runtime_gpu_diagnostics_additively() -> None:
+    resolved = resolve_compute_policy(
+        framework_mode=FrameworkMode.EXPLORATORY,
+        hardware_mode="cpu_only",
+    )
+    payload: dict[str, object] = {}
+    stamp_compute_policy_metadata(
+        payload=payload,
+        compute_policy=resolved,
+        compute_runtime_metadata={
+            "gpu_memory_peak_mb": 512.25,
+            "device_transfer_seconds": 0.123,
+            "torch_deterministic_enforced": True,
+            "torch_deterministic_limitations": None,
+        },
+    )
+
+    assert payload["gpu_memory_peak_mb"] == 512.25
+    assert payload["device_transfer_seconds"] == 0.123
+    assert payload["torch_deterministic_enforced"] is True
+    assert payload["compute_policy"]["gpu_memory_peak_mb"] == 512.25
+    assert payload["compute_policy"]["torch_deterministic_enforced"] is True

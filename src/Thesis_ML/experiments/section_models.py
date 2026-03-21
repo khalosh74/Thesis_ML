@@ -152,6 +152,7 @@ class ModelFitOutput(_SectionModel):
     tuning_best_params_path: Path
     fit_timing_summary: dict[str, Any]
     fit_timing_summary_path: Path
+    compute_runtime_metadata: dict[str, Any] | None = None
 
 
 class InterpretabilityInput(_SectionModel):

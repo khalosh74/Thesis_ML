@@ -269,12 +269,13 @@ Additive timing artifacts (Phase A Slice 1):
 - tuned `best_params_per_fold.csv` includes search timing summary columns.
 - each run emits `fit_timing_summary.json`; path is stamped in `config.json` and `metrics.json`.
 
-Additive compute-policy metadata (PR 1):
+Additive compute-policy metadata (PR 3):
 
 - exploratory, comparison, and protocol CLIs accept operational compute controls:
   `--hardware-mode`, `--gpu-device-id`, `--deterministic-compute`, `--allow-backend-fallback`.
-- PR 1 records resolved compute metadata in run artifacts; it does not introduce a GPU estimator backend, mixed scheduler, or scientific behavior change.
-- official comparison/confirmatory execution remains `cpu_only` only in PR 1, so release validation should treat any non-CPU official compute request as an expected hard failure.
+- PR 3 records resolved compute metadata in run artifacts and enables exploratory `ridge` execution on `torch_gpu` when `gpu_only` capability is valid.
+- PR 3 does not introduce mixed CPU/GPU scheduling and does not change official scientific semantics.
+- official comparison/confirmatory execution remains `cpu_only` only, so release validation should treat any non-CPU official compute request as an expected hard failure.
 
 ## Official RC checklist
 

@@ -37,6 +37,70 @@ def _safe_float_from_cv_results(
     return float(np.nanmean(values))
 
 
+def _extract_fold_compute_runtime_metadata(estimator: Any) -> dict[str, Any] | None:
+    model = getattr(estimator, "named_steps", {}).get("model")
+    if model is None:
+        return None
+    metadata_candidate: Any = None
+    if hasattr(model, "get_backend_runtime_metadata"):
+        metadata_candidate = model.get_backend_runtime_metadata()
+    elif hasattr(model, "backend_runtime_metadata_"):
+        metadata_candidate = getattr(model, "backend_runtime_metadata_")
+    if not isinstance(metadata_candidate, dict):
+        return None
+    return dict(metadata_candidate)
+
+
+def _aggregate_compute_runtime_metadata(
+    fold_metadata_rows: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    if not fold_metadata_rows:
+        return None
+
+    peak_values: list[float] = []
+    transfer_values: list[float] = []
+    deterministic_values: list[bool] = []
+    deterministic_limitations: list[str] = []
+    backend_ids: list[str] = []
+
+    for row in fold_metadata_rows:
+        peak_value = row.get("gpu_memory_peak_mb")
+        if isinstance(peak_value, (int, float)):
+            peak_values.append(float(peak_value))
+
+        transfer_value = row.get("device_transfer_seconds")
+        if isinstance(transfer_value, (int, float)):
+            transfer_values.append(float(transfer_value))
+
+        deterministic_value = row.get("torch_deterministic_enforced")
+        if isinstance(deterministic_value, bool):
+            deterministic_values.append(bool(deterministic_value))
+
+        deterministic_limit = row.get("torch_deterministic_limitations")
+        if isinstance(deterministic_limit, str) and deterministic_limit.strip():
+            deterministic_limitations.append(deterministic_limit.strip())
+
+        backend_id = row.get("backend_id")
+        if isinstance(backend_id, str) and backend_id.strip():
+            backend_ids.append(backend_id.strip())
+
+    payload: dict[str, Any] = {
+        "backend_id": (backend_ids[0] if backend_ids else None),
+        "backend_diagnostics_folds": int(len(fold_metadata_rows)),
+        "gpu_memory_peak_mb": (max(peak_values) if peak_values else None),
+        "device_transfer_seconds": (sum(transfer_values) if transfer_values else None),
+        "torch_deterministic_enforced": (
+            bool(all(deterministic_values)) if deterministic_values else None
+        ),
+        "torch_deterministic_limitations": (
+            ";".join(sorted(set(deterministic_limitations))) if deterministic_limitations else None
+        ),
+    }
+    if len(set(backend_ids)) > 1:
+        payload["backend_id"] = "mixed"
+    return payload
+
+
 def execute_model_fit(section_input: ModelFitInput) -> dict[str, Any]:
     y = section_input.metadata_df[section_input.target_column].astype(str).to_numpy()
 
@@ -186,6 +250,7 @@ def execute_model_fit(section_input: ModelFitInput) -> dict[str, Any]:
     tuning_rows: list[dict[str, Any]] = []
     y_true_all: list[str] = []
     y_pred_all: list[str] = []
+    fold_compute_runtime_metadata: list[dict[str, Any]] = []
 
     for fold_index, (train_idx, test_idx) in enumerate(splits):
         outer_fold_start = perf_counter()
@@ -323,6 +388,9 @@ def execute_model_fit(section_input: ModelFitInput) -> dict[str, Any]:
             fit_start = perf_counter()
             estimator.fit(section_input.x_matrix[train_idx], y[train_idx])
             estimator_fit_elapsed_seconds = float(perf_counter() - fit_start)
+        fold_backend_metadata = _extract_fold_compute_runtime_metadata(estimator)
+        if fold_backend_metadata is not None:
+            fold_compute_runtime_metadata.append(fold_backend_metadata)
 
         if interpretability_enabled:
             if interpretability_dir is None:
@@ -630,6 +698,9 @@ def execute_model_fit(section_input: ModelFitInput) -> dict[str, Any]:
         "tuning_best_params_path": tuning_best_params_path,
         "fit_timing_summary": fit_timing_summary,
         "fit_timing_summary_path": fit_timing_summary_path,
+        "compute_runtime_metadata": _aggregate_compute_runtime_metadata(
+            fold_compute_runtime_metadata
+        ),
     }
 
 

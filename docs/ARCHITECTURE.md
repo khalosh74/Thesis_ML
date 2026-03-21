@@ -90,7 +90,7 @@ Core package root: `src/Thesis_ML/`
 - Resolve run mode (`fresh`, `resume`, `forced_rerun`) and status file.
 - Resolve framework/methodology/metric runtime policy via `experiments/runtime_policies.py`.
 - Resolve operational compute policy/capabilities via `experiments/compute_policy.py` and `experiments/compute_capabilities.py`.
-- Resolve estimator construction through `experiments/backend_registry.py`; in PR 2 this still selects only the CPU reference backend.
+- Resolve estimator construction through `experiments/backend_registry.py`; in PR 3 exploratory `ridge` can resolve to `torch_gpu` when `gpu_only` capability is valid, while other models remain CPU reference.
 - Plan section path from `start_section`/`end_section`.
 - Execute section adapters in order.
 - Build/stamp run artifacts via `experiments/run_artifacts.py`.
@@ -101,7 +101,7 @@ Core package root: `src/Thesis_ML/`
 2. Locked comparison run (`thesisml-run-comparison`)
 - Load and validate registered comparison JSON (`comparison-spec-v1`).
 - Compile declared variants into explicit concrete run specs.
-- Validate official compute controls conservatively before dispatch (`cpu_only` only in PR 1).
+- Validate official compute controls conservatively before dispatch (`cpu_only` only in PR 3 scope).
 - Execute each run spec through existing `run_experiment(...)`.
 - Stamp `framework_mode=locked_comparison` and comparison identity metadata.
 - Emit comparison-level manifests/summaries under `outputs/reports/comparisons/`.
@@ -112,7 +112,7 @@ Core package root: `src/Thesis_ML/`
 3. Confirmatory canonical thesis protocol run (`thesisml-run-protocol`)
 - Load and validate canonical protocol JSON (`thesis-protocol-v1`).
 - Compile official suites into explicit concrete run specs.
-- Validate official compute controls conservatively before dispatch (`cpu_only` only in PR 1).
+- Validate official compute controls conservatively before dispatch (`cpu_only` only in PR 3 scope).
 - Execute each run spec through existing `run_experiment(...)`.
 - Stamp `framework_mode=confirmatory` and `canonical_run=true`.
 - Persist protocol metadata in run artifacts and emit protocol-level manifests/summaries under `outputs/reports/confirmatory/`.
@@ -155,7 +155,7 @@ Framework guardrails:
 - decision metric, tuning metric, and permutation metric are resolved from primary metric and must align (drift raises validation/runtime errors).
 - secondary metrics are emitted for descriptive reporting only.
 - official artifacts (`config.json`, `metrics.json`, comparison/protocol manifests and summaries) persist `metric_policy_effective` for auditability.
-- run artifacts also persist additive compute-policy metadata (`hardware_mode_*`, backend selection/fallback metadata, GPU device metadata when available); in PR 1 the concrete backend remains the CPU reference path.
+- run artifacts also persist additive compute-policy metadata (`hardware_mode_*`, backend selection/fallback metadata, GPU device metadata when available); in PR 3 exploratory `ridge` may execute through `torch_gpu` while official paths remain CPU-only.
 - official comparison/confirmatory runs persist `data_policy_effective` and standardized data-layer artifacts
   (`dataset_card.*`, `dataset_summary.*`, `data_quality_report.json`, class/missingness reports, `leakage_audit.json`,
   and external compatibility artifacts when configured).

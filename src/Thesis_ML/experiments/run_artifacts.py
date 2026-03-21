@@ -122,6 +122,7 @@ def stamp_metrics_artifact(
     timeout_policy_effective: dict[str, Any] | None = None,
     profiling_context: dict[str, Any] | None = None,
     compute_policy: ResolvedComputePolicy | None = None,
+    compute_runtime_metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     if not metrics_path.exists():
         return None
@@ -198,6 +199,7 @@ def stamp_metrics_artifact(
     stamp_compute_policy_metadata(
         payload=persisted_metrics,
         compute_policy=compute_policy,
+        compute_runtime_metadata=compute_runtime_metadata,
     )
     metrics_path.write_text(f"{json.dumps(persisted_metrics, indent=2)}\n", encoding="utf-8")
     return persisted_metrics
@@ -301,6 +303,7 @@ def build_run_config_payload(
     timeout_policy_effective: dict[str, Any] | None = None,
     profiling_context: dict[str, Any] | None = None,
     compute_policy: ResolvedComputePolicy | None = None,
+    compute_runtime_metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     payload = {
         "run_id": run_id,
@@ -459,6 +462,7 @@ def build_run_config_payload(
     stamp_compute_policy_metadata(
         payload=payload,
         compute_policy=compute_policy,
+        compute_runtime_metadata=compute_runtime_metadata,
     )
     return payload
 
@@ -523,6 +527,7 @@ def build_run_result_payload(
     timeout_policy_effective: dict[str, Any] | None = None,
     profiling_context: dict[str, Any] | None = None,
     compute_policy: ResolvedComputePolicy | None = None,
+    compute_runtime_metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     payload = {
         "run_id": run_id,
@@ -637,5 +642,6 @@ def build_run_result_payload(
     stamp_compute_policy_metadata(
         payload=payload,
         compute_policy=compute_policy,
+        compute_runtime_metadata=compute_runtime_metadata,
     )
     return payload

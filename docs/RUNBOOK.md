@@ -319,11 +319,13 @@ Policy note:
 - exploratory mode is flexible and not confirmatory evidence.
 - locked comparison mode allows only declared variants from comparison specs.
 - confirmatory mode must load thesis-critical settings from protocol JSON, not ad hoc CLI flags.
-- compute controls are operational only in PR 1:
+- compute controls are operational:
   `--hardware-mode {cpu_only,gpu_only,max_both}`, `--gpu-device-id`,
   `--deterministic-compute`, `--allow-backend-fallback`.
-- exploratory runs can request and record `gpu_only` or `max_both`, but PR 1 still executes the CPU reference path and records the resolved policy/backend metadata.
-- official comparison/protocol runs remain conservative in PR 1:
+- PR 3 exploratory behavior:
+  `gpu_only` can execute `ridge` through the torch GPU backend when capability is valid;
+  `max_both` remains metadata/policy only with CPU reference execution.
+- official comparison/protocol runs remain conservative in PR 3:
   `--hardware-mode` must stay `cpu_only`, `--allow-backend-fallback` is rejected,
   and `--gpu-device-id` is invalid with `cpu_only`.
 - comparison/protocol specs must declare one methodology policy:

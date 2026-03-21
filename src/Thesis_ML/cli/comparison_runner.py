@@ -91,7 +91,7 @@ def _build_parser() -> argparse.ArgumentParser:
         choices=list(HARDWARE_MODE_CHOICES),
         help=(
             "Operational compute control only. "
-            "PR 1 locked comparisons remain conservative and admit cpu_only only."
+            "Official comparison runs remain conservative and admit cpu_only only."
         ),
     )
     parser.add_argument(
@@ -108,7 +108,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--allow-backend-fallback",
         action="store_true",
-        help="Exploratory-only compute fallback flag. Official PR 1 paths reject it.",
+        help="Exploratory-only compute fallback flag. Official comparison paths reject it.",
     )
     return parser
 

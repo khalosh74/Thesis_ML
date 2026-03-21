@@ -936,6 +936,11 @@ def run_experiment(
     metrics = dict(segment_result.metrics or {})
     spatial_compatibility = segment_result.spatial_compatibility
     interpretability_summary = segment_result.interpretability_summary
+    compute_runtime_metadata = (
+        dict(segment_result.compute_runtime_metadata)
+        if isinstance(segment_result.compute_runtime_metadata, dict)
+        else None
+    )
     identity = resolve_run_identity(
         protocol_context=resolved_protocol_context,
         comparison_context=resolved_comparison_context,
@@ -982,6 +987,7 @@ def run_experiment(
             timeout_policy_effective=timeout_policy_effective,
             profiling_context=resolved_profiling_context,
             compute_policy=resolved_compute_policy,
+            compute_runtime_metadata=compute_runtime_metadata,
         )
     except Exception as exc:
         failure = _failure_payload(exc)
@@ -1137,6 +1143,7 @@ def run_experiment(
             timeout_policy_effective=timeout_policy_effective,
             profiling_context=resolved_profiling_context,
             compute_policy=resolved_compute_policy,
+            compute_runtime_metadata=compute_runtime_metadata,
         )
         config_path.write_text(f"{json.dumps(config, indent=2)}\n", encoding="utf-8")
     except Exception as exc:
@@ -1318,6 +1325,7 @@ def run_experiment(
         timeout_policy_effective=timeout_policy_effective,
         profiling_context=resolved_profiling_context,
         compute_policy=resolved_compute_policy,
+        compute_runtime_metadata=compute_runtime_metadata,
     )
 
 
@@ -1474,7 +1482,7 @@ def _build_parser() -> argparse.ArgumentParser:
         choices=list(HARDWARE_MODE_CHOICES),
         help=(
             "Operational compute policy only. "
-            "PR 1 resolves and records cpu_only | gpu_only | max_both without changing model-fit behavior."
+            "PR 3 enables exploratory torch-gpu execution for ridge in gpu_only mode when capability is available."
         ),
     )
     parser.add_argument(
@@ -1492,8 +1500,8 @@ def _build_parser() -> argparse.ArgumentParser:
         "--allow-backend-fallback",
         action="store_true",
         help=(
-            "Allow exploratory gpu_only requests to fall back to the CPU reference backend in PR 1. "
-            "Official paths reject this flag."
+            "Allow exploratory gpu_only requests to fall back to the CPU reference backend when "
+            "GPU capability is unavailable. Official paths reject this flag."
         ),
     )
     return parser

@@ -18,6 +18,7 @@ GPU_ONLY: HardwareMode = "gpu_only"
 MAX_BOTH: HardwareMode = "max_both"
 CPU_REFERENCE_BACKEND_STACK_ID = "sklearn_cpu_reference_v1"
 GPU_BACKEND_NOT_IMPLEMENTED_REASON = "gpu_backend_not_implemented_pr1"
+TORCH_GPU_BACKEND_STACK_ID_FALLBACK = "torch_gpu_reference_v1"
 COMPUTE_POLICY_FIELD_NAMES: tuple[str, ...] = (
     "hardware_mode_requested",
     "hardware_mode_effective",
@@ -31,6 +32,10 @@ COMPUTE_POLICY_FIELD_NAMES: tuple[str, ...] = (
     "backend_stack_id",
     "backend_fallback_used",
     "backend_fallback_reason",
+    "gpu_memory_peak_mb",
+    "device_transfer_seconds",
+    "torch_deterministic_enforced",
+    "torch_deterministic_limitations",
 )
 
 
@@ -147,12 +152,13 @@ def resolve_compute_policy(
     }:
         if requested_mode != CPU_ONLY:
             raise ValueError(
-                "Official PR 1 compute controls are conservative: "
+                "Official compute controls are conservative in the current rollout: "
                 "hardware_mode must remain 'cpu_only' for confirmatory and locked comparison runs."
             )
         if allow_backend_fallback:
             raise ValueError(
-                "allow_backend_fallback is exploratory-only in PR 1 and is not allowed for official runs."
+                "allow_backend_fallback is exploratory-only in the current rollout and is not "
+                "allowed for official runs."
             )
         return _cpu_reference_policy(
             requested_mode=requested_mode,
@@ -172,31 +178,46 @@ def resolve_compute_policy(
     )
 
     if requested_mode == GPU_ONLY:
-        if not _gpu_compatible(snapshot):
+        if _gpu_compatible(snapshot):
+            return ResolvedComputePolicy(
+                hardware_mode_requested=requested_mode,
+                hardware_mode_effective=GPU_ONLY,
+                requested_backend_family="torch_gpu",
+                effective_backend_family="torch_gpu",
+                gpu_device_id=snapshot.device_id,
+                gpu_device_name=snapshot.device_name,
+                gpu_device_total_memory_mb=snapshot.device_total_memory_mb,
+                deterministic_compute=bool(deterministic_compute),
+                allow_backend_fallback=bool(allow_backend_fallback),
+                backend_stack_id=(
+                    str(snapshot.tested_stack_id).strip() or TORCH_GPU_BACKEND_STACK_ID_FALLBACK
+                ),
+                backend_fallback_used=False,
+                backend_fallback_reason=None,
+            )
+        if not allow_backend_fallback:
             raise ValueError(
                 _compatibility_error_message(
                     hardware_mode=requested_mode,
                     snapshot=snapshot,
                 )
             )
-        if not allow_backend_fallback:
-            raise ValueError(
-                "hardware_mode='gpu_only' requires allow_backend_fallback=true in PR 1 "
-                "because no GPU estimator backend exists yet."
-            )
         return ResolvedComputePolicy(
             hardware_mode_requested=requested_mode,
-            hardware_mode_effective=GPU_ONLY,
+            hardware_mode_effective=CPU_ONLY,
             requested_backend_family="torch_gpu",
             effective_backend_family="sklearn_cpu",
-            gpu_device_id=snapshot.device_id,
-            gpu_device_name=snapshot.device_name,
-            gpu_device_total_memory_mb=snapshot.device_total_memory_mb,
+            gpu_device_id=None,
+            gpu_device_name=None,
+            gpu_device_total_memory_mb=None,
             deterministic_compute=bool(deterministic_compute),
             allow_backend_fallback=True,
             backend_stack_id=CPU_REFERENCE_BACKEND_STACK_ID,
             backend_fallback_used=True,
-            backend_fallback_reason=GPU_BACKEND_NOT_IMPLEMENTED_REASON,
+            backend_fallback_reason=(
+                "gpu_capability_unavailable:"
+                f"{str(snapshot.compatibility_status).strip() or 'unknown'}"
+            ),
         )
 
     if snapshot.requested_device_visible is False:
@@ -267,6 +288,7 @@ def stamp_compute_policy_metadata(
     *,
     payload: dict[str, Any],
     compute_policy: ResolvedComputePolicy | dict[str, Any] | None,
+    compute_runtime_metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     if compute_policy is None:
         return payload
@@ -279,8 +301,22 @@ def stamp_compute_policy_metadata(
         compute_policy_payload = extracted
     else:
         return payload
+    runtime_metadata: dict[str, Any] = {}
+    if isinstance(compute_runtime_metadata, dict):
+        for key in (
+            "gpu_memory_peak_mb",
+            "device_transfer_seconds",
+            "torch_deterministic_enforced",
+            "torch_deterministic_limitations",
+        ):
+            if key in compute_runtime_metadata:
+                runtime_metadata[key] = compute_runtime_metadata.get(key)
     payload.update(compute_policy_payload)
-    payload["compute_policy"] = dict(compute_policy_payload)
+    if runtime_metadata:
+        payload.update(runtime_metadata)
+    nested = dict(compute_policy_payload)
+    nested.update(runtime_metadata)
+    payload["compute_policy"] = nested
     return payload
 
 
@@ -294,6 +330,7 @@ __all__ = [
     "HARDWARE_MODE_CHOICES",
     "HardwareMode",
     "MAX_BOTH",
+    "TORCH_GPU_BACKEND_STACK_ID_FALLBACK",
     "ResolvedComputePolicy",
     "extract_compute_policy_payload",
     "normalize_hardware_mode",

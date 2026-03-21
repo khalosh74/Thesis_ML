@@ -148,6 +148,7 @@ class SegmentExecutionResult:
     metrics: dict[str, Any] | None
     spatial_compatibility: dict[str, Any] | None
     interpretability_summary: dict[str, Any] | None
+    compute_runtime_metadata: dict[str, Any] | None = None
 
 
 def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutionResult:
@@ -192,6 +193,7 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
     fit_output = None
     interpretability_summary: dict[str, Any] | None = None
     metrics: dict[str, Any] | None = None
+    compute_runtime_metadata: dict[str, Any] | None = None
 
     if SectionName.DATASET_SELECTION not in planned_sections and is_after_or_equal(
         planned_sections[-1], SectionName.FEATURE_MATRIX_LOAD
@@ -413,6 +415,11 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
                     extract_linear_coefficients_fn=extract_linear_coefficients_fn,
                 )
             )
+            compute_runtime_metadata = (
+                dict(fit_output.compute_runtime_metadata)
+                if isinstance(fit_output.compute_runtime_metadata, dict)
+                else None
+            )
         elif section == SectionName.INTERPRETABILITY:
             if fit_output is None:
                 raise ValueError(
@@ -586,4 +593,5 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
         metrics=metrics,
         spatial_compatibility=spatial_compatibility,
         interpretability_summary=interpretability_summary,
+        compute_runtime_metadata=compute_runtime_metadata,
     )

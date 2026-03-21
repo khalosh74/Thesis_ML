@@ -11,6 +11,10 @@ from Thesis_ML.experiments.backend_registry import (
     resolve_backend_support,
 )
 from Thesis_ML.experiments.backends.cpu_reference import build_cpu_reference_pipeline
+from Thesis_ML.experiments.backends.torch_ridge import (
+    TORCH_RIDGE_BACKEND_ID,
+    TorchRidgeClassifier,
+)
 from Thesis_ML.experiments.compute_policy import (
     CPU_REFERENCE_BACKEND_STACK_ID,
     ResolvedComputePolicy,
@@ -52,6 +56,23 @@ def _unsupported_backend_policy(effective_backend_family: str) -> ResolvedComput
         deterministic_compute=True,
         allow_backend_fallback=False,
         backend_stack_id="future_backend_stack",
+        backend_fallback_used=False,
+        backend_fallback_reason=None,
+    )
+
+
+def _resolved_torch_policy(*, model_requested: str = "ridge") -> ResolvedComputePolicy:
+    return ResolvedComputePolicy(
+        hardware_mode_requested="gpu_only",
+        hardware_mode_effective="gpu_only",
+        requested_backend_family="torch_gpu",
+        effective_backend_family="torch_gpu",
+        gpu_device_id=0,
+        gpu_device_name="GPU 0",
+        gpu_device_total_memory_mb=12288,
+        deterministic_compute=True,
+        allow_backend_fallback=False,
+        backend_stack_id=f"torch_stack_for_{model_requested}",
         backend_fallback_used=False,
         backend_fallback_reason=None,
     )
@@ -143,13 +164,43 @@ def test_unsupported_future_backend_combinations_fail_clearly(
     compute_policy = _unsupported_backend_policy(effective_backend_family)
 
     support = resolve_backend_support("ridge", compute_policy)
+    if effective_backend_family == "torch_gpu":
+        assert support.supported is True
+        assert support.backend_id == TORCH_RIDGE_BACKEND_ID
+    else:
+        assert support.supported is False
+        assert support.backend_id is None
+        assert support.reason is not None
+        assert "Supported backend families are" in support.reason
+        with pytest.raises(ValueError, match="Supported backend families are"):
+            resolve_backend_constructor("ridge", compute_policy)
+
+
+def test_ridge_resolves_to_torch_backend_when_effective_backend_family_is_torch_gpu() -> None:
+    compute_policy = _resolved_torch_policy()
+    resolution = resolve_backend_constructor("ridge", compute_policy)
+    estimator = resolution.build_estimator(seed=5, class_weight_policy="balanced")
+
+    assert resolution.backend_id == TORCH_RIDGE_BACKEND_ID
+    assert resolution.effective_backend_family == "torch_gpu"
+    assert isinstance(estimator, TorchRidgeClassifier)
+    assert estimator.gpu_device_id == 0
+    assert estimator.deterministic_compute is True
+    assert estimator.class_weight == "balanced"
+
+
+@pytest.mark.parametrize("model_name", ["logreg", "linearsvc", "dummy"])
+def test_torch_backend_requests_for_unsupported_models_fail_clearly(model_name: str) -> None:
+    compute_policy = _resolved_torch_policy(model_requested=model_name)
+
+    support = resolve_backend_support(model_name, compute_policy)
     assert support.supported is False
     assert support.backend_id is None
     assert support.reason is not None
-    assert "Only the CPU reference backend ('sklearn_cpu') is implemented" in support.reason
+    assert "Only ridge is implemented for torch_gpu" in support.reason
 
-    with pytest.raises(ValueError, match="Only the CPU reference backend"):
-        resolve_backend_constructor("ridge", compute_policy)
+    with pytest.raises(ValueError, match="Only ridge is implemented for torch_gpu"):
+        resolve_backend_constructor(model_name, compute_policy)
 
 
 def test_cpu_reference_pipeline_preserves_expected_behavior_contracts() -> None:
