@@ -17,7 +17,10 @@ from Thesis_ML.comparisons.models import (
 )
 from Thesis_ML.config.framework_mode import FrameworkMode
 from Thesis_ML.config.metric_policy import resolve_effective_metric_policy
+from Thesis_ML.experiments.backend_registry import resolve_backend_support
 from Thesis_ML.experiments.compute_policy import (
+    GPU_ONLY,
+    ResolvedComputePolicy,
     extract_compute_policy_payload,
     resolve_compute_policy,
 )
@@ -41,6 +44,12 @@ from Thesis_ML.experiments.runtime_policies import (
 )
 from Thesis_ML.experiments.timeout_watchdog import execute_run_with_timeout_watchdog
 from Thesis_ML.verification.official_artifacts import verify_official_artifacts
+
+_OFFICIAL_LOCKED_COMPARISON_GPU_ALLOWLIST: frozenset[tuple[str, str]] = frozenset(
+    {
+        ("ridge", "torch_gpu"),
+    }
+)
 
 
 def _comparison_output_dir(comparison: ComparisonSpec, reports_root: Path | str) -> Path:
@@ -107,6 +116,44 @@ def _comparison_context_payload(
         context_name="comparison_context",
         context=payload,
     )
+
+
+def _validate_official_comparison_gpu_admission(
+    *,
+    compiled_manifest: CompiledComparisonManifest,
+    compute_policy: ResolvedComputePolicy,
+) -> None:
+    if compute_policy.hardware_mode_requested != GPU_ONLY:
+        return
+
+    backend_family = str(compute_policy.effective_backend_family)
+    disallowed_runs: list[str] = []
+    unsupported_runs: list[str] = []
+    for run_spec in compiled_manifest.runs:
+        model_name = str(run_spec.model).strip().lower()
+        if (model_name, backend_family) not in _OFFICIAL_LOCKED_COMPARISON_GPU_ALLOWLIST:
+            disallowed_runs.append(f"{run_spec.run_id}:{model_name}")
+            continue
+        backend_support = resolve_backend_support(model_name, compute_policy)
+        if not backend_support.supported:
+            reason = str(backend_support.reason or "unsupported_backend_combination")
+            unsupported_runs.append(f"{run_spec.run_id}:{model_name}:{reason}")
+
+    if disallowed_runs or unsupported_runs:
+        allowed_combinations = ", ".join(
+            f"{model_name}/{family}"
+            for model_name, family in sorted(_OFFICIAL_LOCKED_COMPARISON_GPU_ALLOWLIST)
+        )
+        detail_parts = []
+        if disallowed_runs:
+            detail_parts.append("disallowed_model_runs=" + ", ".join(disallowed_runs))
+        if unsupported_runs:
+            detail_parts.append("unsupported_backend_runs=" + ", ".join(unsupported_runs))
+        detail_text = "; ".join(detail_parts)
+        raise ValueError(
+            "Official locked comparison gpu_only admission rejected. "
+            f"Approved model/backend combinations: {allowed_combinations}. {detail_text}"
+        )
 
 
 def _to_run_result_success(
@@ -409,12 +456,16 @@ def execute_compiled_comparison(
     if int(max_parallel_runs) <= 0:
         raise ValueError("max_parallel_runs must be >= 1.")
     resolved_max_parallel_runs = int(max_parallel_runs)
-    resolve_compute_policy(
+    resolved_compute_policy = resolve_compute_policy(
         framework_mode=FrameworkMode.LOCKED_COMPARISON,
         hardware_mode=hardware_mode,
         gpu_device_id=gpu_device_id,
         deterministic_compute=deterministic_compute,
         allow_backend_fallback=allow_backend_fallback,
+    )
+    _validate_official_comparison_gpu_admission(
+        compiled_manifest=compiled_manifest,
+        compute_policy=resolved_compute_policy,
     )
 
     run_results: list[ComparisonRunResult] = []

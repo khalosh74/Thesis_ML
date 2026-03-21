@@ -223,7 +223,7 @@ def test_comparison_runner_rejects_non_cpu_compute_controls(
 ) -> None:
     spec = load_comparison_spec(_comparison_spec_path())
 
-    with pytest.raises(ValueError, match="hardware_mode must remain 'cpu_only'"):
+    with pytest.raises(ValueError, match="deterministic_compute=true"):
         compile_and_run_comparison(
             comparison=spec,
             index_csv=comparison_dataset["index_csv"],
@@ -233,6 +233,18 @@ def test_comparison_runner_rejects_non_cpu_compute_controls(
             variant_ids=["ridge"],
             dry_run=True,
             hardware_mode="gpu_only",
+        )
+
+    with pytest.raises(ValueError, match="do not admit hardware_mode='max_both'"):
+        compile_and_run_comparison(
+            comparison=spec,
+            index_csv=comparison_dataset["index_csv"],
+            data_root=comparison_dataset["data_root"],
+            cache_dir=comparison_dataset["cache_dir"],
+            reports_root=comparison_dataset["reports_root"],
+            variant_ids=["ridge"],
+            dry_run=True,
+            hardware_mode="max_both",
         )
 
     with pytest.raises(ValueError, match="allow_backend_fallback is exploratory-only"):

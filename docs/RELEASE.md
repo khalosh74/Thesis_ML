@@ -278,7 +278,12 @@ Additive compute-policy metadata and scheduling (PR 5):
 - PR 5 records resolved compute metadata in run artifacts and enables exploratory run-level
   `max_both` CPU/GPU lane assignment while preserving model/scientific semantics.
 - PR 5 does not introduce in-fit hybrid execution and does not change official scientific semantics.
-- official comparison/confirmatory execution remains `cpu_only` only, so release validation should treat any non-CPU official compute request as an expected hard failure.
+- PR 6 introduces locked-comparison GPU admission gates:
+  - official comparison `gpu_only` is selectively admitted only for explicit approved combinations (currently `ridge` + `torch_gpu`);
+  - `deterministic_compute=true` is required;
+  - `allow_backend_fallback=true` remains rejected;
+  - official `max_both` remains rejected.
+- confirmatory official execution remains `cpu_only` only; non-CPU confirmatory requests remain expected hard failures.
 
 ## Official RC checklist
 
