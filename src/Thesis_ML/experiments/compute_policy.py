@@ -11,6 +11,7 @@ from Thesis_ML.experiments.compute_capabilities import (
 
 HardwareMode = Literal["cpu_only", "gpu_only", "max_both"]
 BackendFamily = Literal["sklearn_cpu", "torch_gpu", "auto_mixed"]
+ComputeLane = Literal["cpu", "gpu"]
 
 HARDWARE_MODE_CHOICES: tuple[HardwareMode, ...] = ("cpu_only", "gpu_only", "max_both")
 CPU_ONLY: HardwareMode = "cpu_only"
@@ -32,6 +33,10 @@ COMPUTE_POLICY_FIELD_NAMES: tuple[str, ...] = (
     "backend_stack_id",
     "backend_fallback_used",
     "backend_fallback_reason",
+    "assigned_compute_lane",
+    "assigned_backend_family",
+    "lane_assignment_reason",
+    "scheduler_mode_effective",
     "gpu_memory_peak_mb",
     "device_transfer_seconds",
     "torch_deterministic_enforced",
@@ -53,6 +58,10 @@ class ResolvedComputePolicy:
     backend_stack_id: str
     backend_fallback_used: bool
     backend_fallback_reason: str | None
+    assigned_compute_lane: ComputeLane | None = None
+    assigned_backend_family: BackendFamily | None = None
+    lane_assignment_reason: str | None = None
+    scheduler_mode_effective: HardwareMode | None = None
 
     def to_payload(self) -> dict[str, Any]:
         return {
@@ -68,6 +77,10 @@ class ResolvedComputePolicy:
             "backend_stack_id": str(self.backend_stack_id),
             "backend_fallback_used": bool(self.backend_fallback_used),
             "backend_fallback_reason": self.backend_fallback_reason,
+            "assigned_compute_lane": self.assigned_compute_lane,
+            "assigned_backend_family": self.assigned_backend_family,
+            "lane_assignment_reason": self.lane_assignment_reason,
+            "scheduler_mode_effective": self.scheduler_mode_effective,
         }
 
 
@@ -322,6 +335,7 @@ def stamp_compute_policy_metadata(
 
 __all__ = [
     "BackendFamily",
+    "ComputeLane",
     "COMPUTE_POLICY_FIELD_NAMES",
     "CPU_ONLY",
     "CPU_REFERENCE_BACKEND_STACK_ID",

@@ -38,6 +38,12 @@ from Thesis_ML.experiments.compute_policy import (
     HARDWARE_MODE_CHOICES,
     resolve_compute_policy,
 )
+from Thesis_ML.experiments.compute_scheduler import (
+    ComputeRunAssignment,
+    ComputeRunRequest,
+    materialize_scheduled_compute_policy,
+    plan_compute_schedule,
+)
 from Thesis_ML.experiments.data_reporting import write_official_data_artifacts
 from Thesis_ML.experiments.errors import exception_failure_payload
 from Thesis_ML.experiments.execution_policy import (
@@ -337,6 +343,9 @@ def run_experiment(
     gpu_device_id: int | None = None,
     deterministic_compute: bool = False,
     allow_backend_fallback: bool = False,
+    max_parallel_runs: int = 1,
+    max_parallel_gpu_runs: int = 1,
+    scheduled_compute_assignment: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Run one leakage-safe grouped-CV experiment and write standardized artifacts."""
     index_csv = Path(index_csv)
@@ -649,6 +658,44 @@ def run_experiment(
     artifact_registry_path = reports_root / "artifact_registry.sqlite3"
     git_provenance = collect_git_provenance()
     code_ref = str(git_provenance.get("git_commit") or "") or None
+
+    if resolved_framework_mode == FrameworkMode.EXPLORATORY:
+        compute_schedule_start = perf_counter()
+        if scheduled_compute_assignment is not None:
+            scheduler_assignment = ComputeRunAssignment.from_payload(
+                scheduled_compute_assignment,
+                default_order_index=0,
+                default_run_id=str(resolved_run_id),
+                default_model_name=str(model),
+            )
+            if str(scheduler_assignment.run_id) != str(resolved_run_id):
+                raise ValueError(
+                    "scheduled_compute_assignment.run_id does not match run_experiment run_id."
+                )
+            if str(scheduler_assignment.model_name).strip().lower() != str(model).strip().lower():
+                raise ValueError(
+                    "scheduled_compute_assignment.model_name does not match run_experiment model."
+                )
+        else:
+            [scheduler_assignment] = plan_compute_schedule(
+                run_requests=[
+                    ComputeRunRequest(
+                        order_index=0,
+                        run_id=str(resolved_run_id),
+                        model_name=str(model),
+                    )
+                ],
+                base_compute_policy=resolved_compute_policy,
+                max_parallel_runs=int(max_parallel_runs),
+                max_parallel_gpu_runs=int(max_parallel_gpu_runs),
+            )
+        resolved_compute_policy = materialize_scheduled_compute_policy(
+            base_compute_policy=resolved_compute_policy,
+            assignment=scheduler_assignment,
+        )
+        stage_timings["compute_schedule_resolution"] = float(
+            perf_counter() - compute_schedule_start
+        )
 
     if resolved_framework_mode in {
         FrameworkMode.CONFIRMATORY,
@@ -1477,12 +1524,31 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Allow reusing completed same-run section artifacts when available.",
     )
     parser.add_argument(
+        "--max-parallel-runs",
+        type=int,
+        default=1,
+        help=(
+            "Deterministic scheduling window used for exploratory run-level lane planning. "
+            "Does not change scientific semantics."
+        ),
+    )
+    parser.add_argument(
+        "--max-parallel-gpu-runs",
+        type=int,
+        default=1,
+        help=(
+            "Maximum GPU-lane slots per exploratory scheduling window when hardware-mode is "
+            "gpu_only or max_both."
+        ),
+    )
+    parser.add_argument(
         "--hardware-mode",
         default="cpu_only",
         choices=list(HARDWARE_MODE_CHOICES),
         help=(
             "Operational compute policy only. "
-            "PR 4 enables exploratory torch-gpu execution for ridge/logreg in gpu_only mode when capability is available."
+            "PR 5 adds exploratory max_both run-level lane scheduling. "
+            "Official paths remain CPU-only."
         ),
     )
     parser.add_argument(
@@ -1515,12 +1581,61 @@ def main(argv: list[str] | None = None) -> int:
     models = list(MODEL_NAMES) if args.model == "all" else [args.model]
     subgroup_dimensions = list(args.subgroup_dimension) if list(args.subgroup_dimension) else None
     results: list[dict[str, Any]] = []
+    run_batch: list[dict[str, Any]] = []
+    if args.model == "all":
+        base_run_id = args.run_id or datetime.now().strftime("%Y%m%d_%H%M%S")
+        for order_index, model_name in enumerate(models):
+            run_batch.append(
+                {
+                    "order_index": int(order_index),
+                    "model_name": str(model_name),
+                    "run_id": f"{base_run_id}_{model_name}_{args.target}",
+                }
+            )
+    else:
+        run_batch.append(
+            {
+                "order_index": 0,
+                "model_name": str(models[0]),
+                "run_id": args.run_id,
+            }
+        )
 
-    for model_name in models:
-        model_run_id = args.run_id
-        if args.model == "all":
-            base = args.run_id or datetime.now().strftime("%Y%m%d_%H%M%S")
-            model_run_id = f"{base}_{model_name}_{args.target}"
+    scheduled_assignments_by_run_id: dict[str, dict[str, Any]] = {}
+    if len(run_batch) > 1:
+        base_compute_policy = resolve_compute_policy(
+            framework_mode=FrameworkMode.EXPLORATORY,
+            hardware_mode=args.hardware_mode,
+            gpu_device_id=args.gpu_device_id,
+            deterministic_compute=bool(args.deterministic_compute),
+            allow_backend_fallback=bool(args.allow_backend_fallback),
+        )
+        schedule = plan_compute_schedule(
+            run_requests=[
+                ComputeRunRequest(
+                    order_index=int(run_spec["order_index"]),
+                    run_id=str(run_spec["run_id"]),
+                    model_name=str(run_spec["model_name"]),
+                )
+                for run_spec in run_batch
+            ],
+            base_compute_policy=base_compute_policy,
+            max_parallel_runs=int(args.max_parallel_runs),
+            max_parallel_gpu_runs=int(args.max_parallel_gpu_runs),
+        )
+        scheduled_assignments_by_run_id = {
+            str(assignment.run_id): assignment.to_payload() for assignment in schedule
+        }
+
+    for run_spec in run_batch:
+        model_name = str(run_spec["model_name"])
+        model_run_id_raw = run_spec.get("run_id")
+        model_run_id = str(model_run_id_raw) if model_run_id_raw is not None else None
+        scheduled_assignment = (
+            scheduled_assignments_by_run_id.get(model_run_id, None)
+            if model_run_id is not None
+            else None
+        )
 
         result = run_experiment(
             index_csv=Path(args.index_csv),
@@ -1569,6 +1684,9 @@ def main(argv: list[str] | None = None) -> int:
             gpu_device_id=args.gpu_device_id,
             deterministic_compute=bool(args.deterministic_compute),
             allow_backend_fallback=bool(args.allow_backend_fallback),
+            max_parallel_runs=int(args.max_parallel_runs),
+            max_parallel_gpu_runs=int(args.max_parallel_gpu_runs),
+            scheduled_compute_assignment=scheduled_assignment,
         )
         results.append(
             {

@@ -321,11 +321,12 @@ Policy note:
 - confirmatory mode must load thesis-critical settings from protocol JSON, not ad hoc CLI flags.
 - compute controls are operational:
   `--hardware-mode {cpu_only,gpu_only,max_both}`, `--gpu-device-id`,
-  `--deterministic-compute`, `--allow-backend-fallback`.
-- PR 4 exploratory behavior:
-  `gpu_only` can execute `ridge` and `logreg` through the torch GPU backend when capability is valid;
-  `max_both` remains metadata/policy only with CPU reference execution.
-- official comparison/protocol runs remain conservative in PR 4:
+  `--deterministic-compute`, `--allow-backend-fallback`,
+  `--max-parallel-runs`, `--max-parallel-gpu-runs`.
+- PR 5 exploratory behavior:
+  `gpu_only` can execute `ridge` and `logreg` through the torch GPU backend when capability is valid.
+  `max_both` now performs deterministic run-level CPU/GPU lane assignment (no in-fit hybrid execution).
+- official comparison/protocol runs remain conservative in PR 5:
   `--hardware-mode` must stay `cpu_only`, `--allow-backend-fallback` is rejected,
   and `--gpu-device-id` is invalid with `cpu_only`.
 - comparison/protocol specs must declare one methodology policy:
