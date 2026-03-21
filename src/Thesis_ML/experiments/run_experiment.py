@@ -17,8 +17,6 @@ import nibabel as nib
 import numpy as np
 import pandas as pd
 import sklearn
-from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import StandardScaler
 
 from Thesis_ML.artifacts.registry import (
     ARTIFACT_TYPE_EXPERIMENT_REPORT,
@@ -58,7 +56,7 @@ from Thesis_ML.experiments.model_catalog import (
 from Thesis_ML.experiments.model_catalog import (
     projected_runtime_seconds as resolve_projected_runtime_seconds,
 )
-from Thesis_ML.experiments.model_factory import MODEL_NAMES, make_model
+from Thesis_ML.experiments.model_factory import MODEL_NAMES, build_pipeline, make_model
 from Thesis_ML.experiments.official_contracts import (
     validate_official_preflight,
     validate_run_artifact_contract,
@@ -143,26 +141,31 @@ def _failure_payload(exc: Exception) -> dict[str, Any]:
     return exception_failure_payload(exc, default_stage="runtime")
 
 
-def _make_model(name: str, seed: int, class_weight_policy: str = "none") -> Any:
+def _make_model(
+    name: str,
+    seed: int,
+    class_weight_policy: str = "none",
+    compute_policy=None,
+) -> Any:
     return make_model(
         name=name,
         seed=seed,
         class_weight_policy=class_weight_policy,
+        compute_policy=compute_policy,
     )
 
 
-def _build_pipeline(model_name: str, seed: int, class_weight_policy: str = "none"):
-    model = _make_model(
-        name=model_name,
+def _build_pipeline(
+    model_name: str,
+    seed: int,
+    class_weight_policy: str = "none",
+    compute_policy=None,
+):
+    return build_pipeline(
+        model_name=model_name,
         seed=seed,
         class_weight_policy=class_weight_policy,
-    )
-    # fMRI voxel vectors are dense numeric arrays; centered scaling is appropriate.
-    return Pipeline(
-        steps=[
-            ("scaler", StandardScaler(with_mean=True, with_std=True)),
-            ("model", model),
-        ]
+        compute_policy=compute_policy,
     )
 
 
@@ -892,6 +895,7 @@ def run_experiment(
                             model_name=model_name,
                             seed=seed,
                             class_weight_policy=methodology_policy.class_weight_policy.value,
+                            compute_policy=resolved_compute_policy,
                         ),
                         load_features_from_cache_fn=_load_features_from_cache,
                         scores_for_predictions_fn=_scores_for_predictions,

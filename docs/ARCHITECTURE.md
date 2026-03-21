@@ -33,6 +33,8 @@ Core package root: `src/Thesis_ML/`
   - indexing, cache extraction, SPM utilities
 - `experiments/`
   - full pipeline wrapper (`run_experiment.py`)
+  - backend registry (`backend_registry.py`)
+  - backend implementations (`backends/`)
   - compute capability probing (`compute_capabilities.py`)
   - compute policy resolution/stamping (`compute_policy.py`)
   - official preflight + artifact contract validation (`official_contracts.py`)
@@ -88,6 +90,7 @@ Core package root: `src/Thesis_ML/`
 - Resolve run mode (`fresh`, `resume`, `forced_rerun`) and status file.
 - Resolve framework/methodology/metric runtime policy via `experiments/runtime_policies.py`.
 - Resolve operational compute policy/capabilities via `experiments/compute_policy.py` and `experiments/compute_capabilities.py`.
+- Resolve estimator construction through `experiments/backend_registry.py`; in PR 2 this still selects only the CPU reference backend.
 - Plan section path from `start_section`/`end_section`.
 - Execute section adapters in order.
 - Build/stamp run artifacts via `experiments/run_artifacts.py`.
