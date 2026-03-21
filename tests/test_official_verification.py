@@ -512,6 +512,34 @@ def test_verify_official_artifacts_resolves_relative_report_dirs(tmp_path: Path)
     assert summary["passed"] is True
 
 
+def test_verify_official_artifacts_requires_explicit_lane_metadata_for_official_max_both(
+    tmp_path: Path,
+) -> None:
+    output_dir = tmp_path / "protocol_runs" / "thesis-canonical__1.0.0"
+    run_dir = _write_confirmatory_output(output_dir)
+
+    config_path = run_dir / "config.json"
+    metrics_path = run_dir / "metrics.json"
+    config_payload = json.loads(config_path.read_text(encoding="utf-8"))
+    metrics_payload = json.loads(metrics_path.read_text(encoding="utf-8"))
+
+    for payload in (config_payload, metrics_payload):
+        payload["hardware_mode_requested"] = "max_both"
+        payload["hardware_mode_effective"] = "max_both"
+        payload["deterministic_compute"] = True
+        payload["backend_fallback_used"] = False
+        payload["backend_fallback_reason"] = None
+
+    config_path.write_text(f"{json.dumps(config_payload, indent=2)}\n", encoding="utf-8")
+    metrics_path.write_text(f"{json.dumps(metrics_payload, indent=2)}\n", encoding="utf-8")
+
+    summary = verify_official_artifacts(output_dir=output_dir)
+    assert summary["passed"] is False
+    assert any(
+        issue["code"] == "official_max_both_field_missing" for issue in summary["issues"]
+    )
+
+
 def test_compare_official_outputs_detects_deterministic_mismatch(tmp_path: Path) -> None:
     left_dir = tmp_path / "left"
     right_dir = tmp_path / "right"

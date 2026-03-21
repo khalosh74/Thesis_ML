@@ -288,6 +288,11 @@ Additive compute-policy metadata and scheduling (PR 5):
   - `deterministic_compute=true` is required;
   - `allow_backend_fallback=true` remains rejected;
   - official `max_both` remains rejected.
+- PR 8 adds conservative official `max_both` admission for locked comparison only:
+  - deterministic compute is required and backend fallback remains rejected;
+  - lane assignment remains run-level only (no in-fit hybrid execution);
+  - only explicit approved model/backend combinations are GPU-lane eligible (currently `ridge` + `torch_gpu`);
+  - confirmatory `max_both` remains rejected.
 
 ## Official RC checklist
 

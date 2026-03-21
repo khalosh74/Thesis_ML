@@ -326,11 +326,13 @@ Policy note:
 - PR 5 exploratory behavior:
   `gpu_only` can execute `ridge` and `logreg` through the torch GPU backend when capability is valid.
   `max_both` now performs deterministic run-level CPU/GPU lane assignment (no in-fit hybrid execution).
-- PR 7 official behavior:
+- PR 8 official behavior:
   locked comparison and confirmatory protocol can admit `--hardware-mode gpu_only` only for
   explicit approved combinations (currently `ridge` on `torch_gpu`).
-  `--deterministic-compute` is required, `--allow-backend-fallback` is rejected,
-  and official `--hardware-mode max_both` remains rejected.
+  locked comparison can now admit `--hardware-mode max_both` conservatively with deterministic
+  compute, no fallback, and explicit run-level lane stamping; only approved model/backend
+  combinations are GPU-lane eligible (currently `ridge` on `torch_gpu`).
+  confirmatory `--hardware-mode max_both` remains rejected.
   unsupported official GPU model/backend requests still fail clearly.
 - comparison/protocol specs must declare one methodology policy:
   `fixed_baselines_only` or `grouped_nested_tuning`.

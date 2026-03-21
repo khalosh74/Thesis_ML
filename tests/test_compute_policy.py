@@ -188,12 +188,35 @@ def test_confirmatory_gpu_only_resolves_when_deterministic_and_capable() -> None
     assert resolved.backend_fallback_used is False
 
 
-def test_locked_comparison_paths_enforce_pr6_gates() -> None:
-    with pytest.raises(ValueError, match="do not admit hardware_mode='max_both'"):
+def test_locked_comparison_paths_enforce_pr6_pr8_gates() -> None:
+    with pytest.raises(ValueError, match="max_both execution requires deterministic_compute=true"):
         resolve_compute_policy(
             framework_mode=FrameworkMode.LOCKED_COMPARISON,
             hardware_mode="max_both",
         )
+
+    with pytest.raises(ValueError, match="requires compatible GPU capability"):
+        resolve_compute_policy(
+            framework_mode=FrameworkMode.LOCKED_COMPARISON,
+            hardware_mode="max_both",
+            deterministic_compute=True,
+            capability_snapshot=_missing_gpu_snapshot(),
+        )
+
+    resolved_max_both = resolve_compute_policy(
+        framework_mode=FrameworkMode.LOCKED_COMPARISON,
+        hardware_mode="max_both",
+        deterministic_compute=True,
+        capability_snapshot=_gpu_capability_snapshot(device_id=0),
+    )
+    assert resolved_max_both.hardware_mode_requested == "max_both"
+    assert resolved_max_both.hardware_mode_effective == "max_both"
+    assert resolved_max_both.requested_backend_family == "auto_mixed"
+    assert resolved_max_both.effective_backend_family == "sklearn_cpu"
+    assert resolved_max_both.gpu_device_id == 0
+    assert resolved_max_both.deterministic_compute is True
+    assert resolved_max_both.allow_backend_fallback is False
+    assert resolved_max_both.backend_fallback_used is False
 
     with pytest.raises(ValueError, match="deterministic_compute=true"):
         resolve_compute_policy(

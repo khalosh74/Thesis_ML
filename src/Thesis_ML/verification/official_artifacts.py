@@ -317,6 +317,123 @@ def _verify_data_layer_artifacts(
                 )
 
 
+def _verify_official_max_both_metadata(
+    *,
+    config_payload: dict[str, Any],
+    metrics_payload: dict[str, Any],
+    issues: list[dict[str, Any]],
+    report_dir: Path,
+) -> None:
+    config_mode = str(config_payload.get("hardware_mode_requested", "")).strip().lower()
+    metrics_mode = str(metrics_payload.get("hardware_mode_requested", "")).strip().lower()
+    if "max_both" not in {config_mode, metrics_mode}:
+        return
+
+    if config_mode != "max_both" or metrics_mode != "max_both":
+        _add_issue(
+            issues,
+            code="official_max_both_mode_drift",
+            message="hardware_mode_requested must match as 'max_both' in config/metrics.",
+            path=report_dir,
+            details={"config_mode": config_mode, "metrics_mode": metrics_mode},
+        )
+
+    required_fields = (
+        "hardware_mode_requested",
+        "hardware_mode_effective",
+        "assigned_compute_lane",
+        "assigned_backend_family",
+        "lane_assignment_reason",
+        "scheduler_mode_effective",
+        "deterministic_compute",
+        "backend_stack_id",
+        "backend_fallback_used",
+        "backend_fallback_reason",
+    )
+    for field_name in required_fields:
+        if field_name not in config_payload or field_name not in metrics_payload:
+            _add_issue(
+                issues,
+                code="official_max_both_field_missing",
+                message=f"Official max_both run metadata is missing '{field_name}'.",
+                path=report_dir,
+            )
+
+    config_lane = str(config_payload.get("assigned_compute_lane", "")).strip().lower()
+    metrics_lane = str(metrics_payload.get("assigned_compute_lane", "")).strip().lower()
+    if config_lane not in {"cpu", "gpu"} or metrics_lane not in {"cpu", "gpu"}:
+        _add_issue(
+            issues,
+            code="official_max_both_lane_invalid",
+            message="Official max_both assigned_compute_lane must be cpu or gpu in config/metrics.",
+            path=report_dir,
+            details={"config_lane": config_lane, "metrics_lane": metrics_lane},
+        )
+        return
+    if config_lane != metrics_lane:
+        _add_issue(
+            issues,
+            code="official_max_both_lane_drift",
+            message="Official max_both assigned_compute_lane differs between config and metrics.",
+            path=report_dir,
+            details={"config_lane": config_lane, "metrics_lane": metrics_lane},
+        )
+
+    if bool(config_payload.get("deterministic_compute")) is not True or bool(
+        metrics_payload.get("deterministic_compute")
+    ) is not True:
+        _add_issue(
+            issues,
+            code="official_max_both_determinism_missing",
+            message="Official max_both requires deterministic_compute=true.",
+            path=report_dir,
+        )
+
+    if bool(config_payload.get("backend_fallback_used")) or bool(
+        metrics_payload.get("backend_fallback_used")
+    ):
+        _add_issue(
+            issues,
+            code="official_max_both_fallback_forbidden",
+            message="Official max_both forbids backend fallback.",
+            path=report_dir,
+        )
+
+    config_backend = str(config_payload.get("assigned_backend_family", "")).strip().lower()
+    metrics_backend = str(metrics_payload.get("assigned_backend_family", "")).strip().lower()
+    if config_backend != metrics_backend:
+        _add_issue(
+            issues,
+            code="official_max_both_backend_drift",
+            message="Official max_both assigned_backend_family differs between config and metrics.",
+            path=report_dir,
+            details={"config_backend": config_backend, "metrics_backend": metrics_backend},
+        )
+
+    if config_lane == "gpu":
+        if config_backend != "torch_gpu" or metrics_backend != "torch_gpu":
+            _add_issue(
+                issues,
+                code="official_max_both_gpu_backend_invalid",
+                message="Official max_both GPU lane requires assigned_backend_family='torch_gpu'.",
+                path=report_dir,
+            )
+        if config_payload.get("gpu_device_id") is None or metrics_payload.get("gpu_device_id") is None:
+            _add_issue(
+                issues,
+                code="official_max_both_gpu_device_missing",
+                message="Official max_both GPU lane requires gpu_device_id in config and metrics.",
+                path=report_dir,
+            )
+    elif config_backend != "sklearn_cpu" or metrics_backend != "sklearn_cpu":
+        _add_issue(
+            issues,
+            code="official_max_both_cpu_backend_invalid",
+            message="Official max_both CPU lane requires assigned_backend_family='sklearn_cpu'.",
+            path=report_dir,
+        )
+
+
 def _verify_confirmatory_reporting_contract(
     *,
     suite_summary: dict[str, Any] | None,
@@ -812,6 +929,12 @@ def verify_official_artifacts(
                 )
 
         _verify_metric_policy(
+            config_payload=config_payload,
+            metrics_payload=metrics_payload,
+            issues=issues,
+            report_dir=report_dir,
+        )
+        _verify_official_max_both_metadata(
             config_payload=config_payload,
             metrics_payload=metrics_payload,
             issues=issues,

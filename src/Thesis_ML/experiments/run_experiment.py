@@ -659,7 +659,10 @@ def run_experiment(
     git_provenance = collect_git_provenance()
     code_ref = str(git_provenance.get("git_commit") or "") or None
 
-    if resolved_framework_mode == FrameworkMode.EXPLORATORY:
+    if (
+        resolved_framework_mode == FrameworkMode.EXPLORATORY
+        or scheduled_compute_assignment is not None
+    ):
         compute_schedule_start = perf_counter()
         if scheduled_compute_assignment is not None:
             scheduler_assignment = ComputeRunAssignment.from_payload(

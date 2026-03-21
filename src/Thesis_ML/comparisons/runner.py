@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from time import perf_counter
@@ -20,10 +21,12 @@ from Thesis_ML.config.metric_policy import resolve_effective_metric_policy
 from Thesis_ML.experiments.backend_registry import resolve_backend_support
 from Thesis_ML.experiments.compute_policy import (
     GPU_ONLY,
+    MAX_BOTH,
     ResolvedComputePolicy,
     extract_compute_policy_payload,
     resolve_compute_policy,
 )
+from Thesis_ML.experiments.compute_scheduler import ComputeRunRequest, plan_compute_schedule
 from Thesis_ML.experiments.errors import exception_failure_payload
 from Thesis_ML.experiments.execution_policy import read_run_status
 from Thesis_ML.experiments.parallel_execution import (
@@ -50,6 +53,47 @@ _OFFICIAL_LOCKED_COMPARISON_GPU_ALLOWLIST: frozenset[tuple[str, str]] = frozense
         ("ridge", "torch_gpu"),
     }
 )
+_OFFICIAL_LOCKED_COMPARISON_MAX_BOTH_GPU_LANE_ALLOWLIST: frozenset[tuple[str, str]] = frozenset(
+    {
+        ("ridge", "torch_gpu"),
+    }
+)
+_OFFICIAL_LOCKED_COMPARISON_MAX_PARALLEL_GPU_RUNS = 1
+
+
+def _official_locked_comparison_max_both_gpu_models() -> set[str]:
+    return {
+        str(model_name).strip().lower()
+        for model_name, backend_family in _OFFICIAL_LOCKED_COMPARISON_MAX_BOTH_GPU_LANE_ALLOWLIST
+        if str(backend_family).strip().lower() == "torch_gpu"
+    }
+
+
+def _resolve_official_comparison_schedule_assignments(
+    *,
+    pending_run_specs: list[CompiledComparisonRunSpec],
+    compute_policy: ResolvedComputePolicy,
+    max_parallel_runs: int,
+) -> dict[str, dict[str, Any]]:
+    if compute_policy.hardware_mode_requested != MAX_BOTH:
+        return {}
+    if not pending_run_specs:
+        return {}
+    schedule = plan_compute_schedule(
+        run_requests=[
+            ComputeRunRequest(
+                order_index=order_index,
+                run_id=str(spec.run_id),
+                model_name=str(spec.model),
+            )
+            for order_index, spec in enumerate(pending_run_specs)
+        ],
+        base_compute_policy=compute_policy,
+        max_parallel_runs=int(max_parallel_runs),
+        max_parallel_gpu_runs=_OFFICIAL_LOCKED_COMPARISON_MAX_PARALLEL_GPU_RUNS,
+        gpu_model_allowlist=_official_locked_comparison_max_both_gpu_models(),
+    )
+    return {str(assignment.run_id): assignment.to_payload() for assignment in schedule}
 
 
 def _comparison_output_dir(comparison: ComparisonSpec, reports_root: Path | str) -> Path:
@@ -123,7 +167,23 @@ def _validate_official_comparison_gpu_admission(
     compiled_manifest: CompiledComparisonManifest,
     compute_policy: ResolvedComputePolicy,
 ) -> None:
-    if compute_policy.hardware_mode_requested != GPU_ONLY:
+    requested_mode = str(compute_policy.hardware_mode_requested).strip().lower()
+    if requested_mode not in {GPU_ONLY, MAX_BOTH}:
+        return
+
+    if requested_mode == MAX_BOTH:
+        # PR 8: official max_both is run-level lane scheduling only; unsupported models remain
+        # explicitly on CPU lanes and only allowlisted models are GPU-lane eligible.
+        gpu_probe_policy = replace(compute_policy, effective_backend_family="torch_gpu")
+        for model_name in sorted(_official_locked_comparison_max_both_gpu_models()):
+            backend_support = resolve_backend_support(model_name, gpu_probe_policy)
+            if backend_support.supported:
+                continue
+            reason = str(backend_support.reason or "unsupported_backend_combination")
+            raise ValueError(
+                "Official locked comparison max_both admission rejected because allowlisted "
+                f"GPU model/backend is unsupported: model='{model_name}' reason='{reason}'."
+            )
         return
 
     backend_family = str(compute_policy.effective_backend_family)
@@ -642,6 +702,20 @@ def execute_compiled_comparison(
             }
         )
 
+    scheduled_assignments_by_run_id: dict[str, dict[str, Any]] = {}
+    if pending_run_executions and resolved_compute_policy.hardware_mode_requested == MAX_BOTH:
+        scheduled_assignments_by_run_id = _resolve_official_comparison_schedule_assignments(
+            pending_run_specs=[
+                pending_spec
+                for pending_spec in (
+                    pending.get("spec") for pending in pending_run_executions
+                )
+                if isinstance(pending_spec, CompiledComparisonRunSpec)
+            ],
+            compute_policy=resolved_compute_policy,
+            max_parallel_runs=resolved_max_parallel_runs,
+        )
+
     dispatch_jobs: list[OfficialRunJob] = []
     job_metadata_by_order: dict[int, dict[str, Any]] = {}
     for order_index, pending in enumerate(pending_run_executions):
@@ -656,6 +730,7 @@ def execute_compiled_comparison(
         run_force = bool(pending["run_force"])
         run_resume = bool(pending["run_resume"])
         started_at = _utc_now_iso()
+        scheduled_assignment_payload = scheduled_assignments_by_run_id.get(str(spec.run_id))
 
         try:
             timeout_policy_effective = resolve_run_timeout_policy(
@@ -717,6 +792,7 @@ def execute_compiled_comparison(
                 "gpu_device_id": gpu_device_id,
                 "deterministic_compute": bool(deterministic_compute),
                 "allow_backend_fallback": bool(allow_backend_fallback),
+                "scheduled_compute_assignment": scheduled_assignment_payload,
             }
             dispatch_jobs.append(
                 OfficialRunJob(

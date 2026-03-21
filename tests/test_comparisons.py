@@ -235,7 +235,7 @@ def test_comparison_runner_rejects_non_cpu_compute_controls(
             hardware_mode="gpu_only",
         )
 
-    with pytest.raises(ValueError, match="do not admit hardware_mode='max_both'"):
+    with pytest.raises(ValueError, match="max_both execution requires deterministic_compute=true"):
         compile_and_run_comparison(
             comparison=spec,
             index_csv=comparison_dataset["index_csv"],

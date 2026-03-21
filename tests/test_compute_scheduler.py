@@ -100,6 +100,26 @@ def test_scheduler_respects_max_parallel_gpu_runs_per_window() -> None:
     assert sum(1 for row in schedule if row.assigned_compute_lane == "gpu") == 2
 
 
+def test_max_both_gpu_allowlist_restricts_gpu_lanes() -> None:
+    policy = _max_both_policy(gpu_available=True, allow_backend_fallback=False)
+    schedule = plan_compute_schedule(
+        run_requests=[
+            ComputeRunRequest(order_index=0, run_id="run_0", model_name="ridge"),
+            ComputeRunRequest(order_index=1, run_id="run_1", model_name="logreg"),
+        ],
+        base_compute_policy=policy,
+        max_parallel_runs=2,
+        max_parallel_gpu_runs=1,
+        gpu_model_allowlist={"ridge"},
+    )
+
+    assert schedule[0].assigned_compute_lane == "gpu"
+    assert schedule[0].assigned_backend_family == "torch_gpu"
+    assert schedule[1].assigned_compute_lane == "cpu"
+    assert schedule[1].assigned_backend_family == "sklearn_cpu"
+    assert schedule[1].lane_assignment_reason == "max_both_gpu_disallowed_by_policy"
+
+
 def test_scheduler_outputs_are_deterministically_sorted_by_order_index() -> None:
     policy = _max_both_policy(gpu_available=True, allow_backend_fallback=False)
     schedule = plan_compute_schedule(
@@ -196,4 +216,3 @@ def test_materialize_scheduled_compute_policy_stamps_lane_metadata() -> None:
     assert resolved.effective_backend_family == "torch_gpu"
     assert resolved.gpu_device_id == 0
     assert resolved.backend_fallback_used is False
-

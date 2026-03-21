@@ -23,6 +23,9 @@ TORCH_GPU_BACKEND_STACK_ID_FALLBACK = "torch_gpu_reference_v1"
 LOCKED_COMPARISON_GPU_DETERMINISM_REQUIRED_REASON = (
     "Official locked comparison gpu_only execution requires deterministic_compute=true."
 )
+LOCKED_COMPARISON_MAX_BOTH_DETERMINISM_REQUIRED_REASON = (
+    "Official locked comparison max_both execution requires deterministic_compute=true."
+)
 CONFIRMATORY_GPU_DETERMINISM_REQUIRED_REASON = (
     "Official confirmatory gpu_only execution requires deterministic_compute=true."
 )
@@ -162,9 +165,33 @@ def _resolve_locked_comparison_compute_policy(
         )
 
     if requested_mode == MAX_BOTH:
-        raise ValueError(
-            "Official locked comparison compute controls do not admit hardware_mode='max_both' "
-            "in the current rollout."
+        if not deterministic_compute:
+            raise ValueError(LOCKED_COMPARISON_MAX_BOTH_DETERMINISM_REQUIRED_REASON)
+        snapshot = capability_snapshot or detect_compute_capabilities(
+            requested_device_id=gpu_device_id
+        )
+        if not _gpu_compatible(snapshot):
+            raise ValueError(
+                _compatibility_error_message(
+                    hardware_mode=requested_mode,
+                    snapshot=snapshot,
+                )
+            )
+        return ResolvedComputePolicy(
+            hardware_mode_requested=requested_mode,
+            hardware_mode_effective=MAX_BOTH,
+            requested_backend_family="auto_mixed",
+            effective_backend_family="sklearn_cpu",
+            gpu_device_id=snapshot.device_id,
+            gpu_device_name=snapshot.device_name,
+            gpu_device_total_memory_mb=snapshot.device_total_memory_mb,
+            deterministic_compute=True,
+            allow_backend_fallback=False,
+            backend_stack_id=(
+                str(snapshot.tested_stack_id).strip() or TORCH_GPU_BACKEND_STACK_ID_FALLBACK
+            ),
+            backend_fallback_used=False,
+            backend_fallback_reason=None,
         )
 
     if requested_mode == CPU_ONLY:

@@ -175,14 +175,24 @@ def _torch_gpu_support_for_model(
     *,
     model_name: str,
     base_compute_policy: ResolvedComputePolicy,
+    gpu_model_allowlist: set[str] | None = None,
 ) -> tuple[bool, str | None]:
+    normalized_model_name = str(model_name).strip().lower()
+    if (
+        gpu_model_allowlist is not None
+        and normalized_model_name not in gpu_model_allowlist
+    ):
+        return (
+            False,
+            f"gpu_lane_not_allowed_by_policy:{normalized_model_name}",
+        )
     if base_compute_policy.gpu_device_id is None:
         return False, "gpu_capability_unavailable"
     probe_policy = replace(
         base_compute_policy,
         effective_backend_family=cast(BackendFamily, "torch_gpu"),
     )
-    support = resolve_backend_support(model_name, probe_policy)
+    support = resolve_backend_support(normalized_model_name, probe_policy)
     return bool(support.supported), support.reason
 
 
@@ -237,6 +247,7 @@ def plan_compute_schedule(
     base_compute_policy: ResolvedComputePolicy,
     max_parallel_runs: int = 1,
     max_parallel_gpu_runs: int = 1,
+    gpu_model_allowlist: set[str] | None = None,
 ) -> list[ComputeRunAssignment]:
     requests = _normalize_requests(run_requests)
     if not requests:
@@ -252,6 +263,12 @@ def plan_compute_schedule(
     )
     if resolved_max_parallel_gpu_runs > resolved_max_parallel_runs:
         raise ValueError("max_parallel_gpu_runs cannot exceed max_parallel_runs.")
+
+    normalized_gpu_model_allowlist = (
+        {str(value).strip().lower() for value in gpu_model_allowlist}
+        if gpu_model_allowlist is not None
+        else None
+    )
 
     requested_mode = cast(HardwareMode, base_compute_policy.hardware_mode_requested)
     scheduler_mode_effective = cast(HardwareMode, base_compute_policy.hardware_mode_effective)
@@ -318,6 +335,7 @@ def plan_compute_schedule(
             supported, unsupported_reason = _torch_gpu_support_for_model(
                 model_name=request.model_name,
                 base_compute_policy=base_compute_policy,
+                gpu_model_allowlist=normalized_gpu_model_allowlist,
             )
             if supported:
                 assignments.append(
@@ -395,9 +413,10 @@ def plan_compute_schedule(
         remaining_gpu_slots = int(resolved_max_parallel_gpu_runs)
 
         for request in batch:
-            supported, _ = _torch_gpu_support_for_model(
+            supported, unsupported_reason = _torch_gpu_support_for_model(
                 model_name=request.model_name,
                 base_compute_policy=base_compute_policy,
+                gpu_model_allowlist=normalized_gpu_model_allowlist,
             )
             if supported and remaining_gpu_slots > 0:
                 assignments.append(
@@ -423,11 +442,16 @@ def plan_compute_schedule(
                 )
                 continue
 
+            cpu_reason = "max_both_model_cpu_only"
+            if isinstance(unsupported_reason, str) and unsupported_reason.startswith(
+                "gpu_lane_not_allowed_by_policy:"
+            ):
+                cpu_reason = "max_both_gpu_disallowed_by_policy"
             assignments.append(
                 _cpu_assignment(
                     request=request,
                     scheduler_mode_effective=scheduler_mode_effective,
-                    reason="max_both_model_cpu_only",
+                    reason=cpu_reason,
                     fallback_used=False,
                     fallback_reason=None,
                 )
@@ -504,4 +528,3 @@ __all__ = [
     "plan_compute_schedule",
     "materialize_scheduled_compute_policy",
 ]
-
