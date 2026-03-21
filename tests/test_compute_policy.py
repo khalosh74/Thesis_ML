@@ -139,13 +139,56 @@ def test_max_both_with_gpu_capability_records_mode_but_keeps_cpu_backend() -> No
     assert resolved.gpu_device_id == 0
 
 
-def test_official_paths_enforce_pr6_gates() -> None:
-    with pytest.raises(ValueError, match="hardware_mode must remain 'cpu_only'"):
+def test_confirmatory_paths_enforce_pr7_gates() -> None:
+    with pytest.raises(ValueError, match="do not admit hardware_mode='max_both'"):
+        resolve_compute_policy(
+            framework_mode=FrameworkMode.CONFIRMATORY,
+            hardware_mode="max_both",
+        )
+
+    with pytest.raises(ValueError, match="deterministic_compute=true"):
         resolve_compute_policy(
             framework_mode=FrameworkMode.CONFIRMATORY,
             hardware_mode="gpu_only",
+            deterministic_compute=False,
+            capability_snapshot=_gpu_capability_snapshot(),
         )
 
+    with pytest.raises(ValueError, match="requires compatible GPU capability"):
+        resolve_compute_policy(
+            framework_mode=FrameworkMode.CONFIRMATORY,
+            hardware_mode="gpu_only",
+            deterministic_compute=True,
+            capability_snapshot=_missing_gpu_snapshot(),
+        )
+
+    with pytest.raises(ValueError, match="exploratory-only"):
+        resolve_compute_policy(
+            framework_mode=FrameworkMode.CONFIRMATORY,
+            hardware_mode="cpu_only",
+            allow_backend_fallback=True,
+        )
+
+
+def test_confirmatory_gpu_only_resolves_when_deterministic_and_capable() -> None:
+    resolved = resolve_compute_policy(
+        framework_mode=FrameworkMode.CONFIRMATORY,
+        hardware_mode="gpu_only",
+        deterministic_compute=True,
+        capability_snapshot=_gpu_capability_snapshot(device_id=0),
+    )
+
+    assert resolved.hardware_mode_requested == "gpu_only"
+    assert resolved.hardware_mode_effective == "gpu_only"
+    assert resolved.requested_backend_family == "torch_gpu"
+    assert resolved.effective_backend_family == "torch_gpu"
+    assert resolved.gpu_device_id == 0
+    assert resolved.deterministic_compute is True
+    assert resolved.allow_backend_fallback is False
+    assert resolved.backend_fallback_used is False
+
+
+def test_locked_comparison_paths_enforce_pr6_gates() -> None:
     with pytest.raises(ValueError, match="do not admit hardware_mode='max_both'"):
         resolve_compute_policy(
             framework_mode=FrameworkMode.LOCKED_COMPARISON,

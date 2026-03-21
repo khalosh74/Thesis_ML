@@ -283,7 +283,11 @@ Additive compute-policy metadata and scheduling (PR 5):
   - `deterministic_compute=true` is required;
   - `allow_backend_fallback=true` remains rejected;
   - official `max_both` remains rejected.
-- confirmatory official execution remains `cpu_only` only; non-CPU confirmatory requests remain expected hard failures.
+- PR 7 extends the same conservative gate to confirmatory protocol execution:
+  - official confirmatory `gpu_only` is selectively admitted only for explicit approved combinations (currently `ridge` + `torch_gpu`);
+  - `deterministic_compute=true` is required;
+  - `allow_backend_fallback=true` remains rejected;
+  - official `max_both` remains rejected.
 
 ## Official RC checklist
 

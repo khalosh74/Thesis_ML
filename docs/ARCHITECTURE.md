@@ -118,7 +118,11 @@ Core package root: `src/Thesis_ML/`
 3. Confirmatory canonical thesis protocol run (`thesisml-run-protocol`)
 - Load and validate canonical protocol JSON (`thesis-protocol-v1`).
 - Compile official suites into explicit concrete run specs.
-- Validate official compute controls conservatively before dispatch (`cpu_only` only; non-CPU still rejected).
+- Validate official compute controls before dispatch:
+  - `cpu_only` remains default.
+  - `gpu_only` is admitted only for explicit confirmatory allowlist entries (PR 7: `ridge` on `torch_gpu`) with `deterministic_compute=true`.
+  - `max_both` remains rejected for official runs.
+  - `allow_backend_fallback=true` remains rejected for official runs.
 - Execute each run spec through existing `run_experiment(...)`.
 - Stamp `framework_mode=confirmatory` and `canonical_run=true`.
 - Persist protocol metadata in run artifacts and emit protocol-level manifests/summaries under `outputs/reports/confirmatory/`.
@@ -161,7 +165,7 @@ Framework guardrails:
 - decision metric, tuning metric, and permutation metric are resolved from primary metric and must align (drift raises validation/runtime errors).
 - secondary metrics are emitted for descriptive reporting only.
 - official artifacts (`config.json`, `metrics.json`, comparison/protocol manifests and summaries) persist `metric_policy_effective` for auditability.
-- run artifacts also persist additive compute-policy metadata (`hardware_mode_*`, backend selection/fallback metadata, GPU device metadata when available); exploratory `ridge`/`logreg` may execute through `torch_gpu` lanes, and PR 6 allows selectively gated locked-comparison `gpu_only` execution (`ridge`/`torch_gpu`) while confirmatory remains CPU-only.
+- run artifacts also persist additive compute-policy metadata (`hardware_mode_*`, backend selection/fallback metadata, GPU device metadata when available); exploratory `ridge`/`logreg` may execute through `torch_gpu` lanes, PR 6 allows selectively gated locked-comparison `gpu_only` execution (`ridge`/`torch_gpu`), and PR 7 allows the same conservative gate in confirmatory (`ridge`/`torch_gpu`) while official `max_both` remains disabled.
 - run artifacts also persist additive scheduling metadata (`assigned_compute_lane`, `assigned_backend_family`, `lane_assignment_reason`, `scheduler_mode_effective`) for exploratory scheduling auditability.
 - official comparison/confirmatory runs persist `data_policy_effective` and standardized data-layer artifacts
   (`dataset_card.*`, `dataset_summary.*`, `data_quality_report.json`, class/missingness reports, `leakage_audit.json`,

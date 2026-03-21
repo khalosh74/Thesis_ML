@@ -23,6 +23,9 @@ TORCH_GPU_BACKEND_STACK_ID_FALLBACK = "torch_gpu_reference_v1"
 LOCKED_COMPARISON_GPU_DETERMINISM_REQUIRED_REASON = (
     "Official locked comparison gpu_only execution requires deterministic_compute=true."
 )
+CONFIRMATORY_GPU_DETERMINISM_REQUIRED_REASON = (
+    "Official confirmatory gpu_only execution requires deterministic_compute=true."
+)
 COMPUTE_POLICY_FIELD_NAMES: tuple[str, ...] = (
     "hardware_mode_requested",
     "hardware_mode_effective",
@@ -203,6 +206,65 @@ def _resolve_locked_comparison_compute_policy(
     )
 
 
+def _resolve_confirmatory_compute_policy(
+    *,
+    requested_mode: HardwareMode,
+    gpu_device_id: int | None,
+    deterministic_compute: bool,
+    allow_backend_fallback: bool,
+    capability_snapshot: ComputeCapabilitySnapshot | None,
+) -> ResolvedComputePolicy:
+    if allow_backend_fallback:
+        raise ValueError(
+            "allow_backend_fallback is exploratory-only in the current rollout and is not "
+            "allowed for official runs."
+        )
+
+    if requested_mode == MAX_BOTH:
+        raise ValueError(
+            "Official confirmatory compute controls do not admit hardware_mode='max_both' "
+            "in the current rollout."
+        )
+
+    if requested_mode == CPU_ONLY:
+        return _cpu_reference_policy(
+            requested_mode=requested_mode,
+            deterministic_compute=deterministic_compute,
+            allow_backend_fallback=False,
+        )
+
+    if not deterministic_compute:
+        raise ValueError(CONFIRMATORY_GPU_DETERMINISM_REQUIRED_REASON)
+
+    snapshot = capability_snapshot or detect_compute_capabilities(
+        requested_device_id=gpu_device_id
+    )
+    if not _gpu_compatible(snapshot):
+        raise ValueError(
+            _compatibility_error_message(
+                hardware_mode=requested_mode,
+                snapshot=snapshot,
+            )
+        )
+
+    return ResolvedComputePolicy(
+        hardware_mode_requested=requested_mode,
+        hardware_mode_effective=GPU_ONLY,
+        requested_backend_family="torch_gpu",
+        effective_backend_family="torch_gpu",
+        gpu_device_id=snapshot.device_id,
+        gpu_device_name=snapshot.device_name,
+        gpu_device_total_memory_mb=snapshot.device_total_memory_mb,
+        deterministic_compute=True,
+        allow_backend_fallback=False,
+        backend_stack_id=(
+            str(snapshot.tested_stack_id).strip() or TORCH_GPU_BACKEND_STACK_ID_FALLBACK
+        ),
+        backend_fallback_used=False,
+        backend_fallback_reason=None,
+    )
+
+
 def resolve_compute_policy(
     *,
     framework_mode: FrameworkMode | str,
@@ -222,20 +284,12 @@ def resolve_compute_policy(
         )
 
     if resolved_framework_mode == FrameworkMode.CONFIRMATORY:
-        if requested_mode != CPU_ONLY:
-            raise ValueError(
-                "Official compute controls are conservative in the current rollout: "
-                "hardware_mode must remain 'cpu_only' for confirmatory runs."
-            )
-        if allow_backend_fallback:
-            raise ValueError(
-                "allow_backend_fallback is exploratory-only in the current rollout and is not "
-                "allowed for official runs."
-            )
-        return _cpu_reference_policy(
+        return _resolve_confirmatory_compute_policy(
             requested_mode=requested_mode,
+            gpu_device_id=gpu_device_id,
             deterministic_compute=deterministic_compute,
-            allow_backend_fallback=False,
+            allow_backend_fallback=allow_backend_fallback,
+            capability_snapshot=capability_snapshot,
         )
 
     if resolved_framework_mode == FrameworkMode.LOCKED_COMPARISON:
