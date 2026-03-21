@@ -449,6 +449,12 @@ def resolve_methodology_runtime(
             Literal["grouped_leave_one_group_out"], normalized_inner_cv
         )
 
+    if resolved_policy_name == MethodologyPolicyName.FIXED_BASELINES_ONLY.value:
+        resolved_inner_cv_scheme_literal = None
+        resolved_tuning_inner_group_field = None
+        resolved_tuning_space_id = None
+        resolved_tuning_space_version = None
+
     if resolved_evidence_run_role == "untuned_baseline":
         if resolved_policy_name != MethodologyPolicyName.GROUPED_NESTED_TUNING.value:
             raise ValueError(

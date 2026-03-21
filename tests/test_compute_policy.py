@@ -10,6 +10,7 @@ from Thesis_ML.experiments.compute_policy import (
     resolve_compute_policy,
     stamp_compute_policy_metadata,
 )
+from Thesis_ML.experiments.runtime_policies import resolve_methodology_runtime
 
 
 def _gpu_capability_snapshot(*, device_id: int = 0) -> ComputeCapabilitySnapshot:
@@ -151,6 +152,32 @@ def test_official_paths_reject_non_cpu_modes_and_backend_fallback() -> None:
             hardware_mode="cpu_only",
             allow_backend_fallback=True,
         )
+
+
+def test_fixed_baselines_runtime_resolution_drops_tuning_fields() -> None:
+    methodology_policy, _ = resolve_methodology_runtime(
+        framework_mode=FrameworkMode.EXPLORATORY,
+        methodology_policy_name="fixed_baselines_only",
+        class_weight_policy="none",
+        tuning_enabled=False,
+        tuning_search_space_id="linear-grouped-nested-v1",
+        tuning_search_space_version="1.0.0",
+        tuning_inner_cv_scheme="grouped_leave_one_group_out",
+        tuning_inner_group_field="session",
+        subgroup_reporting_enabled=True,
+        subgroup_dimensions=["label"],
+        subgroup_min_samples_per_group=1,
+        evidence_run_role=None,
+        protocol_context={},
+        comparison_context={},
+    )
+
+    assert methodology_policy.policy_name.value == "fixed_baselines_only"
+    assert methodology_policy.tuning_enabled is False
+    assert methodology_policy.inner_cv_scheme is None
+    assert methodology_policy.inner_group_field is None
+    assert methodology_policy.tuning_search_space_id is None
+    assert methodology_policy.tuning_search_space_version is None
 
 
 def test_compute_policy_stamping_includes_runtime_gpu_diagnostics_additively() -> None:
