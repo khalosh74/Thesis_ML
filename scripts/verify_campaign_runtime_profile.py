@@ -74,6 +74,24 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--profile-inner-folds",
+        type=int,
+        default=None,
+        help=(
+            "Optional profiling-only grouped-nested inner-fold cap. "
+            "Only applies to precheck profiling runs."
+        ),
+    )
+    parser.add_argument(
+        "--profile-tuning-candidates",
+        type=int,
+        default=None,
+        help=(
+            "Optional profiling-only grouped-nested candidate cap. "
+            "Only applies to precheck profiling runs."
+        ),
+    )
+    parser.add_argument(
         "--quiet-progress",
         action="store_true",
         help="Disable live progress messages on stderr.",
@@ -191,6 +209,8 @@ def main(argv: list[str] | None = None) -> int:
         deterministic_compute=bool(args.deterministic_compute),
         allow_backend_fallback=bool(args.allow_backend_fallback),
         profile_permutations=args.profile_permutations,
+        profile_inner_folds=args.profile_inner_folds,
+        profile_tuning_candidates=args.profile_tuning_candidates,
         progress_callback=progress_callback,
     )
 

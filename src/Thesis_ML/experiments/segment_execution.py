@@ -120,6 +120,9 @@ class SegmentExecutionRequest:
     calibration_require_probabilities_for_validity: bool = False
     interpretability_enabled_override: bool | None = None
     max_outer_folds: int | None = None
+    profiling_only: bool = False
+    profile_inner_folds: int | None = None
+    profile_tuning_candidates: int | None = None
     compute_policy: ResolvedComputePolicy | None = None
     start_section: str | SectionName | None = None
     end_section: str | SectionName | None = None
@@ -453,6 +456,9 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
                     fit_timing_summary_path=request.fit_timing_summary_path,
                     interpretability_enabled=request.interpretability_enabled_override,
                     max_outer_folds=request.max_outer_folds,
+                    profiling_only=bool(request.profiling_only),
+                    profile_inner_folds=request.profile_inner_folds,
+                    profile_tuning_candidates=request.profile_tuning_candidates,
                     compute_policy=request.compute_policy,
                     run_id=request.run_id,
                     config_filename=request.config_filename,

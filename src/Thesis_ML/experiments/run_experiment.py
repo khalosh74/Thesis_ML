@@ -392,6 +392,8 @@ def run_experiment(
     resolved_compute_policy = None
     resolved_profiling_context: dict[str, Any] | None = None
     profiling_max_outer_folds: int | None = None
+    profiling_inner_fold_cap: int | None = None
+    profiling_tuning_candidate_cap: int | None = None
     dataset_fingerprint: dict[str, Any] | None = None
     data_policy_effective: dict[str, Any] = {}
     data_assessment: dict[str, Any] = {}
@@ -436,11 +438,29 @@ def run_experiment(
         profiling_max_outer_folds = int(profiling_context.get("max_outer_folds", 1))
         if profiling_max_outer_folds <= 0:
             raise ValueError("profiling_context.max_outer_folds must be > 0.")
+        profile_inner_folds_raw = profiling_context.get("profile_inner_folds")
+        if profile_inner_folds_raw is not None:
+            profiling_inner_fold_cap = int(profile_inner_folds_raw)
+            if profiling_inner_fold_cap <= 0:
+                raise ValueError("profiling_context.profile_inner_folds must be > 0.")
+        profile_tuning_candidates_raw = profiling_context.get("profile_tuning_candidates")
+        if profile_tuning_candidates_raw is not None:
+            profiling_tuning_candidate_cap = int(profile_tuning_candidates_raw)
+            if profiling_tuning_candidate_cap <= 0:
+                raise ValueError("profiling_context.profile_tuning_candidates must be > 0.")
         resolved_profiling_context = dict(profiling_context)
         resolved_profiling_context["source"] = profile_source
         resolved_profiling_context["profiling_only"] = True
         resolved_profiling_context["precheck_only"] = True
         resolved_profiling_context["max_outer_folds"] = int(profiling_max_outer_folds)
+        resolved_profiling_context["profile_inner_folds"] = (
+            int(profiling_inner_fold_cap) if profiling_inner_fold_cap is not None else None
+        )
+        resolved_profiling_context["profile_tuning_candidates"] = (
+            int(profiling_tuning_candidate_cap)
+            if profiling_tuning_candidate_cap is not None
+            else None
+        )
 
     target_column = _resolve_target_column(target)
     context_start = perf_counter()
@@ -976,6 +996,9 @@ def run_experiment(
                         ),
                         interpretability_enabled_override=interpretability_enabled_override,
                         max_outer_folds=profiling_max_outer_folds,
+                        profiling_only=bool(resolved_profiling_context is not None),
+                        profile_inner_folds=profiling_inner_fold_cap,
+                        profile_tuning_candidates=profiling_tuning_candidate_cap,
                         compute_policy=resolved_compute_policy,
                         run_id=resolved_run_id,
                         config_filename=config_path.name,

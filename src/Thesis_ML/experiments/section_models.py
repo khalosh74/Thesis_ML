@@ -125,6 +125,9 @@ class ModelFitInput(_SectionModel):
     fit_timing_summary_path: Path | None = None
     interpretability_enabled: bool | None = None
     max_outer_folds: int | None = None
+    profiling_only: bool = False
+    profile_inner_folds: int | None = None
+    profile_tuning_candidates: int | None = None
     compute_policy: ResolvedComputePolicy | None = None
     progress_callback: ProgressCallback | None = None
     run_id: str = Field(min_length=1)

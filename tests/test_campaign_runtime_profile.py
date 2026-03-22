@@ -244,6 +244,126 @@ def test_campaign_runtime_profile_profile_permutations_override_and_extrapolatio
         assert float(row["estimated_full_permutation_seconds"]) == expected
 
 
+def test_campaign_runtime_profile_profile_nested_tuning_override_and_extrapolation(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    calls: list[dict[str, Any]] = []
+    original_validity_fn = runtime_profile._profiling_validity_for_run
+
+    def _patched_validity_for_run(
+        *, index_csv: Path, run: Any
+    ) -> runtime_profile._ProfileRunValidity:
+        validity = original_validity_fn(index_csv=index_csv, run=run)
+        methodology_name = str(
+            getattr(run.methodology_policy_name, "value", run.methodology_policy_name)
+        ).strip()
+        if (
+            methodology_name == "grouped_nested_tuning"
+            and bool(getattr(run, "tuning_enabled", False))
+            and str(getattr(run, "model", "")).strip().lower() == "linearsvc"
+        ):
+            return runtime_profile._ProfileRunValidity(
+                can_profile_measured=True,
+                expected_outer_folds=max(1, int(validity.expected_outer_folds)),
+                estimated_train_inner_groups_after_outer_fold=4,
+                reason=None,
+                profiling_subset_description=validity.profiling_subset_description,
+            )
+        return validity
+
+    monkeypatch.setattr(
+        runtime_profile, "_profiling_validity_for_run", _patched_validity_for_run
+    )
+
+    def _fake_run_experiment(**kwargs: Any) -> dict[str, Any]:
+        calls.append(dict(kwargs))
+        run_id = str(kwargs["run_id"])
+        report_dir = Path(kwargs["reports_root"]) / run_id
+        report_dir.mkdir(parents=True, exist_ok=True)
+        profiling_context = dict(kwargs.get("profiling_context", {}))
+        configured_candidate_count = profiling_context.get("configured_candidate_count")
+        configured_inner_fold_count = profiling_context.get("configured_inner_fold_count")
+        profiled_candidate_count = profiling_context.get("profiled_candidate_count")
+        profiled_inner_fold_count = profiling_context.get("profiled_inner_fold_count")
+
+        tuning_summary_path = report_dir / "tuning_summary.json"
+        if isinstance(configured_candidate_count, int) and configured_candidate_count > 0:
+            tuning_summary_path.write_text(
+                json.dumps(
+                    {
+                        "timing_totals_seconds": {
+                            "measured_inner_tuning_total": 5.0,
+                            "estimated_full_tuned_search_total": 20.0,
+                        },
+                        "configured_candidate_count_total": int(configured_candidate_count),
+                        "profiled_candidate_count_total": int(profiled_candidate_count or 0),
+                        "configured_inner_fold_count_total": int(configured_inner_fold_count or 0),
+                        "profiled_inner_fold_count_total": int(profiled_inner_fold_count or 0),
+                        "tuning_extrapolation_applied": True,
+                        "specialized_linearsvc_tuning_used": True,
+                    },
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+        return {
+            "run_id": run_id,
+            "report_dir": str(report_dir),
+            "run_status_path": str(report_dir / "run_status.json"),
+            "tuning_summary_path": str(tuning_summary_path),
+            "stage_timings_seconds": {"total": 30.0},
+            "metrics": {"n_folds": 1, "primary_metric_value": 0.5},
+        }
+
+    monkeypatch.setattr(runtime_profile, "run_experiment", _fake_run_experiment)
+
+    summary = runtime_profile.verify_campaign_runtime_profile(
+        index_csv=_demo_index_csv(),
+        data_root=_repo_root() / "demo_data" / "synthetic_v1" / "data_root",
+        cache_dir=_repo_root() / "demo_data" / "synthetic_v1" / "cache",
+        confirmatory_protocol=_confirmatory_protocol(),
+        comparison_specs=_comparison_specs(),
+        profile_root=tmp_path / "runtime_profiles",
+        profile_inner_folds=2,
+        profile_tuning_candidates=3,
+    )
+
+    assert summary["passed"] is True
+    assert summary["inputs"]["profile_inner_folds_override"] == 2
+    assert summary["inputs"]["profile_tuning_candidates_override"] == 3
+    assert calls
+
+    nested_calls = [
+        call
+        for call in calls
+        if isinstance(call.get("profiling_context"), dict)
+        and call["profiling_context"].get("configured_candidate_count") is not None
+    ]
+    assert nested_calls
+    for call in nested_calls:
+        profiling_context = dict(call["profiling_context"])
+        assert int(profiling_context["profile_inner_folds"]) <= int(
+            profiling_context["configured_inner_fold_count"]
+        )
+        assert int(profiling_context["profile_tuning_candidates"]) <= int(
+            profiling_context["configured_candidate_count"]
+        )
+
+    tuned_rows = [
+        row
+        for row in summary["cohort_estimates"]
+        if row.get("configured_candidate_count") is not None
+        and row.get("status") == "passed"
+        and row.get("estimate_source") == "measured_profile"
+    ]
+    assert tuned_rows
+    assert any(float(row["estimated_full_tuning_seconds"]) == 20.0 for row in tuned_rows)
+    assert any(bool(row["tuning_extrapolation_applied"]) is True for row in tuned_rows)
+
+
 def test_campaign_runtime_profile_uses_fallback_for_unprofileable_grouped_nested_cohorts(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -659,10 +779,129 @@ def test_model_fit_tuned_rows_include_search_timing_summary(tmp_path: Path) -> N
     for row in tuned_rows:
         assert int(row["n_candidates"]) > 0
         assert float(row["tuned_search_elapsed_seconds"]) >= 0.0
+        assert int(row["configured_candidate_count"]) >= int(row["profiled_candidate_count"])
+        assert int(row["configured_inner_fold_count"]) >= int(row["profiled_inner_fold_count"])
+        assert row["tuning_executor"] == "gridsearchcv_pipeline_reference_v1"
+        assert bool(row["specialized_linearsvc_tuning_used"]) is False
         assert float(row["cv_mean_fit_time_seconds"]) >= 0.0
         assert float(row["cv_std_fit_time_seconds"]) >= 0.0
         assert float(row["cv_mean_score_time_seconds"]) >= 0.0
         assert float(row["cv_std_score_time_seconds"]) >= 0.0
+
+
+def test_model_fit_linearsvc_uses_specialized_tuning_executor(tmp_path: Path) -> None:
+    metadata_df = pd.DataFrame(
+        [
+            {
+                "sample_id": "s1",
+                "subject": "sub-001",
+                "session": "ses-01",
+                "bas": "BAS2",
+                "task": "passive",
+                "modality": "audio",
+                "emotion": "anger",
+                "coarse_affect": "negative",
+            },
+            {
+                "sample_id": "s2",
+                "subject": "sub-001",
+                "session": "ses-01",
+                "bas": "BAS2",
+                "task": "passive",
+                "modality": "video",
+                "emotion": "happiness",
+                "coarse_affect": "positive",
+            },
+            {
+                "sample_id": "s3",
+                "subject": "sub-001",
+                "session": "ses-02",
+                "bas": "BAS2",
+                "task": "passive",
+                "modality": "audio",
+                "emotion": "anger",
+                "coarse_affect": "negative",
+            },
+            {
+                "sample_id": "s4",
+                "subject": "sub-001",
+                "session": "ses-02",
+                "bas": "BAS2",
+                "task": "passive",
+                "modality": "video",
+                "emotion": "happiness",
+                "coarse_affect": "positive",
+            },
+            {
+                "sample_id": "s5",
+                "subject": "sub-001",
+                "session": "ses-03",
+                "bas": "BAS2",
+                "task": "passive",
+                "modality": "audio",
+                "emotion": "anger",
+                "coarse_affect": "negative",
+            },
+            {
+                "sample_id": "s6",
+                "subject": "sub-001",
+                "session": "ses-03",
+                "bas": "BAS2",
+                "task": "passive",
+                "modality": "video",
+                "emotion": "happiness",
+                "coarse_affect": "positive",
+            },
+        ]
+    )
+    x_matrix = np.asarray(
+        [
+            [0.0, 1.0],
+            [1.0, 0.0],
+            [0.2, 1.1],
+            [1.1, 0.3],
+            [0.1, 1.3],
+            [1.2, 0.1],
+        ],
+        dtype=np.float64,
+    )
+
+    output = execute_model_fit(
+        ModelFitInput(
+            x_matrix=x_matrix,
+            metadata_df=metadata_df,
+            target_column="coarse_affect",
+            cv_mode="within_subject_loso_session",
+            model="linearsvc",
+            subject="sub-001",
+            seed=42,
+            primary_metric_name="balanced_accuracy",
+            methodology_policy_name="grouped_nested_tuning",
+            tuning_enabled=True,
+            tuning_search_space_id=LINEAR_GROUPED_NESTED_SEARCH_SPACE_ID,
+            tuning_search_space_version=LINEAR_GROUPED_NESTED_SEARCH_SPACE_VERSION,
+            tuning_inner_cv_scheme="grouped_leave_one_group_out",
+            tuning_inner_group_field="session",
+            run_id="timing_tuned_linearsvc",
+            config_filename="config.json",
+            report_dir=tmp_path,
+            build_pipeline_fn=lambda model_name, seed: _build_pipeline(
+                model_name=model_name,
+                seed=seed,
+                class_weight_policy="none",
+            ),
+            scores_for_predictions_fn=_scores_for_predictions,
+            extract_linear_coefficients_fn=_extract_linear_coefficients,
+        )
+    )
+
+    tuned_rows = [row for row in output["tuning_records"] if str(row.get("status")) == "tuned"]
+    assert tuned_rows
+    assert all(
+        row["tuning_executor"] == "linearsvc_grouped_nested_exact_v1" for row in tuned_rows
+    )
+    assert all(bool(row["specialized_linearsvc_tuning_used"]) is True for row in tuned_rows)
+    assert output["tuning_summary"]["specialized_linearsvc_tuning_used"] is True
 
 
 def test_model_fit_outer_fold_cap_only_applies_when_profiling_flag_set(tmp_path: Path) -> None:

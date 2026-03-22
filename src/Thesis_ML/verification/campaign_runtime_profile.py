@@ -10,6 +10,7 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
+from sklearn.model_selection import ParameterGrid
 
 from Thesis_ML.comparisons.compiler import compile_comparison
 from Thesis_ML.comparisons.loader import load_comparison_spec
@@ -19,6 +20,7 @@ from Thesis_ML.experiments.cache_loading import load_features_from_cache
 from Thesis_ML.experiments.run_experiment import run_experiment
 from Thesis_ML.experiments.section_models import DatasetSelectionInput
 from Thesis_ML.experiments.sections import dataset_selection
+from Thesis_ML.experiments.tuning_search_spaces import get_search_space
 from Thesis_ML.protocols.compiler import compile_protocol
 from Thesis_ML.protocols.loader import load_protocol
 from Thesis_ML.protocols.models import CompiledRunSpec
@@ -542,6 +544,8 @@ def verify_campaign_runtime_profile(
     deterministic_compute: bool = False,
     allow_backend_fallback: bool = False,
     profile_permutations: int | None = None,
+    profile_inner_folds: int | None = None,
+    profile_tuning_candidates: int | None = None,
     progress_callback: ProgressCallback | None = None,
 ) -> dict[str, Any]:
     index_csv_path = Path(index_csv).resolve()
@@ -554,8 +558,21 @@ def verify_campaign_runtime_profile(
     resolved_profile_permutations: int | None = (
         int(profile_permutations) if profile_permutations is not None else None
     )
+    resolved_profile_inner_folds: int | None = (
+        int(profile_inner_folds) if profile_inner_folds is not None else None
+    )
+    resolved_profile_tuning_candidates: int | None = (
+        int(profile_tuning_candidates) if profile_tuning_candidates is not None else None
+    )
     if resolved_profile_permutations is not None and resolved_profile_permutations < 0:
         raise ValueError("profile_permutations must be >= 0 when provided.")
+    if resolved_profile_inner_folds is not None and resolved_profile_inner_folds < 0:
+        raise ValueError("profile_inner_folds must be >= 0 when provided.")
+    if (
+        resolved_profile_tuning_candidates is not None
+        and resolved_profile_tuning_candidates < 0
+    ):
+        raise ValueError("profile_tuning_candidates must be >= 0 when provided.")
     feature_matrix_memoizer = _ProfilingFeatureMatrixMemoizer()
 
     planned_runs, compile_issues = _build_planned_runs(
@@ -634,6 +651,49 @@ def verify_campaign_runtime_profile(
         configured_n_permutations = (
             int(run.controls.n_permutations) if bool(run.controls.permutation_enabled) else 0
         )
+        methodology_name = _coerce_enum(run.methodology_policy_name)
+        grouped_nested_tuning_active = bool(
+            methodology_name == "grouped_nested_tuning"
+            and bool(run.tuning_enabled)
+            and str(run.model).strip().lower() != "dummy"
+        )
+        configured_inner_fold_count: int | None = (
+            int(profile_validity.estimated_train_inner_groups_after_outer_fold)
+            if grouped_nested_tuning_active
+            and profile_validity.estimated_train_inner_groups_after_outer_fold is not None
+            else None
+        )
+        configured_candidate_count: int | None = None
+        if grouped_nested_tuning_active:
+            if not run.tuning_search_space_id:
+                raise ValueError(
+                    "Grouped nested runtime profiling requires tuning_search_space_id for tuned runs."
+                )
+            _, runtime_profile_param_grid = get_search_space(
+                str(run.tuning_search_space_id),
+                str(run.model),
+            )
+            configured_candidate_count = int(len(list(ParameterGrid(runtime_profile_param_grid))))
+        profiled_inner_fold_count: int | None = configured_inner_fold_count
+        if configured_inner_fold_count is not None and resolved_profile_inner_folds is not None:
+            if resolved_profile_inner_folds <= 0:
+                raise ValueError(
+                    "profile_inner_folds must be > 0 when grouped nested tuning is active "
+                    "for profiled cohorts."
+                )
+            profiled_inner_fold_count = int(
+                min(configured_inner_fold_count, resolved_profile_inner_folds)
+            )
+        profiled_candidate_count: int | None = configured_candidate_count
+        if configured_candidate_count is not None and resolved_profile_tuning_candidates is not None:
+            if resolved_profile_tuning_candidates <= 0:
+                raise ValueError(
+                    "profile_tuning_candidates must be > 0 when grouped nested tuning is active "
+                    "for profiled cohorts."
+                )
+            profiled_candidate_count = int(
+                min(configured_candidate_count, resolved_profile_tuning_candidates)
+            )
 
         expected_outer_folds = int(profile_validity.expected_outer_folds)
         if not profile_validity.can_profile_measured:
@@ -668,6 +728,30 @@ def verify_campaign_runtime_profile(
                     "permutation_loop_measured_seconds": None,
                     "estimated_full_permutation_seconds": None,
                     "permutation_extrapolation_applied": False,
+                    "configured_inner_fold_count": (
+                        int(configured_inner_fold_count)
+                        if configured_inner_fold_count is not None
+                        else None
+                    ),
+                    "profiled_inner_fold_count": (
+                        int(profiled_inner_fold_count)
+                        if profiled_inner_fold_count is not None
+                        else None
+                    ),
+                    "configured_candidate_count": (
+                        int(configured_candidate_count)
+                        if configured_candidate_count is not None
+                        else None
+                    ),
+                    "profiled_candidate_count": (
+                        int(profiled_candidate_count)
+                        if profiled_candidate_count is not None
+                        else None
+                    ),
+                    "measured_inner_tuning_seconds": None,
+                    "estimated_full_tuning_seconds": None,
+                    "tuning_extrapolation_applied": False,
+                    "specialized_linearsvc_tuning_used": None,
                     "profile_elapsed_seconds": None,
                     "fold_scale_factor": None,
                     "estimated_seconds_per_full_run": float(estimated_seconds_per_full_run),
@@ -720,6 +804,10 @@ def verify_campaign_runtime_profile(
         permutation_loop_measured_seconds: float | None = None
         estimated_full_permutation_seconds: float | None = None
         permutation_extrapolation_applied = False
+        measured_inner_tuning_seconds: float | None = None
+        estimated_full_tuning_seconds: float | None = None
+        tuning_extrapolation_applied = False
+        specialized_linearsvc_tuning_used: bool | None = None
         feature_matrix_cache_hit = False
         feature_matrix_cache_key: str | None = None
         feature_matrix_cache_sample_signature: str | None = None
@@ -781,6 +869,36 @@ def verify_campaign_runtime_profile(
                     "source_run_id": str(run.run_id),
                     "configured_n_permutations": int(configured_n_permutations),
                     "profiled_n_permutations": int(profiled_n_permutations),
+                    "configured_inner_fold_count": (
+                        int(configured_inner_fold_count)
+                        if configured_inner_fold_count is not None
+                        else None
+                    ),
+                    "profiled_inner_fold_count": (
+                        int(profiled_inner_fold_count)
+                        if profiled_inner_fold_count is not None
+                        else None
+                    ),
+                    "configured_candidate_count": (
+                        int(configured_candidate_count)
+                        if configured_candidate_count is not None
+                        else None
+                    ),
+                    "profiled_candidate_count": (
+                        int(profiled_candidate_count)
+                        if profiled_candidate_count is not None
+                        else None
+                    ),
+                    "profile_inner_folds": (
+                        int(profiled_inner_fold_count)
+                        if profiled_inner_fold_count is not None
+                        else None
+                    ),
+                    "profile_tuning_candidates": (
+                        int(profiled_candidate_count)
+                        if profiled_candidate_count is not None
+                        else None
+                    ),
                 },
                 hardware_mode=str(hardware_mode),
                 gpu_device_id=(int(gpu_device_id) if gpu_device_id is not None else None),
@@ -815,6 +933,35 @@ def verify_campaign_runtime_profile(
                 run_status_path = run_result.get("run_status_path")
                 if isinstance(run_status_path, str) and run_status_path:
                     profile_artifact_paths.append(run_status_path)
+                tuning_summary_path = run_result.get("tuning_summary_path")
+                if isinstance(tuning_summary_path, str) and tuning_summary_path:
+                    tuning_summary_candidate = Path(tuning_summary_path)
+                    if tuning_summary_candidate.exists():
+                        tuning_summary_payload = json.loads(
+                            tuning_summary_candidate.read_text(encoding="utf-8")
+                        )
+                        timing_totals_payload = tuning_summary_payload.get("timing_totals_seconds")
+                        if isinstance(timing_totals_payload, dict):
+                            measured_inner_value = timing_totals_payload.get(
+                                "measured_inner_tuning_total"
+                            )
+                            if isinstance(measured_inner_value, (int, float)):
+                                measured_inner_tuning_seconds = float(measured_inner_value)
+                            estimated_tuning_value = timing_totals_payload.get(
+                                "estimated_full_tuned_search_total"
+                            )
+                            if isinstance(estimated_tuning_value, (int, float)):
+                                estimated_full_tuning_seconds = float(estimated_tuning_value)
+                        specialized_flag = tuning_summary_payload.get(
+                            "specialized_linearsvc_tuning_used"
+                        )
+                        if isinstance(specialized_flag, bool):
+                            specialized_linearsvc_tuning_used = bool(specialized_flag)
+                        tuning_extrapolation_flag = tuning_summary_payload.get(
+                            "tuning_extrapolation_applied"
+                        )
+                        if isinstance(tuning_extrapolation_flag, bool):
+                            tuning_extrapolation_applied = bool(tuning_extrapolation_flag)
             if measured_outer_folds <= 0:
                 measured_outer_folds = 1
         except Exception as exc:
@@ -893,6 +1040,22 @@ def verify_campaign_runtime_profile(
                 - float(permutation_loop_measured_seconds)
                 + float(estimated_full_permutation_seconds),
             )
+        if (
+            measured_inner_tuning_seconds is not None
+            and estimated_full_tuning_seconds is not None
+            and measured_inner_tuning_seconds >= 0.0
+        ):
+            tuning_extrapolation_applied = bool(
+                tuning_extrapolation_applied
+                or abs(float(estimated_full_tuning_seconds) - float(measured_inner_tuning_seconds))
+                > 1e-12
+            )
+            adjusted_elapsed_seconds = max(
+                0.0,
+                float(adjusted_elapsed_seconds)
+                - float(measured_inner_tuning_seconds)
+                + float(estimated_full_tuning_seconds),
+            )
 
         fold_scale_factor = float(expected_outer_folds) / float(max(measured_outer_folds, 1))
         estimated_seconds_per_full_run = float(adjusted_elapsed_seconds) * float(fold_scale_factor)
@@ -924,6 +1087,27 @@ def verify_campaign_runtime_profile(
                 "configured_n_permutations": int(configured_n_permutations),
                 "profiled_n_permutations": int(profiled_n_permutations),
                 "permutation_extrapolation_applied": bool(permutation_extrapolation_applied),
+                "configured_inner_fold_count": (
+                    int(configured_inner_fold_count)
+                    if configured_inner_fold_count is not None
+                    else None
+                ),
+                "profiled_inner_fold_count": (
+                    int(profiled_inner_fold_count)
+                    if profiled_inner_fold_count is not None
+                    else None
+                ),
+                "configured_candidate_count": (
+                    int(configured_candidate_count)
+                    if configured_candidate_count is not None
+                    else None
+                ),
+                "profiled_candidate_count": (
+                    int(profiled_candidate_count)
+                    if profiled_candidate_count is not None
+                    else None
+                ),
+                "tuning_extrapolation_applied": bool(tuning_extrapolation_applied),
             },
         )
 
@@ -955,6 +1139,38 @@ def verify_campaign_runtime_profile(
                     else None
                 ),
                 "permutation_extrapolation_applied": bool(permutation_extrapolation_applied),
+                "configured_inner_fold_count": (
+                    int(configured_inner_fold_count)
+                    if configured_inner_fold_count is not None
+                    else None
+                ),
+                "profiled_inner_fold_count": (
+                    int(profiled_inner_fold_count)
+                    if profiled_inner_fold_count is not None
+                    else None
+                ),
+                "configured_candidate_count": (
+                    int(configured_candidate_count)
+                    if configured_candidate_count is not None
+                    else None
+                ),
+                "profiled_candidate_count": (
+                    int(profiled_candidate_count)
+                    if profiled_candidate_count is not None
+                    else None
+                ),
+                "measured_inner_tuning_seconds": (
+                    float(measured_inner_tuning_seconds)
+                    if measured_inner_tuning_seconds is not None
+                    else None
+                ),
+                "estimated_full_tuning_seconds": (
+                    float(estimated_full_tuning_seconds)
+                    if estimated_full_tuning_seconds is not None
+                    else None
+                ),
+                "tuning_extrapolation_applied": bool(tuning_extrapolation_applied),
+                "specialized_linearsvc_tuning_used": specialized_linearsvc_tuning_used,
                 "profile_elapsed_seconds": float(elapsed_seconds),
                 "fold_scale_factor": float(fold_scale_factor),
                 "estimated_seconds_per_full_run": float(estimated_seconds_per_full_run),
@@ -1052,6 +1268,16 @@ def verify_campaign_runtime_profile(
                 if resolved_profile_permutations is not None
                 else None
             ),
+            "profile_inner_folds_override": (
+                int(resolved_profile_inner_folds)
+                if resolved_profile_inner_folds is not None
+                else None
+            ),
+            "profile_tuning_candidates_override": (
+                int(resolved_profile_tuning_candidates)
+                if resolved_profile_tuning_candidates is not None
+                else None
+            ),
         },
         "profiling_runs_executed": int(profiling_runs_executed),
         "fallback_estimates_used": int(fallback_estimates_used),
@@ -1080,6 +1306,19 @@ def verify_campaign_runtime_profile(
                     else None
                 ),
                 "full_permutation_extrapolation": "linear_when_permutation_metrics_available",
+            },
+            "nested_tuning_profiling": {
+                "profile_inner_folds_override": (
+                    int(resolved_profile_inner_folds)
+                    if resolved_profile_inner_folds is not None
+                    else None
+                ),
+                "profile_tuning_candidates_override": (
+                    int(resolved_profile_tuning_candidates)
+                    if resolved_profile_tuning_candidates is not None
+                    else None
+                ),
+                "full_tuning_extrapolation": "linear_when_tuning_timing_metadata_available",
             },
             "notes": [
                 "Profiling runs are precheck-only and non-canonical.",

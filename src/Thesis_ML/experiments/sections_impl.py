@@ -13,6 +13,10 @@ from sklearn.model_selection import GridSearchCV, LeaveOneGroupOut, ParameterGri
 
 from Thesis_ML.config.metric_policy import metric_bundle, metric_scorer
 from Thesis_ML.experiments.evidence_statistics import build_calibration_outputs
+from Thesis_ML.experiments.linearsvc_tuning import (
+    is_specialized_linearsvc_grouped_nested_supported,
+    run_specialized_linearsvc_grouped_nested_tuning,
+)
 from Thesis_ML.experiments.metrics import classification_metric_score
 from Thesis_ML.experiments.tuning_search_spaces import get_search_space
 from Thesis_ML.experiments.progress import emit_progress
@@ -316,6 +320,21 @@ def execute_model_fit(section_input: ModelFitInput) -> dict[str, Any]:
         estimator_fit_elapsed_seconds: float | None = None
         tuned_search_elapsed_seconds: float | None = None
         tuned_search_candidate_count = 0
+        tuned_search_configured_candidate_count = 0
+        tuned_search_profiled_candidate_count = 0
+        tuned_search_configured_inner_fold_count = 0
+        tuned_search_profiled_inner_fold_count = 0
+        tuning_extrapolation_applied = False
+        estimated_full_tuned_search_seconds: float | None = None
+        measured_inner_tuning_seconds: float | None = None
+        estimated_full_inner_tuning_seconds: float | None = None
+        tuning_split_scale_seconds: float | None = None
+        tuning_candidate_fit_seconds: float | None = None
+        tuning_candidate_predict_seconds: float | None = None
+        tuning_refit_elapsed_seconds: float | None = None
+        tuning_executor = "none"
+        tuning_executor_fallback_reason: str | None = None
+        specialized_linearsvc_tuning_used = False
         cv_mean_fit_time_seconds: float | None = None
         cv_std_fit_time_seconds: float | None = None
         cv_mean_score_time_seconds: float | None = None
@@ -339,6 +358,21 @@ def execute_model_fit(section_input: ModelFitInput) -> dict[str, Any]:
                         "inner_group_field": section_input.tuning_inner_group_field,
                         "estimator_fit_elapsed_seconds": estimator_fit_elapsed_seconds,
                         "tuned_search_elapsed_seconds": pd.NA,
+                        "configured_candidate_count": 0,
+                        "profiled_candidate_count": 0,
+                        "configured_inner_fold_count": 0,
+                        "profiled_inner_fold_count": 0,
+                        "tuning_extrapolation_applied": False,
+                        "measured_inner_tuning_seconds": pd.NA,
+                        "estimated_full_inner_tuning_seconds": pd.NA,
+                        "estimated_full_tuned_search_seconds": pd.NA,
+                        "tuning_executor": "skipped_control_model",
+                        "tuning_executor_fallback_reason": pd.NA,
+                        "specialized_linearsvc_tuning_used": False,
+                        "tuning_split_scale_seconds": pd.NA,
+                        "tuning_candidate_fit_seconds": pd.NA,
+                        "tuning_candidate_predict_seconds": pd.NA,
+                        "tuning_refit_elapsed_seconds": pd.NA,
                         "cv_mean_fit_time_seconds": pd.NA,
                         "cv_std_fit_time_seconds": pd.NA,
                         "cv_mean_score_time_seconds": pd.NA,
@@ -352,13 +386,40 @@ def execute_model_fit(section_input: ModelFitInput) -> dict[str, Any]:
                     section_input.tuning_search_space_id,
                     section_input.model,
                 )
-                candidate_count = int(len(list(ParameterGrid(param_grid))))
-                inner_groups = groups[train_idx]
-                inner_group_count = int(len(np.unique(inner_groups)))
+                candidate_params = list(ParameterGrid(param_grid))
+                candidate_count = int(len(candidate_params))
+                x_outer_train = section_input.x_matrix[train_idx]
+                y_outer_train = y[train_idx]
+                inner_groups = np.asarray(groups[train_idx]).astype(str, copy=False)
+                inner_splits = list(LeaveOneGroupOut().split(x_outer_train, y_outer_train, inner_groups))
+                inner_group_count = int(len(inner_splits))
                 if inner_group_count < 2:
                     raise ValueError(
                         "Grouped nested tuning requires at least two inner groups in training data."
                     )
+                configured_candidate_count = int(candidate_count)
+                configured_inner_fold_count = int(inner_group_count)
+                profiled_candidate_count = int(candidate_count)
+                profiled_inner_fold_count = int(inner_group_count)
+                if bool(section_input.profiling_only):
+                    if section_input.profile_tuning_candidates is not None:
+                        profiled_candidate_count = int(
+                            min(
+                                int(candidate_count),
+                                int(section_input.profile_tuning_candidates),
+                            )
+                        )
+                        if profiled_candidate_count <= 0:
+                            raise ValueError("profile_tuning_candidates must be > 0 when provided.")
+                    if section_input.profile_inner_folds is not None:
+                        profiled_inner_fold_count = int(
+                            min(
+                                int(inner_group_count),
+                                int(section_input.profile_inner_folds),
+                            )
+                        )
+                        if profiled_inner_fold_count <= 0:
+                            raise ValueError("profile_inner_folds must be > 0 when provided.")
                 emit_progress(
                     section_input.progress_callback,
                     stage="tuning",
@@ -369,8 +430,10 @@ def execute_model_fit(section_input: ModelFitInput) -> dict[str, Any]:
                         "target": str(section_input.target_column),
                         "fold_index": int(fold_index + 1),
                         "total_folds": int(total_outer_folds),
-                        "candidate_count": int(candidate_count),
-                        "inner_group_count": int(inner_group_count),
+                        "candidate_count": int(configured_candidate_count),
+                        "inner_group_count": int(configured_inner_fold_count),
+                        "profiled_candidate_count": int(profiled_candidate_count),
+                        "profiled_inner_fold_count": int(profiled_inner_fold_count),
                     },
                 )
                 declared_space_version = section_input.tuning_search_space_version
@@ -378,47 +441,200 @@ def execute_model_fit(section_input: ModelFitInput) -> dict[str, Any]:
                     raise ValueError(
                         "Declared tuning_search_space_version does not match search-space registry version."
                     )
-                search = GridSearchCV(
-                    estimator=clone(pipeline_template),
-                    param_grid=param_grid,
-                    scoring=metric_scorer(section_input.primary_metric_name),
-                    cv=LeaveOneGroupOut(),
-                    refit=True,
-                    n_jobs=1,
+                supports_specialized, specialized_reason = (
+                    is_specialized_linearsvc_grouped_nested_supported(
+                        model_name=section_input.model,
+                        pipeline_template=pipeline_template,
+                        param_grid=param_grid,
+                    )
                 )
-                search_start = perf_counter()
-                search.fit(
-                    section_input.x_matrix[train_idx],
-                    y[train_idx],
-                    groups=inner_groups,
-                )
-                tuned_search_elapsed_seconds = float(perf_counter() - search_start)
-                estimator = search.best_estimator_
-                tuned_search_candidate_count = int(len(search.cv_results_["params"]))
-                cv_mean_fit_time_seconds = _safe_float_from_cv_results(
-                    search.cv_results_,
-                    "mean_fit_time",
-                )
-                cv_std_fit_time_seconds = _safe_float_from_cv_results(
-                    search.cv_results_,
-                    "std_fit_time",
-                )
-                cv_mean_score_time_seconds = _safe_float_from_cv_results(
-                    search.cv_results_,
-                    "mean_score_time",
-                )
-                cv_std_score_time_seconds = _safe_float_from_cv_results(
-                    search.cv_results_,
-                    "std_score_time",
-                )
+                if supports_specialized:
+                    try:
+                        specialized_result = run_specialized_linearsvc_grouped_nested_tuning(
+                            pipeline_template=clone(pipeline_template),
+                            x_train=x_outer_train,
+                            y_train=y_outer_train,
+                            inner_groups=inner_groups,
+                            param_grid=param_grid,
+                            primary_metric_name=section_input.primary_metric_name,
+                            profile_inner_folds=(
+                                int(profiled_inner_fold_count)
+                                if profiled_inner_fold_count < configured_inner_fold_count
+                                else None
+                            ),
+                            profile_tuning_candidates=(
+                                int(profiled_candidate_count)
+                                if profiled_candidate_count < configured_candidate_count
+                                else None
+                            ),
+                        )
+                        estimator = specialized_result.best_estimator
+                        tuned_search_elapsed_seconds = float(
+                            specialized_result.tuned_search_elapsed_seconds
+                        )
+                        tuned_search_candidate_count = int(
+                            specialized_result.profiled_candidate_count
+                        )
+                        tuned_search_configured_candidate_count = int(
+                            specialized_result.configured_candidate_count
+                        )
+                        tuned_search_profiled_candidate_count = int(
+                            specialized_result.profiled_candidate_count
+                        )
+                        tuned_search_configured_inner_fold_count = int(
+                            specialized_result.configured_inner_fold_count
+                        )
+                        tuned_search_profiled_inner_fold_count = int(
+                            specialized_result.profiled_inner_fold_count
+                        )
+                        tuning_extrapolation_applied = bool(
+                            specialized_result.tuning_extrapolation_applied
+                        )
+                        measured_inner_tuning_seconds = float(
+                            specialized_result.measured_inner_tuning_seconds
+                        )
+                        estimated_full_inner_tuning_seconds = float(
+                            specialized_result.estimated_full_inner_tuning_seconds
+                        )
+                        estimated_full_tuned_search_seconds = float(
+                            specialized_result.estimated_full_tuned_search_seconds
+                        )
+                        tuning_split_scale_seconds = float(
+                            specialized_result.split_scale_seconds
+                        )
+                        tuning_candidate_fit_seconds = float(
+                            specialized_result.candidate_fit_seconds
+                        )
+                        tuning_candidate_predict_seconds = float(
+                            specialized_result.candidate_predict_seconds
+                        )
+                        tuning_refit_elapsed_seconds = float(
+                            specialized_result.refit_elapsed_seconds
+                        )
+                        tuning_executor = str(specialized_result.executor_id)
+                        specialized_linearsvc_tuning_used = True
+                        cv_mean_fit_time_seconds = _safe_float_from_cv_results(
+                            specialized_result.cv_results,
+                            "mean_fit_time",
+                        )
+                        cv_std_fit_time_seconds = _safe_float_from_cv_results(
+                            specialized_result.cv_results,
+                            "std_fit_time",
+                        )
+                        cv_mean_score_time_seconds = _safe_float_from_cv_results(
+                            specialized_result.cv_results,
+                            "mean_score_time",
+                        )
+                        cv_std_score_time_seconds = _safe_float_from_cv_results(
+                            specialized_result.cv_results,
+                            "std_score_time",
+                        )
+                        best_score = float(specialized_result.best_score)
+                        best_params_json = json.dumps(
+                            specialized_result.best_params,
+                            sort_keys=True,
+                        )
+                    except ValueError as exc:
+                        supports_specialized = False
+                        tuning_executor_fallback_reason = str(exc)
+                if not supports_specialized:
+                    tuning_executor = "gridsearchcv_pipeline_reference_v1"
+                    if specialized_reason:
+                        tuning_executor_fallback_reason = str(specialized_reason)
+                    profiled_param_grid: dict[str, Any] | list[dict[str, Any]] = param_grid
+                    if profiled_candidate_count < configured_candidate_count:
+                        profiled_param_grid = [
+                            {"model__C": [float(params["model__C"])]}
+                            for params in candidate_params[:profiled_candidate_count]
+                        ]
+                    profiled_inner_splits = inner_splits[:profiled_inner_fold_count]
+                    search = GridSearchCV(
+                        estimator=clone(pipeline_template),
+                        param_grid=profiled_param_grid,
+                        scoring=metric_scorer(section_input.primary_metric_name),
+                        cv=profiled_inner_splits,
+                        refit=True,
+                        n_jobs=1,
+                    )
+                    search_start = perf_counter()
+                    search.fit(x_outer_train, y_outer_train)
+                    tuned_search_elapsed_seconds = float(perf_counter() - search_start)
+                    estimator = search.best_estimator_
+                    tuned_search_candidate_count = int(len(search.cv_results_["params"]))
+                    tuned_search_configured_candidate_count = int(configured_candidate_count)
+                    tuned_search_profiled_candidate_count = int(
+                        tuned_search_candidate_count
+                    )
+                    tuned_search_configured_inner_fold_count = int(configured_inner_fold_count)
+                    tuned_search_profiled_inner_fold_count = int(profiled_inner_fold_count)
+                    measured_inner_tuning_seconds = float(tuned_search_elapsed_seconds)
+                    estimated_full_inner_tuning_seconds = float(measured_inner_tuning_seconds)
+                    tuning_extrapolation_applied = bool(
+                        tuned_search_profiled_candidate_count != tuned_search_configured_candidate_count
+                        or tuned_search_profiled_inner_fold_count
+                        != tuned_search_configured_inner_fold_count
+                    )
+                    if tuning_extrapolation_applied:
+                        estimated_full_inner_tuning_seconds *= float(
+                            tuned_search_configured_candidate_count
+                        ) / float(max(tuned_search_profiled_candidate_count, 1))
+                        estimated_full_inner_tuning_seconds *= float(
+                            tuned_search_configured_inner_fold_count
+                        ) / float(max(tuned_search_profiled_inner_fold_count, 1))
+                    estimated_full_tuned_search_seconds = float(
+                        estimated_full_inner_tuning_seconds
+                    )
+                    cv_mean_fit_time_seconds = _safe_float_from_cv_results(
+                        search.cv_results_,
+                        "mean_fit_time",
+                    )
+                    cv_std_fit_time_seconds = _safe_float_from_cv_results(
+                        search.cv_results_,
+                        "std_fit_time",
+                    )
+                    cv_mean_score_time_seconds = _safe_float_from_cv_results(
+                        search.cv_results_,
+                        "mean_score_time",
+                    )
+                    cv_std_score_time_seconds = _safe_float_from_cv_results(
+                        search.cv_results_,
+                        "std_score_time",
+                    )
+                    best_score = float(search.best_score_)
+                    best_params_json = json.dumps(search.best_params_, sort_keys=True)
                 tuning_rows.append(
                     {
                         "fold": int(fold_index),
                         "status": "tuned",
                         "model": section_input.model,
-                        "best_score": float(search.best_score_),
-                        "best_params_json": json.dumps(search.best_params_, sort_keys=True),
+                        "best_score": float(best_score),
+                        "best_params_json": best_params_json,
                         "n_candidates": int(tuned_search_candidate_count),
+                        "configured_candidate_count": int(
+                            tuned_search_configured_candidate_count
+                        ),
+                        "profiled_candidate_count": int(
+                            tuned_search_profiled_candidate_count
+                        ),
+                        "configured_inner_fold_count": int(
+                            tuned_search_configured_inner_fold_count
+                        ),
+                        "profiled_inner_fold_count": int(
+                            tuned_search_profiled_inner_fold_count
+                        ),
+                        "tuning_extrapolation_applied": bool(tuning_extrapolation_applied),
+                        "measured_inner_tuning_seconds": measured_inner_tuning_seconds,
+                        "estimated_full_inner_tuning_seconds": estimated_full_inner_tuning_seconds,
+                        "estimated_full_tuned_search_seconds": estimated_full_tuned_search_seconds,
+                        "tuning_executor": str(tuning_executor),
+                        "tuning_executor_fallback_reason": tuning_executor_fallback_reason,
+                        "specialized_linearsvc_tuning_used": bool(
+                            specialized_linearsvc_tuning_used
+                        ),
+                        "tuning_split_scale_seconds": tuning_split_scale_seconds,
+                        "tuning_candidate_fit_seconds": tuning_candidate_fit_seconds,
+                        "tuning_candidate_predict_seconds": tuning_candidate_predict_seconds,
+                        "tuning_refit_elapsed_seconds": tuning_refit_elapsed_seconds,
                         "search_space_id": section_input.tuning_search_space_id,
                         "search_space_version": resolved_space_version,
                         "primary_metric_name": section_input.primary_metric_name,
@@ -512,6 +728,21 @@ def execute_model_fit(section_input: ModelFitInput) -> dict[str, Any]:
                 "estimator_fit_elapsed_seconds": estimator_fit_elapsed_seconds,
                 "tuned_search_elapsed_seconds": tuned_search_elapsed_seconds,
                 "tuned_search_candidate_count": int(tuned_search_candidate_count),
+                "configured_candidate_count": int(tuned_search_configured_candidate_count),
+                "profiled_candidate_count": int(tuned_search_profiled_candidate_count),
+                "configured_inner_fold_count": int(tuned_search_configured_inner_fold_count),
+                "profiled_inner_fold_count": int(tuned_search_profiled_inner_fold_count),
+                "tuning_extrapolation_applied": bool(tuning_extrapolation_applied),
+                "measured_inner_tuning_seconds": measured_inner_tuning_seconds,
+                "estimated_full_inner_tuning_seconds": estimated_full_inner_tuning_seconds,
+                "estimated_full_tuned_search_seconds": estimated_full_tuned_search_seconds,
+                "tuning_executor": str(tuning_executor),
+                "tuning_executor_fallback_reason": tuning_executor_fallback_reason,
+                "specialized_linearsvc_tuning_used": bool(specialized_linearsvc_tuning_used),
+                "tuning_split_scale_seconds": tuning_split_scale_seconds,
+                "tuning_candidate_fit_seconds": tuning_candidate_fit_seconds,
+                "tuning_candidate_predict_seconds": tuning_candidate_predict_seconds,
+                "tuning_refit_elapsed_seconds": tuning_refit_elapsed_seconds,
                 "cv_mean_fit_time_seconds": cv_mean_fit_time_seconds,
                 "cv_std_fit_time_seconds": cv_std_fit_time_seconds,
                 "cv_mean_score_time_seconds": cv_mean_score_time_seconds,
@@ -618,6 +849,7 @@ def execute_model_fit(section_input: ModelFitInput) -> dict[str, Any]:
             },
         )
 
+    tuned_rows = [row for row in tuning_rows if str(row.get("status")) == "tuned"]
     tuning_summary = {
         "methodology_policy_name": methodology_policy_name,
         "tuning_enabled": bool(tuning_enabled),
@@ -635,8 +867,44 @@ def execute_model_fit(section_input: ModelFitInput) -> dict[str, Any]:
         "planned_outer_folds": int(planned_outer_folds),
         "executed_outer_folds": int(len(splits)),
         "profiling_outer_fold_cap": (int(max_outer_folds) if max_outer_folds is not None else None),
+        "profiling_only": bool(section_input.profiling_only),
+        "profile_inner_folds_override": (
+            int(section_input.profile_inner_folds)
+            if section_input.profile_inner_folds is not None
+            else None
+        ),
+        "profile_tuning_candidates_override": (
+            int(section_input.profile_tuning_candidates)
+            if section_input.profile_tuning_candidates is not None
+            else None
+        ),
         "n_tuned_folds": int(sum(row["status"] == "tuned" for row in tuning_rows)),
         "n_skipped_folds": int(sum(row["status"] != "tuned" for row in tuning_rows)),
+        "specialized_linearsvc_tuning_used": bool(
+            any(bool(row.get("specialized_linearsvc_tuning_used")) for row in tuned_rows)
+        ),
+        "tuning_executor_ids": sorted(
+            {
+                str(row.get("tuning_executor"))
+                for row in tuned_rows
+                if isinstance(row.get("tuning_executor"), str) and str(row.get("tuning_executor"))
+            }
+        ),
+        "configured_inner_fold_count_total": int(
+            sum(int(row.get("configured_inner_fold_count") or 0) for row in tuned_rows)
+        ),
+        "profiled_inner_fold_count_total": int(
+            sum(int(row.get("profiled_inner_fold_count") or 0) for row in tuned_rows)
+        ),
+        "configured_candidate_count_total": int(
+            sum(int(row.get("configured_candidate_count") or 0) for row in tuned_rows)
+        ),
+        "profiled_candidate_count_total": int(
+            sum(int(row.get("profiled_candidate_count") or 0) for row in tuned_rows)
+        ),
+        "tuning_extrapolation_applied": bool(
+            any(bool(row.get("tuning_extrapolation_applied")) for row in tuned_rows)
+        ),
         "best_params_path": str(tuning_best_params_path.resolve()),
         "timing_totals_seconds": {
             "outer_fold_total": float(
@@ -647,6 +915,21 @@ def execute_model_fit(section_input: ModelFitInput) -> dict[str, Any]:
             ),
             "tuned_search_total": float(
                 sum(float(row.get("tuned_search_elapsed_seconds") or 0.0) for row in fold_rows)
+            ),
+            "measured_inner_tuning_total": float(
+                sum(float(row.get("measured_inner_tuning_seconds") or 0.0) for row in tuned_rows)
+            ),
+            "estimated_full_tuned_search_total": float(
+                sum(float(row.get("estimated_full_tuned_search_seconds") or 0.0) for row in tuned_rows)
+            ),
+            "tuning_split_scale_total": float(
+                sum(float(row.get("tuning_split_scale_seconds") or 0.0) for row in tuned_rows)
+            ),
+            "tuning_candidate_fit_total": float(
+                sum(float(row.get("tuning_candidate_fit_seconds") or 0.0) for row in tuned_rows)
+            ),
+            "tuning_candidate_predict_total": float(
+                sum(float(row.get("tuning_candidate_predict_seconds") or 0.0) for row in tuned_rows)
             ),
         },
     }
@@ -664,6 +947,21 @@ def execute_model_fit(section_input: ModelFitInput) -> dict[str, Any]:
                 "best_score",
                 "best_params_json",
                 "n_candidates",
+                "configured_candidate_count",
+                "profiled_candidate_count",
+                "configured_inner_fold_count",
+                "profiled_inner_fold_count",
+                "tuning_extrapolation_applied",
+                "measured_inner_tuning_seconds",
+                "estimated_full_inner_tuning_seconds",
+                "estimated_full_tuned_search_seconds",
+                "tuning_executor",
+                "tuning_executor_fallback_reason",
+                "specialized_linearsvc_tuning_used",
+                "tuning_split_scale_seconds",
+                "tuning_candidate_fit_seconds",
+                "tuning_candidate_predict_seconds",
+                "tuning_refit_elapsed_seconds",
                 "search_space_id",
                 "search_space_version",
                 "primary_metric_name",
@@ -696,6 +994,12 @@ def execute_model_fit(section_input: ModelFitInput) -> dict[str, Any]:
             "tuned_search": float(
                 sum(float(row.get("tuned_search_elapsed_seconds") or 0.0) for row in fold_rows)
             ),
+            "measured_inner_tuning": float(
+                sum(float(row.get("measured_inner_tuning_seconds") or 0.0) for row in fold_rows)
+            ),
+            "estimated_full_tuned_search": float(
+                sum(float(row.get("estimated_full_tuned_search_seconds") or 0.0) for row in fold_rows)
+            ),
         },
         "fold_timings": [
             {
@@ -712,6 +1016,59 @@ def execute_model_fit(section_input: ModelFitInput) -> dict[str, Any]:
                     else None
                 ),
                 "tuned_search_candidate_count": int(row.get("tuned_search_candidate_count") or 0),
+                "configured_candidate_count": int(row.get("configured_candidate_count") or 0),
+                "profiled_candidate_count": int(row.get("profiled_candidate_count") or 0),
+                "configured_inner_fold_count": int(row.get("configured_inner_fold_count") or 0),
+                "profiled_inner_fold_count": int(row.get("profiled_inner_fold_count") or 0),
+                "tuning_extrapolation_applied": bool(row.get("tuning_extrapolation_applied")),
+                "measured_inner_tuning_seconds": (
+                    float(row.get("measured_inner_tuning_seconds"))
+                    if row.get("measured_inner_tuning_seconds") is not None
+                    else None
+                ),
+                "estimated_full_inner_tuning_seconds": (
+                    float(row.get("estimated_full_inner_tuning_seconds"))
+                    if row.get("estimated_full_inner_tuning_seconds") is not None
+                    else None
+                ),
+                "estimated_full_tuned_search_seconds": (
+                    float(row.get("estimated_full_tuned_search_seconds"))
+                    if row.get("estimated_full_tuned_search_seconds") is not None
+                    else None
+                ),
+                "tuning_executor": (
+                    str(row.get("tuning_executor"))
+                    if row.get("tuning_executor") is not None
+                    else None
+                ),
+                "tuning_executor_fallback_reason": (
+                    str(row.get("tuning_executor_fallback_reason"))
+                    if row.get("tuning_executor_fallback_reason") is not None
+                    else None
+                ),
+                "specialized_linearsvc_tuning_used": bool(
+                    row.get("specialized_linearsvc_tuning_used")
+                ),
+                "tuning_split_scale_seconds": (
+                    float(row.get("tuning_split_scale_seconds"))
+                    if row.get("tuning_split_scale_seconds") is not None
+                    else None
+                ),
+                "tuning_candidate_fit_seconds": (
+                    float(row.get("tuning_candidate_fit_seconds"))
+                    if row.get("tuning_candidate_fit_seconds") is not None
+                    else None
+                ),
+                "tuning_candidate_predict_seconds": (
+                    float(row.get("tuning_candidate_predict_seconds"))
+                    if row.get("tuning_candidate_predict_seconds") is not None
+                    else None
+                ),
+                "tuning_refit_elapsed_seconds": (
+                    float(row.get("tuning_refit_elapsed_seconds"))
+                    if row.get("tuning_refit_elapsed_seconds") is not None
+                    else None
+                ),
                 "cv_mean_fit_time_seconds": (
                     float(row.get("cv_mean_fit_time_seconds"))
                     if row.get("cv_mean_fit_time_seconds") is not None
