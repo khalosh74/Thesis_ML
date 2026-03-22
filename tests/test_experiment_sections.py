@@ -34,6 +34,7 @@ from Thesis_ML.experiments.sections import (
     model_fit,
 )
 
+from Thesis_ML.experiments.progress import ProgressEvent
 
 def _write_nifti(path: Path, data: np.ndarray, affine: np.ndarray | None = None) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -530,3 +531,92 @@ def test_model_fit_record_random_split_generates_non_empty_folds(tmp_path: Path)
     for train_idx, test_idx in fit_output.splits:
         assert int(len(train_idx)) > 0
         assert int(len(test_idx)) > 0
+
+def test_model_fit_emits_fold_progress_events(tmp_path: Path) -> None:
+    events: list[ProgressEvent] = []
+
+    def _capture(event: ProgressEvent) -> None:
+        events.append(event)
+
+    report_dir = tmp_path / "run"
+    report_dir.mkdir(parents=True, exist_ok=True)
+
+    metadata_df = pd.DataFrame(
+        [
+            {
+                "sample_id": "s1",
+                "subject": "sub-001",
+                "session": "ses-01",
+                "bas": "BAS2",
+                "task": "passive",
+                "modality": "audio",
+                "emotion": "anger",
+                "coarse_affect": "negative",
+            },
+            {
+                "sample_id": "s2",
+                "subject": "sub-001",
+                "session": "ses-01",
+                "bas": "BAS2",
+                "task": "passive",
+                "modality": "video",
+                "emotion": "happiness",
+                "coarse_affect": "positive",
+            },
+            {
+                "sample_id": "s3",
+                "subject": "sub-001",
+                "session": "ses-02",
+                "bas": "BAS2",
+                "task": "passive",
+                "modality": "audio",
+                "emotion": "anger",
+                "coarse_affect": "negative",
+            },
+            {
+                "sample_id": "s4",
+                "subject": "sub-001",
+                "session": "ses-02",
+                "bas": "BAS2",
+                "task": "passive",
+                "modality": "video",
+                "emotion": "happiness",
+                "coarse_affect": "positive",
+            },
+        ]
+    )
+    x_matrix = np.asarray(
+        [
+            [0.0, 0.1, 0.0, 0.1],
+            [0.1, 0.0, 0.1, 0.0],
+            [2.0, 2.1, 2.0, 2.1],
+            [2.1, 2.0, 2.1, 2.0],
+        ],
+        dtype=np.float64,
+    )
+
+    fit_output = model_fit(
+        ModelFitInput(
+            x_matrix=x_matrix,
+            metadata_df=metadata_df,
+            target_column="coarse_affect",
+            cv_mode="within_subject_loso_session",
+            model="ridge",
+            subject="sub-001",
+            seed=7,
+            run_id="progress_test",
+            config_filename="config.json",
+            report_dir=report_dir,
+            build_pipeline_fn=_build_pipeline,
+            scores_for_predictions_fn=_scores_for_predictions,
+            extract_linear_coefficients_fn=_extract_linear_coefficients,
+            progress_callback=_capture,
+        )
+    )
+
+    assert fit_output.fold_rows
+    assert events
+    fold_events = [event for event in events if event.stage == "fold"]
+    assert fold_events
+    assert any("starting outer fold" in event.message for event in fold_events)
+    assert any("finished outer fold" in event.message for event in fold_events)

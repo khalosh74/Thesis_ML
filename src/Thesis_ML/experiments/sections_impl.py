@@ -9,12 +9,13 @@ import numpy as np
 import pandas as pd
 from sklearn.base import clone
 from sklearn.metrics import confusion_matrix
-from sklearn.model_selection import GridSearchCV, LeaveOneGroupOut, StratifiedKFold
+from sklearn.model_selection import GridSearchCV, LeaveOneGroupOut, ParameterGrid, StratifiedKFold
 
 from Thesis_ML.config.metric_policy import metric_bundle, metric_scorer
 from Thesis_ML.experiments.evidence_statistics import build_calibration_outputs
 from Thesis_ML.experiments.metrics import classification_metric_score
 from Thesis_ML.experiments.tuning_search_spaces import get_search_space
+from Thesis_ML.experiments.progress import emit_progress
 
 if TYPE_CHECKING:
     from Thesis_ML.experiments.section_models import (
@@ -251,9 +252,39 @@ def execute_model_fit(section_input: ModelFitInput) -> dict[str, Any]:
     y_true_all: list[str] = []
     y_pred_all: list[str] = []
     fold_compute_runtime_metadata: list[dict[str, Any]] = []
+    total_outer_folds = int(len(splits))
+    emit_progress(
+        section_input.progress_callback,
+        stage="model_fit",
+        message=f"starting model fit with {total_outer_folds} outer folds",
+        completed_units=0.0,
+        total_units=float(total_outer_folds),
+        metadata={
+            "run_id": str(section_input.run_id),
+            "model": str(section_input.model),
+            "target": str(section_input.target_column),
+            "cv_mode": str(section_input.cv_mode),
+            "total_folds": int(total_outer_folds),
+        },
+    )
 
     for fold_index, (train_idx, test_idx) in enumerate(splits):
         outer_fold_start = perf_counter()
+        emit_progress(
+            section_input.progress_callback,
+            stage="fold",
+            message=f"starting outer fold {fold_index + 1}/{total_outer_folds}",
+            completed_units=float(fold_index),
+            total_units=float(total_outer_folds),
+            metadata={
+                "run_id": str(section_input.run_id),
+                "model": str(section_input.model),
+                "target": str(section_input.target_column),
+                "cv_mode": str(section_input.cv_mode),
+                "fold_index": int(fold_index + 1),
+                "total_folds": int(total_outer_folds),
+            },
+        )
         train_meta = section_input.metadata_df.iloc[train_idx].reset_index(drop=True)
         test_meta = section_input.metadata_df.iloc[test_idx].reset_index(drop=True)
         train_subjects = sorted(train_meta["subject"].astype(str).unique().tolist())
@@ -321,15 +352,31 @@ def execute_model_fit(section_input: ModelFitInput) -> dict[str, Any]:
                     section_input.tuning_search_space_id,
                     section_input.model,
                 )
+                candidate_count = int(len(list(ParameterGrid(param_grid))))
+                inner_groups = groups[train_idx]
+                inner_group_count = int(len(np.unique(inner_groups)))
+                if inner_group_count < 2:
+                    raise ValueError(
+                        "Grouped nested tuning requires at least two inner groups in training data."
+                    )
+                emit_progress(
+                    section_input.progress_callback,
+                    stage="tuning",
+                    message=f"running nested tuning on fold {fold_index + 1}/{total_outer_folds}",
+                    metadata={
+                        "run_id": str(section_input.run_id),
+                        "model": str(section_input.model),
+                        "target": str(section_input.target_column),
+                        "fold_index": int(fold_index + 1),
+                        "total_folds": int(total_outer_folds),
+                        "candidate_count": int(candidate_count),
+                        "inner_group_count": int(inner_group_count),
+                    },
+                )
                 declared_space_version = section_input.tuning_search_space_version
                 if declared_space_version and declared_space_version != resolved_space_version:
                     raise ValueError(
                         "Declared tuning_search_space_version does not match search-space registry version."
-                    )
-                inner_groups = groups[train_idx]
-                if len(np.unique(inner_groups)) < 2:
-                    raise ValueError(
-                        "Grouped nested tuning requires at least two inner groups in training data."
                     )
                 search = GridSearchCV(
                     estimator=clone(pipeline_template),
@@ -554,6 +601,22 @@ def execute_model_fit(section_input: ModelFitInput) -> dict[str, Any]:
         y_true_all.extend(y_true.tolist())
         y_pred_all.extend(y_pred.tolist())
         fold_rows[-1]["outer_fold_elapsed_seconds"] = float(perf_counter() - outer_fold_start)
+        emit_progress(
+            section_input.progress_callback,
+            stage="fold",
+            message=f"finished outer fold {fold_index + 1}/{total_outer_folds}",
+            completed_units=float(fold_index + 1),
+            total_units=float(total_outer_folds),
+            metadata={
+                "run_id": str(section_input.run_id),
+                "model": str(section_input.model),
+                "target": str(section_input.target_column),
+                "cv_mode": str(section_input.cv_mode),
+                "fold_index": int(fold_index + 1),
+                "total_folds": int(total_outer_folds),
+                "outer_fold_elapsed_seconds": float(fold_rows[-1]["outer_fold_elapsed_seconds"]),
+            },
+        )
 
     tuning_summary = {
         "methodology_policy_name": methodology_policy_name,
@@ -676,6 +739,20 @@ def execute_model_fit(section_input: ModelFitInput) -> dict[str, Any]:
     fit_timing_summary_path.write_text(
         f"{json.dumps(fit_timing_summary, indent=2)}\n",
         encoding="utf-8",
+    )
+    emit_progress(
+        section_input.progress_callback,
+        stage="model_fit",
+        message="finished model fit",
+        completed_units=float(total_outer_folds),
+        total_units=float(total_outer_folds),
+        metadata={
+            "run_id": str(section_input.run_id),
+            "model": str(section_input.model),
+            "target": str(section_input.target_column),
+            "cv_mode": str(section_input.cv_mode),
+            "total_folds": int(total_outer_folds),
+        },
     )
 
     return {
@@ -967,6 +1044,13 @@ def execute_evaluation(section_input: EvaluationInput) -> dict[str, Any]:
                 section_input.y_pred_all,
                 metric_name=permutation_metric_name,
             ),
+            progress_callback=section_input.progress_callback,
+            progress_metadata={
+                "run_id": str(section_input.run_id),
+                "model": str(section_input.model),
+                "target": str(section_input.target_column),
+                "cv_mode": str(section_input.cv_mode),
+            },
         )
         permutation_payload["alpha"] = float(section_input.permutation_alpha)
         permutation_payload["minimum_required"] = int(section_input.permutation_minimum_required)

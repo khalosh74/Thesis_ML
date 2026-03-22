@@ -10,7 +10,7 @@ from sklearn.base import clone
 from sklearn.pipeline import Pipeline
 
 from Thesis_ML.config.metric_policy import classification_metric_score as policy_metric_score
-
+from Thesis_ML.experiments.progress import ProgressCallback, emit_progress
 
 def classification_metric_score(
     y_true: list[str] | np.ndarray,
@@ -54,11 +54,34 @@ def evaluate_permutations(
     n_permutations: int,
     metric_name: str,
     observed_metric: float,
+    progress_callback: ProgressCallback | None = None,
+    progress_metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     rng = np.random.default_rng(seed)
     permutation_scores: list[float] = []
+    progress_base = dict(progress_metadata or {})
+    emit_progress(
+        progress_callback,
+        stage="permutation",
+        message=f"starting permutation test with {n_permutations} permutations",
+        completed_units=0.0,
+        total_units=float(n_permutations),
+        metadata=progress_base,
+    )
 
-    for _ in range(n_permutations):
+    for permutation_index in range(n_permutations):
+        emit_progress(
+            progress_callback,
+            stage="permutation",
+            message=f"running permutation {permutation_index + 1}/{n_permutations}",
+            completed_units=float(permutation_index),
+            total_units=float(n_permutations),
+            metadata={
+                **progress_base,
+                "permutation_index": int(permutation_index + 1),
+                "n_permutations": int(n_permutations),
+            },
+        )
         y_true_all: list[str] = []
         y_pred_all: list[str] = []
 
@@ -79,6 +102,18 @@ def evaluate_permutations(
                 y_pred=y_pred_all,
                 metric_name=metric_name,
             )
+        )
+        emit_progress(
+            progress_callback,
+            stage="permutation",
+            message=f"finished permutation {permutation_index + 1}/{n_permutations}",
+            completed_units=float(permutation_index + 1),
+            total_units=float(n_permutations),
+            metadata={
+                **progress_base,
+                "permutation_index": int(permutation_index + 1),
+                "n_permutations": int(n_permutations),
+            },
         )
 
     ge_count = sum(score >= observed_metric for score in permutation_scores)
@@ -105,6 +140,14 @@ def evaluate_permutations(
     payload["permutation_metric_mean"] = payload["null_summary"]["mean"]
     payload["permutation_metric_std"] = payload["null_summary"]["std"]
     payload["permutation_p_value"] = payload["p_value"]
+    emit_progress(
+        progress_callback,
+        stage="permutation",
+        message="finished permutation test",
+        completed_units=float(n_permutations),
+        total_units=float(n_permutations),
+        metadata=progress_base,
+    )
     return payload
 
 

@@ -612,3 +612,44 @@ def test_model_fit_outer_fold_cap_only_applies_when_profiling_flag_set(tmp_path:
 
     assert len(full_output["splits"]) >= 2
     assert len(capped_output["splits"]) == 1
+
+def test_campaign_runtime_profile_emits_progress_events(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    events: list[object] = []
+    calls: list[dict[str, Any]] = []
+
+    def _fake_run_experiment(**kwargs: Any) -> dict[str, Any]:
+        calls.append(dict(kwargs))
+        run_id = str(kwargs["run_id"])
+        report_dir = Path(kwargs["reports_root"]) / run_id
+        return {
+            "run_id": run_id,
+            "report_dir": str(report_dir),
+            "run_status_path": str(report_dir / "run_status.json"),
+            "stage_timings_seconds": {"total": 2.5},
+            "metrics": {"n_folds": 1, "primary_metric_value": 0.5},
+        }
+
+    monkeypatch.setattr(runtime_profile, "run_experiment", _fake_run_experiment)
+
+    def _capture(event: object) -> None:
+        events.append(event)
+
+    summary = runtime_profile.verify_campaign_runtime_profile(
+        index_csv=_demo_index_csv(),
+        data_root=_repo_root() / "demo_data" / "synthetic_v1" / "data_root",
+        cache_dir=_repo_root() / "demo_data" / "synthetic_v1" / "cache",
+        confirmatory_protocol=_confirmatory_protocol(),
+        comparison_specs=_comparison_specs(),
+        profile_root=tmp_path / "runtime_profiles",
+        progress_callback=_capture,
+    )
+
+    assert summary["passed"] is True
+    assert calls
+    assert all(call.get("progress_callback") is _capture for call in calls)
+    assert events
+    stages = [getattr(event, "stage", None) for event in events]
+    assert "campaign" in stages

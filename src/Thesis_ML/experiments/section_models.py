@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from Thesis_ML.experiments.progress import ProgressCallback
 from Thesis_ML.experiments.compute_policy import ResolvedComputePolicy
 
 
@@ -125,6 +126,7 @@ class ModelFitInput(_SectionModel):
     interpretability_enabled: bool | None = None
     max_outer_folds: int | None = None
     compute_policy: ResolvedComputePolicy | None = None
+    progress_callback: ProgressCallback | None = None
     run_id: str = Field(min_length=1)
     config_filename: str = Field(min_length=1)
     report_dir: Path
@@ -220,6 +222,7 @@ class EvaluationInput(_SectionModel):
     calibration_require_probabilities_for_validity: bool = False
     calibration_summary_path: Path | None = None
     calibration_table_path: Path | None = None
+    progress_callback: ProgressCallback | None = None
     spatial_compatibility: dict[str, Any]
     spatial_report_path: Path
     interpretability_summary: dict[str, Any]

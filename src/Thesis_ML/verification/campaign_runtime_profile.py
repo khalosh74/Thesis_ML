@@ -20,6 +20,7 @@ from Thesis_ML.experiments.sections import dataset_selection
 from Thesis_ML.protocols.compiler import compile_protocol
 from Thesis_ML.protocols.loader import load_protocol
 from Thesis_ML.protocols.models import CompiledRunSpec
+from Thesis_ML.experiments.progress import ProgressCallback, emit_progress
 
 
 @dataclass(frozen=True)
@@ -452,6 +453,11 @@ def verify_campaign_runtime_profile(
     confirmatory_protocol: Path | str,
     comparison_specs: list[Path | str],
     profile_root: Path | str,
+    hardware_mode: str = "cpu_only",
+    gpu_device_id: int | None = None,
+    deterministic_compute: bool = False,
+    allow_backend_fallback: bool = False,
+    progress_callback: ProgressCallback | None = None,
 ) -> dict[str, Any]:
     index_csv_path = Path(index_csv).resolve()
     data_root_path = Path(data_root).resolve()
@@ -476,6 +482,21 @@ def verify_campaign_runtime_profile(
         cohorts.setdefault(key, []).append(record)
         cohort_descriptors[key] = descriptor
 
+    total_cohorts = int(len(cohorts))
+    completed_cohorts = 0
+
+    emit_progress(
+        progress_callback,
+        stage="campaign",
+        message="compiled campaign runtime profile plan",
+        completed_units=0.0,
+        total_units=float(total_cohorts),
+        metadata={
+            "n_planned_runs": int(len(planned_runs)),
+            "n_cohorts": int(total_cohorts),
+        },
+    )
+
     cohort_estimates: list[dict[str, Any]] = []
     phase_totals: dict[str, float] = {"confirmatory": 0.0, "comparison": 0.0}
     phase_runs: dict[str, int] = {"confirmatory": 0, "comparison": 0}
@@ -497,6 +518,23 @@ def verify_campaign_runtime_profile(
         run_id = _profile_run_id(phase=representative.phase, cohort_id=cohort_id)
         cohort_reports_root = profile_root_path / representative.phase / cohort_id
         cohort_reports_root.mkdir(parents=True, exist_ok=True)
+
+        emit_progress(
+            progress_callback,
+            stage="campaign",
+            message=f"starting cohort {cohort_index}/{total_cohorts}",
+            completed_units=float(completed_cohorts),
+            total_units=float(total_cohorts),
+            metadata={
+                "phase": str(representative.phase),
+                "cohort_id": str(cohort_id),
+                "cohort_index": int(cohort_index),
+                "n_cohorts": int(total_cohorts),
+                "model": str(run.model),
+                "target": str(run.target),
+                "source_run_id": str(run.run_id),
+            },
+        )
         expected_outer_folds = 0
         measured_outer_folds = 0
         elapsed_seconds = 0.0
@@ -545,6 +583,25 @@ def verify_campaign_runtime_profile(
                         else None
                     ),
                 }
+            )
+            completed_cohorts += 1
+            emit_progress(
+                progress_callback,
+                stage="campaign",
+                message=f"used fallback estimate for cohort {cohort_index}/{total_cohorts}",
+                completed_units=float(completed_cohorts),
+                total_units=float(total_cohorts),
+                metadata={
+                    "phase": str(representative.phase),
+                    "cohort_id": str(cohort_id),
+                    "cohort_index": int(cohort_index),
+                    "n_cohorts": int(total_cohorts),
+                    "model": str(run.model),
+                    "target": str(run.target),
+                    "source_run_id": str(run.run_id),
+                    "estimate_source": "conservative_fallback",
+                    "fallback_reason": str(profile_validity.reason or "profiling_subset_invalid"),
+                },
             )
             continue
 
@@ -607,8 +664,14 @@ def verify_campaign_runtime_profile(
                     "source_phase": str(representative.phase),
                     "source_run_id": str(run.run_id),
                 },
+                hardware_mode=str(hardware_mode),
+                gpu_device_id=(int(gpu_device_id) if gpu_device_id is not None else None),
+                deterministic_compute=bool(deterministic_compute),
+                allow_backend_fallback=bool(allow_backend_fallback),
+                progress_callback=progress_callback,
             )
             elapsed_seconds = float(perf_counter() - started)
+
             profiling_runs_executed += 1
             if isinstance(run_result, dict):
                 stage_timings = run_result.get("stage_timings_seconds")
@@ -691,6 +754,26 @@ def verify_campaign_runtime_profile(
             estimated_total_seconds
         )
 
+        completed_cohorts += 1
+        emit_progress(
+            progress_callback,
+            stage="campaign",
+            message=f"finished cohort {cohort_index}/{total_cohorts}",
+            completed_units=float(completed_cohorts),
+            total_units=float(total_cohorts),
+            metadata={
+                "phase": str(representative.phase),
+                "cohort_id": str(cohort_id),
+                "cohort_index": int(cohort_index),
+                "n_cohorts": int(total_cohorts),
+                "model": str(run.model),
+                "target": str(run.target),
+                "source_run_id": str(run.run_id),
+                "estimate_source": "measured_profile",
+                "profile_elapsed_seconds": float(elapsed_seconds),
+            },
+        )
+
         cohort_estimates.append(
             {
                 "status": "passed",
@@ -770,6 +853,20 @@ def verify_campaign_runtime_profile(
         and len(cohorts) > 0
         and (profiling_runs_executed > 0 or fallback_estimates_used > 0)
     )
+
+    emit_progress(
+        progress_callback,
+        stage="campaign",
+        message="finished campaign runtime profiling",
+        completed_units=float(total_cohorts),
+        total_units=float(total_cohorts),
+        metadata={
+            "n_cohorts": int(total_cohorts),
+            "profiling_runs_executed": int(profiling_runs_executed),
+            "fallback_estimates_used": int(fallback_estimates_used),
+        },
+    )
+
     return {
         "schema_version": "campaign-runtime-profile-summary-v1",
         "generated_at_utc": _utc_now(),

@@ -46,7 +46,7 @@ from Thesis_ML.experiments.segment_execution_helpers import (
     resolve_base_artifact,
 )
 from Thesis_ML.orchestration.contracts import ReusePolicy, SectionName
-
+from Thesis_ML.experiments.progress import ProgressCallback, emit_progress
 
 @dataclass(frozen=True)
 class SegmentExecutionRequest:
@@ -100,6 +100,7 @@ class SegmentExecutionRequest:
     tuning_search_space_version: str | None = None
     tuning_inner_cv_scheme: str | None = None
     tuning_inner_group_field: str | None = None
+    progress_callback: ProgressCallback | None = None
     subgroup_reporting_enabled: bool = True
     subgroup_dimensions: tuple[str, ...] = (
         "label",
@@ -152,7 +153,31 @@ class SegmentExecutionResult:
 
 
 def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutionResult:
+    def _emit_section_event(
+    *,
+    section_name: str,
+    status: str,
+    completed_units: float | None,
+    total_units: float | None,
+    message: str,
+    ) -> None:
+        emit_progress(
+            request.progress_callback,
+            stage="section",
+            message=message,
+            completed_units=completed_units,
+            total_units=total_units,
+            metadata={
+                "run_id": str(request.run_id),
+                "model": str(request.model),
+                "target": str(request.target_column),
+                "cv_mode": str(request.cv_mode),
+                "section": str(section_name),
+                "status": str(status),
+            },
+        )
     planned_sections = plan_section_path(request.start_section, request.end_section)
+    total_sections = int(len(planned_sections))
     start_section = planned_sections[0]
     reuse_policy = normalize_reuse_policy(request.reuse_policy)
     base_artifact = resolve_base_artifact(
@@ -253,6 +278,14 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
             )
 
     for section in planned_sections:
+        section_number = int(len(executed_sections) + 1)
+        _emit_section_event(
+            section_name=section.value,
+            status="starting",
+            completed_units=float(section_number - 1),
+            total_units=float(total_sections),
+            message=f"starting section {section.value}",
+        )
         if section == SectionName.DATASET_SELECTION:
             selection_output = dataset_selection(
                 DatasetSelectionInput(
@@ -288,6 +321,13 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
                     artifact_ids["feature_cache"] = reusable_feature_cache.artifact_id
                     reused_sections.append(section.value)
                     executed_sections.append(section.value)
+                    _emit_section_event(
+                        section_name=section.value,
+                        status="reused",
+                        completed_units=float(section_number),
+                        total_units=float(total_sections),
+                        message=f"reused section {section.value}",
+                    )
                     continue
 
             cache_output = feature_cache_build(
@@ -343,6 +383,13 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
                     artifact_ids["feature_matrix_bundle"] = reusable_feature_matrix.artifact_id
                     reused_sections.append(section.value)
                     executed_sections.append(section.value)
+                    _emit_section_event(
+                        section_name=section.value,
+                        status="reused",
+                        completed_units=float(section_number),
+                        total_units=float(total_sections),
+                        message=f"reused section {section.value}",
+                    )
                     continue
             matrix_output = feature_matrix_load(
                 FeatureMatrixLoadInput(
@@ -413,6 +460,7 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
                     build_pipeline_fn=build_pipeline_fn,
                     scores_for_predictions_fn=scores_for_predictions_fn,
                     extract_linear_coefficients_fn=extract_linear_coefficients_fn,
+                    progress_callback=request.progress_callback,
                 )
             )
             compute_runtime_metadata = (
@@ -443,6 +491,13 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
                     )
                     reused_sections.append(section.value)
                     executed_sections.append(section.value)
+                    _emit_section_event(
+                        section_name=section.value,
+                        status="reused",
+                        completed_units=float(section_number),
+                        total_units=float(total_sections),
+                        message=f"reused section {section.value}",
+                    )
                     continue
             interpretability_output = interpretability(
                 InterpretabilityInput(
@@ -504,6 +559,13 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
                     artifact_ids[ARTIFACT_TYPE_METRICS_BUNDLE] = reusable_metrics.artifact_id
                     reused_sections.append(section.value)
                     executed_sections.append(section.value)
+                    _emit_section_event(
+                        section_name=section.value,
+                        status="reused",
+                        completed_units=float(section_number),
+                        total_units=float(total_sections),
+                        message=f"reused section {section.value}",
+                    )
                     continue
             evaluation_output = evaluation(
                 EvaluationInput(
@@ -576,6 +638,7 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
                     target_column=request.target_column,
                     cv_mode=request.cv_mode,
                     seed=request.seed,
+                    progress_callback=request.progress_callback,
                 )
             )
             metrics = evaluation_output.metrics
@@ -584,6 +647,13 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
             raise ValueError(f"Unsupported section encountered in execution plan: {section.value}")
 
         executed_sections.append(section.value)
+        _emit_section_event(
+            section_name=section.value,
+            status="finished",
+            completed_units=float(section_number),
+            total_units=float(total_sections),
+            message=f"finished section {section.value}",
+        )
 
     return SegmentExecutionResult(
         planned_sections=[section.value for section in planned_sections],

@@ -98,6 +98,7 @@ from Thesis_ML.experiments.tuning_search_spaces import (
     LINEAR_GROUPED_NESTED_SEARCH_SPACE_ID,
     LINEAR_GROUPED_NESTED_SEARCH_SPACE_VERSION,
 )
+from Thesis_ML.experiments.progress import ProgressCallback, emit_progress
 
 LOGGER = logging.getLogger(__name__)
 
@@ -224,6 +225,8 @@ def _evaluate_permutations(
     n_permutations: int,
     metric_name: str,
     observed_metric: float,
+    progress_callback=None,
+    progress_metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     return evaluate_permutations(
         pipeline_template=pipeline_template,
@@ -234,8 +237,9 @@ def _evaluate_permutations(
         n_permutations=n_permutations,
         metric_name=metric_name,
         observed_metric=observed_metric,
+        progress_callback=progress_callback,
+        progress_metadata=progress_metadata,
     )
-
 
 def _extract_linear_coefficients(estimator) -> tuple[np.ndarray, np.ndarray, list[str]]:
     return extract_linear_coefficients(estimator=estimator)
@@ -351,6 +355,7 @@ def run_experiment(
     gpu_device_id: int | None = None,
     deterministic_compute: bool = False,
     allow_backend_fallback: bool = False,
+    progress_callback: ProgressCallback | None = None,
     max_parallel_runs: int = 1,
     max_parallel_gpu_runs: int = 1,
     scheduled_compute_assignment: dict[str, Any] | None = None,
@@ -659,6 +664,28 @@ def run_experiment(
     resolved_run_id = run_id or f"{timestamp}_{model}_{target_column}"
     if resolved_base_run_id is None:
         resolved_base_run_id = str(resolved_run_id)
+    emit_progress(
+        progress_callback,
+        stage="run",
+        message="starting run execution",
+        metadata={
+            "run_id": str(resolved_run_id),
+            "model": str(model),
+            "target": str(target_column),
+            "cv_mode": str(cv_mode),
+            "framework_mode": str(resolved_framework_mode.value),
+            "hardware_mode_requested": str(resolved_compute_policy.hardware_mode_requested),
+            "hardware_mode_effective": str(resolved_compute_policy.hardware_mode_effective),
+            "effective_backend_family": str(resolved_compute_policy.effective_backend_family),
+            "assigned_compute_lane": (
+                str(resolved_compute_policy.assigned_compute_lane)
+                if resolved_compute_policy.assigned_compute_lane is not None
+                else None
+            ),
+            "gpu_device_id": resolved_compute_policy.gpu_device_id,
+            "gpu_device_name": resolved_compute_policy.gpu_device_name,
+        },
+    )
     report_dir = reports_root / resolved_run_id
     should_reuse_completed_artifacts = bool(resume or reuse_completed_artifacts)
     artifact_registry_path = reports_root / "artifact_registry.sqlite3"
@@ -953,6 +980,7 @@ def run_experiment(
                             class_weight_policy=methodology_policy.class_weight_policy.value,
                             compute_policy=resolved_compute_policy,
                         ),
+                        progress_callback=progress_callback,
                         load_features_from_cache_fn=_load_features_from_cache,
                         scores_for_predictions_fn=_scores_for_predictions,
                         extract_linear_coefficients_fn=_extract_linear_coefficients,
@@ -1312,6 +1340,19 @@ def run_experiment(
         warning_summary=warning_summary,
         stage_timings_seconds=stage_timings,
         resource_summary=resource_summary,
+    )
+    emit_progress(
+        progress_callback,
+        stage="run",
+        message="finished run execution",
+        metadata={
+            "run_id": str(resolved_run_id),
+            "model": str(model),
+            "target": str(target_column),
+            "cv_mode": str(cv_mode),
+            "framework_mode": str(resolved_framework_mode.value),
+            "report_dir": str(report_dir.resolve()),
+        },
     )
 
     return build_run_result_payload(
