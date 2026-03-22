@@ -305,14 +305,18 @@ def execute_variant(
                             str(params["filter_task"]) if params.get("filter_task") else None
                         ),
                         filter_modality=(
-                            str(params["filter_modality"]) if params.get("filter_modality") else None
+                            str(params["filter_modality"])
+                            if params.get("filter_modality")
+                            else None
                         ),
                         n_permutations=n_permutations,
                         methodology_policy_name=methodology_params["methodology_policy_name"],
                         class_weight_policy=methodology_params["class_weight_policy"],
                         tuning_enabled=bool(methodology_params["tuning_enabled"]),
                         tuning_search_space_id=methodology_params["tuning_search_space_id"],
-                        tuning_search_space_version=methodology_params["tuning_search_space_version"],
+                        tuning_search_space_version=methodology_params[
+                            "tuning_search_space_version"
+                        ],
                         tuning_inner_cv_scheme=methodology_params["tuning_inner_cv_scheme"],
                         tuning_inner_group_field=methodology_params["tuning_inner_group_field"],
                         run_id=run_id,

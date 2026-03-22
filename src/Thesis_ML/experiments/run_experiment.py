@@ -597,9 +597,7 @@ def run_experiment(
         deterministic_compute=deterministic_compute,
         allow_backend_fallback=allow_backend_fallback,
     )
-    stage_timings["compute_policy_resolution"] = float(
-        perf_counter() - compute_policy_start
-    )
+    stage_timings["compute_policy_resolution"] = float(perf_counter() - compute_policy_start)
 
     effective_tuning_space_id = methodology_policy.tuning_search_space_id
     effective_tuning_space_version = methodology_policy.tuning_search_space_version
