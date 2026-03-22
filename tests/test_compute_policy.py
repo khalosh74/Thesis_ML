@@ -296,6 +296,9 @@ def test_compute_policy_stamping_includes_runtime_gpu_diagnostics_additively() -
         payload=payload,
         compute_policy=resolved,
         compute_runtime_metadata={
+            "backend_id": "cpu_reference",
+            "actual_estimator_backend_id": "cpu_reference",
+            "actual_estimator_backend_family": "sklearn_cpu",
             "gpu_memory_peak_mb": 512.25,
             "device_transfer_seconds": 0.123,
             "torch_deterministic_enforced": True,
@@ -303,8 +306,11 @@ def test_compute_policy_stamping_includes_runtime_gpu_diagnostics_additively() -
         },
     )
 
+    assert payload["actual_estimator_backend_id"] == "cpu_reference"
+    assert payload["actual_estimator_backend_family"] == "sklearn_cpu"
     assert payload["gpu_memory_peak_mb"] == 512.25
     assert payload["device_transfer_seconds"] == 0.123
     assert payload["torch_deterministic_enforced"] is True
+    assert payload["compute_policy"]["actual_estimator_backend_id"] == "cpu_reference"
     assert payload["compute_policy"]["gpu_memory_peak_mb"] == 512.25
     assert payload["compute_policy"]["torch_deterministic_enforced"] is True

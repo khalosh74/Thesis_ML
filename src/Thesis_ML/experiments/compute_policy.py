@@ -46,6 +46,8 @@ COMPUTE_POLICY_FIELD_NAMES: tuple[str, ...] = (
     "assigned_backend_family",
     "lane_assignment_reason",
     "scheduler_mode_effective",
+    "actual_estimator_backend_id",
+    "actual_estimator_backend_family",
     "gpu_memory_peak_mb",
     "device_transfer_seconds",
     "torch_deterministic_enforced",
@@ -466,6 +468,9 @@ def stamp_compute_policy_metadata(
     runtime_metadata: dict[str, Any] = {}
     if isinstance(compute_runtime_metadata, dict):
         for key in (
+            "backend_id",
+            "actual_estimator_backend_id",
+            "actual_estimator_backend_family",
             "gpu_memory_peak_mb",
             "device_transfer_seconds",
             "torch_deterministic_enforced",

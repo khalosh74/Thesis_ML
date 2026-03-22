@@ -192,6 +192,12 @@ def _execute_cached_scaled_permutations(
     progress_base: dict[str, Any],
 ) -> list[float]:
     permutation_scores: list[float] = []
+    fold_test_label_lists: list[list[str]] = [
+        np.asarray(fold_cache.y_test).tolist() for fold_cache in fold_caches
+    ]
+    y_true_all_constant: list[str] = [
+        str(label) for labels in fold_test_label_lists for label in labels
+    ]
     for permutation_index in range(int(n_permutations)):
         emit_progress(
             progress_callback,
@@ -205,7 +211,6 @@ def _execute_cached_scaled_permutations(
                 "n_permutations": int(n_permutations),
             },
         )
-        y_true_all: list[str] = []
         y_pred_all: list[str] = []
         for fold_cache in fold_caches:
             y_train_permuted = fold_cache.y_train.copy()
@@ -213,12 +218,11 @@ def _execute_cached_scaled_permutations(
             estimator = clone(final_estimator_template)
             estimator.fit(fold_cache.x_train_scaled, y_train_permuted)
             pred = np.asarray(estimator.predict(fold_cache.x_test_scaled))
-            y_true_all.extend(np.asarray(fold_cache.y_test).tolist())
             y_pred_all.extend(pred.tolist())
 
         permutation_scores.append(
             classification_metric_score(
-                y_true=y_true_all,
+                y_true=y_true_all_constant,
                 y_pred=y_pred_all,
                 metric_name=metric_name,
             )

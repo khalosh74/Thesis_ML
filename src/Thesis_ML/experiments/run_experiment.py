@@ -11,7 +11,7 @@ import warnings
 from datetime import datetime
 from pathlib import Path
 from time import perf_counter
-from typing import Any
+from typing import Any, Callable
 
 import nibabel as nib
 import numpy as np
@@ -148,6 +148,23 @@ def _warning_summary(warnings_payload: list[dict[str, Any]]) -> dict[str, Any]:
 
 def _failure_payload(exc: Exception) -> dict[str, Any]:
     return exception_failure_payload(exc, default_stage="runtime")
+
+
+def _resolve_backend_family_from_backend_id(
+    backend_id: str | None,
+    *,
+    fallback_family: str,
+) -> str:
+    if not isinstance(backend_id, str):
+        return str(fallback_family)
+    normalized = backend_id.strip().lower()
+    if not normalized:
+        return str(fallback_family)
+    if normalized == "cpu_reference":
+        return "sklearn_cpu"
+    if "torch" in normalized or "gpu" in normalized:
+        return "torch_gpu"
+    return "sklearn_cpu"
 
 
 def _make_model(
@@ -359,6 +376,9 @@ def run_experiment(
     max_parallel_runs: int = 1,
     max_parallel_gpu_runs: int = 1,
     scheduled_compute_assignment: dict[str, Any] | None = None,
+    load_features_from_cache_fn_override: (
+        Callable[..., tuple[np.ndarray, pd.DataFrame, dict[str, Any]]] | None
+    ) = None,
 ) -> dict[str, Any]:
     """Run one leakage-safe grouped-CV experiment and write standardized artifacts."""
     index_csv = Path(index_csv)
@@ -664,28 +684,6 @@ def run_experiment(
     resolved_run_id = run_id or f"{timestamp}_{model}_{target_column}"
     if resolved_base_run_id is None:
         resolved_base_run_id = str(resolved_run_id)
-    emit_progress(
-        progress_callback,
-        stage="run",
-        message="starting run execution",
-        metadata={
-            "run_id": str(resolved_run_id),
-            "model": str(model),
-            "target": str(target_column),
-            "cv_mode": str(cv_mode),
-            "framework_mode": str(resolved_framework_mode.value),
-            "hardware_mode_requested": str(resolved_compute_policy.hardware_mode_requested),
-            "hardware_mode_effective": str(resolved_compute_policy.hardware_mode_effective),
-            "effective_backend_family": str(resolved_compute_policy.effective_backend_family),
-            "assigned_compute_lane": (
-                str(resolved_compute_policy.assigned_compute_lane)
-                if resolved_compute_policy.assigned_compute_lane is not None
-                else None
-            ),
-            "gpu_device_id": resolved_compute_policy.gpu_device_id,
-            "gpu_device_name": resolved_compute_policy.gpu_device_name,
-        },
-    )
     report_dir = reports_root / resolved_run_id
     should_reuse_completed_artifacts = bool(resume or reuse_completed_artifacts)
     artifact_registry_path = reports_root / "artifact_registry.sqlite3"
@@ -732,6 +730,36 @@ def run_experiment(
         stage_timings["compute_schedule_resolution"] = float(
             perf_counter() - compute_schedule_start
         )
+
+    emit_progress(
+        progress_callback,
+        stage="run",
+        message="starting run execution",
+        metadata={
+            "run_id": str(resolved_run_id),
+            "model": str(model),
+            "target": str(target_column),
+            "cv_mode": str(cv_mode),
+            "framework_mode": str(resolved_framework_mode.value),
+            "hardware_mode_requested": str(resolved_compute_policy.hardware_mode_requested),
+            "hardware_mode_effective": str(resolved_compute_policy.hardware_mode_effective),
+            "requested_backend_family": str(resolved_compute_policy.requested_backend_family),
+            "effective_backend_family": str(resolved_compute_policy.effective_backend_family),
+            "assigned_compute_lane": (
+                str(resolved_compute_policy.assigned_compute_lane)
+                if resolved_compute_policy.assigned_compute_lane is not None
+                else None
+            ),
+            "assigned_backend_family": (
+                str(resolved_compute_policy.assigned_backend_family)
+                if resolved_compute_policy.assigned_backend_family is not None
+                else None
+            ),
+            "lane_assignment_reason": resolved_compute_policy.lane_assignment_reason,
+            "gpu_device_id": resolved_compute_policy.gpu_device_id,
+            "gpu_device_name": resolved_compute_policy.gpu_device_name,
+        },
+    )
 
     if resolved_framework_mode in {
         FrameworkMode.CONFIRMATORY,
@@ -981,7 +1009,11 @@ def run_experiment(
                             compute_policy=resolved_compute_policy,
                         ),
                         progress_callback=progress_callback,
-                        load_features_from_cache_fn=_load_features_from_cache,
+                        load_features_from_cache_fn=(
+                            load_features_from_cache_fn_override
+                            if load_features_from_cache_fn_override is not None
+                            else _load_features_from_cache
+                        ),
                         scores_for_predictions_fn=_scores_for_predictions,
                         extract_linear_coefficients_fn=_extract_linear_coefficients,
                         compute_interpretability_stability_fn=_compute_interpretability_stability,
@@ -1025,6 +1057,24 @@ def run_experiment(
         if isinstance(segment_result.compute_runtime_metadata, dict)
         else None
     )
+    actual_estimator_backend_id: str | None = None
+    actual_estimator_backend_family: str | None = None
+    if compute_runtime_metadata is not None:
+        backend_id_candidate = compute_runtime_metadata.get("backend_id")
+        if isinstance(backend_id_candidate, str) and backend_id_candidate.strip():
+            actual_estimator_backend_id = backend_id_candidate.strip()
+            actual_estimator_backend_family = _resolve_backend_family_from_backend_id(
+                actual_estimator_backend_id,
+                fallback_family=str(resolved_compute_policy.effective_backend_family),
+            )
+        else:
+            actual_estimator_backend_family = str(resolved_compute_policy.effective_backend_family)
+        compute_runtime_metadata["actual_estimator_backend_id"] = actual_estimator_backend_id
+        compute_runtime_metadata["actual_estimator_backend_family"] = (
+            actual_estimator_backend_family
+        )
+    else:
+        actual_estimator_backend_family = str(resolved_compute_policy.effective_backend_family)
     identity = resolve_run_identity(
         protocol_context=resolved_protocol_context,
         comparison_context=resolved_comparison_context,
@@ -1351,6 +1401,22 @@ def run_experiment(
             "target": str(target_column),
             "cv_mode": str(cv_mode),
             "framework_mode": str(resolved_framework_mode.value),
+            "hardware_mode_requested": str(resolved_compute_policy.hardware_mode_requested),
+            "hardware_mode_effective": str(resolved_compute_policy.hardware_mode_effective),
+            "requested_backend_family": str(resolved_compute_policy.requested_backend_family),
+            "effective_backend_family": str(resolved_compute_policy.effective_backend_family),
+            "assigned_compute_lane": (
+                str(resolved_compute_policy.assigned_compute_lane)
+                if resolved_compute_policy.assigned_compute_lane is not None
+                else None
+            ),
+            "assigned_backend_family": (
+                str(resolved_compute_policy.assigned_backend_family)
+                if resolved_compute_policy.assigned_backend_family is not None
+                else None
+            ),
+            "actual_estimator_backend_id": actual_estimator_backend_id,
+            "actual_estimator_backend_family": actual_estimator_backend_family,
             "report_dir": str(report_dir.resolve()),
         },
     )

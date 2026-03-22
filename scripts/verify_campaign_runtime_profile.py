@@ -50,7 +50,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--gpu-device-id",
         type=int,
-        default=0,
+        default=None,
         help="CUDA device id to use for profiling runs.",
     )
     parser.add_argument(
@@ -64,6 +64,16 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Allow fallback to CPU if GPU is unavailable in exploratory profiling.",
     )
     parser.add_argument(
+        "--profile-permutations",
+        type=int,
+        default=None,
+        help=(
+            "Optional profiling-only permutation override. "
+            "When set, profiling runs use this permutation count and runtime summary "
+            "records extrapolated full-permutation estimates."
+        ),
+    )
+    parser.add_argument(
         "--quiet-progress",
         action="store_true",
         help="Disable live progress messages on stderr.",
@@ -73,7 +83,6 @@ def _build_parser() -> argparse.ArgumentParser:
 class _ConsoleProgressReporter:
     def __init__(self) -> None:
         self._started = perf_counter()
-        self._last_print_at = 0.0
 
     @staticmethod
     def _humanize_seconds(total_seconds: float | None) -> str:
@@ -88,16 +97,6 @@ class _ConsoleProgressReporter:
 
     def __call__(self, event: ProgressEvent) -> None:
         now = perf_counter()
-
-        # Throttle noisy permutation updates.
-        if (
-            event.stage == "permutation"
-            and event.completed_units is not None
-            and event.total_units is not None
-            and event.completed_units not in {0.0, event.total_units}
-            and (now - self._last_print_at) < 0.5
-        ):
-            return
 
         elapsed = now - self._started
         fraction = None
@@ -130,8 +129,17 @@ class _ConsoleProgressReporter:
         fold_index = event.metadata.get("fold_index")
         total_folds = event.metadata.get("total_folds")
         lane = event.metadata.get("assigned_compute_lane")
-        backend = event.metadata.get("effective_backend_family")
+        backend = (
+            event.metadata.get("actual_estimator_backend_family")
+            or event.metadata.get("assigned_backend_family")
+            or event.metadata.get("effective_backend_family")
+        )
+        backend_id = (
+            event.metadata.get("actual_estimator_backend_id")
+            or event.metadata.get("backend_id")
+        )
         hardware = event.metadata.get("hardware_mode_effective")
+        hardware_requested = event.metadata.get("hardware_mode_requested")
 
         suffix_parts: list[str] = []
         if phase is not None:
@@ -140,10 +148,14 @@ class _ConsoleProgressReporter:
             suffix_parts.append(f"model={model}")
         if hardware is not None:
             suffix_parts.append(f"hw={hardware}")
+        if hardware_requested is not None:
+            suffix_parts.append(f"hw_req={hardware_requested}")
         if lane is not None:
             suffix_parts.append(f"lane={lane}")
         if backend is not None:
             suffix_parts.append(f"backend={backend}")
+        if backend_id is not None:
+            suffix_parts.append(f"estimator_backend={backend_id}")
         if section is not None:
             suffix_parts.append(f"section={section}")
         if fold_index is not None and total_folds is not None:
@@ -161,7 +173,6 @@ class _ConsoleProgressReporter:
             line = f"{line} | {suffix}"
 
         print(line, file=sys.stderr, flush=True)
-        self._last_print_at = now
 
 def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
@@ -179,6 +190,7 @@ def main(argv: list[str] | None = None) -> int:
         gpu_device_id=args.gpu_device_id,
         deterministic_compute=bool(args.deterministic_compute),
         allow_backend_fallback=bool(args.allow_backend_fallback),
+        profile_permutations=args.profile_permutations,
         progress_callback=progress_callback,
     )
 

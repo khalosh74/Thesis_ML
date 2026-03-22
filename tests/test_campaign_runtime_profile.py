@@ -169,6 +169,81 @@ def test_campaign_runtime_profile_fails_when_a_cohort_profile_run_errors(
     assert "profiling_run_failed" in issue_codes
 
 
+def test_campaign_runtime_profile_profile_permutations_override_and_extrapolation(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    calls: list[dict[str, Any]] = []
+
+    def _fake_run_experiment(**kwargs: Any) -> dict[str, Any]:
+        calls.append(dict(kwargs))
+        run_id = str(kwargs["run_id"])
+        report_dir = Path(kwargs["reports_root"]) / run_id
+        profiled_n_permutations = int(kwargs["n_permutations"])
+        return {
+            "run_id": run_id,
+            "report_dir": str(report_dir),
+            "run_status_path": str(report_dir / "run_status.json"),
+            "stage_timings_seconds": {"total": 15.0},
+            "metrics": {
+                "n_folds": 1,
+                "primary_metric_value": 0.5,
+                "permutation_test": {
+                    "permutation_loop_seconds": float(profiled_n_permutations),
+                },
+            },
+        }
+
+    monkeypatch.setattr(runtime_profile, "run_experiment", _fake_run_experiment)
+
+    summary = runtime_profile.verify_campaign_runtime_profile(
+        index_csv=_demo_index_csv(),
+        data_root=_repo_root() / "demo_data" / "synthetic_v1" / "data_root",
+        cache_dir=_repo_root() / "demo_data" / "synthetic_v1" / "cache",
+        confirmatory_protocol=_confirmatory_protocol(),
+        comparison_specs=_comparison_specs(),
+        profile_root=tmp_path / "runtime_profiles",
+        profile_permutations=5,
+    )
+
+    assert summary["passed"] is True
+    assert summary["inputs"]["profile_permutations_override"] == 5
+    assert calls
+    assert any(int(call["n_permutations"]) > 0 for call in calls)
+
+    for call in calls:
+        profile_context = call.get("profiling_context")
+        assert isinstance(profile_context, dict)
+        configured = int(profile_context.get("configured_n_permutations", 0))
+        profiled = int(profile_context.get("profiled_n_permutations", 0))
+        if configured > 0:
+            assert profiled == min(configured, 5)
+            assert int(call["n_permutations"]) == profiled
+
+    measured_rows = [
+        row
+        for row in summary["cohort_estimates"]
+        if str(row.get("status")) == "passed"
+        and str(row.get("estimate_source")) == "measured_profile"
+        and int(row.get("configured_n_permutations", 0)) > 0
+    ]
+    assert measured_rows
+
+    extrapolated_rows = [
+        row
+        for row in measured_rows
+        if int(row.get("configured_n_permutations", 0)) > int(row.get("profiled_n_permutations", 0))
+    ]
+    assert extrapolated_rows
+    for row in extrapolated_rows:
+        assert bool(row["permutation_extrapolation_applied"]) is True
+        measured_loop = float(row["permutation_loop_measured_seconds"])
+        configured = int(row["configured_n_permutations"])
+        profiled = int(row["profiled_n_permutations"])
+        expected = measured_loop * float(configured) / float(profiled)
+        assert float(row["estimated_full_permutation_seconds"]) == expected
+
+
 def test_campaign_runtime_profile_uses_fallback_for_unprofileable_grouped_nested_cohorts(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -209,6 +284,86 @@ def test_campaign_runtime_profile_uses_fallback_for_unprofileable_grouped_nested
     assert fallback_rows
     assert all(str(row.get("estimate_confidence")) == "low" for row in fallback_rows)
     assert all(row.get("fallback_reason") for row in fallback_rows)
+
+
+def test_campaign_runtime_profile_feature_matrix_memoization_reuses_exact_keys(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    load_calls = 0
+    cache_manifest = tmp_path / "cache" / "cache_manifest.csv"
+    cache_manifest.parent.mkdir(parents=True, exist_ok=True)
+    cache_manifest.write_text("cache_key,cache_path\n", encoding="utf-8")
+
+    def _fake_load_features_from_cache(
+        *,
+        index_df: pd.DataFrame,
+        cache_manifest_path: Path,
+        spatial_report_path: Path | None = None,
+        affine_atol: float,
+    ) -> tuple[np.ndarray, pd.DataFrame, dict[str, Any]]:
+        del spatial_report_path
+        del affine_atol
+        assert Path(cache_manifest_path).resolve() == cache_manifest.resolve()
+        nonlocal load_calls
+        load_calls += 1
+        x_matrix = np.asarray([[1.0, 0.0], [0.0, 1.0]], dtype=np.float32)
+        metadata_df = index_df.reset_index(drop=True).copy(deep=True)
+        return x_matrix, metadata_df, {"status": "passed", "passed": True}
+
+    def _fake_run_experiment(**kwargs: Any) -> dict[str, Any]:
+        loader = kwargs.get("load_features_from_cache_fn_override")
+        assert callable(loader)
+        loader(
+            index_df=pd.DataFrame(
+                [
+                    {"sample_id": "sample_a", "beta_path": "beta_a.nii"},
+                    {"sample_id": "sample_b", "beta_path": "beta_b.nii"},
+                ]
+            ),
+            cache_manifest_path=cache_manifest,
+            spatial_report_path=tmp_path / "spatial_report.json",
+            affine_atol=1e-5,
+        )
+        run_id = str(kwargs["run_id"])
+        report_dir = Path(kwargs["reports_root"]) / run_id
+        return {
+            "run_id": run_id,
+            "report_dir": str(report_dir),
+            "run_status_path": str(report_dir / "run_status.json"),
+            "stage_timings_seconds": {"total": 3.0},
+            "metrics": {"n_folds": 1, "primary_metric_value": 0.5},
+        }
+
+    monkeypatch.setattr(runtime_profile, "load_features_from_cache", _fake_load_features_from_cache)
+    monkeypatch.setattr(runtime_profile, "run_experiment", _fake_run_experiment)
+
+    summary = runtime_profile.verify_campaign_runtime_profile(
+        index_csv=_demo_index_csv(),
+        data_root=_repo_root() / "demo_data" / "synthetic_v1" / "data_root",
+        cache_dir=_repo_root() / "demo_data" / "synthetic_v1" / "cache",
+        confirmatory_protocol=_confirmatory_protocol(),
+        comparison_specs=_comparison_specs(),
+        profile_root=tmp_path / "runtime_profiles",
+    )
+
+    assert summary["passed"] is True
+    assert int(summary["profiling_runs_executed"]) > 1
+    memo_summary = summary["feature_matrix_memoization"]
+    assert memo_summary["enabled"] is True
+    assert int(memo_summary["hits"]) >= 1
+    assert int(memo_summary["misses"]) >= 1
+    assert int(memo_summary["misses"]) == load_calls
+    assert bool(memo_summary["reuse_happened"]) is True
+
+    measured_rows = [
+        row
+        for row in summary["cohort_estimates"]
+        if str(row.get("status")) == "passed"
+        and str(row.get("estimate_source")) == "measured_profile"
+    ]
+    assert measured_rows
+    assert any(bool(row.get("feature_matrix_cache_hit")) for row in measured_rows)
 
 
 def test_grouped_nested_cohort_selects_valid_representative_when_available(

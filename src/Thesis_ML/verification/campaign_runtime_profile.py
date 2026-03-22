@@ -1,19 +1,21 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from hashlib import sha1
 from pathlib import Path
 from time import perf_counter
 from typing import Any
 
+import numpy as np
 import pandas as pd
 
 from Thesis_ML.comparisons.compiler import compile_comparison
 from Thesis_ML.comparisons.loader import load_comparison_spec
 from Thesis_ML.comparisons.models import CompiledComparisonRunSpec
 from Thesis_ML.config.framework_mode import FrameworkMode
+from Thesis_ML.experiments.cache_loading import load_features_from_cache
 from Thesis_ML.experiments.run_experiment import run_experiment
 from Thesis_ML.experiments.section_models import DatasetSelectionInput
 from Thesis_ML.experiments.sections import dataset_selection
@@ -40,6 +42,88 @@ class _ProfileRunValidity:
     estimated_train_inner_groups_after_outer_fold: int | None
     reason: str | None
     profiling_subset_description: str
+
+
+@dataclass
+class _ProfilingFeatureMatrixMemoizer:
+    _store: dict[str, tuple[np.ndarray, pd.DataFrame, dict[str, Any]]] = field(
+        default_factory=dict
+    )
+    hits: int = 0
+    misses: int = 0
+    last_lookup_hit: bool = False
+    last_lookup_key: str | None = None
+    last_lookup_sample_signature: str | None = None
+
+    @staticmethod
+    def _sample_signature(index_df: pd.DataFrame) -> str:
+        if "sample_id" in index_df.columns:
+            sample_values = index_df["sample_id"].astype(str).tolist()
+        else:
+            sample_values = index_df.index.astype(str).tolist()
+        signature_source = "\x1f".join(sample_values)
+        return sha1(signature_source.encode("utf-8")).hexdigest()
+
+    def _cache_key(
+        self,
+        *,
+        index_df: pd.DataFrame,
+        cache_manifest_path: Path,
+        affine_atol: float,
+    ) -> tuple[str, str]:
+        sample_signature = self._sample_signature(index_df)
+        resolved_manifest = Path(cache_manifest_path).resolve()
+        key_payload = {
+            "cache_manifest_path": str(resolved_manifest),
+            "affine_atol": float(affine_atol),
+            "n_rows": int(len(index_df)),
+            "sample_signature": sample_signature,
+        }
+        cache_key = json.dumps(key_payload, sort_keys=True, separators=(",", ":"))
+        return cache_key, sample_signature
+
+    def load(
+        self,
+        *,
+        index_df: pd.DataFrame,
+        cache_manifest_path: Path,
+        spatial_report_path: Path | None = None,
+        affine_atol: float,
+    ) -> tuple[np.ndarray, pd.DataFrame, dict[str, Any]]:
+        cache_key, sample_signature = self._cache_key(
+            index_df=index_df,
+            cache_manifest_path=cache_manifest_path,
+            affine_atol=affine_atol,
+        )
+        self.last_lookup_key = cache_key
+        self.last_lookup_sample_signature = sample_signature
+        cached = self._store.get(cache_key)
+        if cached is not None:
+            self.hits += 1
+            self.last_lookup_hit = True
+            x_matrix, metadata_df, spatial_payload = cached
+            return x_matrix, metadata_df.copy(deep=False), dict(spatial_payload)
+
+        self.misses += 1
+        self.last_lookup_hit = False
+        x_matrix, metadata_df, spatial_payload = load_features_from_cache(
+            index_df=index_df,
+            cache_manifest_path=cache_manifest_path,
+            spatial_report_path=spatial_report_path,
+            affine_atol=affine_atol,
+        )
+        self._store[cache_key] = (x_matrix, metadata_df.copy(deep=True), dict(spatial_payload))
+        return x_matrix, metadata_df.copy(deep=False), dict(spatial_payload)
+
+    def summary_payload(self) -> dict[str, Any]:
+        return {
+            "enabled": True,
+            "hits": int(self.hits),
+            "misses": int(self.misses),
+            "unique_entries": int(len(self._store)),
+            "lookups": int(self.hits + self.misses),
+            "reuse_happened": bool(self.hits > 0),
+        }
 
 
 def _utc_now() -> str:
@@ -457,6 +541,7 @@ def verify_campaign_runtime_profile(
     gpu_device_id: int | None = None,
     deterministic_compute: bool = False,
     allow_backend_fallback: bool = False,
+    profile_permutations: int | None = None,
     progress_callback: ProgressCallback | None = None,
 ) -> dict[str, Any]:
     index_csv_path = Path(index_csv).resolve()
@@ -466,6 +551,12 @@ def verify_campaign_runtime_profile(
     comparison_spec_paths = [Path(path).resolve() for path in comparison_specs]
     profile_root_path = Path(profile_root).resolve()
     profile_root_path.mkdir(parents=True, exist_ok=True)
+    resolved_profile_permutations: int | None = (
+        int(profile_permutations) if profile_permutations is not None else None
+    )
+    if resolved_profile_permutations is not None and resolved_profile_permutations < 0:
+        raise ValueError("profile_permutations must be >= 0 when provided.")
+    feature_matrix_memoizer = _ProfilingFeatureMatrixMemoizer()
 
     planned_runs, compile_issues = _build_planned_runs(
         index_csv=index_csv_path,
@@ -540,6 +631,9 @@ def verify_campaign_runtime_profile(
         elapsed_seconds = 0.0
         run_result: dict[str, Any] | None = None
         run_error: str | None = None
+        configured_n_permutations = (
+            int(run.controls.n_permutations) if bool(run.controls.permutation_enabled) else 0
+        )
 
         expected_outer_folds = int(profile_validity.expected_outer_folds)
         if not profile_validity.can_profile_measured:
@@ -569,12 +663,20 @@ def verify_campaign_runtime_profile(
                     "profiling_subset_description": profile_validity.profiling_subset_description,
                     "expected_outer_folds_per_run": int(expected_outer_folds),
                     "measured_outer_folds": None,
+                    "configured_n_permutations": int(configured_n_permutations),
+                    "profiled_n_permutations": None,
+                    "permutation_loop_measured_seconds": None,
+                    "estimated_full_permutation_seconds": None,
+                    "permutation_extrapolation_applied": False,
                     "profile_elapsed_seconds": None,
                     "fold_scale_factor": None,
                     "estimated_seconds_per_full_run": float(estimated_seconds_per_full_run),
                     "estimated_total_seconds": float(estimated_total_seconds),
                     "estimated_total_human": _humanize_seconds(estimated_total_seconds),
                     "projected_runtime_seconds_per_run": int(run.projected_runtime_seconds),
+                    "feature_matrix_cache_hit": False,
+                    "feature_matrix_cache_key": None,
+                    "feature_matrix_cache_sample_signature": None,
                     "fallback_reason": str(profile_validity.reason or "profiling_subset_invalid"),
                     "estimated_train_inner_groups_after_outer_fold": (
                         int(profile_validity.estimated_train_inner_groups_after_outer_fold)
@@ -605,7 +707,25 @@ def verify_campaign_runtime_profile(
             )
             continue
 
+        profiled_n_permutations = int(configured_n_permutations)
+        if configured_n_permutations > 0 and resolved_profile_permutations is not None:
+            if resolved_profile_permutations <= 0:
+                raise ValueError(
+                    "profile_permutations must be > 0 when permutation controls are enabled "
+                    "for profiled cohorts."
+                )
+            profiled_n_permutations = int(
+                min(configured_n_permutations, resolved_profile_permutations)
+            )
+        permutation_loop_measured_seconds: float | None = None
+        estimated_full_permutation_seconds: float | None = None
+        permutation_extrapolation_applied = False
+        feature_matrix_cache_hit = False
+        feature_matrix_cache_key: str | None = None
+        feature_matrix_cache_sample_signature: str | None = None
+
         try:
+            previous_cache_hits = int(feature_matrix_memoizer.hits)
             started = perf_counter()
             run_result = run_experiment(
                 index_csv=index_csv_path,
@@ -622,11 +742,7 @@ def verify_campaign_runtime_profile(
                 filter_modality=str(run.filter_modality)
                 if run.filter_modality is not None
                 else None,
-                n_permutations=(
-                    int(run.controls.n_permutations)
-                    if bool(run.controls.permutation_enabled)
-                    else 0
-                ),
+                n_permutations=int(profiled_n_permutations),
                 primary_metric_name=str(run.primary_metric),
                 permutation_metric_name=(
                     str(run.controls.permutation_metric)
@@ -663,14 +779,22 @@ def verify_campaign_runtime_profile(
                     "source_framework_mode": str(run.framework_mode),
                     "source_phase": str(representative.phase),
                     "source_run_id": str(run.run_id),
+                    "configured_n_permutations": int(configured_n_permutations),
+                    "profiled_n_permutations": int(profiled_n_permutations),
                 },
                 hardware_mode=str(hardware_mode),
                 gpu_device_id=(int(gpu_device_id) if gpu_device_id is not None else None),
                 deterministic_compute=bool(deterministic_compute),
                 allow_backend_fallback=bool(allow_backend_fallback),
                 progress_callback=progress_callback,
+                load_features_from_cache_fn_override=feature_matrix_memoizer.load,
             )
             elapsed_seconds = float(perf_counter() - started)
+            feature_matrix_cache_hit = int(feature_matrix_memoizer.hits) > int(previous_cache_hits)
+            feature_matrix_cache_key = feature_matrix_memoizer.last_lookup_key
+            feature_matrix_cache_sample_signature = (
+                feature_matrix_memoizer.last_lookup_sample_signature
+            )
 
             profiling_runs_executed += 1
             if isinstance(run_result, dict):
@@ -680,6 +804,11 @@ def verify_campaign_runtime_profile(
                 metrics_payload = run_result.get("metrics")
                 if isinstance(metrics_payload, dict):
                     measured_outer_folds = int(metrics_payload.get("n_folds", 0))
+                    permutation_payload = metrics_payload.get("permutation_test")
+                    if isinstance(permutation_payload, dict):
+                        measured_loop = permutation_payload.get("permutation_loop_seconds")
+                        if isinstance(measured_loop, (int, float)):
+                            permutation_loop_measured_seconds = float(measured_loop)
                 report_dir = run_result.get("report_dir")
                 if isinstance(report_dir, str) and report_dir:
                     profile_artifact_paths.append(report_dir)
@@ -744,8 +873,29 @@ def verify_campaign_runtime_profile(
             )
             continue
 
+        adjusted_elapsed_seconds = float(elapsed_seconds)
+        if (
+            configured_n_permutations > 0
+            and profiled_n_permutations > 0
+            and permutation_loop_measured_seconds is not None
+        ):
+            estimated_full_permutation_seconds = (
+                float(permutation_loop_measured_seconds)
+                * float(configured_n_permutations)
+                / float(profiled_n_permutations)
+            )
+            permutation_extrapolation_applied = (
+                int(profiled_n_permutations) != int(configured_n_permutations)
+            )
+            adjusted_elapsed_seconds = max(
+                0.0,
+                float(elapsed_seconds)
+                - float(permutation_loop_measured_seconds)
+                + float(estimated_full_permutation_seconds),
+            )
+
         fold_scale_factor = float(expected_outer_folds) / float(max(measured_outer_folds, 1))
-        estimated_seconds_per_full_run = float(elapsed_seconds) * float(fold_scale_factor)
+        estimated_seconds_per_full_run = float(adjusted_elapsed_seconds) * float(fold_scale_factor)
         estimated_total_seconds = float(estimated_seconds_per_full_run) * float(len(cohort_runs))
         phase_totals[str(representative.phase)] += float(estimated_total_seconds)
         phase_runs[str(representative.phase)] += int(len(cohort_runs))
@@ -771,6 +921,9 @@ def verify_campaign_runtime_profile(
                 "source_run_id": str(run.run_id),
                 "estimate_source": "measured_profile",
                 "profile_elapsed_seconds": float(elapsed_seconds),
+                "configured_n_permutations": int(configured_n_permutations),
+                "profiled_n_permutations": int(profiled_n_permutations),
+                "permutation_extrapolation_applied": bool(permutation_extrapolation_applied),
             },
         )
 
@@ -789,11 +942,27 @@ def verify_campaign_runtime_profile(
                 "profiling_subset_description": profile_validity.profiling_subset_description,
                 "expected_outer_folds_per_run": int(expected_outer_folds),
                 "measured_outer_folds": int(measured_outer_folds),
+                "configured_n_permutations": int(configured_n_permutations),
+                "profiled_n_permutations": int(profiled_n_permutations),
+                "permutation_loop_measured_seconds": (
+                    float(permutation_loop_measured_seconds)
+                    if permutation_loop_measured_seconds is not None
+                    else None
+                ),
+                "estimated_full_permutation_seconds": (
+                    float(estimated_full_permutation_seconds)
+                    if estimated_full_permutation_seconds is not None
+                    else None
+                ),
+                "permutation_extrapolation_applied": bool(permutation_extrapolation_applied),
                 "profile_elapsed_seconds": float(elapsed_seconds),
                 "fold_scale_factor": float(fold_scale_factor),
                 "estimated_seconds_per_full_run": float(estimated_seconds_per_full_run),
                 "estimated_total_seconds": float(estimated_total_seconds),
                 "estimated_total_human": _humanize_seconds(estimated_total_seconds),
+                "feature_matrix_cache_hit": bool(feature_matrix_cache_hit),
+                "feature_matrix_cache_key": feature_matrix_cache_key,
+                "feature_matrix_cache_sample_signature": feature_matrix_cache_sample_signature,
                 "profile_reports_root": str(cohort_reports_root),
                 "profile_run_id": run_id,
                 "profile_report_dir": (
@@ -878,6 +1047,11 @@ def verify_campaign_runtime_profile(
             "confirmatory_protocol": str(confirmatory_protocol_path),
             "comparison_specs": [str(path) for path in comparison_spec_paths],
             "profile_root": str(profile_root_path),
+            "profile_permutations_override": (
+                int(resolved_profile_permutations)
+                if resolved_profile_permutations is not None
+                else None
+            ),
         },
         "profiling_runs_executed": int(profiling_runs_executed),
         "fallback_estimates_used": int(fallback_estimates_used),
@@ -899,11 +1073,20 @@ def verify_campaign_runtime_profile(
                 "outer_fold_scaling": "linear",
                 "compiled_run_count_scaling": "linear",
             },
+            "permutation_profiling": {
+                "profile_permutations_override": (
+                    int(resolved_profile_permutations)
+                    if resolved_profile_permutations is not None
+                    else None
+                ),
+                "full_permutation_extrapolation": "linear_when_permutation_metrics_available",
+            },
             "notes": [
                 "Profiling runs are precheck-only and non-canonical.",
                 "Estimated totals are projections from representative cohort runs.",
             ],
         },
+        "feature_matrix_memoization": feature_matrix_memoizer.summary_payload(),
         "profile_artifact_paths": sorted(set(profile_artifact_paths)),
         "issues": issues,
     }
