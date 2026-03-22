@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+from dataclasses import dataclass
 from time import perf_counter
 from typing import Any
 
@@ -9,6 +10,24 @@ from sklearn.base import BaseEstimator, ClassifierMixin
 from sklearn.utils.validation import check_is_fitted
 
 TORCH_RIDGE_BACKEND_ID = "torch_ridge_gpu_v2"
+
+
+@dataclass(frozen=True)
+class RidgeGpuPermutationFoldState:
+    fold_index: int
+    n_train: int
+    n_test: int
+    classes: np.ndarray
+    y_test: np.ndarray
+    fit_intercept: bool
+    alpha: float
+    target_mean: float
+    batch_size_hint: int
+    torch_module: Any
+    device: Any
+    cholesky_factor: Any
+    system_matrix: Any
+    k_test: Any
 
 
 def resolve_torch_ridge_class_weight(class_weight_policy: str) -> str | None:
@@ -226,6 +245,231 @@ def _solve_spd_system(torch: Any, system_matrix: Any, rhs: Any, ) -> Any:
     raise RuntimeError("Torch ridge backend could not find a usable linear solver.")
 
 
+def _resolve_cholesky_factor(torch: Any, system_matrix: Any) -> Any:
+    linalg = getattr(torch, "linalg", None)
+
+    if linalg is not None:
+        cholesky_ex = getattr(linalg, "cholesky_ex", None)
+        if callable(cholesky_ex):
+            chol_out = cholesky_ex(system_matrix, check_errors=False)
+            chol_factor = chol_out.L if hasattr(chol_out, "L") else chol_out[0]
+            chol_info = (
+                chol_out.info
+                if hasattr(chol_out, "info")
+                else (chol_out[1] if isinstance(chol_out, tuple) and len(chol_out) > 1 else None)
+            )
+            if chol_info is None or np.all(_to_numpy_array(chol_info) == 0):
+                return chol_factor
+
+        cholesky = getattr(linalg, "cholesky", None)
+        if callable(cholesky):
+            return cholesky(system_matrix)
+
+    matrix_np = _to_numpy_array(system_matrix).astype(np.float64, copy=False)
+    chol_np = np.linalg.cholesky(matrix_np)
+    return _as_torch_float_tensor(torch, chol_np, device=getattr(system_matrix, "device", None))
+
+
+def _solve_cholesky_system(
+    torch: Any,
+    *,
+    cholesky_factor: Any,
+    rhs: Any,
+    system_matrix: Any,
+) -> Any:
+    cholesky_solve = getattr(torch, "cholesky_solve", None)
+    if callable(cholesky_solve):
+        return cholesky_solve(rhs, cholesky_factor)
+
+    linalg = getattr(torch, "linalg", None)
+    solve_triangular = getattr(linalg, "solve_triangular", None) if linalg is not None else None
+    if callable(solve_triangular):
+        intermediate = solve_triangular(cholesky_factor, rhs, upper=False)
+        return solve_triangular(cholesky_factor.T, intermediate, upper=True)
+
+    return _solve_spd_system(torch, system_matrix, rhs)
+
+
+def supports_ridge_gpu_batched_dual(estimator: Any) -> tuple[bool, str | None]:
+    backend_id = str(getattr(estimator, "backend_id", "")).strip().lower()
+    if backend_id != TORCH_RIDGE_BACKEND_ID:
+        return False, "backend_id_not_torch_ridge_gpu"
+
+    alpha_raw = getattr(estimator, "alpha", None)
+    if not isinstance(alpha_raw, (int, float)):
+        return False, "ridge_alpha_must_be_numeric"
+    alpha = float(alpha_raw)
+    if not np.isfinite(alpha) or alpha < 0.0:
+        return False, "ridge_alpha_must_be_finite_and_non_negative"
+
+    fit_intercept_raw = getattr(estimator, "fit_intercept", None)
+    if not isinstance(fit_intercept_raw, (bool, np.bool_)):
+        return False, "ridge_fit_intercept_must_be_boolean"
+
+    class_weight = getattr(estimator, "class_weight", None)
+    if class_weight is not None:
+        normalized_class_weight = str(class_weight).strip().lower()
+        if normalized_class_weight not in {"none", ""}:
+            return False, "ridge_gpu_batched_dual_requires_class_weight_none"
+
+    return True, None
+
+
+def _encode_binary_targets_from_labels(
+    labels: np.ndarray,
+    *,
+    classes: np.ndarray,
+) -> np.ndarray:
+    labels_array = np.asarray(labels).astype(str, copy=False)
+    class_array = np.asarray(classes).astype(str, copy=False)
+    if class_array.shape[0] != 2:
+        raise ValueError("Binary ridge permutation encoding requires exactly two classes.")
+    positive_class = str(class_array[1])
+    return np.where(labels_array == positive_class, 1.0, -1.0).astype(np.float64, copy=False)
+
+
+def build_ridge_gpu_permutation_fold_state(
+    *,
+    fold_index: int,
+    x_train_scaled: np.ndarray,
+    x_test_scaled: np.ndarray,
+    y_train: np.ndarray,
+    y_test: np.ndarray,
+    estimator: Any,
+    batch_size_hint: int = 16,
+) -> tuple[RidgeGpuPermutationFoldState, dict[str, float]]:
+    supported, reason = supports_ridge_gpu_batched_dual(estimator)
+    if not supported:
+        raise ValueError(reason or "ridge_gpu_batched_dual_not_supported")
+
+    x_train = np.asarray(x_train_scaled, dtype=np.float64)
+    x_test = np.asarray(x_test_scaled, dtype=np.float64)
+    y_train_text = np.asarray(y_train).astype(str, copy=False)
+    y_test_text = np.asarray(y_test).astype(str, copy=False)
+
+    classes = np.unique(y_train_text)
+    if classes.shape[0] != 2:
+        raise ValueError("ridge_gpu_batched_dual currently supports binary folds only.")
+
+    alpha = float(getattr(estimator, "alpha", 1.0))
+    fit_intercept = bool(getattr(estimator, "fit_intercept", True))
+    encoded_targets = _encode_binary_targets_from_labels(y_train_text, classes=classes)
+    target_mean = float(encoded_targets.mean()) if fit_intercept else 0.0
+
+    if fit_intercept:
+        feature_mean = np.mean(x_train, axis=0, dtype=np.float64)
+        x_train_effective = x_train - feature_mean
+        x_test_effective = x_test - feature_mean
+    else:
+        x_train_effective = x_train
+        x_test_effective = x_test
+
+    torch = _import_torch_module()
+    if getattr(torch, "float64", None) is None:
+        raise ValueError("ridge_gpu_batched_dual_requires_torch_float64_support")
+    device, _ = _resolve_cuda_device(torch, int(getattr(estimator, "gpu_device_id", 0)))
+    _configure_torch_determinism(
+        torch,
+        enabled=bool(getattr(estimator, "deterministic_compute", False)),
+    )
+
+    build_start = perf_counter()
+    x_train_tensor = _as_torch_float_tensor(torch, x_train_effective, device=device)
+    x_test_tensor = _as_torch_float_tensor(torch, x_test_effective, device=device)
+
+    k_train = x_train_tensor @ x_train_tensor.T
+    system_matrix = _add_alpha_to_diagonal(
+        torch,
+        k_train,
+        alpha,
+        device=device,
+    )
+
+    factorization_start = perf_counter()
+    cholesky_factor = _resolve_cholesky_factor(torch, system_matrix)
+    factorization_seconds = float(perf_counter() - factorization_start)
+
+    k_test = x_test_tensor @ x_train_tensor.T
+
+    # Retain only fold-resident dual solve state.
+    del x_train_tensor
+    del x_test_tensor
+    del k_train
+    fold_state_build_seconds = float(perf_counter() - build_start)
+
+    state = RidgeGpuPermutationFoldState(
+        fold_index=int(fold_index),
+        n_train=int(x_train.shape[0]),
+        n_test=int(x_test.shape[0]),
+        classes=np.asarray(classes).astype(str, copy=False),
+        y_test=np.asarray(y_test_text).astype(str, copy=False),
+        fit_intercept=bool(fit_intercept),
+        alpha=float(alpha),
+        target_mean=float(target_mean),
+        batch_size_hint=max(1, int(batch_size_hint)),
+        torch_module=torch,
+        device=device,
+        cholesky_factor=cholesky_factor,
+        system_matrix=system_matrix,
+        k_test=k_test,
+    )
+    return state, {
+        "fold_gpu_state_build_seconds": float(fold_state_build_seconds),
+        "fold_factorization_seconds": float(factorization_seconds),
+    }
+
+
+def solve_ridge_gpu_permutation_batch(
+    *,
+    state: RidgeGpuPermutationFoldState,
+    permuted_train_labels_batch: np.ndarray,
+) -> tuple[np.ndarray, dict[str, float]]:
+    labels_batch = np.asarray(permuted_train_labels_batch)
+    if labels_batch.ndim == 1:
+        labels_batch = labels_batch.reshape(-1, 1)
+    if labels_batch.ndim != 2:
+        raise ValueError("permuted_train_labels_batch must be 2D for batched ridge permutation.")
+    if int(labels_batch.shape[0]) != int(state.n_train):
+        raise ValueError(
+            "permuted_train_labels_batch row count does not match cached fold training size."
+        )
+
+    encode_start = perf_counter()
+    encoded_targets = _encode_binary_targets_from_labels(labels_batch, classes=state.classes)
+    if bool(state.fit_intercept):
+        encoded_targets = encoded_targets - float(state.target_mean)
+    rhs_tensor = _as_torch_float_tensor(
+        state.torch_module,
+        np.asarray(encoded_targets, dtype=np.float64),
+        device=state.device,
+    )
+    encode_seconds = float(perf_counter() - encode_start)
+
+    solve_start = perf_counter()
+    dual_coefficients = _solve_cholesky_system(
+        state.torch_module,
+        cholesky_factor=state.cholesky_factor,
+        rhs=rhs_tensor,
+        system_matrix=state.system_matrix,
+    )
+    batched_solve_seconds = float(perf_counter() - solve_start)
+
+    predict_start = perf_counter()
+    score_tensor = state.k_test @ dual_coefficients
+    if bool(state.fit_intercept):
+        score_tensor = score_tensor + float(state.target_mean)
+    score_array = _to_numpy_array(score_tensor).astype(np.float64, copy=False)
+    if score_array.ndim == 1:
+        score_array = score_array.reshape(-1, 1)
+    batched_predict_seconds = float(perf_counter() - predict_start)
+
+    return score_array, {
+        "batched_target_encode_seconds": float(encode_seconds),
+        "batched_solve_seconds": float(batched_solve_seconds),
+        "batched_predict_seconds": float(batched_predict_seconds),
+    }
+
+
 def _solve_adaptive_ridge_exact(torch: Any, x_array: np.ndarray, y_indices: np.ndarray, sample_weights: np.ndarray, *, alpha: float, fit_intercept: bool, device: Any,) -> tuple[np.ndarray, np.ndarray, bool, dict[str, Any]]:
     n_samples, n_features = x_array.shape
     n_classes = int(np.max(y_indices)) + 1
@@ -364,8 +608,6 @@ class TorchRidgeClassifier(BaseEstimator, ClassifierMixin):
                 pass
 
         transfer_start = perf_counter()
-        
-        transfer_start = perf_counter()
         solver_start = perf_counter()
 
         coefficient_weights, intercept_vector, binary_mode, ridge_solver_metadata = _solve_adaptive_ridge_exact(
@@ -477,8 +719,12 @@ def make_torch_ridge_estimator(
 
 
 __all__ = [
+    "RidgeGpuPermutationFoldState",
     "TORCH_RIDGE_BACKEND_ID",
     "TorchRidgeClassifier",
+    "build_ridge_gpu_permutation_fold_state",
     "make_torch_ridge_estimator",
     "resolve_torch_ridge_class_weight",
+    "solve_ridge_gpu_permutation_batch",
+    "supports_ridge_gpu_batched_dual",
 ]

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
@@ -214,6 +215,169 @@ class _FakeTorchPermutationEstimator(BaseEstimator, ClassifierMixin):
         return np.asarray([self._prediction_label_] * int(x_array.shape[0]))
 
 
+class _FakeTorchRidgePermutationEstimator(BaseEstimator, ClassifierMixin):
+    def __init__(
+        self,
+        *,
+        alpha: float = 1.0,
+        fit_intercept: bool = True,
+        class_weight: str | None = None,
+        backend_id: str = "torch_ridge_gpu_v2",
+    ) -> None:
+        self.alpha = float(alpha)
+        self.fit_intercept = bool(fit_intercept)
+        self.class_weight = class_weight
+        self.backend_id = str(backend_id)
+
+    def fit(
+        self,
+        x_matrix: np.ndarray,
+        y_labels: np.ndarray,
+    ) -> "_FakeTorchRidgePermutationEstimator":
+        x_array = np.asarray(x_matrix, dtype=np.float64)
+        labels = np.asarray(y_labels).astype(str, copy=False)
+        classes = np.unique(labels)
+        if classes.shape[0] != 2:
+            raise ValueError("fake ridge estimator supports binary labels only for this test.")
+        encoded = np.where(labels == str(classes[1]), 1.0, -1.0).astype(np.float64)
+        if bool(self.fit_intercept):
+            feature_mean = np.mean(x_array, axis=0, dtype=np.float64)
+            target_mean = float(encoded.mean())
+            x_effective = x_array - feature_mean
+            y_effective = encoded - target_mean
+        else:
+            feature_mean = np.zeros(x_array.shape[1], dtype=np.float64)
+            target_mean = 0.0
+            x_effective = x_array
+            y_effective = encoded
+        system = x_effective.T @ x_effective
+        system = np.asarray(system, dtype=np.float64, copy=True)
+        system.flat[:: system.shape[0] + 1] += float(self.alpha)
+        rhs = x_effective.T @ y_effective
+        coef = np.linalg.solve(system, rhs)
+        intercept = float(target_mean - feature_mean @ coef) if bool(self.fit_intercept) else 0.0
+        self.coef_ = np.asarray(coef, dtype=np.float64).reshape(1, -1)
+        self.intercept_ = np.asarray([intercept], dtype=np.float64)
+        self.classes_ = classes
+        self.n_features_in_ = int(x_array.shape[1])
+        return self
+
+    def decision_function(self, x_matrix: np.ndarray) -> np.ndarray:
+        x_array = np.asarray(x_matrix, dtype=np.float64)
+        return x_array @ np.asarray(self.coef_, dtype=np.float64).reshape(-1) + float(
+            np.asarray(self.intercept_, dtype=np.float64)[0]
+        )
+
+    def predict(self, x_matrix: np.ndarray) -> np.ndarray:
+        scores = np.asarray(self.decision_function(x_matrix), dtype=np.float64)
+        classes = np.asarray(self.classes_).astype(str, copy=False)
+        return np.where(scores >= 0.0, str(classes[1]), str(classes[0]))
+
+
+@dataclass(frozen=True)
+class _FakeRidgeGpuFoldState:
+    fold_index: int
+    n_train: int
+    n_test: int
+    classes: np.ndarray
+    y_test: np.ndarray
+    fit_intercept: bool
+    alpha: float
+    target_mean: float
+    k_test: np.ndarray
+    cholesky_factor: np.ndarray
+
+
+def _patch_fake_ridge_gpu_specialized_primitives(monkeypatch) -> None:
+    def _fake_build_fold_state(
+        *,
+        fold_index: int,
+        x_train_scaled: np.ndarray,
+        x_test_scaled: np.ndarray,
+        y_train: np.ndarray,
+        y_test: np.ndarray,
+        estimator: Any,
+        batch_size_hint: int = 16,
+    ) -> tuple[_FakeRidgeGpuFoldState, dict[str, float]]:
+        del batch_size_hint
+        x_train = np.asarray(x_train_scaled, dtype=np.float64)
+        x_test = np.asarray(x_test_scaled, dtype=np.float64)
+        y_train_text = np.asarray(y_train).astype(str, copy=False)
+        y_test_text = np.asarray(y_test).astype(str, copy=False)
+        classes = np.unique(y_train_text)
+        if classes.shape[0] != 2:
+            raise ValueError("fake ridge gpu fold state requires binary labels")
+        encoded = np.where(y_train_text == str(classes[1]), 1.0, -1.0).astype(np.float64)
+        fit_intercept = bool(getattr(estimator, "fit_intercept", True))
+        if fit_intercept:
+            feature_mean = np.mean(x_train, axis=0, dtype=np.float64)
+            x_train_effective = x_train - feature_mean
+            x_test_effective = x_test - feature_mean
+            target_mean = float(encoded.mean())
+        else:
+            x_train_effective = x_train
+            x_test_effective = x_test
+            target_mean = 0.0
+        k_train = x_train_effective @ x_train_effective.T
+        system = np.asarray(k_train, dtype=np.float64, copy=True)
+        alpha = float(getattr(estimator, "alpha", 1.0))
+        system.flat[:: system.shape[0] + 1] += alpha
+        cholesky_factor = np.linalg.cholesky(system)
+        k_test = x_test_effective @ x_train_effective.T
+        state = _FakeRidgeGpuFoldState(
+            fold_index=int(fold_index),
+            n_train=int(x_train.shape[0]),
+            n_test=int(x_test.shape[0]),
+            classes=np.asarray(classes).astype(str, copy=False),
+            y_test=np.asarray(y_test_text).astype(str, copy=False),
+            fit_intercept=fit_intercept,
+            alpha=alpha,
+            target_mean=float(target_mean),
+            k_test=np.asarray(k_test, dtype=np.float64),
+            cholesky_factor=np.asarray(cholesky_factor, dtype=np.float64),
+        )
+        return state, {
+            "fold_gpu_state_build_seconds": 0.0,
+            "fold_factorization_seconds": 0.0,
+        }
+
+    def _fake_solve_batch(
+        *,
+        state: _FakeRidgeGpuFoldState,
+        permuted_train_labels_batch: np.ndarray,
+    ) -> tuple[np.ndarray, dict[str, float]]:
+        labels_batch = np.asarray(permuted_train_labels_batch)
+        if labels_batch.ndim == 1:
+            labels_batch = labels_batch.reshape(-1, 1)
+        encoded = np.where(
+            labels_batch.astype(str, copy=False) == str(np.asarray(state.classes)[1]),
+            1.0,
+            -1.0,
+        ).astype(np.float64)
+        if bool(state.fit_intercept):
+            encoded = encoded - float(state.target_mean)
+        intermediate = np.linalg.solve(state.cholesky_factor, encoded)
+        dual = np.linalg.solve(state.cholesky_factor.T, intermediate)
+        scores = np.asarray(state.k_test @ dual, dtype=np.float64)
+        if bool(state.fit_intercept):
+            scores = scores + float(state.target_mean)
+        return scores, {
+            "batched_solve_seconds": 0.0,
+            "batched_predict_seconds": 0.0,
+        }
+
+    monkeypatch.setattr(
+        metrics_module,
+        "build_ridge_gpu_permutation_fold_state",
+        _fake_build_fold_state,
+    )
+    monkeypatch.setattr(
+        metrics_module,
+        "solve_ridge_gpu_permutation_batch",
+        _fake_solve_batch,
+    )
+
+
 def test_torch_gpu_capable_estimator_routes_to_cached_scaled_hybrid_gpu_mode() -> None:
     x_matrix, y, splits = _toy_permutation_inputs()
     pipeline_template = Pipeline(
@@ -237,6 +401,187 @@ def test_torch_gpu_capable_estimator_routes_to_cached_scaled_hybrid_gpu_mode() -
     assert payload["execution_mode"] == "cached_scaled_hybrid_gpu"
     assert payload["backend_family"] == "torch_gpu"
     assert payload["shortcut_applied"] is False
+
+
+def test_ridge_gpu_batched_dual_routes_for_supported_torch_ridge_case(monkeypatch) -> None:
+    x_matrix, y, splits = _toy_permutation_inputs()
+    pipeline_template = Pipeline(
+        steps=[
+            ("scaler", StandardScaler(with_mean=True, with_std=True)),
+            ("model", _FakeTorchRidgePermutationEstimator()),
+        ]
+    )
+    monkeypatch.setattr(metrics_module, "supports_ridge_gpu_batched_dual", lambda _estimator: (True, None))
+
+    execution_plan = metrics_module._resolve_permutation_execution_plan(
+        pipeline_template,
+        y=y,
+        splits=splits,
+    )
+
+    assert execution_plan.execution_mode == "ridge_gpu_batched_dual"
+
+
+def test_ridge_gpu_batched_dual_falls_back_for_unsupported_ridge_configuration() -> None:
+    x_matrix, y, splits = _toy_permutation_inputs()
+    pipeline_template = Pipeline(
+        steps=[
+            ("scaler", StandardScaler(with_mean=True, with_std=True)),
+            ("model", _FakeTorchRidgePermutationEstimator(class_weight="balanced")),
+        ]
+    )
+
+    execution_plan = metrics_module._resolve_permutation_execution_plan(
+        pipeline_template,
+        y=y,
+        splits=splits,
+    )
+
+    assert execution_plan.execution_mode == "cached_scaled_hybrid_gpu"
+
+
+def test_ridge_gpu_batched_dual_matches_generic_cached_path_for_binary_case(monkeypatch) -> None:
+    _patch_fake_ridge_gpu_specialized_primitives(monkeypatch)
+    x_matrix, y, splits = _toy_permutation_inputs()
+    metric_name = "balanced_accuracy"
+    observed_metric = 0.0
+    n_permutations = 11
+    seed = 123
+
+    specialized_payload = evaluate_permutations(
+        pipeline_template=Pipeline(
+            steps=[
+                ("scaler", StandardScaler(with_mean=True, with_std=True)),
+                ("model", _FakeTorchRidgePermutationEstimator(alpha=1.3, fit_intercept=True)),
+            ]
+        ),
+        x_matrix=x_matrix,
+        y=y,
+        splits=splits,
+        seed=seed,
+        n_permutations=n_permutations,
+        metric_name=metric_name,
+        observed_metric=observed_metric,
+    )
+
+    monkeypatch.setattr(
+        metrics_module,
+        "supports_ridge_gpu_batched_dual",
+        lambda _estimator: (False, "forced_generic_path_for_parity_test"),
+    )
+    generic_payload = evaluate_permutations(
+        pipeline_template=Pipeline(
+            steps=[
+                ("scaler", StandardScaler(with_mean=True, with_std=True)),
+                ("model", _FakeTorchRidgePermutationEstimator(alpha=1.3, fit_intercept=True)),
+            ]
+        ),
+        x_matrix=x_matrix,
+        y=y,
+        splits=splits,
+        seed=seed,
+        n_permutations=n_permutations,
+        metric_name=metric_name,
+        observed_metric=observed_metric,
+    )
+
+    assert specialized_payload["execution_mode"] == "ridge_gpu_batched_dual"
+    assert generic_payload["execution_mode"] == "cached_scaled_hybrid_gpu"
+    np.testing.assert_allclose(
+        specialized_payload["null_scores"],
+        generic_payload["null_scores"],
+        atol=1e-12,
+        rtol=1e-12,
+    )
+    assert specialized_payload["p_value"] == generic_payload["p_value"]
+
+
+def test_ridge_gpu_batched_dual_preserves_per_permutation_progress_events(monkeypatch) -> None:
+    _patch_fake_ridge_gpu_specialized_primitives(monkeypatch)
+    x_matrix, y, splits = _toy_permutation_inputs()
+    events: list[Any] = []
+
+    evaluate_permutations(
+        pipeline_template=Pipeline(
+            steps=[
+                ("scaler", StandardScaler(with_mean=True, with_std=True)),
+                ("model", _FakeTorchRidgePermutationEstimator(alpha=0.7, fit_intercept=True)),
+            ]
+        ),
+        x_matrix=x_matrix,
+        y=y,
+        splits=splits,
+        seed=202,
+        n_permutations=5,
+        metric_name="balanced_accuracy",
+        observed_metric=0.0,
+        progress_callback=events.append,
+    )
+
+    permutation_messages = [
+        event.message
+        for event in events
+        if event.stage == "permutation"
+        and (
+            (event.message.startswith("running permutation ") and "/" in event.message)
+            or (event.message.startswith("finished permutation ") and "/" in event.message)
+        )
+    ]
+    assert len(permutation_messages) == 10
+    assert permutation_messages == [
+        "running permutation 1/5",
+        "finished permutation 1/5",
+        "running permutation 2/5",
+        "finished permutation 2/5",
+        "running permutation 3/5",
+        "finished permutation 3/5",
+        "running permutation 4/5",
+        "finished permutation 4/5",
+        "running permutation 5/5",
+        "finished permutation 5/5",
+    ]
+
+
+def test_ridge_gpu_batched_dual_payload_keeps_required_fields_and_additive_metadata(monkeypatch) -> None:
+    _patch_fake_ridge_gpu_specialized_primitives(monkeypatch)
+    x_matrix, y, splits = _toy_permutation_inputs()
+
+    payload = evaluate_permutations(
+        pipeline_template=Pipeline(
+            steps=[
+                ("scaler", StandardScaler(with_mean=True, with_std=True)),
+                ("model", _FakeTorchRidgePermutationEstimator(alpha=0.5)),
+            ]
+        ),
+        x_matrix=x_matrix,
+        y=y,
+        splits=splits,
+        seed=77,
+        n_permutations=4,
+        metric_name="balanced_accuracy",
+        observed_metric=0.0,
+    )
+
+    required_existing_fields = {
+        "n_permutations",
+        "metric_name",
+        "observed_score",
+        "p_value",
+        "null_summary",
+        "null_scores",
+        "observed_metric",
+        "permutation_metric_mean",
+        "permutation_metric_std",
+        "permutation_p_value",
+    }
+    assert required_existing_fields <= set(payload)
+    assert payload["execution_mode"] == "ridge_gpu_batched_dual"
+    assert payload["specialized_ridge_gpu_path_used"] is True
+    assert int(payload["permutation_batch_size"]) > 0
+    assert isinstance(payload["fold_gpu_state_build_seconds"], float)
+    assert isinstance(payload["fold_factorization_seconds"], float)
+    assert isinstance(payload["batched_solve_seconds"], float)
+    assert isinstance(payload["batched_predict_seconds"], float)
 
 
 def test_permutation_payload_preserves_backward_compatible_fields() -> None:

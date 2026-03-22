@@ -13,12 +13,18 @@ from sklearn.dummy import DummyClassifier
 from sklearn.pipeline import Pipeline
 
 from Thesis_ML.config.metric_policy import classification_metric_score as policy_metric_score
+from Thesis_ML.experiments.backends.torch_ridge import (
+    build_ridge_gpu_permutation_fold_state,
+    solve_ridge_gpu_permutation_batch,
+    supports_ridge_gpu_batched_dual,
+)
 from Thesis_ML.experiments.progress import ProgressCallback, emit_progress
 
 PermutationExecutionMode = Literal[
     "analytic_shortcut",
     "cached_scaled_cpu",
     "cached_scaled_hybrid_gpu",
+    "ridge_gpu_batched_dual",
 ]
 
 
@@ -112,7 +118,29 @@ def _resolve_dummy_shortcut_strategy(estimator: Any) -> str | None:
     return None
 
 
-def _resolve_permutation_execution_plan(pipeline_template: Pipeline) -> PermutationExecutionPlan:
+def _binary_fold_targets_supported(
+    *,
+    y: np.ndarray,
+    splits: list[tuple[np.ndarray, np.ndarray]],
+) -> bool:
+    y_array = np.asarray(y).astype(str, copy=False)
+    if np.unique(y_array).shape[0] != 2:
+        return False
+    for train_idx, _ in splits:
+        train_idx_array = np.asarray(train_idx, dtype=np.int64)
+        if train_idx_array.size == 0:
+            return False
+        if np.unique(y_array[train_idx_array]).shape[0] != 2:
+            return False
+    return True
+
+
+def _resolve_permutation_execution_plan(
+    pipeline_template: Pipeline,
+    *,
+    y: np.ndarray,
+    splits: list[tuple[np.ndarray, np.ndarray]],
+) -> PermutationExecutionPlan:
     final_estimator = _resolve_final_estimator(pipeline_template)
     estimator_name = _resolve_estimator_name(final_estimator)
     backend_family = _resolve_backend_family(final_estimator)
@@ -127,7 +155,11 @@ def _resolve_permutation_execution_plan(pipeline_template: Pipeline) -> Permutat
             shortcut_strategy=shortcut_strategy,
         )
     if backend_family == "torch_gpu":
-        mode: PermutationExecutionMode = "cached_scaled_hybrid_gpu"
+        ridge_specialized_supported, _ = supports_ridge_gpu_batched_dual(final_estimator)
+        if ridge_specialized_supported and _binary_fold_targets_supported(y=y, splits=splits):
+            mode: PermutationExecutionMode = "ridge_gpu_batched_dual"
+        else:
+            mode = "cached_scaled_hybrid_gpu"
     else:
         mode = "cached_scaled_cpu"
     return PermutationExecutionPlan(
@@ -242,6 +274,128 @@ def _execute_cached_scaled_permutations(
     return permutation_scores
 
 
+def _execute_ridge_gpu_batched_dual_permutations(
+    *,
+    final_estimator_template: Any,
+    fold_caches: list[PermutationFoldCache],
+    rng: np.random.Generator,
+    n_permutations: int,
+    metric_name: str,
+    progress_callback: ProgressCallback | None,
+    progress_base: dict[str, Any],
+) -> tuple[list[float], dict[str, Any]]:
+    batch_size = max(1, int(getattr(final_estimator_template, "permutation_batch_size", 16)))
+
+    fold_states = []
+    fold_gpu_state_build_seconds = 0.0
+    fold_factorization_seconds = 0.0
+    for fold_cache in fold_caches:
+        fold_state, timing_metadata = build_ridge_gpu_permutation_fold_state(
+            fold_index=int(fold_cache.fold_index),
+            x_train_scaled=np.asarray(fold_cache.x_train_scaled, dtype=np.float64),
+            x_test_scaled=np.asarray(fold_cache.x_test_scaled, dtype=np.float64),
+            y_train=np.asarray(fold_cache.y_train),
+            y_test=np.asarray(fold_cache.y_test),
+            estimator=final_estimator_template,
+            batch_size_hint=batch_size,
+        )
+        fold_states.append(fold_state)
+        fold_gpu_state_build_seconds += float(timing_metadata.get("fold_gpu_state_build_seconds", 0.0))
+        fold_factorization_seconds += float(timing_metadata.get("fold_factorization_seconds", 0.0))
+
+    y_true_all_constant: list[str] = [
+        str(label) for fold_state in fold_states for label in np.asarray(fold_state.y_test).tolist()
+    ]
+    permutation_scores: list[float] = []
+    batched_solve_seconds = 0.0
+    batched_predict_seconds = 0.0
+
+    permutation_index = 0
+    while permutation_index < int(n_permutations):
+        current_batch_size = min(batch_size, int(n_permutations) - permutation_index)
+        permuted_labels_by_fold: list[np.ndarray] = []
+        for fold_cache in fold_caches:
+            y_train_fold = np.asarray(fold_cache.y_train)
+            labels_batch = np.empty((int(y_train_fold.shape[0]), int(current_batch_size)), dtype=y_train_fold.dtype)
+            permuted_labels_by_fold.append(labels_batch)
+
+        for local_perm_index in range(int(current_batch_size)):
+            for fold_index, fold_cache in enumerate(fold_caches):
+                y_train_permuted = np.asarray(fold_cache.y_train).copy()
+                rng.shuffle(y_train_permuted)
+                permuted_labels_by_fold[fold_index][:, local_perm_index] = y_train_permuted
+
+        fold_score_batches: list[np.ndarray] = []
+        for fold_index, fold_state in enumerate(fold_states):
+            fold_score_batch, timing_metadata = solve_ridge_gpu_permutation_batch(
+                state=fold_state,
+                permuted_train_labels_batch=permuted_labels_by_fold[fold_index],
+            )
+            fold_score_batches.append(np.asarray(fold_score_batch, dtype=np.float64))
+            batched_solve_seconds += float(timing_metadata.get("batched_solve_seconds", 0.0))
+            batched_predict_seconds += float(timing_metadata.get("batched_predict_seconds", 0.0))
+
+        batch_scores: list[float] = []
+        for local_perm_index in range(int(current_batch_size)):
+            y_pred_all: list[str] = []
+            for fold_index, fold_state in enumerate(fold_states):
+                fold_scores = np.asarray(fold_score_batches[fold_index], dtype=np.float64)
+                fold_scores_column = fold_scores[:, local_perm_index]
+                classes = np.asarray(fold_state.classes).astype(str, copy=False)
+                predictions = np.where(
+                    fold_scores_column >= 0.0,
+                    str(classes[1]),
+                    str(classes[0]),
+                )
+                y_pred_all.extend(predictions.tolist())
+            batch_scores.append(
+                classification_metric_score(
+                    y_true=y_true_all_constant,
+                    y_pred=y_pred_all,
+                    metric_name=metric_name,
+                )
+            )
+
+        for local_perm_index, score in enumerate(batch_scores):
+            absolute_permutation_index = permutation_index + local_perm_index
+            emit_progress(
+                progress_callback,
+                stage="permutation",
+                message=f"running permutation {absolute_permutation_index + 1}/{n_permutations}",
+                completed_units=float(absolute_permutation_index),
+                total_units=float(n_permutations),
+                metadata={
+                    **progress_base,
+                    "permutation_index": int(absolute_permutation_index + 1),
+                    "n_permutations": int(n_permutations),
+                },
+            )
+            permutation_scores.append(float(score))
+            emit_progress(
+                progress_callback,
+                stage="permutation",
+                message=f"finished permutation {absolute_permutation_index + 1}/{n_permutations}",
+                completed_units=float(absolute_permutation_index + 1),
+                total_units=float(n_permutations),
+                metadata={
+                    **progress_base,
+                    "permutation_index": int(absolute_permutation_index + 1),
+                    "n_permutations": int(n_permutations),
+                },
+            )
+
+        permutation_index += int(current_batch_size)
+
+    return permutation_scores, {
+        "specialized_ridge_gpu_path_used": True,
+        "permutation_batch_size": int(batch_size),
+        "fold_gpu_state_build_seconds": float(fold_gpu_state_build_seconds),
+        "fold_factorization_seconds": float(fold_factorization_seconds),
+        "batched_solve_seconds": float(batched_solve_seconds),
+        "batched_predict_seconds": float(batched_predict_seconds),
+    }
+
+
 def _build_permutation_payload(
     *,
     permutation_scores: list[float],
@@ -253,6 +407,7 @@ def _build_permutation_payload(
     n_folds: int,
     fold_cache_build_seconds: float,
     permutation_loop_seconds: float,
+    additional_metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     ge_count = sum(score >= observed_metric for score in permutation_scores)
     p_value = (ge_count + 1.0) / (n_permutations + 1.0)
@@ -292,6 +447,17 @@ def _build_permutation_payload(
     payload["n_folds"] = int(n_folds)
     payload["fold_cache_build_seconds"] = float(fold_cache_build_seconds)
     payload["permutation_loop_seconds"] = float(permutation_loop_seconds)
+    payload["specialized_ridge_gpu_path_used"] = bool(
+        execution_plan.execution_mode == "ridge_gpu_batched_dual"
+    )
+    payload["specialized_ridge_gpu_fallback_reason"] = None
+    payload["permutation_batch_size"] = None
+    payload["fold_gpu_state_build_seconds"] = None
+    payload["fold_factorization_seconds"] = None
+    payload["batched_solve_seconds"] = None
+    payload["batched_predict_seconds"] = None
+    if additional_metadata:
+        payload.update(additional_metadata)
     return payload
 
 
@@ -310,11 +476,16 @@ def evaluate_permutations(
     if int(n_permutations) <= 0:
         raise ValueError("evaluate_permutations requires n_permutations > 0.")
 
-    execution_plan = _resolve_permutation_execution_plan(pipeline_template)
+    execution_plan = _resolve_permutation_execution_plan(
+        pipeline_template,
+        y=y,
+        splits=splits,
+    )
     final_estimator = _resolve_final_estimator(pipeline_template)
     rng = np.random.default_rng(seed)
     fold_cache_build_seconds = 0.0
     permutation_loop_seconds = 0.0
+    additional_metadata: dict[str, Any] | None = None
     progress_base = dict(progress_metadata or {})
     emit_progress(
         progress_callback,
@@ -353,7 +524,7 @@ def evaluate_permutations(
                     "n_permutations": int(n_permutations),
                 },
             )
-    else:
+    elif execution_plan.execution_mode in {"cached_scaled_cpu", "cached_scaled_hybrid_gpu"}:
         fold_cache_start = perf_counter()
         fold_caches = _build_permutation_fold_cache(
             pipeline_template=pipeline_template,
@@ -373,6 +544,49 @@ def evaluate_permutations(
             progress_base=progress_base,
         )
         permutation_loop_seconds = float(perf_counter() - permutation_loop_start)
+    else:
+        fold_cache_start = perf_counter()
+        fold_caches = _build_permutation_fold_cache(
+            pipeline_template=pipeline_template,
+            x_matrix=x_matrix,
+            y=y,
+            splits=splits,
+        )
+        fold_cache_build_seconds = float(perf_counter() - fold_cache_start)
+        permutation_loop_start = perf_counter()
+        try:
+            permutation_scores, additional_metadata = _execute_ridge_gpu_batched_dual_permutations(
+                final_estimator_template=final_estimator,
+                fold_caches=fold_caches,
+                rng=rng,
+                n_permutations=int(n_permutations),
+                metric_name=metric_name,
+                progress_callback=progress_callback,
+                progress_base=progress_base,
+            )
+        except ValueError as exc:
+            execution_plan = PermutationExecutionPlan(
+                execution_mode="cached_scaled_hybrid_gpu",
+                estimator_name=execution_plan.estimator_name,
+                backend_family=execution_plan.backend_family,
+                shortcut_applied=execution_plan.shortcut_applied,
+                shortcut_reason=execution_plan.shortcut_reason,
+                shortcut_strategy=execution_plan.shortcut_strategy,
+            )
+            permutation_scores = _execute_cached_scaled_permutations(
+                final_estimator_template=final_estimator,
+                fold_caches=fold_caches,
+                rng=rng,
+                n_permutations=int(n_permutations),
+                metric_name=metric_name,
+                progress_callback=progress_callback,
+                progress_base=progress_base,
+            )
+            additional_metadata = {
+                "specialized_ridge_gpu_path_used": False,
+                "specialized_ridge_gpu_fallback_reason": str(exc),
+            }
+        permutation_loop_seconds = float(perf_counter() - permutation_loop_start)
 
     payload = _build_permutation_payload(
         permutation_scores=permutation_scores,
@@ -384,6 +598,7 @@ def evaluate_permutations(
         n_folds=int(len(splits)),
         fold_cache_build_seconds=float(fold_cache_build_seconds),
         permutation_loop_seconds=float(permutation_loop_seconds),
+        additional_metadata=additional_metadata,
     )
     emit_progress(
         progress_callback,
