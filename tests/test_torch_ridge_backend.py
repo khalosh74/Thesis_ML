@@ -236,3 +236,84 @@ def test_torch_ridge_rejects_invalid_gpu_device_id(
 
     with pytest.raises(RuntimeError, match="outside visible CUDA range"):
         estimator.fit(x_matrix, labels)
+
+def test_torch_ridge_uses_dual_solver_when_features_exceed_samples(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_torch = _FakeTorch()
+    _patch_fake_torch(monkeypatch, fake_torch)
+
+    x_matrix = np.asarray(
+        [
+            [0.0, 0.1, 0.0, 0.1, 0.2, 0.0],
+            [0.1, 0.0, 0.1, 0.0, 0.0, 0.2],
+            [2.0, 2.1, 2.0, 2.1, 2.0, 2.2],
+            [2.1, 2.0, 2.1, 2.0, 2.2, 2.0],
+        ],
+        dtype=np.float64,
+    )
+    labels = np.asarray(["neg", "neg", "pos", "pos"])
+
+    estimator = torch_ridge.TorchRidgeClassifier(gpu_device_id=0)
+    estimator.fit(x_matrix, labels)
+
+    metadata = estimator.get_backend_runtime_metadata()
+    assert metadata["ridge_solver_family"] == "dual"
+    assert metadata["ridge_system_dimension"] == x_matrix.shape[0]
+
+
+def test_torch_ridge_uses_primal_solver_when_samples_exceed_features(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_torch = _FakeTorch()
+    _patch_fake_torch(monkeypatch, fake_torch)
+
+    x_matrix = np.asarray(
+        [
+            [0.0, 0.1],
+            [0.1, 0.0],
+            [0.2, 0.1],
+            [0.0, 0.2],
+            [2.0, 2.1],
+            [2.2, 2.0],
+        ],
+        dtype=np.float64,
+    )
+    labels = np.asarray(["neg", "neg", "neg", "pos", "pos", "pos"])
+
+    estimator = torch_ridge.TorchRidgeClassifier(gpu_device_id=0)
+    estimator.fit(x_matrix, labels)
+
+    metadata = estimator.get_backend_runtime_metadata()
+    assert metadata["ridge_solver_family"] == "primal"
+    assert metadata["ridge_system_dimension"] == x_matrix.shape[1]
+
+def test_torch_ridge_multiclass_prediction_parity_is_reasonable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_torch = _FakeTorch()
+    _patch_fake_torch(monkeypatch, fake_torch)
+
+    x_matrix = np.asarray(
+        [
+            [0.0, 0.0],
+            [0.1, 0.0],
+            [2.0, 2.0],
+            [2.1, 2.0],
+            [4.0, 4.0],
+            [4.1, 4.0],
+        ],
+        dtype=np.float64,
+    )
+    labels = np.asarray(["a", "a", "b", "b", "c", "c"])
+
+    torch_estimator = torch_ridge.TorchRidgeClassifier(gpu_device_id=0)
+    cpu_estimator = RidgeClassifier()
+
+    torch_estimator.fit(x_matrix, labels)
+    cpu_estimator.fit(x_matrix, labels)
+
+    torch_predictions = np.asarray(torch_estimator.predict(x_matrix))
+    cpu_predictions = np.asarray(cpu_estimator.predict(x_matrix))
+    agreement = float(np.mean(torch_predictions == cpu_predictions))
+    assert agreement >= 0.95

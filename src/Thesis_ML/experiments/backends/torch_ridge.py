@@ -8,7 +8,7 @@ import numpy as np
 from sklearn.base import BaseEstimator, ClassifierMixin
 from sklearn.utils.validation import check_is_fitted
 
-TORCH_RIDGE_BACKEND_ID = "torch_ridge_gpu_v1"
+TORCH_RIDGE_BACKEND_ID = "torch_ridge_gpu_v2"
 
 
 def resolve_torch_ridge_class_weight(class_weight_policy: str) -> str | None:
@@ -124,6 +124,188 @@ def _configure_torch_determinism(torch: Any, *, enabled: bool) -> tuple[bool, st
     return enforced, ";".join(limitations) if limitations else None
 
 
+def _build_ridge_target_matrix(y_indices: np.ndarray, *, n_classes: int,) -> tuple[np.ndarray, bool]:
+    n_samples = int(y_indices.shape[0])
+
+    if n_classes == 2:
+        # classes_[0] = negative side, classes_[1] = positive side
+        target = np.where(y_indices == 1, 1.0, -1.0).astype(np.float64).reshape(n_samples, 1)
+        return target, True
+
+    target = -np.ones((n_samples, n_classes), dtype=np.float64)
+    target[np.arange(n_samples), y_indices] = 1.0
+    return target, False
+
+
+def _prepare_weighted_centered_problem(x_array: np.ndarray, target_matrix: np.ndarray, sample_weights: np.ndarray, *, fit_intercept: bool, ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    weights = np.asarray(sample_weights, dtype=np.float64).reshape(-1)
+    if weights.ndim != 1 or weights.shape[0] != x_array.shape[0]:
+        raise ValueError("sample_weights must be a 1D vector aligned with X rows.")
+
+    if fit_intercept:
+        total_weight = float(np.sum(weights))
+        if total_weight <= 0.0:
+            raise ValueError("Weighted ridge requires a strictly positive total sample weight.")
+
+        feature_mean = np.sum(x_array * weights[:, None], axis=0) / total_weight
+        target_mean = np.sum(target_matrix * weights[:, None], axis=0) / total_weight
+
+        x_centered = x_array - feature_mean
+        target_centered = target_matrix - target_mean
+    else:
+        feature_mean = np.zeros(x_array.shape[1], dtype=np.float64)
+        target_mean = np.zeros(target_matrix.shape[1], dtype=np.float64)
+        x_centered = x_array
+        target_centered = target_matrix
+
+    weight_sqrt = np.sqrt(weights).astype(np.float64, copy=False).reshape(-1, 1)
+    weighted_x = x_centered * weight_sqrt
+    weighted_target = target_centered * weight_sqrt
+
+    return weighted_x, weighted_target, feature_mean, target_mean
+
+
+def _add_alpha_to_diagonal(torch: Any, matrix: Any, alpha: float, *, device: Any, ) -> Any:
+    if float(alpha) < 0.0:
+        raise ValueError("Ridge alpha must be >= 0.")
+
+    diagonal_fn = getattr(torch, "diagonal", None)
+    if callable(diagonal_fn):
+        try:
+            diag_view = diagonal_fn(matrix)
+            add_in_place = getattr(diag_view, "add_", None)
+            if callable(add_in_place):
+                add_in_place(float(alpha))
+                return matrix
+        except Exception:
+            pass
+
+    matrix_np = _to_numpy_array(matrix).astype(np.float64, copy=True)
+    matrix_np.flat[:: matrix_np.shape[0] + 1] += float(alpha)
+    return _as_torch_float_tensor(torch, matrix_np, device=device)
+
+
+def _solve_spd_system(torch: Any, system_matrix: Any, rhs: Any, ) -> Any:
+    linalg = getattr(torch, "linalg", None)
+
+    if linalg is not None:
+        cholesky_ex = getattr(linalg, "cholesky_ex", None)
+        if callable(cholesky_ex):
+            try:
+                chol_out = cholesky_ex(system_matrix, check_errors=False)
+                chol_factor = chol_out.L if hasattr(chol_out, "L") else chol_out[0]
+                chol_info = chol_out.info if hasattr(chol_out, "info") else (
+                    chol_out[1] if isinstance(chol_out, tuple) and len(chol_out) > 1 else None
+                )
+
+                if chol_info is None or np.all(_to_numpy_array(chol_info) == 0):
+                    cholesky_solve = getattr(torch, "cholesky_solve", None)
+                    if callable(cholesky_solve):
+                        return cholesky_solve(rhs, chol_factor)
+            except Exception:
+                pass
+
+        solve_ex = getattr(linalg, "solve_ex", None)
+        if callable(solve_ex):
+            try:
+                solve_out = solve_ex(system_matrix, rhs, check_errors=False)
+                solve_result = solve_out.result if hasattr(solve_out, "result") else solve_out[0]
+                solve_info = solve_out.info if hasattr(solve_out, "info") else (
+                    solve_out[1] if isinstance(solve_out, tuple) and len(solve_out) > 1 else None
+                )
+
+                if solve_info is None or np.all(_to_numpy_array(solve_info) == 0):
+                    return solve_result
+            except Exception:
+                pass
+
+        solve = getattr(linalg, "solve", None)
+        if callable(solve):
+            return solve(system_matrix, rhs)
+
+    raise RuntimeError("Torch ridge backend could not find a usable linear solver.")
+
+
+def _solve_adaptive_ridge_exact(torch: Any, x_array: np.ndarray, y_indices: np.ndarray, sample_weights: np.ndarray, *, alpha: float, fit_intercept: bool, device: Any,) -> tuple[np.ndarray, np.ndarray, bool, dict[str, Any]]:
+    n_samples, n_features = x_array.shape
+    n_classes = int(np.max(y_indices)) + 1
+
+    target_matrix, binary_mode = _build_ridge_target_matrix(
+        y_indices,
+        n_classes=n_classes,
+    )
+
+    weighted_x, weighted_target, feature_mean, target_mean = _prepare_weighted_centered_problem(
+        x_array,
+        target_matrix,
+        sample_weights,
+        fit_intercept=fit_intercept,
+    )
+
+    weighted_x_tensor = _as_torch_float_tensor(torch, weighted_x, device=device)
+    weighted_target_tensor = _as_torch_float_tensor(torch, weighted_target, device=device)
+
+    target_columns = int(weighted_target.shape[1])
+
+    if n_features > n_samples:
+        solver_family = "dual"
+        system_dimension = int(n_samples)
+
+        system_matrix = weighted_x_tensor @ weighted_x_tensor.T
+        system_matrix = _add_alpha_to_diagonal(
+            torch,
+            system_matrix,
+            float(alpha),
+            device=device,
+        )
+
+        dual_solution = _solve_spd_system(
+            torch,
+            system_matrix,
+            weighted_target_tensor,
+        )
+        weight_tensor = weighted_x_tensor.T @ dual_solution
+    else:
+        solver_family = "primal"
+        system_dimension = int(n_features)
+
+        system_matrix = weighted_x_tensor.T @ weighted_x_tensor
+        system_matrix = _add_alpha_to_diagonal(
+            torch,
+            system_matrix,
+            float(alpha),
+            device=device,
+        )
+
+        rhs = weighted_x_tensor.T @ weighted_target_tensor
+        weight_tensor = _solve_spd_system(
+            torch,
+            system_matrix,
+            rhs,
+        )
+
+    weight_matrix = _to_numpy_array(weight_tensor).astype(np.float64, copy=False)
+    if weight_matrix.ndim == 1:
+        weight_matrix = weight_matrix.reshape(-1, 1)
+
+    if fit_intercept:
+        intercept_vector = target_mean - feature_mean @ weight_matrix
+    else:
+        intercept_vector = np.zeros(weight_matrix.shape[1], dtype=np.float64)
+
+    metadata = {
+        "ridge_solver_family": solver_family,
+        "ridge_system_dimension": system_dimension,
+        "ridge_rhs_columns": target_columns,
+        "ridge_binary_mode": bool(binary_mode),
+    }
+    return (
+        weight_matrix,
+        np.asarray(intercept_vector, dtype=np.float64),
+        bool(binary_mode),
+        metadata,
+    )
+
 class TorchRidgeClassifier(BaseEstimator, ClassifierMixin):
     def __init__(
         self,
@@ -148,6 +330,8 @@ class TorchRidgeClassifier(BaseEstimator, ClassifierMixin):
         x_array = np.asarray(x_matrix, dtype=np.float64)
         y_array = np.asarray(y_labels)
 
+        if float(self.alpha) < 0.0:
+            raise ValueError("TorchRidgeClassifier requires alpha >= 0.")  
         if x_array.ndim != 2:
             raise ValueError("TorchRidgeClassifier.fit requires a 2D feature matrix.")
         if y_array.ndim != 1:
@@ -180,59 +364,32 @@ class TorchRidgeClassifier(BaseEstimator, ClassifierMixin):
                 pass
 
         transfer_start = perf_counter()
-        if self.fit_intercept:
-            x_augmented = np.concatenate(
-                [x_array, np.ones((x_array.shape[0], 1), dtype=np.float64)],
-                axis=1,
-            )
-        else:
-            x_augmented = x_array
-        x_augmented_tensor = _as_torch_float_tensor(torch, x_augmented, device=device)
-        weighted_design_tensor = x_augmented_tensor * _as_torch_float_tensor(
+        
+        transfer_start = perf_counter()
+        solver_start = perf_counter()
+
+        coefficient_weights, intercept_vector, binary_mode, ridge_solver_metadata = _solve_adaptive_ridge_exact(
             torch,
-            sample_weight_sqrt.reshape(-1, 1),
+            x_array,
+            y_indices,
+            sample_weights,
+            alpha=float(self.alpha),
+            fit_intercept=bool(self.fit_intercept),
             device=device,
         )
-        sample_weight_sqrt_tensor = _as_torch_float_tensor(
-            torch,
-            sample_weight_sqrt,
-            device=device,
-        )
+
+        solver_elapsed = float(perf_counter() - solver_start)
         transfer_elapsed = float(perf_counter() - transfer_start)
 
-        regularization = np.eye(x_augmented.shape[1], dtype=np.float64) * float(self.alpha)
-        if self.fit_intercept:
-            regularization[-1, -1] = 0.0
-        regularization_tensor = _as_torch_float_tensor(torch, regularization, device=device)
-        system_matrix = weighted_design_tensor.T @ weighted_design_tensor + regularization_tensor
-
-        class_coefficients: list[np.ndarray] = []
-        class_intercepts: list[float] = []
-        for class_index in range(int(classes.shape[0])):
-            class_target = np.where(y_indices == class_index, 1.0, -1.0).astype(np.float64)
-            class_target_tensor = _as_torch_float_tensor(torch, class_target, device=device)
-            rhs = weighted_design_tensor.T @ (class_target_tensor * sample_weight_sqrt_tensor)
-            solution = torch.linalg.solve(system_matrix, rhs)
-            solution_np = _to_numpy_array(solution).astype(np.float64, copy=False)
-            if self.fit_intercept:
-                class_coefficients.append(solution_np[:-1])
-                class_intercepts.append(float(solution_np[-1]))
-            else:
-                class_coefficients.append(solution_np)
-                class_intercepts.append(0.0)
-
-        coefficient_matrix = np.vstack(class_coefficients).astype(np.float64, copy=False)
-        intercept_vector = np.asarray(class_intercepts, dtype=np.float64)
-        if int(classes.shape[0]) == 2:
-            self.coef_ = (coefficient_matrix[1] - coefficient_matrix[0]).reshape(1, -1)
-            self.intercept_ = np.asarray(
-                [float(intercept_vector[1] - intercept_vector[0])],
-                dtype=np.float64,
-            )
+        if binary_mode:
+            # coefficient_weights: (p, 1)
+            self.coef_ = coefficient_weights.T.astype(np.float64, copy=False)
+            self.intercept_ = np.asarray([float(intercept_vector[0])], dtype=np.float64)
             self._binary_mode_ = True
         else:
-            self.coef_ = coefficient_matrix
-            self.intercept_ = intercept_vector
+            # coefficient_weights: (p, K)
+            self.coef_ = coefficient_weights.T.astype(np.float64, copy=False)
+            self.intercept_ = np.asarray(intercept_vector, dtype=np.float64)
             self._binary_mode_ = False
 
         gpu_memory_peak_mb: float | None = None
@@ -240,7 +397,7 @@ class TorchRidgeClassifier(BaseEstimator, ClassifierMixin):
             try:
                 peak_bytes = float(cuda_module.max_memory_allocated(device))
                 gpu_memory_peak_mb = float(peak_bytes / (1024.0 * 1024.0))
-            except Exception:  # pragma: no cover - best effort diagnostic only
+            except Exception:
                 gpu_memory_peak_mb = None
 
         self.classes_ = classes
@@ -250,8 +407,10 @@ class TorchRidgeClassifier(BaseEstimator, ClassifierMixin):
             "backend_id": self.backend_id,
             "gpu_memory_peak_mb": gpu_memory_peak_mb,
             "device_transfer_seconds": transfer_elapsed,
+            "ridge_solver_seconds": solver_elapsed,
             "torch_deterministic_enforced": bool(deterministic_enforced),
             "torch_deterministic_limitations": deterministic_limitations,
+            **ridge_solver_metadata,
         }
         return self
 
