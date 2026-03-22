@@ -17,6 +17,8 @@ import nibabel as nib
 import numpy as np
 import pandas as pd
 import sklearn
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
 
 from Thesis_ML.artifacts.registry import (
     ARTIFACT_TYPE_EXPERIMENT_REPORT,
@@ -62,7 +64,7 @@ from Thesis_ML.experiments.model_catalog import (
 from Thesis_ML.experiments.model_catalog import (
     projected_runtime_seconds as resolve_projected_runtime_seconds,
 )
-from Thesis_ML.experiments.model_factory import MODEL_NAMES, build_pipeline, make_model
+from Thesis_ML.experiments.model_factory import MODEL_NAMES, make_model
 from Thesis_ML.experiments.official_contracts import (
     validate_official_preflight,
     validate_run_artifact_contract,
@@ -167,11 +169,17 @@ def _build_pipeline(
     class_weight_policy: str = "none",
     compute_policy=None,
 ):
-    return build_pipeline(
-        model_name=model_name,
+    model = _make_model(
+        name=model_name,
         seed=seed,
         class_weight_policy=class_weight_policy,
         compute_policy=compute_policy,
+    )
+    return Pipeline(
+        steps=[
+            ("scaler", StandardScaler(with_mean=True, with_std=True)),
+            ("model", model),
+        ]
     )
 
 

@@ -2,6 +2,7 @@
 .venv/
 .venv-uv/
 venv/
+.venv-gpu/
 
 # Python caches and build artifacts
 __pycache__/
