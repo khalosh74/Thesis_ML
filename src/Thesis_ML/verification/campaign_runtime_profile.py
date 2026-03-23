@@ -17,6 +17,7 @@ from Thesis_ML.comparisons.loader import load_comparison_spec
 from Thesis_ML.comparisons.models import CompiledComparisonRunSpec
 from Thesis_ML.config.framework_mode import FrameworkMode
 from Thesis_ML.experiments.cache_loading import load_features_from_cache
+from Thesis_ML.experiments.progress import ProgressCallback, emit_progress
 from Thesis_ML.experiments.run_experiment import run_experiment
 from Thesis_ML.experiments.section_models import DatasetSelectionInput
 from Thesis_ML.experiments.sections import dataset_selection
@@ -24,7 +25,6 @@ from Thesis_ML.experiments.tuning_search_spaces import get_search_space
 from Thesis_ML.protocols.compiler import compile_protocol
 from Thesis_ML.protocols.loader import load_protocol
 from Thesis_ML.protocols.models import CompiledRunSpec
-from Thesis_ML.experiments.progress import ProgressCallback, emit_progress
 
 
 @dataclass(frozen=True)
@@ -752,6 +752,7 @@ def verify_campaign_runtime_profile(
                     "estimated_full_tuning_seconds": None,
                     "tuning_extrapolation_applied": False,
                     "specialized_linearsvc_tuning_used": None,
+                    "specialized_logreg_tuning_used": None,
                     "profile_elapsed_seconds": None,
                     "fold_scale_factor": None,
                     "estimated_seconds_per_full_run": float(estimated_seconds_per_full_run),
@@ -808,6 +809,7 @@ def verify_campaign_runtime_profile(
         estimated_full_tuning_seconds: float | None = None
         tuning_extrapolation_applied = False
         specialized_linearsvc_tuning_used: bool | None = None
+        specialized_logreg_tuning_used: bool | None = None
         feature_matrix_cache_hit = False
         feature_matrix_cache_key: str | None = None
         feature_matrix_cache_sample_signature: str | None = None
@@ -957,6 +959,11 @@ def verify_campaign_runtime_profile(
                         )
                         if isinstance(specialized_flag, bool):
                             specialized_linearsvc_tuning_used = bool(specialized_flag)
+                        specialized_logreg_flag = tuning_summary_payload.get(
+                            "specialized_logreg_tuning_used"
+                        )
+                        if isinstance(specialized_logreg_flag, bool):
+                            specialized_logreg_tuning_used = bool(specialized_logreg_flag)
                         tuning_extrapolation_flag = tuning_summary_payload.get(
                             "tuning_extrapolation_applied"
                         )
@@ -1171,6 +1178,7 @@ def verify_campaign_runtime_profile(
                 ),
                 "tuning_extrapolation_applied": bool(tuning_extrapolation_applied),
                 "specialized_linearsvc_tuning_used": specialized_linearsvc_tuning_used,
+                "specialized_logreg_tuning_used": specialized_logreg_tuning_used,
                 "profile_elapsed_seconds": float(elapsed_seconds),
                 "fold_scale_factor": float(fold_scale_factor),
                 "estimated_seconds_per_full_run": float(estimated_seconds_per_full_run),

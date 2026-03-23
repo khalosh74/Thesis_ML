@@ -22,6 +22,7 @@ from Thesis_ML.experiments.stage_registry import (
     MODEL_FIT_CPU_EXECUTOR_ID,
     PERMUTATION_REFERENCE_EXECUTOR_ID,
     SPECIALIZED_LINEARSVC_TUNING_EXECUTOR_ID,
+    SPECIALIZED_LOGREG_TUNING_EXECUTOR_ID,
 )
 from Thesis_ML.experiments.tuning_search_spaces import (
     LINEAR_GROUPED_NESTED_SEARCH_SPACE_ID,
@@ -243,6 +244,39 @@ def test_linearsvc_tuning_and_permutation_dispatch_through_stage_planner(
 
     tuning_summary = json.loads(Path(result["tuning_summary_path"]).read_text(encoding="utf-8"))
     assert SPECIALIZED_LINEARSVC_TUNING_EXECUTOR_ID in tuning_summary["tuning_executor_ids"]
+
+
+def test_logreg_tuning_dispatch_through_stage_planner_with_progress_telemetry(
+    prepared_dataset: dict[str, Path],
+) -> None:
+    run_kwargs = _base_run_kwargs(prepared_dataset)
+    run_kwargs["model"] = "logreg"
+    result = run_experiment(
+        **run_kwargs,
+        run_id="stage_planner_logreg_dispatch",
+        methodology_policy_name="grouped_nested_tuning",
+        tuning_enabled=True,
+        tuning_search_space_id=LINEAR_GROUPED_NESTED_SEARCH_SPACE_ID,
+        tuning_search_space_version=LINEAR_GROUPED_NESTED_SEARCH_SPACE_VERSION,
+        tuning_inner_cv_scheme="grouped_leave_one_group_out",
+        tuning_inner_group_field="session",
+        n_permutations=0,
+    )
+
+    stage_execution = result.get("stage_execution")
+    assert isinstance(stage_execution, dict)
+    assignment_by_stage = {
+        str(row.get("stage")): row for row in stage_execution["assignments"]
+    }
+    assert assignment_by_stage["model_fit"]["executor_id"] == MODEL_FIT_CPU_EXECUTOR_ID
+    assert assignment_by_stage["tuning"]["executor_id"] == SPECIALIZED_LOGREG_TUNING_EXECUTOR_ID
+    assert assignment_by_stage["tuning"]["fallback_used"] is False
+
+    tuning_summary = json.loads(Path(result["tuning_summary_path"]).read_text(encoding="utf-8"))
+    assert SPECIALIZED_LOGREG_TUNING_EXECUTOR_ID in tuning_summary["tuning_executor_ids"]
+    assert tuning_summary["specialized_logreg_tuning_used"] is True
+    assert int(tuning_summary["tuning_progress_event_count_total"]) > 0
+    assert int(tuning_summary["tuning_progress_total_units_total"]) > 0
 
 
 def test_invalid_start_end_combination_raises(prepared_dataset: dict[str, Path]) -> None:

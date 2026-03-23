@@ -23,6 +23,7 @@ from Thesis_ML.experiments.stage_registry import (
     REPORTING_CPU_EXECUTOR_ID,
     SPATIAL_VALIDATION_CPU_EXECUTOR_ID,
     SPECIALIZED_LINEARSVC_TUNING_EXECUTOR_ID,
+    SPECIALIZED_LOGREG_TUNING_EXECUTOR_ID,
     TUNING_GENERIC_EXECUTOR_ID,
     TUNING_SKIPPED_CONTROL_EXECUTOR_ID,
     StageExecutorSelectionContext,
@@ -63,6 +64,53 @@ def _compute_lane_for_backend(
     if isinstance(lane, str) and lane.strip() in {"cpu", "gpu"}:
         return str(lane).strip()
     return "gpu" if _resolve_effective_backend_family(compute_policy) == "torch_gpu" else "cpu"
+
+
+_STAGE_GPU_MEMORY_SOFT_LIMITS_MB: dict[StageKey, int] = {
+    StageKey.PERMUTATION: 2048,
+}
+
+
+def _resource_admissible(
+    *,
+    stage_key: StageKey,
+    backend_family: StageBackendFamily,
+    compute_policy: ResolvedComputePolicy,
+) -> tuple[bool, str | None]:
+    if backend_family != StageBackendFamily.TORCH_GPU:
+        return True, None
+
+    assigned_lane = (
+        str(compute_policy.assigned_compute_lane).strip().lower()
+        if isinstance(compute_policy.assigned_compute_lane, str)
+        else None
+    )
+    scheduler_mode = (
+        str(compute_policy.scheduler_mode_effective).strip().lower()
+        if isinstance(compute_policy.scheduler_mode_effective, str)
+        else None
+    )
+    if assigned_lane == "cpu":
+        reason = "assigned_cpu_lane_blocks_gpu_executor"
+        if scheduler_mode == "max_both":
+            reason = "max_both_cpu_lane_budget_exhausted_for_stage"
+        return False, reason
+
+    stage_soft_limit = _STAGE_GPU_MEMORY_SOFT_LIMITS_MB.get(stage_key)
+    gpu_memory_mb = (
+        int(compute_policy.gpu_device_total_memory_mb)
+        if compute_policy.gpu_device_total_memory_mb is not None
+        else None
+    )
+    if stage_soft_limit is not None and gpu_memory_mb is not None and gpu_memory_mb < stage_soft_limit:
+        return (
+            False,
+            (
+                "gpu_memory_below_stage_soft_limit:"
+                f"{gpu_memory_mb}mb<{int(stage_soft_limit)}mb"
+            ),
+        )
+    return True, None
 
 
 def _backend_family_admissible(
@@ -131,6 +179,14 @@ def _resolve_executor_for_stage(
         if not backend_ok:
             rejection_reasons.append(f"{executor_id}:{backend_reason}")
             continue
+        resource_ok, resource_reason = _resource_admissible(
+            stage_key=stage_key,
+            backend_family=spec.backend_family,
+            compute_policy=compute_policy,
+        )
+        if not resource_ok:
+            rejection_reasons.append(f"{executor_id}:{resource_reason}")
+            continue
         supported, support_reason = stage_executor_support_status(spec, support_context)
         if not supported:
             rejection_reasons.append(
@@ -194,7 +250,9 @@ def _tuning_executor_candidates(model_name: str) -> tuple[str, ...]:
         return (TUNING_SKIPPED_CONTROL_EXECUTOR_ID,)
     if normalized == "linearsvc":
         return (SPECIALIZED_LINEARSVC_TUNING_EXECUTOR_ID, TUNING_GENERIC_EXECUTOR_ID)
-    if normalized in {"logreg", "ridge"}:
+    if normalized == "logreg":
+        return (SPECIALIZED_LOGREG_TUNING_EXECUTOR_ID, TUNING_GENERIC_EXECUTOR_ID)
+    if normalized == "ridge":
         return (TUNING_GENERIC_EXECUTOR_ID,)
     return (TUNING_GENERIC_EXECUTOR_ID,)
 

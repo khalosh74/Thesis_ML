@@ -20,6 +20,7 @@ from Thesis_ML.experiments.stage_registry import (
     MODEL_FIT_CPU_EXECUTOR_ID,
     PERMUTATION_REFERENCE_EXECUTOR_ID,
     SPECIALIZED_LINEARSVC_TUNING_EXECUTOR_ID,
+    SPECIALIZED_LOGREG_TUNING_EXECUTOR_ID,
     TUNING_GENERIC_EXECUTOR_ID,
     TUNING_SKIPPED_CONTROL_EXECUTOR_ID,
     run_model_fit_executor,
@@ -269,7 +270,11 @@ def execute_model_fit(section_input: ModelFitInput) -> dict[str, Any]:
         and str(section_input.tuning_fallback_executor_id).strip()
         else (
             TUNING_GENERIC_EXECUTOR_ID
-            if tuning_executor_id == SPECIALIZED_LINEARSVC_TUNING_EXECUTOR_ID
+            if tuning_executor_id
+            in {
+                SPECIALIZED_LINEARSVC_TUNING_EXECUTOR_ID,
+                SPECIALIZED_LOGREG_TUNING_EXECUTOR_ID,
+            }
             else None
         )
     )
@@ -371,6 +376,9 @@ def execute_model_fit(section_input: ModelFitInput) -> dict[str, Any]:
         tuning_executor = "none"
         tuning_executor_fallback_reason: str | None = None
         specialized_linearsvc_tuning_used = False
+        specialized_logreg_tuning_used = False
+        tuning_progress_event_count: int | None = None
+        tuning_progress_total_units: int | None = None
         cv_mean_fit_time_seconds: float | None = None
         cv_std_fit_time_seconds: float | None = None
         cv_mean_score_time_seconds: float | None = None
@@ -402,6 +410,15 @@ def execute_model_fit(section_input: ModelFitInput) -> dict[str, Any]:
                     profiled_candidate_count=0,
                     profiled_inner_fold_count=0,
                     primary_metric_name=section_input.primary_metric_name,
+                    progress_callback=section_input.progress_callback,
+                    progress_metadata={
+                        "run_id": str(section_input.run_id),
+                        "model": str(section_input.model),
+                        "target": str(section_input.target_column),
+                        "cv_mode": str(section_input.cv_mode),
+                        "fold_index": int(fold_index + 1),
+                        "total_folds": int(total_outer_folds),
+                    },
                 )
                 tuning_executor = str(tuning_result.get("tuning_executor", "skipped_control_model"))
                 tuning_executor_fallback_reason = (
@@ -412,6 +429,19 @@ def execute_model_fit(section_input: ModelFitInput) -> dict[str, Any]:
                 )
                 specialized_linearsvc_tuning_used = bool(
                     tuning_result.get("specialized_linearsvc_tuning_used", False)
+                )
+                specialized_logreg_tuning_used = bool(
+                    tuning_result.get("specialized_logreg_tuning_used", False)
+                )
+                tuning_progress_event_count = (
+                    int(tuning_result["tuning_progress_event_count"])
+                    if tuning_result.get("tuning_progress_event_count") is not None
+                    else None
+                )
+                tuning_progress_total_units = (
+                    int(tuning_result["tuning_progress_total_units"])
+                    if tuning_result.get("tuning_progress_total_units") is not None
+                    else None
                 )
                 tuning_rows.append(
                     {
@@ -439,6 +469,19 @@ def execute_model_fit(section_input: ModelFitInput) -> dict[str, Any]:
                         "tuning_executor_fallback_reason": tuning_executor_fallback_reason,
                         "specialized_linearsvc_tuning_used": bool(
                             specialized_linearsvc_tuning_used
+                        ),
+                        "specialized_logreg_tuning_used": bool(
+                            specialized_logreg_tuning_used
+                        ),
+                        "tuning_progress_event_count": (
+                            int(tuning_progress_event_count)
+                            if tuning_progress_event_count is not None
+                            else pd.NA
+                        ),
+                        "tuning_progress_total_units": (
+                            int(tuning_progress_total_units)
+                            if tuning_progress_total_units is not None
+                            else pd.NA
                         ),
                         "tuning_split_scale_seconds": pd.NA,
                         "tuning_candidate_fit_seconds": pd.NA,
@@ -527,6 +570,15 @@ def execute_model_fit(section_input: ModelFitInput) -> dict[str, Any]:
                     profiled_candidate_count=profiled_candidate_count,
                     profiled_inner_fold_count=profiled_inner_fold_count,
                     primary_metric_name=section_input.primary_metric_name,
+                    progress_callback=section_input.progress_callback,
+                    progress_metadata={
+                        "run_id": str(section_input.run_id),
+                        "model": str(section_input.model),
+                        "target": str(section_input.target_column),
+                        "cv_mode": str(section_input.cv_mode),
+                        "fold_index": int(fold_index + 1),
+                        "total_folds": int(total_outer_folds),
+                    },
                 )
                 estimator = tuning_result["estimator"]
                 tuned_search_elapsed_seconds = (
@@ -615,6 +667,19 @@ def execute_model_fit(section_input: ModelFitInput) -> dict[str, Any]:
                 specialized_linearsvc_tuning_used = bool(
                     tuning_result.get("specialized_linearsvc_tuning_used", False)
                 )
+                specialized_logreg_tuning_used = bool(
+                    tuning_result.get("specialized_logreg_tuning_used", False)
+                )
+                tuning_progress_event_count = (
+                    int(tuning_result["tuning_progress_event_count"])
+                    if tuning_result.get("tuning_progress_event_count") is not None
+                    else None
+                )
+                tuning_progress_total_units = (
+                    int(tuning_result["tuning_progress_total_units"])
+                    if tuning_result.get("tuning_progress_total_units") is not None
+                    else None
+                )
                 tuning_rows.append(
                     {
                         "fold": int(fold_index),
@@ -643,6 +708,19 @@ def execute_model_fit(section_input: ModelFitInput) -> dict[str, Any]:
                         "tuning_executor_fallback_reason": tuning_executor_fallback_reason,
                         "specialized_linearsvc_tuning_used": bool(
                             specialized_linearsvc_tuning_used
+                        ),
+                        "specialized_logreg_tuning_used": bool(
+                            specialized_logreg_tuning_used
+                        ),
+                        "tuning_progress_event_count": (
+                            int(tuning_progress_event_count)
+                            if tuning_progress_event_count is not None
+                            else pd.NA
+                        ),
+                        "tuning_progress_total_units": (
+                            int(tuning_progress_total_units)
+                            if tuning_progress_total_units is not None
+                            else pd.NA
                         ),
                         "tuning_split_scale_seconds": tuning_split_scale_seconds,
                         "tuning_candidate_fit_seconds": tuning_candidate_fit_seconds,
@@ -757,6 +835,9 @@ def execute_model_fit(section_input: ModelFitInput) -> dict[str, Any]:
                 "tuning_executor": str(tuning_executor),
                 "tuning_executor_fallback_reason": tuning_executor_fallback_reason,
                 "specialized_linearsvc_tuning_used": bool(specialized_linearsvc_tuning_used),
+                "specialized_logreg_tuning_used": bool(specialized_logreg_tuning_used),
+                "tuning_progress_event_count": tuning_progress_event_count,
+                "tuning_progress_total_units": tuning_progress_total_units,
                 "tuning_split_scale_seconds": tuning_split_scale_seconds,
                 "tuning_candidate_fit_seconds": tuning_candidate_fit_seconds,
                 "tuning_candidate_predict_seconds": tuning_candidate_predict_seconds,
@@ -901,12 +982,31 @@ def execute_model_fit(section_input: ModelFitInput) -> dict[str, Any]:
         "specialized_linearsvc_tuning_used": bool(
             any(bool(row.get("specialized_linearsvc_tuning_used")) for row in tuned_rows)
         ),
+        "specialized_logreg_tuning_used": bool(
+            any(bool(row.get("specialized_logreg_tuning_used")) for row in tuned_rows)
+        ),
         "tuning_executor_ids": sorted(
             {
                 str(row.get("tuning_executor"))
                 for row in tuned_rows
                 if isinstance(row.get("tuning_executor"), str) and str(row.get("tuning_executor"))
             }
+        ),
+        "tuning_progress_event_count_total": int(
+            sum(
+                int(row.get("tuning_progress_event_count"))
+                for row in tuned_rows
+                if row.get("tuning_progress_event_count") is not None
+                and not pd.isna(row.get("tuning_progress_event_count"))
+            )
+        ),
+        "tuning_progress_total_units_total": int(
+            sum(
+                int(row.get("tuning_progress_total_units"))
+                for row in tuned_rows
+                if row.get("tuning_progress_total_units") is not None
+                and not pd.isna(row.get("tuning_progress_total_units"))
+            )
         ),
         "configured_inner_fold_count_total": int(
             sum(int(row.get("configured_inner_fold_count") or 0) for row in tuned_rows)
@@ -976,6 +1076,9 @@ def execute_model_fit(section_input: ModelFitInput) -> dict[str, Any]:
                 "tuning_executor",
                 "tuning_executor_fallback_reason",
                 "specialized_linearsvc_tuning_used",
+                "specialized_logreg_tuning_used",
+                "tuning_progress_event_count",
+                "tuning_progress_total_units",
                 "tuning_split_scale_seconds",
                 "tuning_candidate_fit_seconds",
                 "tuning_candidate_predict_seconds",
@@ -1066,6 +1169,17 @@ def execute_model_fit(section_input: ModelFitInput) -> dict[str, Any]:
                 ),
                 "specialized_linearsvc_tuning_used": bool(
                     row.get("specialized_linearsvc_tuning_used")
+                ),
+                "specialized_logreg_tuning_used": bool(row.get("specialized_logreg_tuning_used")),
+                "tuning_progress_event_count": (
+                    int(row.get("tuning_progress_event_count"))
+                    if row.get("tuning_progress_event_count") is not None
+                    else None
+                ),
+                "tuning_progress_total_units": (
+                    int(row.get("tuning_progress_total_units"))
+                    if row.get("tuning_progress_total_units") is not None
+                    else None
                 ),
                 "tuning_split_scale_seconds": (
                     float(row.get("tuning_split_scale_seconds"))

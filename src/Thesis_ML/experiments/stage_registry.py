@@ -18,6 +18,10 @@ from Thesis_ML.experiments.linearsvc_tuning import (
     SPECIALIZED_LINEARSVC_TUNING_EXECUTOR_ID,
     run_specialized_linearsvc_grouped_nested_tuning,
 )
+from Thesis_ML.experiments.logreg_tuning import (
+    SPECIALIZED_LOGREG_TUNING_EXECUTOR_ID,
+    run_specialized_logreg_grouped_nested_tuning,
+)
 from Thesis_ML.experiments.stage_execution import (
     StageBackendFamily,
     StageExecutorEquivalence,
@@ -91,6 +95,18 @@ def _support_torch_backend(context: StageExecutorSelectionContext) -> tuple[bool
         return False, "effective_backend_family_not_torch_gpu"
     if policy.gpu_device_id is None:
         return False, "gpu_device_id_missing"
+    return True, None
+
+
+def _support_logreg_specialized_cpu(
+    context: StageExecutorSelectionContext,
+) -> tuple[bool, str | None]:
+    policy = context.compute_policy
+    if policy is None:
+        return True, None
+    backend_family = str(policy.assigned_backend_family or policy.effective_backend_family).strip()
+    if backend_family == StageBackendFamily.TORCH_GPU.value:
+        return False, "specialized_logreg_requires_sklearn_cpu_backend"
     return True, None
 
 
@@ -242,6 +258,9 @@ def _execute_tuning_generic_entrypoint(
         "tuning_executor": TUNING_GENERIC_EXECUTOR_ID,
         "tuning_executor_fallback_reason": tuning_executor_fallback_reason,
         "specialized_linearsvc_tuning_used": False,
+        "specialized_logreg_tuning_used": False,
+        "tuning_progress_event_count": None,
+        "tuning_progress_total_units": None,
     }
 
 
@@ -324,6 +343,98 @@ def _execute_tuning_linearsvc_specialized_entrypoint(
         "tuning_executor": str(specialized_result.executor_id),
         "tuning_executor_fallback_reason": None,
         "specialized_linearsvc_tuning_used": True,
+        "specialized_logreg_tuning_used": False,
+        "tuning_progress_event_count": None,
+        "tuning_progress_total_units": None,
+    }
+
+
+def _execute_tuning_logreg_specialized_entrypoint(
+    *,
+    pipeline_template: Pipeline,
+    x_outer_train: np.ndarray,
+    y_outer_train: np.ndarray,
+    inner_groups: np.ndarray,
+    param_grid: dict[str, Any],
+    configured_candidate_count: int,
+    configured_inner_fold_count: int,
+    profiled_candidate_count: int,
+    profiled_inner_fold_count: int,
+    primary_metric_name: str,
+    progress_callback: Any = None,
+    progress_metadata: dict[str, Any] | None = None,
+    **_: Any,
+) -> dict[str, Any]:
+    specialized_result = run_specialized_logreg_grouped_nested_tuning(
+        pipeline_template=clone(pipeline_template),
+        x_train=x_outer_train,
+        y_train=y_outer_train,
+        inner_groups=inner_groups,
+        param_grid=param_grid,
+        primary_metric_name=primary_metric_name,
+        profile_inner_folds=(
+            int(profiled_inner_fold_count)
+            if int(profiled_inner_fold_count) < int(configured_inner_fold_count)
+            else None
+        ),
+        profile_tuning_candidates=(
+            int(profiled_candidate_count)
+            if int(profiled_candidate_count) < int(configured_candidate_count)
+            else None
+        ),
+        progress_callback=progress_callback,
+        progress_metadata=progress_metadata,
+    )
+    return {
+        "estimator": specialized_result.best_estimator,
+        "tuned_search_elapsed_seconds": float(specialized_result.tuned_search_elapsed_seconds),
+        "tuned_search_candidate_count": int(specialized_result.profiled_candidate_count),
+        "tuned_search_configured_candidate_count": int(
+            specialized_result.configured_candidate_count
+        ),
+        "tuned_search_profiled_candidate_count": int(specialized_result.profiled_candidate_count),
+        "tuned_search_configured_inner_fold_count": int(
+            specialized_result.configured_inner_fold_count
+        ),
+        "tuned_search_profiled_inner_fold_count": int(
+            specialized_result.profiled_inner_fold_count
+        ),
+        "tuning_extrapolation_applied": bool(specialized_result.tuning_extrapolation_applied),
+        "measured_inner_tuning_seconds": float(specialized_result.measured_inner_tuning_seconds),
+        "estimated_full_inner_tuning_seconds": float(
+            specialized_result.estimated_full_inner_tuning_seconds
+        ),
+        "estimated_full_tuned_search_seconds": float(
+            specialized_result.estimated_full_tuned_search_seconds
+        ),
+        "tuning_split_scale_seconds": float(specialized_result.split_scale_seconds),
+        "tuning_candidate_fit_seconds": float(specialized_result.candidate_fit_seconds),
+        "tuning_candidate_predict_seconds": float(specialized_result.candidate_predict_seconds),
+        "tuning_refit_elapsed_seconds": float(specialized_result.refit_elapsed_seconds),
+        "cv_mean_fit_time_seconds": _safe_float_from_cv_results(
+            specialized_result.cv_results,
+            "mean_fit_time",
+        ),
+        "cv_std_fit_time_seconds": _safe_float_from_cv_results(
+            specialized_result.cv_results,
+            "std_fit_time",
+        ),
+        "cv_mean_score_time_seconds": _safe_float_from_cv_results(
+            specialized_result.cv_results,
+            "mean_score_time",
+        ),
+        "cv_std_score_time_seconds": _safe_float_from_cv_results(
+            specialized_result.cv_results,
+            "std_score_time",
+        ),
+        "best_score": float(specialized_result.best_score),
+        "best_params_json": json.dumps(specialized_result.best_params, sort_keys=True),
+        "tuning_executor": str(specialized_result.executor_id),
+        "tuning_executor_fallback_reason": None,
+        "specialized_linearsvc_tuning_used": False,
+        "specialized_logreg_tuning_used": True,
+        "tuning_progress_event_count": int(specialized_result.progress_event_count),
+        "tuning_progress_total_units": int(specialized_result.progress_total_units),
     }
 
 
@@ -332,6 +443,9 @@ def _execute_tuning_skipped_control_entrypoint() -> dict[str, Any]:
         "tuning_executor": "skipped_control_model",
         "tuning_executor_fallback_reason": None,
         "specialized_linearsvc_tuning_used": False,
+        "specialized_logreg_tuning_used": False,
+        "tuning_progress_event_count": None,
+        "tuning_progress_total_units": None,
     }
 
 
@@ -485,6 +599,16 @@ def _build_registry() -> tuple[StageExecutorSpec, ...]:
             execute=_execute_tuning_linearsvc_specialized_entrypoint,
         ),
         StageExecutorSpec(
+            executor_id=SPECIALIZED_LOGREG_TUNING_EXECUTOR_ID,
+            stage_key=StageKey.TUNING,
+            backend_family=StageBackendFamily.SKLEARN_CPU,
+            supported_model_names=("logreg",),
+            equivalence_class="exact_reference_equivalent",
+            official_admitted=True,
+            support_predicate=_support_logreg_specialized_cpu,
+            execute=_execute_tuning_logreg_specialized_entrypoint,
+        ),
+        StageExecutorSpec(
             executor_id=TUNING_SKIPPED_CONTROL_EXECUTOR_ID,
             stage_key=StageKey.TUNING,
             backend_family=StageBackendFamily.SKLEARN_CPU,
@@ -620,6 +744,8 @@ def run_tuning_executor(
     profiled_candidate_count: int,
     profiled_inner_fold_count: int,
     primary_metric_name: str,
+    progress_callback: Any = None,
+    progress_metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     executor = get_stage_executor(executor_id)
     if executor.stage_key != StageKey.TUNING:
@@ -639,15 +765,17 @@ def run_tuning_executor(
         "profiled_candidate_count": int(profiled_candidate_count),
         "profiled_inner_fold_count": int(profiled_inner_fold_count),
         "primary_metric_name": str(primary_metric_name),
+        "progress_callback": progress_callback,
+        "progress_metadata": progress_metadata,
     }
     if executor_id == TUNING_SKIPPED_CONTROL_EXECUTOR_ID:
         return executor.execute()
-    if executor_id != SPECIALIZED_LINEARSVC_TUNING_EXECUTOR_ID:
+    if fallback_executor_id is None:
         return executor.execute(**kwargs)
     try:
         return executor.execute(**kwargs)
     except ValueError as exc:
-        if fallback_executor_id is None:
+        if str(fallback_executor_id).strip() == str(executor_id).strip():
             raise
         fallback_executor = get_stage_executor(fallback_executor_id)
         if fallback_executor.stage_key != StageKey.TUNING:
@@ -708,6 +836,7 @@ __all__ = [
     "PREPROCESS_CPU_EXECUTOR_ID",
     "REPORTING_CPU_EXECUTOR_ID",
     "SPECIALIZED_LINEARSVC_TUNING_EXECUTOR_ID",
+    "SPECIALIZED_LOGREG_TUNING_EXECUTOR_ID",
     "SPATIAL_VALIDATION_CPU_EXECUTOR_ID",
     "STAGE_EXECUTOR_REGISTRY",
     "TUNING_GENERIC_EXECUTOR_ID",
