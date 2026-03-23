@@ -4,6 +4,7 @@ import json
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from time import perf_counter
 from typing import Any
 
 import numpy as np
@@ -18,6 +19,7 @@ from Thesis_ML.artifacts.registry import (
     get_artifact,
 )
 from Thesis_ML.experiments.compute_policy import ResolvedComputePolicy
+from Thesis_ML.experiments.progress import ProgressCallback, emit_progress
 from Thesis_ML.experiments.section_models import (
     DatasetSelectionInput,
     EvaluationInput,
@@ -46,7 +48,7 @@ from Thesis_ML.experiments.segment_execution_helpers import (
     resolve_base_artifact,
 )
 from Thesis_ML.orchestration.contracts import ReusePolicy, SectionName
-from Thesis_ML.experiments.progress import ProgressCallback, emit_progress
+
 
 @dataclass(frozen=True)
 class SegmentExecutionRequest:
@@ -153,6 +155,7 @@ class SegmentExecutionResult:
     spatial_compatibility: dict[str, Any] | None
     interpretability_summary: dict[str, Any] | None
     compute_runtime_metadata: dict[str, Any] | None = None
+    section_timings_seconds: dict[str, float] | None = None
 
 
 def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutionResult:
@@ -222,6 +225,7 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
     interpretability_summary: dict[str, Any] | None = None
     metrics: dict[str, Any] | None = None
     compute_runtime_metadata: dict[str, Any] | None = None
+    section_timings_seconds: dict[str, float] = {}
 
     if SectionName.DATASET_SELECTION not in planned_sections and is_after_or_equal(
         planned_sections[-1], SectionName.FEATURE_MATRIX_LOAD
@@ -282,6 +286,7 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
 
     for section in planned_sections:
         section_number = int(len(executed_sections) + 1)
+        section_start = perf_counter()
         _emit_section_event(
             section_name=section.value,
             status="starting",
@@ -324,6 +329,7 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
                     artifact_ids["feature_cache"] = reusable_feature_cache.artifact_id
                     reused_sections.append(section.value)
                     executed_sections.append(section.value)
+                    section_timings_seconds[section.value] = float(perf_counter() - section_start)
                     _emit_section_event(
                         section_name=section.value,
                         status="reused",
@@ -386,6 +392,7 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
                     artifact_ids["feature_matrix_bundle"] = reusable_feature_matrix.artifact_id
                     reused_sections.append(section.value)
                     executed_sections.append(section.value)
+                    section_timings_seconds[section.value] = float(perf_counter() - section_start)
                     _emit_section_event(
                         section_name=section.value,
                         status="reused",
@@ -497,6 +504,7 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
                     )
                     reused_sections.append(section.value)
                     executed_sections.append(section.value)
+                    section_timings_seconds[section.value] = float(perf_counter() - section_start)
                     _emit_section_event(
                         section_name=section.value,
                         status="reused",
@@ -565,6 +573,7 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
                     artifact_ids[ARTIFACT_TYPE_METRICS_BUNDLE] = reusable_metrics.artifact_id
                     reused_sections.append(section.value)
                     executed_sections.append(section.value)
+                    section_timings_seconds[section.value] = float(perf_counter() - section_start)
                     _emit_section_event(
                         section_name=section.value,
                         status="reused",
@@ -653,6 +662,7 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
             raise ValueError(f"Unsupported section encountered in execution plan: {section.value}")
 
         executed_sections.append(section.value)
+        section_timings_seconds[section.value] = float(perf_counter() - section_start)
         _emit_section_event(
             section_name=section.value,
             status="finished",
@@ -670,4 +680,5 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
         spatial_compatibility=spatial_compatibility,
         interpretability_summary=interpretability_summary,
         compute_runtime_metadata=compute_runtime_metadata,
+        section_timings_seconds=section_timings_seconds,
     )

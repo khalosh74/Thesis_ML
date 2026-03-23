@@ -11,6 +11,12 @@ from Thesis_ML.experiments.compute_policy import (
     stamp_compute_policy_metadata,
 )
 from Thesis_ML.experiments.segment_execution import SegmentExecutionResult
+from Thesis_ML.experiments.stage_execution import (
+    StageExecutionResult as StageExecutionMetadata,
+)
+from Thesis_ML.experiments.stage_execution import (
+    stage_execution_payload,
+)
 
 
 def _relative_path(path: Path) -> str | None:
@@ -90,6 +96,12 @@ def metric_policy_effective_payload(
     }
 
 
+def _stage_execution_payload(
+    stage_execution: StageExecutionMetadata | dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    return stage_execution_payload(stage_execution)
+
+
 def stamp_metrics_artifact(
     *,
     metrics_path: Path,
@@ -123,6 +135,7 @@ def stamp_metrics_artifact(
     profiling_context: dict[str, Any] | None = None,
     compute_policy: ResolvedComputePolicy | None = None,
     compute_runtime_metadata: dict[str, Any] | None = None,
+    stage_execution: StageExecutionMetadata | dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     if not metrics_path.exists():
         return None
@@ -196,6 +209,9 @@ def stamp_metrics_artifact(
     if profiling_context is not None:
         persisted_metrics["profiling_context"] = dict(profiling_context)
         persisted_metrics["profiling_only"] = bool(profiling_context.get("profiling_only", False))
+    stage_execution_data = _stage_execution_payload(stage_execution)
+    if stage_execution_data is not None:
+        persisted_metrics["stage_execution"] = stage_execution_data
     stamp_compute_policy_metadata(
         payload=persisted_metrics,
         compute_policy=compute_policy,
@@ -304,6 +320,7 @@ def build_run_config_payload(
     profiling_context: dict[str, Any] | None = None,
     compute_policy: ResolvedComputePolicy | None = None,
     compute_runtime_metadata: dict[str, Any] | None = None,
+    stage_execution: StageExecutionMetadata | dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     payload = {
         "run_id": run_id,
@@ -459,6 +476,9 @@ def build_run_config_payload(
             else False
         ),
     }
+    stage_execution_data = _stage_execution_payload(stage_execution)
+    if stage_execution_data is not None:
+        payload["stage_execution"] = stage_execution_data
     stamp_compute_policy_metadata(
         payload=payload,
         compute_policy=compute_policy,
@@ -528,6 +548,7 @@ def build_run_result_payload(
     profiling_context: dict[str, Any] | None = None,
     compute_policy: ResolvedComputePolicy | None = None,
     compute_runtime_metadata: dict[str, Any] | None = None,
+    stage_execution: StageExecutionMetadata | dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     payload = {
         "run_id": run_id,
@@ -639,6 +660,9 @@ def build_run_result_payload(
             else False
         ),
     }
+    stage_execution_data = _stage_execution_payload(stage_execution)
+    if stage_execution_data is not None:
+        payload["stage_execution"] = stage_execution_data
     stamp_compute_policy_metadata(
         payload=payload,
         compute_policy=compute_policy,

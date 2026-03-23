@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import nibabel as nib
@@ -118,6 +119,45 @@ def test_full_pipeline_execution_remains_supported(prepared_dataset: dict[str, P
     assert result["executed_sections"] == result["planned_sections"]
     assert result["metrics"]["n_folds"] >= 2
     assert Path(result["metrics_path"]).exists()
+
+
+def test_full_pipeline_stage_execution_metadata_is_additive(
+    prepared_dataset: dict[str, Path],
+) -> None:
+    result = run_experiment(
+        **_base_run_kwargs(prepared_dataset),
+        run_id="full_pipeline_stage_metadata",
+    )
+
+    assert result["planned_sections"] == [
+        "dataset_selection",
+        "feature_cache_build",
+        "feature_matrix_load",
+        "spatial_validation",
+        "model_fit",
+        "interpretability",
+        "evaluation",
+    ]
+    stage_execution = result.get("stage_execution")
+    assert isinstance(stage_execution, dict)
+    assert isinstance(stage_execution.get("policy"), dict)
+    assert isinstance(stage_execution.get("assignments"), list)
+    assert isinstance(stage_execution.get("telemetry"), list)
+    assert any(
+        row.get("stage") == "model_fit" and row.get("status") == "executed"
+        for row in stage_execution["telemetry"]
+    )
+    assert any(
+        row.get("stage") == "tuning" and row.get("status") == "skipped"
+        for row in stage_execution["telemetry"]
+    )
+
+    config_payload = json.loads(Path(result["config_path"]).read_text(encoding="utf-8"))
+    metrics_payload = json.loads(Path(result["metrics_path"]).read_text(encoding="utf-8"))
+    assert config_payload["planned_sections"] == result["planned_sections"]
+    assert metrics_payload["framework_mode"] == result["framework_mode"]
+    assert isinstance(config_payload.get("stage_execution"), dict)
+    assert isinstance(metrics_payload.get("stage_execution"), dict)
 
 
 def test_segment_execution_feature_matrix_to_evaluation(

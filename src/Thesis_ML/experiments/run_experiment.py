@@ -8,10 +8,11 @@ import logging
 import platform
 import tracemalloc
 import warnings
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 from time import perf_counter
-from typing import Any, Callable
+from typing import Any
 
 import nibabel as nib
 import numpy as np
@@ -69,6 +70,7 @@ from Thesis_ML.experiments.official_contracts import (
     validate_official_preflight,
     validate_run_artifact_contract,
 )
+from Thesis_ML.experiments.progress import ProgressCallback, emit_progress
 from Thesis_ML.experiments.provenance import (
     collect_dataset_fingerprint,
     collect_git_provenance,
@@ -94,11 +96,11 @@ from Thesis_ML.experiments.segment_execution import (
     execute_section_segment,
 )
 from Thesis_ML.experiments.spatial_validation import SPATIAL_AFFINE_ATOL
+from Thesis_ML.experiments.stage_execution import build_stage_execution_result
 from Thesis_ML.experiments.tuning_search_spaces import (
     LINEAR_GROUPED_NESTED_SEARCH_SPACE_ID,
     LINEAR_GROUPED_NESTED_SEARCH_SPACE_VERSION,
 )
-from Thesis_ML.experiments.progress import ProgressCallback, emit_progress
 
 LOGGER = logging.getLogger(__name__)
 
@@ -1098,6 +1100,22 @@ def run_experiment(
         )
     else:
         actual_estimator_backend_family = str(resolved_compute_policy.effective_backend_family)
+    stage_execution = build_stage_execution_result(
+        compute_policy=resolved_compute_policy,
+        planned_sections=segment_result.planned_sections,
+        executed_sections=segment_result.executed_sections,
+        reused_sections=segment_result.reused_sections,
+        tuning_enabled=bool(methodology_policy.tuning_enabled),
+        n_permutations=int(n_permutations),
+        section_timings_seconds=(
+            segment_result.section_timings_seconds
+            if isinstance(segment_result.section_timings_seconds, dict)
+            else None
+        ),
+        stage_timings_seconds=stage_timings,
+        reporting_status="planned",
+        actual_estimator_backend_family=actual_estimator_backend_family,
+    )
     identity = resolve_run_identity(
         protocol_context=resolved_protocol_context,
         comparison_context=resolved_comparison_context,
@@ -1145,6 +1163,7 @@ def run_experiment(
             profiling_context=resolved_profiling_context,
             compute_policy=resolved_compute_policy,
             compute_runtime_metadata=compute_runtime_metadata,
+            stage_execution=stage_execution,
         )
     except Exception as exc:
         failure = _failure_payload(exc)
@@ -1301,6 +1320,7 @@ def run_experiment(
             profiling_context=resolved_profiling_context,
             compute_policy=resolved_compute_policy,
             compute_runtime_metadata=compute_runtime_metadata,
+            stage_execution=stage_execution,
         )
         config_path.write_text(f"{json.dumps(config, indent=2)}\n", encoding="utf-8")
     except Exception as exc:
@@ -1512,6 +1532,7 @@ def run_experiment(
         profiling_context=resolved_profiling_context,
         compute_policy=resolved_compute_policy,
         compute_runtime_metadata=compute_runtime_metadata,
+        stage_execution=stage_execution,
     )
 
 
