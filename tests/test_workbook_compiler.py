@@ -567,3 +567,12 @@ def test_compile_workbook_unsupported_schema_version_raises(tmp_path: Path) -> N
 
     with pytest.raises(ValueError, match="Unsupported workbook schema version"):
         compile_workbook_file(workbook_path)
+
+
+def test_compile_shipped_revised_workbook_asset_passes() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    workbook_path = repo_root / "templates" / "thesis_experiment_program_revised.xlsx"
+
+    manifest = compile_workbook_file(workbook_path)
+
+    assert manifest.trial_specs
