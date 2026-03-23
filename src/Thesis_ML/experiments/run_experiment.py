@@ -97,6 +97,10 @@ from Thesis_ML.experiments.segment_execution import (
 )
 from Thesis_ML.experiments.spatial_validation import SPATIAL_AFFINE_ATOL
 from Thesis_ML.experiments.stage_execution import build_stage_execution_result
+from Thesis_ML.experiments.stage_planner import (
+    StagePlanningResult,
+    plan_stage_execution,
+)
 from Thesis_ML.experiments.tuning_search_spaces import (
     LINEAR_GROUPED_NESTED_SEARCH_SPACE_ID,
     LINEAR_GROUPED_NESTED_SEARCH_SPACE_VERSION,
@@ -939,7 +943,19 @@ def run_experiment(
             )
             raise
         stage_timings["data_artifact_generation"] = float(perf_counter() - data_artifacts_start)
+
+    stage_planning_result: StagePlanningResult | None = None
     try:
+        stage_planning_start = perf_counter()
+        stage_planning_result = plan_stage_execution(
+            framework_mode=resolved_framework_mode,
+            compute_policy=resolved_compute_policy,
+            model_name=model,
+            methodology_policy_name=methodology_policy.policy_name.value,
+            tuning_enabled=bool(methodology_policy.tuning_enabled),
+            n_permutations=int(n_permutations),
+        )
+        stage_timings["stage_planning"] = float(perf_counter() - stage_planning_start)
         execute_start = perf_counter()
         with warnings.catch_warnings(record=True) as warning_records:
             warnings.simplefilter("always")
@@ -1043,6 +1059,10 @@ def run_experiment(
                         extract_linear_coefficients_fn=_extract_linear_coefficients,
                         compute_interpretability_stability_fn=_compute_interpretability_stability,
                         evaluate_permutations_fn=_evaluate_permutations,
+                        stage_assignments=tuple(stage_planning_result.assignments),
+                        stage_fallback_executor_ids=dict(
+                            stage_planning_result.runtime_fallback_executor_ids
+                        ),
                     )
                 )
             finally:
@@ -1100,6 +1120,14 @@ def run_experiment(
         )
     else:
         actual_estimator_backend_family = str(resolved_compute_policy.effective_backend_family)
+    if stage_planning_result is None:
+        raise ValueError("Stage planning did not produce assignments.")
+    planned_stage_assignments = (
+        list(segment_result.stage_assignments)
+        if isinstance(segment_result.stage_assignments, list)
+        and bool(segment_result.stage_assignments)
+        else list(stage_planning_result.assignments)
+    )
     stage_execution = build_stage_execution_result(
         compute_policy=resolved_compute_policy,
         planned_sections=segment_result.planned_sections,
@@ -1115,6 +1143,7 @@ def run_experiment(
         stage_timings_seconds=stage_timings,
         reporting_status="planned",
         actual_estimator_backend_family=actual_estimator_backend_family,
+        planned_assignments=planned_stage_assignments,
     )
     identity = resolve_run_identity(
         protocol_context=resolved_protocol_context,

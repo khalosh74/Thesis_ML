@@ -3,6 +3,8 @@ from __future__ import annotations
 from Thesis_ML.config.framework_mode import FrameworkMode
 from Thesis_ML.experiments.compute_policy import resolve_compute_policy
 from Thesis_ML.experiments.stage_execution import (
+    StageAssignment,
+    StageBackendFamily,
     StageExecutionResult,
     StageKey,
     build_stage_execution_result,
@@ -139,3 +141,38 @@ def test_stage_execution_payload_is_backward_safe_optional_metadata() -> None:
     )
     assert payload is not None
     assert payload["policy"]["effective_backend_family"] == "sklearn_cpu"
+
+
+def test_stage_execution_includes_planner_assignment_metadata_in_telemetry() -> None:
+    compute_policy = resolve_compute_policy(
+        framework_mode=FrameworkMode.EXPLORATORY,
+        hardware_mode="cpu_only",
+    )
+    stage_result = build_stage_execution_result(
+        compute_policy=compute_policy,
+        planned_sections=["model_fit", "evaluation"],
+        executed_sections=["model_fit", "evaluation"],
+        reused_sections=[],
+        tuning_enabled=True,
+        n_permutations=4,
+        reporting_status="planned",
+        planned_assignments=[
+            StageAssignment(
+                stage=StageKey.MODEL_FIT,
+                backend_family=StageBackendFamily.SKLEARN_CPU,
+                compute_lane="cpu",
+                source="stage_planner_v1",
+                reason="phase2_test_assignment",
+                executor_id="model_fit_cpu_reference_v1",
+                equivalence_class="exact_reference_equivalent",
+                official_admitted=True,
+                fallback_used=False,
+                fallback_reason=None,
+            ),
+        ],
+    )
+
+    telemetry_by_stage = {row.stage: row for row in stage_result.telemetry}
+    model_fit_details = telemetry_by_stage["model_fit"].details
+    assert model_fit_details["executor_id"] == "model_fit_cpu_reference_v1"
+    assert model_fit_details["equivalence_class"] == "exact_reference_equivalent"

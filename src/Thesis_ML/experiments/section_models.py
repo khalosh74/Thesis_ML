@@ -8,8 +8,9 @@ import numpy as np
 import pandas as pd
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from Thesis_ML.experiments.progress import ProgressCallback
 from Thesis_ML.experiments.compute_policy import ResolvedComputePolicy
+from Thesis_ML.experiments.progress import ProgressCallback
+from Thesis_ML.experiments.stage_execution import StageAssignment
 
 
 class _SectionModel(BaseModel):
@@ -129,6 +130,9 @@ class ModelFitInput(_SectionModel):
     profile_inner_folds: int | None = None
     profile_tuning_candidates: int | None = None
     compute_policy: ResolvedComputePolicy | None = None
+    model_fit_assignment: StageAssignment | None = None
+    tuning_assignment: StageAssignment | None = None
+    tuning_fallback_executor_id: str | None = None
     progress_callback: ProgressCallback | None = None
     run_id: str = Field(min_length=1)
     config_filename: str = Field(min_length=1)
@@ -200,6 +204,7 @@ class EvaluationInput(_SectionModel):
     permutation_alpha: float = 0.05
     permutation_minimum_required: int = 0
     permutation_require_pass_for_validity: bool = False
+    permutation_assignment: StageAssignment | None = None
     methodology_policy_name: str = "fixed_baselines_only"
     evidence_run_role: str = "primary"
     repeat_id: int = 1

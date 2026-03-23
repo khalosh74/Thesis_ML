@@ -18,6 +18,15 @@ from Thesis_ML.artifacts.registry import (
 from Thesis_ML.data.index_dataset import build_dataset_index
 from Thesis_ML.experiments.run_experiment import run_experiment
 from Thesis_ML.experiments.segment_execution import plan_section_path
+from Thesis_ML.experiments.stage_registry import (
+    MODEL_FIT_CPU_EXECUTOR_ID,
+    PERMUTATION_REFERENCE_EXECUTOR_ID,
+    SPECIALIZED_LINEARSVC_TUNING_EXECUTOR_ID,
+)
+from Thesis_ML.experiments.tuning_search_spaces import (
+    LINEAR_GROUPED_NESTED_SEARCH_SPACE_ID,
+    LINEAR_GROUPED_NESTED_SEARCH_SPACE_VERSION,
+)
 
 
 def _write_nifti(path: Path, data: np.ndarray, affine: np.ndarray | None = None) -> None:
@@ -151,6 +160,11 @@ def test_full_pipeline_stage_execution_metadata_is_additive(
         row.get("stage") == "tuning" and row.get("status") == "skipped"
         for row in stage_execution["telemetry"]
     )
+    assignment_by_stage = {
+        str(row.get("stage")): row for row in stage_execution["assignments"]
+    }
+    assert assignment_by_stage["model_fit"]["executor_id"] == MODEL_FIT_CPU_EXECUTOR_ID
+    assert isinstance(assignment_by_stage["model_fit"]["reason"], str)
 
     config_payload = json.loads(Path(result["config_path"]).read_text(encoding="utf-8"))
     metrics_payload = json.loads(Path(result["metrics_path"]).read_text(encoding="utf-8"))
@@ -195,6 +209,40 @@ def test_segment_execution_feature_matrix_to_evaluation(
     assert ARTIFACT_TYPE_INTERPRETABILITY_BUNDLE in record_types
     assert ARTIFACT_TYPE_METRICS_BUNDLE in record_types
     assert ARTIFACT_TYPE_FEATURE_CACHE not in record_types
+
+
+def test_linearsvc_tuning_and_permutation_dispatch_through_stage_planner(
+    prepared_dataset: dict[str, Path],
+) -> None:
+    run_kwargs = _base_run_kwargs(prepared_dataset)
+    run_kwargs["model"] = "linearsvc"
+    result = run_experiment(
+        **run_kwargs,
+        run_id="stage_planner_linearsvc_dispatch",
+        methodology_policy_name="grouped_nested_tuning",
+        tuning_enabled=True,
+        tuning_search_space_id=LINEAR_GROUPED_NESTED_SEARCH_SPACE_ID,
+        tuning_search_space_version=LINEAR_GROUPED_NESTED_SEARCH_SPACE_VERSION,
+        tuning_inner_cv_scheme="grouped_leave_one_group_out",
+        tuning_inner_group_field="session",
+        n_permutations=4,
+    )
+
+    stage_execution = result.get("stage_execution")
+    assert isinstance(stage_execution, dict)
+    assignment_by_stage = {
+        str(row.get("stage")): row for row in stage_execution["assignments"]
+    }
+    assert assignment_by_stage["model_fit"]["executor_id"] == MODEL_FIT_CPU_EXECUTOR_ID
+    assert assignment_by_stage["tuning"]["executor_id"] == SPECIALIZED_LINEARSVC_TUNING_EXECUTOR_ID
+    assert assignment_by_stage["permutation"]["executor_id"] == PERMUTATION_REFERENCE_EXECUTOR_ID
+
+    permutation_payload = result["metrics"].get("permutation_test")
+    assert isinstance(permutation_payload, dict)
+    assert permutation_payload.get("permutation_executor_id") == PERMUTATION_REFERENCE_EXECUTOR_ID
+
+    tuning_summary = json.loads(Path(result["tuning_summary_path"]).read_text(encoding="utf-8"))
+    assert SPECIALIZED_LINEARSVC_TUNING_EXECUTOR_ID in tuning_summary["tuning_executor_ids"]
 
 
 def test_invalid_start_end_combination_raises(prepared_dataset: dict[str, Path]) -> None:

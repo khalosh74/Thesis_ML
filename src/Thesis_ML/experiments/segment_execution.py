@@ -47,6 +47,7 @@ from Thesis_ML.experiments.segment_execution_helpers import (
     require_callable,
     resolve_base_artifact,
 )
+from Thesis_ML.experiments.stage_execution import StageAssignment, StageKey
 from Thesis_ML.orchestration.contracts import ReusePolicy, SectionName
 
 
@@ -143,6 +144,8 @@ class SegmentExecutionRequest:
         None
     )
     evaluate_permutations_fn: Callable[..., dict[str, Any]] | None = None
+    stage_assignments: tuple[StageAssignment, ...] | None = None
+    stage_fallback_executor_ids: dict[str, str] | None = None
 
 
 @dataclass(frozen=True)
@@ -156,6 +159,7 @@ class SegmentExecutionResult:
     interpretability_summary: dict[str, Any] | None
     compute_runtime_metadata: dict[str, Any] | None = None
     section_timings_seconds: dict[str, float] | None = None
+    stage_assignments: list[StageAssignment] | None = None
 
 
 def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutionResult:
@@ -226,6 +230,20 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
     metrics: dict[str, Any] | None = None
     compute_runtime_metadata: dict[str, Any] | None = None
     section_timings_seconds: dict[str, float] = {}
+    stage_assignment_map: dict[StageKey, StageAssignment] = {}
+    for assignment in request.stage_assignments or ():
+        normalized_assignment = (
+            assignment
+            if isinstance(assignment, StageAssignment)
+            else StageAssignment.model_validate(dict(assignment))
+        )
+        stage_assignment_map[StageKey(str(normalized_assignment.stage))] = normalized_assignment
+    stage_fallback_executor_ids: dict[StageKey, str] = {}
+    if isinstance(request.stage_fallback_executor_ids, dict):
+        for stage_key_raw, executor_id_raw in request.stage_fallback_executor_ids.items():
+            if not isinstance(executor_id_raw, str) or not executor_id_raw.strip():
+                continue
+            stage_fallback_executor_ids[StageKey(str(stage_key_raw))] = executor_id_raw.strip()
 
     if SectionName.DATASET_SELECTION not in planned_sections and is_after_or_equal(
         planned_sections[-1], SectionName.FEATURE_MATRIX_LOAD
@@ -467,6 +485,9 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
                     profile_inner_folds=request.profile_inner_folds,
                     profile_tuning_candidates=request.profile_tuning_candidates,
                     compute_policy=request.compute_policy,
+                    model_fit_assignment=stage_assignment_map.get(StageKey.MODEL_FIT),
+                    tuning_assignment=stage_assignment_map.get(StageKey.TUNING),
+                    tuning_fallback_executor_id=stage_fallback_executor_ids.get(StageKey.TUNING),
                     run_id=request.run_id,
                     config_filename=request.config_filename,
                     report_dir=request.report_dir,
@@ -481,6 +502,21 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
                 if isinstance(fit_output.compute_runtime_metadata, dict)
                 else None
             )
+            tuning_assignment = stage_assignment_map.get(StageKey.TUNING)
+            if tuning_assignment is not None:
+                tuning_fallback_reason: str | None = None
+                for row in fit_output.tuning_records:
+                    fallback_reason = row.get("tuning_executor_fallback_reason")
+                    if isinstance(fallback_reason, str) and fallback_reason.strip():
+                        tuning_fallback_reason = fallback_reason.strip()
+                        break
+                if tuning_fallback_reason is not None:
+                    stage_assignment_map[StageKey.TUNING] = tuning_assignment.model_copy(
+                        update={
+                            "fallback_used": True,
+                            "fallback_reason": tuning_fallback_reason,
+                        }
+                    )
         elif section == SectionName.INTERPRETABILITY:
             if fit_output is None:
                 raise ValueError(
@@ -603,6 +639,7 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
                     permutation_require_pass_for_validity=bool(
                         request.permutation_require_pass_for_validity
                     ),
+                    permutation_assignment=stage_assignment_map.get(StageKey.PERMUTATION),
                     methodology_policy_name=request.methodology_policy_name,
                     evidence_run_role=str(request.evidence_run_role),
                     repeat_id=int(request.repeat_id),
@@ -657,6 +694,17 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
                 )
             )
             metrics = evaluation_output.metrics
+            permutation_assignment = stage_assignment_map.get(StageKey.PERMUTATION)
+            permutation_payload = metrics.get("permutation_test")
+            if permutation_assignment is not None and isinstance(permutation_payload, dict):
+                fallback_reason = permutation_payload.get("permutation_executor_fallback_reason")
+                if isinstance(fallback_reason, str) and fallback_reason.strip():
+                    stage_assignment_map[StageKey.PERMUTATION] = permutation_assignment.model_copy(
+                        update={
+                            "fallback_used": True,
+                            "fallback_reason": fallback_reason.strip(),
+                        }
+                    )
             artifact_ids[ARTIFACT_TYPE_METRICS_BUNDLE] = evaluation_output.metrics_artifact_id
         else:
             raise ValueError(f"Unsupported section encountered in execution plan: {section.value}")
@@ -681,4 +729,5 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
         interpretability_summary=interpretability_summary,
         compute_runtime_metadata=compute_runtime_metadata,
         section_timings_seconds=section_timings_seconds,
+        stage_assignments=[stage_assignment_map[stage] for stage in StageKey if stage in stage_assignment_map],
     )

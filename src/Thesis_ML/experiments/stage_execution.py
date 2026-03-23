@@ -14,7 +14,8 @@ from Thesis_ML.experiments.compute_policy import (
 StageStatus = Literal["planned", "executed", "reused", "skipped", "not_planned"]
 ComputeLane = Literal["cpu", "gpu"]
 StageExecutionPolicySource = Literal["run_level_compute_policy_bridge_v1"]
-StageAssignmentSource = Literal["run_level_default_assignment_v1"]
+StageAssignmentSource = Literal["run_level_default_assignment_v1", "stage_planner_v1"]
+StageExecutorEquivalence = Literal["exact_reference_equivalent", "validated_variant"]
 
 
 class StageKey(StrEnum):
@@ -60,6 +61,11 @@ class StageAssignment(_StageModel):
     compute_lane: ComputeLane | None = None
     source: StageAssignmentSource = "run_level_default_assignment_v1"
     reason: str = Field(min_length=1)
+    executor_id: str | None = None
+    equivalence_class: StageExecutorEquivalence | None = None
+    official_admitted: bool | None = None
+    fallback_used: bool = False
+    fallback_reason: str | None = None
 
 
 class StageExecutionTelemetry(_StageModel):
@@ -212,6 +218,7 @@ def build_stage_execution_result(
     stage_timings_seconds: Mapping[str, float] | None = None,
     reporting_status: StageStatus = "planned",
     actual_estimator_backend_family: str | None = None,
+    planned_assignments: Sequence[StageAssignment | Mapping[str, Any]] | None = None,
 ) -> StageExecutionResult:
     policy = _policy_from_compute_policy(compute_policy)
     effective_compute_backend = (
@@ -241,22 +248,30 @@ def build_stage_execution_result(
             continue
         section_stage_status[stage_key] = "not_planned"
 
-    assignments: list[StageAssignment] = []
+    assignment_map: dict[StageKey, StageAssignment] = {}
+    if planned_assignments is not None:
+        for raw_assignment in planned_assignments:
+            if isinstance(raw_assignment, StageAssignment):
+                assignment = raw_assignment
+            else:
+                assignment = StageAssignment.model_validate(dict(raw_assignment))
+            assignment_map[StageKey(str(assignment.stage))] = assignment
     for stage in StageKey:
+        if stage in assignment_map:
+            continue
         if stage in _COMPUTE_HEAVY_STAGES:
             backend_family = effective_compute_backend
             stage_lane: ComputeLane | None = compute_lane
         else:
             backend_family = StageBackendFamily.SKLEARN_CPU
             stage_lane = "cpu"
-        assignments.append(
-            StageAssignment(
-                stage=stage,
-                backend_family=backend_family,
-                compute_lane=stage_lane,
-                reason="phase1_stage_execution_default_assignment",
-            )
+        assignment_map[stage] = StageAssignment(
+            stage=stage,
+            backend_family=backend_family,
+            compute_lane=stage_lane,
+            reason="phase1_stage_execution_default_assignment",
         )
+    assignments = [assignment_map[stage] for stage in StageKey]
 
     stage_durations = _normalize_stage_duration_map(
         section_timings_seconds=section_timings_seconds,
@@ -265,6 +280,7 @@ def build_stage_execution_result(
 
     telemetry_rows: list[StageExecutionTelemetry] = []
     for stage in StageKey:
+        assignment = assignment_map[stage]
         status = _planned_status_for_stage(
             stage=stage,
             section_stage_status=section_stage_status,
@@ -273,6 +289,12 @@ def build_stage_execution_result(
             reporting_status=reporting_status,
         )
         details: dict[str, Any] = {}
+        if assignment.executor_id is not None:
+            details["executor_id"] = str(assignment.executor_id)
+        if assignment.equivalence_class is not None:
+            details["equivalence_class"] = str(assignment.equivalence_class)
+        if assignment.fallback_reason is not None:
+            details["fallback_reason"] = str(assignment.fallback_reason)
         if stage in _MODEL_FIT_DEPENDENT_STAGES:
             details["derived_from"] = StageKey.MODEL_FIT.value
         elif stage in _EVALUATION_DEPENDENT_STAGES:
@@ -315,6 +337,7 @@ __all__ = [
     "StageExecutionPolicySource",
     "StageExecutionResult",
     "StageExecutionTelemetry",
+    "StageExecutorEquivalence",
     "StageKey",
     "StageStatus",
     "build_stage_execution_result",

@@ -9,17 +9,24 @@ import numpy as np
 import pandas as pd
 from sklearn.base import clone
 from sklearn.metrics import confusion_matrix
-from sklearn.model_selection import GridSearchCV, LeaveOneGroupOut, ParameterGrid, StratifiedKFold
+from sklearn.model_selection import LeaveOneGroupOut, ParameterGrid, StratifiedKFold
 
-from Thesis_ML.config.metric_policy import metric_bundle, metric_scorer
+from Thesis_ML.config.metric_policy import metric_bundle
 from Thesis_ML.experiments.evidence_statistics import build_calibration_outputs
-from Thesis_ML.experiments.linearsvc_tuning import (
-    is_specialized_linearsvc_grouped_nested_supported,
-    run_specialized_linearsvc_grouped_nested_tuning,
-)
 from Thesis_ML.experiments.metrics import classification_metric_score
-from Thesis_ML.experiments.tuning_search_spaces import get_search_space
 from Thesis_ML.experiments.progress import emit_progress
+from Thesis_ML.experiments.stage_execution import StageAssignment
+from Thesis_ML.experiments.stage_registry import (
+    MODEL_FIT_CPU_EXECUTOR_ID,
+    PERMUTATION_REFERENCE_EXECUTOR_ID,
+    SPECIALIZED_LINEARSVC_TUNING_EXECUTOR_ID,
+    TUNING_GENERIC_EXECUTOR_ID,
+    TUNING_SKIPPED_CONTROL_EXECUTOR_ID,
+    run_model_fit_executor,
+    run_permutation_executor,
+    run_tuning_executor,
+)
+from Thesis_ML.experiments.tuning_search_spaces import get_search_space
 
 if TYPE_CHECKING:
     from Thesis_ML.experiments.section_models import (
@@ -27,19 +34,6 @@ if TYPE_CHECKING:
         InterpretabilityInput,
         ModelFitInput,
     )
-
-
-def _safe_float_from_cv_results(
-    cv_results: dict[str, Any],
-    key: str,
-) -> float | None:
-    raw = cv_results.get(key)
-    if raw is None:
-        return None
-    values = np.asarray(raw, dtype=np.float64)
-    if values.size == 0:
-        return None
-    return float(np.nanmean(values))
 
 
 def _extract_fold_compute_runtime_metadata(estimator: Any) -> dict[str, Any] | None:
@@ -50,7 +44,7 @@ def _extract_fold_compute_runtime_metadata(estimator: Any) -> dict[str, Any] | N
     if hasattr(model, "get_backend_runtime_metadata"):
         metadata_candidate = model.get_backend_runtime_metadata()
     elif hasattr(model, "backend_runtime_metadata_"):
-        metadata_candidate = getattr(model, "backend_runtime_metadata_")
+        metadata_candidate = model.backend_runtime_metadata_
     if not isinstance(metadata_candidate, dict):
         return None
     return dict(metadata_candidate)
@@ -104,6 +98,19 @@ def _aggregate_compute_runtime_metadata(
     if len(set(backend_ids)) > 1:
         payload["backend_id"] = "mixed"
     return payload
+
+
+def _assignment_executor_id(
+    assignment: StageAssignment | None,
+    *,
+    default_executor_id: str,
+) -> str:
+    if assignment is None:
+        return str(default_executor_id)
+    executor_id = assignment.executor_id
+    if isinstance(executor_id, str) and executor_id.strip():
+        return executor_id.strip()
+    return str(default_executor_id)
 
 
 def execute_model_fit(section_input: ModelFitInput) -> dict[str, Any]:
@@ -237,6 +244,35 @@ def execute_model_fit(section_input: ModelFitInput) -> dict[str, Any]:
             "Unsupported methodology_policy_name. "
             "Allowed values: fixed_baselines_only, grouped_nested_tuning."
         )
+    model_fit_executor_id = _assignment_executor_id(
+        section_input.model_fit_assignment,
+        default_executor_id=MODEL_FIT_CPU_EXECUTOR_ID,
+    )
+    default_tuning_executor_id = (
+        TUNING_SKIPPED_CONTROL_EXECUTOR_ID
+        if str(section_input.model).strip().lower() == "dummy"
+        else TUNING_GENERIC_EXECUTOR_ID
+    )
+    if (
+        str(section_input.model).strip().lower() == "linearsvc"
+        and bool(tuning_enabled)
+        and methodology_policy_name == "grouped_nested_tuning"
+    ):
+        default_tuning_executor_id = SPECIALIZED_LINEARSVC_TUNING_EXECUTOR_ID
+    tuning_executor_id = _assignment_executor_id(
+        section_input.tuning_assignment,
+        default_executor_id=default_tuning_executor_id,
+    )
+    tuning_fallback_executor_id = (
+        str(section_input.tuning_fallback_executor_id).strip()
+        if isinstance(section_input.tuning_fallback_executor_id, str)
+        and str(section_input.tuning_fallback_executor_id).strip()
+        else (
+            TUNING_GENERIC_EXECUTOR_ID
+            if tuning_executor_id == SPECIALIZED_LINEARSVC_TUNING_EXECUTOR_ID
+            else None
+        )
+    )
 
     if section_input.interpretability_enabled is None:
         interpretability_enabled = section_input.cv_mode == "within_subject_loso_session"
@@ -341,9 +377,42 @@ def execute_model_fit(section_input: ModelFitInput) -> dict[str, Any]:
         cv_std_score_time_seconds: float | None = None
         if tuning_enabled and methodology_policy_name == "grouped_nested_tuning":
             if section_input.model == "dummy":
-                fit_start = perf_counter()
-                estimator.fit(section_input.x_matrix[train_idx], y[train_idx])
-                estimator_fit_elapsed_seconds = float(perf_counter() - fit_start)
+                fit_payload = run_model_fit_executor(
+                    executor_id=model_fit_executor_id,
+                    estimator=estimator,
+                    x_train=section_input.x_matrix[train_idx],
+                    y_train=y[train_idx],
+                )
+                estimator = fit_payload["estimator"]
+                estimator_fit_elapsed_seconds = float(
+                    fit_payload["estimator_fit_elapsed_seconds"]
+                )
+                tuning_result = run_tuning_executor(
+                    executor_id=tuning_executor_id,
+                    fallback_executor_id=tuning_fallback_executor_id,
+                    pipeline_template=pipeline_template,
+                    x_outer_train=section_input.x_matrix[train_idx],
+                    y_outer_train=y[train_idx],
+                    inner_groups=np.asarray(groups[train_idx]).astype(str, copy=False),
+                    inner_splits=[],
+                    param_grid={},
+                    candidate_params=[],
+                    configured_candidate_count=0,
+                    configured_inner_fold_count=0,
+                    profiled_candidate_count=0,
+                    profiled_inner_fold_count=0,
+                    primary_metric_name=section_input.primary_metric_name,
+                )
+                tuning_executor = str(tuning_result.get("tuning_executor", "skipped_control_model"))
+                tuning_executor_fallback_reason = (
+                    str(tuning_result["tuning_executor_fallback_reason"])
+                    if isinstance(tuning_result.get("tuning_executor_fallback_reason"), str)
+                    and str(tuning_result.get("tuning_executor_fallback_reason")).strip()
+                    else None
+                )
+                specialized_linearsvc_tuning_used = bool(
+                    tuning_result.get("specialized_linearsvc_tuning_used", False)
+                )
                 tuning_rows.append(
                     {
                         "fold": int(fold_index),
@@ -366,9 +435,11 @@ def execute_model_fit(section_input: ModelFitInput) -> dict[str, Any]:
                         "measured_inner_tuning_seconds": pd.NA,
                         "estimated_full_inner_tuning_seconds": pd.NA,
                         "estimated_full_tuned_search_seconds": pd.NA,
-                        "tuning_executor": "skipped_control_model",
-                        "tuning_executor_fallback_reason": pd.NA,
-                        "specialized_linearsvc_tuning_used": False,
+                        "tuning_executor": tuning_executor,
+                        "tuning_executor_fallback_reason": tuning_executor_fallback_reason,
+                        "specialized_linearsvc_tuning_used": bool(
+                            specialized_linearsvc_tuning_used
+                        ),
                         "tuning_split_scale_seconds": pd.NA,
                         "tuning_candidate_fit_seconds": pd.NA,
                         "tuning_candidate_predict_seconds": pd.NA,
@@ -441,167 +512,109 @@ def execute_model_fit(section_input: ModelFitInput) -> dict[str, Any]:
                     raise ValueError(
                         "Declared tuning_search_space_version does not match search-space registry version."
                     )
-                supports_specialized, specialized_reason = (
-                    is_specialized_linearsvc_grouped_nested_supported(
-                        model_name=section_input.model,
-                        pipeline_template=pipeline_template,
-                        param_grid=param_grid,
-                    )
+                tuning_result = run_tuning_executor(
+                    executor_id=tuning_executor_id,
+                    fallback_executor_id=tuning_fallback_executor_id,
+                    pipeline_template=pipeline_template,
+                    x_outer_train=x_outer_train,
+                    y_outer_train=y_outer_train,
+                    inner_groups=inner_groups,
+                    inner_splits=inner_splits,
+                    param_grid=param_grid,
+                    candidate_params=candidate_params,
+                    configured_candidate_count=configured_candidate_count,
+                    configured_inner_fold_count=configured_inner_fold_count,
+                    profiled_candidate_count=profiled_candidate_count,
+                    profiled_inner_fold_count=profiled_inner_fold_count,
+                    primary_metric_name=section_input.primary_metric_name,
                 )
-                if supports_specialized:
-                    try:
-                        specialized_result = run_specialized_linearsvc_grouped_nested_tuning(
-                            pipeline_template=clone(pipeline_template),
-                            x_train=x_outer_train,
-                            y_train=y_outer_train,
-                            inner_groups=inner_groups,
-                            param_grid=param_grid,
-                            primary_metric_name=section_input.primary_metric_name,
-                            profile_inner_folds=(
-                                int(profiled_inner_fold_count)
-                                if profiled_inner_fold_count < configured_inner_fold_count
-                                else None
-                            ),
-                            profile_tuning_candidates=(
-                                int(profiled_candidate_count)
-                                if profiled_candidate_count < configured_candidate_count
-                                else None
-                            ),
-                        )
-                        estimator = specialized_result.best_estimator
-                        tuned_search_elapsed_seconds = float(
-                            specialized_result.tuned_search_elapsed_seconds
-                        )
-                        tuned_search_candidate_count = int(
-                            specialized_result.profiled_candidate_count
-                        )
-                        tuned_search_configured_candidate_count = int(
-                            specialized_result.configured_candidate_count
-                        )
-                        tuned_search_profiled_candidate_count = int(
-                            specialized_result.profiled_candidate_count
-                        )
-                        tuned_search_configured_inner_fold_count = int(
-                            specialized_result.configured_inner_fold_count
-                        )
-                        tuned_search_profiled_inner_fold_count = int(
-                            specialized_result.profiled_inner_fold_count
-                        )
-                        tuning_extrapolation_applied = bool(
-                            specialized_result.tuning_extrapolation_applied
-                        )
-                        measured_inner_tuning_seconds = float(
-                            specialized_result.measured_inner_tuning_seconds
-                        )
-                        estimated_full_inner_tuning_seconds = float(
-                            specialized_result.estimated_full_inner_tuning_seconds
-                        )
-                        estimated_full_tuned_search_seconds = float(
-                            specialized_result.estimated_full_tuned_search_seconds
-                        )
-                        tuning_split_scale_seconds = float(
-                            specialized_result.split_scale_seconds
-                        )
-                        tuning_candidate_fit_seconds = float(
-                            specialized_result.candidate_fit_seconds
-                        )
-                        tuning_candidate_predict_seconds = float(
-                            specialized_result.candidate_predict_seconds
-                        )
-                        tuning_refit_elapsed_seconds = float(
-                            specialized_result.refit_elapsed_seconds
-                        )
-                        tuning_executor = str(specialized_result.executor_id)
-                        specialized_linearsvc_tuning_used = True
-                        cv_mean_fit_time_seconds = _safe_float_from_cv_results(
-                            specialized_result.cv_results,
-                            "mean_fit_time",
-                        )
-                        cv_std_fit_time_seconds = _safe_float_from_cv_results(
-                            specialized_result.cv_results,
-                            "std_fit_time",
-                        )
-                        cv_mean_score_time_seconds = _safe_float_from_cv_results(
-                            specialized_result.cv_results,
-                            "mean_score_time",
-                        )
-                        cv_std_score_time_seconds = _safe_float_from_cv_results(
-                            specialized_result.cv_results,
-                            "std_score_time",
-                        )
-                        best_score = float(specialized_result.best_score)
-                        best_params_json = json.dumps(
-                            specialized_result.best_params,
-                            sort_keys=True,
-                        )
-                    except ValueError as exc:
-                        supports_specialized = False
-                        tuning_executor_fallback_reason = str(exc)
-                if not supports_specialized:
-                    tuning_executor = "gridsearchcv_pipeline_reference_v1"
-                    if specialized_reason:
-                        tuning_executor_fallback_reason = str(specialized_reason)
-                    profiled_param_grid: dict[str, Any] | list[dict[str, Any]] = param_grid
-                    if profiled_candidate_count < configured_candidate_count:
-                        profiled_param_grid = [
-                            {"model__C": [float(params["model__C"])]}
-                            for params in candidate_params[:profiled_candidate_count]
-                        ]
-                    profiled_inner_splits = inner_splits[:profiled_inner_fold_count]
-                    search = GridSearchCV(
-                        estimator=clone(pipeline_template),
-                        param_grid=profiled_param_grid,
-                        scoring=metric_scorer(section_input.primary_metric_name),
-                        cv=profiled_inner_splits,
-                        refit=True,
-                        n_jobs=1,
-                    )
-                    search_start = perf_counter()
-                    search.fit(x_outer_train, y_outer_train)
-                    tuned_search_elapsed_seconds = float(perf_counter() - search_start)
-                    estimator = search.best_estimator_
-                    tuned_search_candidate_count = int(len(search.cv_results_["params"]))
-                    tuned_search_configured_candidate_count = int(configured_candidate_count)
-                    tuned_search_profiled_candidate_count = int(
-                        tuned_search_candidate_count
-                    )
-                    tuned_search_configured_inner_fold_count = int(configured_inner_fold_count)
-                    tuned_search_profiled_inner_fold_count = int(profiled_inner_fold_count)
-                    measured_inner_tuning_seconds = float(tuned_search_elapsed_seconds)
-                    estimated_full_inner_tuning_seconds = float(measured_inner_tuning_seconds)
-                    tuning_extrapolation_applied = bool(
-                        tuned_search_profiled_candidate_count != tuned_search_configured_candidate_count
-                        or tuned_search_profiled_inner_fold_count
-                        != tuned_search_configured_inner_fold_count
-                    )
-                    if tuning_extrapolation_applied:
-                        estimated_full_inner_tuning_seconds *= float(
-                            tuned_search_configured_candidate_count
-                        ) / float(max(tuned_search_profiled_candidate_count, 1))
-                        estimated_full_inner_tuning_seconds *= float(
-                            tuned_search_configured_inner_fold_count
-                        ) / float(max(tuned_search_profiled_inner_fold_count, 1))
-                    estimated_full_tuned_search_seconds = float(
-                        estimated_full_inner_tuning_seconds
-                    )
-                    cv_mean_fit_time_seconds = _safe_float_from_cv_results(
-                        search.cv_results_,
-                        "mean_fit_time",
-                    )
-                    cv_std_fit_time_seconds = _safe_float_from_cv_results(
-                        search.cv_results_,
-                        "std_fit_time",
-                    )
-                    cv_mean_score_time_seconds = _safe_float_from_cv_results(
-                        search.cv_results_,
-                        "mean_score_time",
-                    )
-                    cv_std_score_time_seconds = _safe_float_from_cv_results(
-                        search.cv_results_,
-                        "std_score_time",
-                    )
-                    best_score = float(search.best_score_)
-                    best_params_json = json.dumps(search.best_params_, sort_keys=True)
+                estimator = tuning_result["estimator"]
+                tuned_search_elapsed_seconds = (
+                    float(tuning_result["tuned_search_elapsed_seconds"])
+                    if tuning_result.get("tuned_search_elapsed_seconds") is not None
+                    else None
+                )
+                tuned_search_candidate_count = int(tuning_result["tuned_search_candidate_count"])
+                tuned_search_configured_candidate_count = int(
+                    tuning_result["tuned_search_configured_candidate_count"]
+                )
+                tuned_search_profiled_candidate_count = int(
+                    tuning_result["tuned_search_profiled_candidate_count"]
+                )
+                tuned_search_configured_inner_fold_count = int(
+                    tuning_result["tuned_search_configured_inner_fold_count"]
+                )
+                tuned_search_profiled_inner_fold_count = int(
+                    tuning_result["tuned_search_profiled_inner_fold_count"]
+                )
+                tuning_extrapolation_applied = bool(tuning_result["tuning_extrapolation_applied"])
+                measured_inner_tuning_seconds = (
+                    float(tuning_result["measured_inner_tuning_seconds"])
+                    if tuning_result.get("measured_inner_tuning_seconds") is not None
+                    else None
+                )
+                estimated_full_inner_tuning_seconds = (
+                    float(tuning_result["estimated_full_inner_tuning_seconds"])
+                    if tuning_result.get("estimated_full_inner_tuning_seconds") is not None
+                    else None
+                )
+                estimated_full_tuned_search_seconds = (
+                    float(tuning_result["estimated_full_tuned_search_seconds"])
+                    if tuning_result.get("estimated_full_tuned_search_seconds") is not None
+                    else None
+                )
+                tuning_split_scale_seconds = (
+                    float(tuning_result["tuning_split_scale_seconds"])
+                    if tuning_result.get("tuning_split_scale_seconds") is not None
+                    else None
+                )
+                tuning_candidate_fit_seconds = (
+                    float(tuning_result["tuning_candidate_fit_seconds"])
+                    if tuning_result.get("tuning_candidate_fit_seconds") is not None
+                    else None
+                )
+                tuning_candidate_predict_seconds = (
+                    float(tuning_result["tuning_candidate_predict_seconds"])
+                    if tuning_result.get("tuning_candidate_predict_seconds") is not None
+                    else None
+                )
+                tuning_refit_elapsed_seconds = (
+                    float(tuning_result["tuning_refit_elapsed_seconds"])
+                    if tuning_result.get("tuning_refit_elapsed_seconds") is not None
+                    else None
+                )
+                cv_mean_fit_time_seconds = (
+                    float(tuning_result["cv_mean_fit_time_seconds"])
+                    if tuning_result.get("cv_mean_fit_time_seconds") is not None
+                    else None
+                )
+                cv_std_fit_time_seconds = (
+                    float(tuning_result["cv_std_fit_time_seconds"])
+                    if tuning_result.get("cv_std_fit_time_seconds") is not None
+                    else None
+                )
+                cv_mean_score_time_seconds = (
+                    float(tuning_result["cv_mean_score_time_seconds"])
+                    if tuning_result.get("cv_mean_score_time_seconds") is not None
+                    else None
+                )
+                cv_std_score_time_seconds = (
+                    float(tuning_result["cv_std_score_time_seconds"])
+                    if tuning_result.get("cv_std_score_time_seconds") is not None
+                    else None
+                )
+                best_score = float(tuning_result["best_score"])
+                best_params_json = str(tuning_result["best_params_json"])
+                tuning_executor = str(tuning_result["tuning_executor"])
+                tuning_executor_fallback_reason = (
+                    str(tuning_result["tuning_executor_fallback_reason"])
+                    if isinstance(tuning_result.get("tuning_executor_fallback_reason"), str)
+                    and str(tuning_result.get("tuning_executor_fallback_reason")).strip()
+                    else None
+                )
+                specialized_linearsvc_tuning_used = bool(
+                    tuning_result.get("specialized_linearsvc_tuning_used", False)
+                )
                 tuning_rows.append(
                     {
                         "fold": int(fold_index),
@@ -648,9 +661,14 @@ def execute_model_fit(section_input: ModelFitInput) -> dict[str, Any]:
                     }
                 )
         else:
-            fit_start = perf_counter()
-            estimator.fit(section_input.x_matrix[train_idx], y[train_idx])
-            estimator_fit_elapsed_seconds = float(perf_counter() - fit_start)
+            fit_payload = run_model_fit_executor(
+                executor_id=model_fit_executor_id,
+                estimator=estimator,
+                x_train=section_input.x_matrix[train_idx],
+                y_train=y[train_idx],
+            )
+            estimator = fit_payload["estimator"]
+            estimator_fit_elapsed_seconds = float(fit_payload["estimator_fit_elapsed_seconds"])
         fold_backend_metadata = _extract_fold_compute_runtime_metadata(estimator)
         if fold_backend_metadata is not None:
             fold_compute_runtime_metadata.append(fold_backend_metadata)
@@ -1385,15 +1403,19 @@ def execute_evaluation(section_input: EvaluationInput) -> dict[str, Any]:
         permutation_metric_name = str(
             section_input.permutation_metric_name or section_input.primary_metric_name
         )
-        permutation_payload = section_input.evaluate_permutations_fn(
-            pipeline_template=section_input.build_pipeline_fn(
-                model_name=section_input.model,
-                seed=section_input.seed,
-            ),
+        permutation_executor_id = _assignment_executor_id(
+            section_input.permutation_assignment,
+            default_executor_id=PERMUTATION_REFERENCE_EXECUTOR_ID,
+        )
+        permutation_payload = run_permutation_executor(
+            executor_id=permutation_executor_id,
+            evaluate_permutations_fn=section_input.evaluate_permutations_fn,
+            build_pipeline_fn=section_input.build_pipeline_fn,
+            model_name=section_input.model,
+            seed=section_input.seed,
             x_matrix=section_input.x_matrix,
             y=section_input.y,
             splits=section_input.splits,
-            seed=section_input.seed,
             n_permutations=section_input.n_permutations,
             metric_name=permutation_metric_name,
             observed_metric=classification_metric_score(
