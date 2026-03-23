@@ -23,7 +23,11 @@ from Thesis_ML.experiments.model_catalog import (
     get_model_cost_entry,
     projected_runtime_seconds,
 )
-from Thesis_ML.experiments.model_factory import ALL_MODEL_NAMES
+from Thesis_ML.experiments.model_factory import (
+    ALL_MODEL_NAMES,
+    OFFICIAL_MODEL_NAMES,
+    model_is_officially_admitted,
+)
 from Thesis_ML.experiments.run_states import (
     RUN_STATUS_COMPLETED_LEGACY,
     RUN_STATUS_FAILED,
@@ -77,6 +81,17 @@ REQUIRED_COMPARISON_RUN_ARTIFACTS = (
     "calibration_table.csv",
 )
 SUPPORTED_PRIMARY_METRICS = SUPPORTED_CLASSIFICATION_METRICS
+
+
+def _reject_exploratory_only_official_model(*, model_name: str, field_name: str) -> None:
+    normalized_model = str(model_name).strip().lower()
+    if model_is_officially_admitted(normalized_model):
+        return
+    allowed = ", ".join(sorted(OFFICIAL_MODEL_NAMES))
+    raise ValueError(
+        f"{field_name} model '{model_name}' is exploratory-only and not admitted for "
+        f"locked-comparison official execution. Allowed official models: {allowed}."
+    )
 
 
 class _ComparisonModel(BaseModel):
@@ -153,6 +168,10 @@ class ComparisonInterpretabilityPolicy(_ComparisonModel):
                     raise ValueError(
                         f"Unsupported interpretability model '{model_name}'. Allowed values: {allowed}."
                     )
+                _reject_exploratory_only_official_model(
+                    model_name=model_name,
+                    field_name="interpretability_policy.allowed_models",
+                )
         return self
 
 
@@ -232,6 +251,10 @@ class ComparisonVariant(_ComparisonModel):
             raise ValueError(
                 f"Unsupported variant model '{self.model}'. Allowed values: {allowed}."
             )
+        _reject_exploratory_only_official_model(
+            model_name=self.model,
+            field_name=f"variant '{self.variant_id}'",
+        )
         if len(set(self.claim_ids)) != len(self.claim_ids):
             raise ValueError(f"Variant '{self.variant_id}' contains duplicate claim_ids.")
         return self
@@ -327,6 +350,10 @@ class ComparisonCostPolicy(_ComparisonModel):
                     "cost_policy.explicit_benchmark_expensive_models references unsupported "
                     f"model '{model_name}'. Allowed values: {allowed}."
                 )
+            _reject_exploratory_only_official_model(
+                model_name=model_name,
+                field_name="cost_policy.explicit_benchmark_expensive_models",
+            )
         return self
 
 
@@ -520,6 +547,16 @@ class CompiledComparisonRunSpec(_ComparisonModel):
             raise ValueError(
                 f"CompiledComparisonRunSpec '{self.run_id}' must set canonical_run=false."
             )
+        if self.model not in set(ALL_MODEL_NAMES):
+            allowed = ", ".join(sorted(ALL_MODEL_NAMES))
+            raise ValueError(
+                f"CompiledComparisonRunSpec model '{self.model}' is unsupported. "
+                f"Allowed values: {allowed}."
+            )
+        _reject_exploratory_only_official_model(
+            model_name=self.model,
+            field_name="CompiledComparisonRunSpec",
+        )
         catalog_entry = get_model_cost_entry(self.model)
         if self.model_cost_tier != catalog_entry.cost_tier:
             raise ValueError(

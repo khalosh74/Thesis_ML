@@ -13,6 +13,8 @@ from sklearn.pipeline import Pipeline
 
 from Thesis_ML.config.framework_mode import FrameworkMode, coerce_framework_mode
 from Thesis_ML.config.metric_policy import metric_scorer
+from Thesis_ML.experiments.backend_registry import resolve_backend_support
+from Thesis_ML.experiments.backends.xgboost_gpu import XGBOOST_GPU_BACKEND_ID
 from Thesis_ML.experiments.compute_policy import ResolvedComputePolicy
 from Thesis_ML.experiments.linearsvc_tuning import (
     SPECIALIZED_LINEARSVC_TUNING_EXECUTOR_ID,
@@ -43,6 +45,8 @@ PREPROCESS_CPU_EXECUTOR_ID = "preprocess_cpu_reference_v1"
 MODEL_FIT_CPU_EXECUTOR_ID = "model_fit_cpu_reference_v1"
 MODEL_FIT_TORCH_RIDGE_EXECUTOR_ID = "model_fit_torch_ridge_v1"
 MODEL_FIT_TORCH_LOGREG_EXECUTOR_ID = "model_fit_torch_logreg_v1"
+MODEL_FIT_XGBOOST_CPU_EXECUTOR_ID = "model_fit_xgboost_cpu_v1"
+MODEL_FIT_XGBOOST_GPU_EXECUTOR_ID = "model_fit_xgboost_gpu_v1"
 TUNING_GENERIC_EXECUTOR_ID = "gridsearchcv_pipeline_reference_v1"
 TUNING_SKIPPED_CONTROL_EXECUTOR_ID = "tuning_skipped_control_model_v1"
 PERMUTATION_REFERENCE_EXECUTOR_ID = "permutation_reference_v1"
@@ -110,6 +114,24 @@ def _support_logreg_specialized_cpu(
     return True, None
 
 
+def _support_xgboost_cpu(_: StageExecutorSelectionContext) -> tuple[bool, str | None]:
+    support = resolve_backend_support("xgboost", None)
+    if not support.supported:
+        return False, support.reason or "xgboost_cpu_backend_unavailable"
+    return True, None
+
+
+def _support_xgboost_gpu(context: StageExecutorSelectionContext) -> tuple[bool, str | None]:
+    if context.compute_policy is None:
+        return False, "compute_policy_missing"
+    support = resolve_backend_support("xgboost", context.compute_policy)
+    if not support.supported:
+        return False, support.reason or "xgboost_gpu_backend_unavailable"
+    if support.backend_id != XGBOOST_GPU_BACKEND_ID:
+        return False, "xgboost_gpu_backend_not_selected"
+    return True, None
+
+
 def _stage_noop_entrypoint(**_: Any) -> dict[str, Any]:
     return {"status": "noop"}
 
@@ -140,6 +162,14 @@ def _model_fit_torch_ridge_entrypoint(**kwargs: Any) -> dict[str, Any]:
 
 def _model_fit_torch_logreg_entrypoint(**kwargs: Any) -> dict[str, Any]:
     return _fit_estimator_entrypoint(executor_id=MODEL_FIT_TORCH_LOGREG_EXECUTOR_ID, **kwargs)
+
+
+def _model_fit_xgboost_cpu_entrypoint(**kwargs: Any) -> dict[str, Any]:
+    return _fit_estimator_entrypoint(executor_id=MODEL_FIT_XGBOOST_CPU_EXECUTOR_ID, **kwargs)
+
+
+def _model_fit_xgboost_gpu_entrypoint(**kwargs: Any) -> dict[str, Any]:
+    return _fit_estimator_entrypoint(executor_id=MODEL_FIT_XGBOOST_GPU_EXECUTOR_ID, **kwargs)
 
 
 def _safe_float_from_cv_results(
@@ -579,10 +609,30 @@ def _build_registry() -> tuple[StageExecutorSpec, ...]:
             execute=_model_fit_torch_logreg_entrypoint,
         ),
         StageExecutorSpec(
+            executor_id=MODEL_FIT_XGBOOST_CPU_EXECUTOR_ID,
+            stage_key=StageKey.MODEL_FIT,
+            backend_family=StageBackendFamily.XGBOOST_CPU,
+            supported_model_names=("xgboost",),
+            equivalence_class="validated_variant",
+            official_admitted=False,
+            support_predicate=_support_xgboost_cpu,
+            execute=_model_fit_xgboost_cpu_entrypoint,
+        ),
+        StageExecutorSpec(
+            executor_id=MODEL_FIT_XGBOOST_GPU_EXECUTOR_ID,
+            stage_key=StageKey.MODEL_FIT,
+            backend_family=StageBackendFamily.XGBOOST_GPU,
+            supported_model_names=("xgboost",),
+            equivalence_class="validated_variant",
+            official_admitted=False,
+            support_predicate=_support_xgboost_gpu,
+            execute=_model_fit_xgboost_gpu_entrypoint,
+        ),
+        StageExecutorSpec(
             executor_id=TUNING_GENERIC_EXECUTOR_ID,
             stage_key=StageKey.TUNING,
             backend_family=StageBackendFamily.AUTO_MIXED,
-            supported_model_names=("linearsvc", "logreg", "ridge"),
+            supported_model_names=("linearsvc", "logreg", "ridge", "xgboost"),
             equivalence_class="exact_reference_equivalent",
             official_admitted=True,
             support_predicate=_support_always,
@@ -622,7 +672,7 @@ def _build_registry() -> tuple[StageExecutorSpec, ...]:
             executor_id=PERMUTATION_REFERENCE_EXECUTOR_ID,
             stage_key=StageKey.PERMUTATION,
             backend_family=StageBackendFamily.AUTO_MIXED,
-            supported_model_names=("dummy", "linearsvc", "logreg", "ridge"),
+            supported_model_names=("dummy", "linearsvc", "logreg", "ridge", "xgboost"),
             equivalence_class="exact_reference_equivalent",
             official_admitted=True,
             support_predicate=_support_always,
@@ -829,6 +879,8 @@ __all__ = [
     "FEATURE_CACHE_BUILD_CPU_EXECUTOR_ID",
     "FEATURE_MATRIX_LOAD_CPU_EXECUTOR_ID",
     "MODEL_FIT_CPU_EXECUTOR_ID",
+    "MODEL_FIT_XGBOOST_CPU_EXECUTOR_ID",
+    "MODEL_FIT_XGBOOST_GPU_EXECUTOR_ID",
     "MODEL_FIT_TORCH_LOGREG_EXECUTOR_ID",
     "MODEL_FIT_TORCH_RIDGE_EXECUTOR_ID",
     "PERMUTATION_REFERENCE_EXECUTOR_ID",

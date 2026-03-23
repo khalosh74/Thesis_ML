@@ -51,7 +51,7 @@ def _gpu_capability_snapshot(*, device_id: int = 0) -> ComputeCapabilitySnapshot
     )
 
 
-@pytest.mark.parametrize("model_name", ["logreg", "linearsvc", "dummy"])
+@pytest.mark.parametrize("model_name", ["logreg", "linearsvc", "dummy", "xgboost"])
 def test_official_confirmatory_gpu_only_allowlist_rejects_unsupported_models(
     model_name: str,
 ) -> None:

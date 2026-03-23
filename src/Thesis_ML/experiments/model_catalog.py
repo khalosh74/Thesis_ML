@@ -112,6 +112,23 @@ def _build_catalog() -> dict[str, ModelCostEntry]:
             grouped_nested_runtime_multiplier=1.0,
             notes="Control baseline with negligible runtime.",
         ),
+        ModelCostEntry(
+            model_name="xgboost",
+            cost_tier=ModelCostTier.EXPLORATORY_ONLY,
+            projected_runtime_seconds_by_mode=_validate_runtime_map(
+                "xgboost",
+                {
+                    FrameworkMode.EXPLORATORY.value: 45 * 60,
+                    FrameworkMode.LOCKED_COMPARISON.value: 90 * 60,
+                    FrameworkMode.CONFIRMATORY.value: 90 * 60,
+                },
+            ),
+            grouped_nested_runtime_multiplier=1.25,
+            notes=(
+                "Exploratory-only gradient boosting family. "
+                "Not admitted on locked-comparison or confirmatory official paths."
+            ),
+        ),
     ]
 
     catalog = {entry.model_name: entry for entry in entries}

@@ -173,6 +173,8 @@ def test_full_pipeline_stage_execution_metadata_is_additive(
     assert metrics_payload["framework_mode"] == result["framework_mode"]
     assert isinstance(config_payload.get("stage_execution"), dict)
     assert isinstance(metrics_payload.get("stage_execution"), dict)
+    assert config_payload.get("preprocessing_kind") == "standard_scaler"
+    assert metrics_payload.get("preprocessing_kind") == "standard_scaler"
 
 
 def test_segment_execution_feature_matrix_to_evaluation(

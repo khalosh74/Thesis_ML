@@ -103,6 +103,31 @@ def test_load_comparison_spec_validates() -> None:
     assert int(spec.cost_policy.max_projected_runtime_seconds_per_run) > 0
 
 
+def test_comparison_validation_rejects_exploratory_only_variant_model(
+    tmp_path: Path,
+) -> None:
+    payload = json.loads(_comparison_spec_path().read_text(encoding="utf-8"))
+    payload["allowed_variants"][0]["model"] = "xgboost"
+    spec_path = tmp_path / "invalid_comparison_xgboost_variant.json"
+    spec_path.write_text(f"{json.dumps(payload, indent=2)}\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="exploratory-only"):
+        load_comparison_spec(spec_path)
+
+
+def test_comparison_validation_rejects_exploratory_only_interpretability_model(
+    tmp_path: Path,
+) -> None:
+    payload = json.loads(_comparison_spec_path().read_text(encoding="utf-8"))
+    payload["interpretability_policy"]["enabled"] = True
+    payload["interpretability_policy"]["allowed_models"] = ["xgboost"]
+    spec_path = tmp_path / "invalid_comparison_xgboost_interpretability.json"
+    spec_path.write_text(f"{json.dumps(payload, indent=2)}\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="exploratory-only"):
+        load_comparison_spec(spec_path)
+
+
 def test_compile_comparison_expands_variants_and_subjects(
     comparison_dataset: dict[str, Path],
 ) -> None:

@@ -27,6 +27,7 @@ from Thesis_ML.experiments.stage_registry import (
     run_permutation_executor,
     run_tuning_executor,
 )
+from Thesis_ML.experiments.model_factory import model_supports_linear_interpretability
 from Thesis_ML.experiments.tuning_search_spaces import get_search_space
 
 if TYPE_CHECKING:
@@ -279,10 +280,16 @@ def execute_model_fit(section_input: ModelFitInput) -> dict[str, Any]:
         )
     )
 
+    supports_linear_interpretability = model_supports_linear_interpretability(section_input.model)
     if section_input.interpretability_enabled is None:
-        interpretability_enabled = section_input.cv_mode == "within_subject_loso_session"
+        interpretability_enabled = (
+            section_input.cv_mode == "within_subject_loso_session"
+            and supports_linear_interpretability
+        )
     else:
         interpretability_enabled = bool(section_input.interpretability_enabled)
+    if interpretability_enabled and not supports_linear_interpretability:
+        interpretability_enabled = False
     interpretability_fold_rows: list[dict[str, Any]] = []
     interpretability_vectors: list[np.ndarray] = []
     interpretability_dir: Path | None = None
@@ -1296,11 +1303,20 @@ def execute_interpretability(section_input: InterpretabilityInput) -> dict[str, 
             ),
         }
     else:
+        not_applicable_reason = (
+            "Interpretability export is enabled only for within_subject_loso_session."
+        )
+        if section_input.cv_mode == "within_subject_loso_session" and not model_supports_linear_interpretability(
+            section_input.model
+        ):
+            not_applicable_reason = (
+                "Interpretability export currently supports linear coefficient models only."
+            )
         interpretability_summary = {
             "enabled": False,
             "performed": False,
             "status": "not_applicable",
-            "reason": "Interpretability export is enabled only for within_subject_loso_session.",
+            "reason": not_applicable_reason,
             "caution": caution_text,
             "experiment_mode": section_input.cv_mode,
             "subject": None,

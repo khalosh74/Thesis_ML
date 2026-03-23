@@ -111,6 +111,27 @@ def test_stage_registry_lists_known_tuning_executors() -> None:
     assert TUNING_SKIPPED_CONTROL_EXECUTOR_ID in tuning_executors
 
 
+def test_stage_registry_xgboost_tuning_uses_generic_executor_only() -> None:
+    tuning_executors = list(iter_stage_executors(StageKey.TUNING))
+    xgboost_executors = [
+        spec.executor_id
+        for spec in tuning_executors
+        if spec.supported_model_names is not None and "xgboost" in spec.supported_model_names
+    ]
+    assert xgboost_executors == [TUNING_GENERIC_EXECUTOR_ID]
+
+    context = StageExecutorSelectionContext(
+        stage=StageKey.TUNING,
+        model_name="xgboost",
+        framework_mode=FrameworkMode.EXPLORATORY,
+        compute_policy=None,
+    )
+    generic_tuning_spec = get_stage_executor(TUNING_GENERIC_EXECUTOR_ID)
+    supported, reason = stage_executor_support_status(generic_tuning_spec, context)
+    assert supported is True
+    assert reason is None
+
+
 def test_stage_registry_blocks_non_admitted_executor_on_official_path() -> None:
     context = StageExecutorSelectionContext(
         stage=StageKey.MODEL_FIT,

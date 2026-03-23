@@ -32,6 +32,9 @@ spm = [
 optuna = [
     "optuna>=4.0",
 ]
+xgboost = [
+    "xgboost>=2.0",
+]
 dev = [
     "pre-commit>=3.7.0",
     "pytest>=8.0.0",

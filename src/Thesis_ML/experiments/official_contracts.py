@@ -14,6 +14,10 @@ from Thesis_ML.experiments.errors import (
     OfficialArtifactContractError,
     OfficialContractValidationError,
 )
+from Thesis_ML.experiments.model_factory import (
+    OFFICIAL_MODEL_NAMES,
+    model_is_officially_admitted,
+)
 
 _REQUIRED_INDEX_COLUMNS = {
     "sample_id",
@@ -130,6 +134,14 @@ def validate_official_preflight(
         raise OfficialContractValidationError(
             f"validate_official_preflight called with non-official framework_mode='{framework_mode.value}'.",
             details={"framework_mode": framework_mode.value},
+        )
+    if not model_is_officially_admitted(model):
+        raise OfficialContractValidationError(
+            f"Model '{model}' is exploratory-only and not admitted for official runs.",
+            details={
+                "model": str(model),
+                "allowed_official_models": sorted(OFFICIAL_MODEL_NAMES),
+            },
         )
 
     if not index_csv.exists() or not index_csv.is_file():

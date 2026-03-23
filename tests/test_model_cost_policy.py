@@ -82,7 +82,7 @@ def test_compiled_protocol_and_comparison_manifest_stamp_cost_metadata() -> None
 
 
 def test_projected_runtime_values_are_positive_and_stable() -> None:
-    for model_name in ("ridge", "linearsvc", "logreg", "dummy"):
+    for model_name in ("ridge", "linearsvc", "logreg", "xgboost", "dummy"):
         for mode in ("exploratory", "locked_comparison", "confirmatory"):
             first = projected_runtime_seconds(model_name=model_name, framework_mode=mode)
             second = projected_runtime_seconds(model_name=model_name, framework_mode=mode)

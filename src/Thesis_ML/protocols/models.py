@@ -30,7 +30,11 @@ from Thesis_ML.experiments.model_catalog import (
     projected_runtime_seconds,
     supported_model_cost_tiers,
 )
-from Thesis_ML.experiments.model_factory import ALL_MODEL_NAMES
+from Thesis_ML.experiments.model_factory import (
+    ALL_MODEL_NAMES,
+    OFFICIAL_MODEL_NAMES,
+    model_is_officially_admitted,
+)
 from Thesis_ML.experiments.run_states import (
     RUN_STATUS_COMPLETED_LEGACY,
     RUN_STATUS_FAILED,
@@ -80,6 +84,17 @@ REQUIRED_RUN_ARTIFACTS_BASELINE = (
     "calibration_summary.json",
     "calibration_table.csv",
 )
+
+
+def _reject_exploratory_only_official_model(*, model_name: str, field_name: str) -> None:
+    normalized_model = str(model_name).strip().lower()
+    if model_is_officially_admitted(normalized_model):
+        return
+    allowed = ", ".join(sorted(OFFICIAL_MODEL_NAMES))
+    raise ValueError(
+        f"{field_name} model '{model_name}' is exploratory-only and not admitted for "
+        f"confirmatory protocol execution. Allowed official models: {allowed}."
+    )
 
 
 class _ProtocolModel(BaseModel):
@@ -184,6 +199,10 @@ class ModelPolicy(_ProtocolModel):
                 raise ValueError(
                     f"Unsupported model_policy model '{model_name}'. Allowed values: {allowed}."
                 )
+            _reject_exploratory_only_official_model(
+                model_name=model_name,
+                field_name="model_policy.models",
+            )
         if (
             self.selection_strategy == ModelSelectionStrategy.FIXED_BASELINES
             and self.tuning_enabled
@@ -283,6 +302,10 @@ class InterpretabilityPolicy(_ProtocolModel):
                     raise ValueError(
                         f"Unsupported interpretability model '{model_name}'. Allowed values: {allowed}."
                     )
+                _reject_exploratory_only_official_model(
+                    model_name=model_name,
+                    field_name="interpretability_policy.models",
+                )
             for mode in self.modes:
                 if mode not in SUPPORTED_CV_MODES:
                     allowed = ", ".join(sorted(SUPPORTED_CV_MODES))
@@ -422,6 +445,10 @@ class SuiteSpec(_ProtocolModel):
                         f"Suite '{self.suite_id}' references unsupported model '{model_name}'. "
                         f"Allowed values: {allowed}."
                     )
+                _reject_exploratory_only_official_model(
+                    model_name=model_name,
+                    field_name=f"suite '{self.suite_id}' models",
+                )
         if self.seed_override is not None and int(self.seed_override) < 0:
             raise ValueError(f"Suite '{self.suite_id}' seed_override must be >= 0.")
 
@@ -730,6 +757,10 @@ class CompiledRunSpec(_ProtocolModel):
             raise ValueError(
                 f"CompiledRunSpec model '{self.model}' is unsupported. Allowed values: {allowed}."
             )
+        _reject_exploratory_only_official_model(
+            model_name=self.model,
+            field_name="CompiledRunSpec",
+        )
         catalog_entry = get_model_cost_entry(self.model)
         if self.model_cost_tier != catalog_entry.cost_tier:
             raise ValueError(

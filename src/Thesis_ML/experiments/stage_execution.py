@@ -35,6 +35,8 @@ class StageBackendFamily(StrEnum):
     SKLEARN_CPU = "sklearn_cpu"
     TORCH_GPU = "torch_gpu"
     AUTO_MIXED = "auto_mixed"
+    XGBOOST_CPU = "xgboost_cpu"
+    XGBOOST_GPU = "xgboost_gpu"
 
 
 class _StageModel(BaseModel):
@@ -128,7 +130,11 @@ def _coerce_backend_family(value: str) -> StageBackendFamily:
 
 
 def _default_compute_lane_for_backend(backend_family: StageBackendFamily) -> ComputeLane:
-    return "gpu" if backend_family == StageBackendFamily.TORCH_GPU else "cpu"
+    return (
+        "gpu"
+        if backend_family in {StageBackendFamily.TORCH_GPU, StageBackendFamily.XGBOOST_GPU}
+        else "cpu"
+    )
 
 
 def _policy_from_compute_policy(

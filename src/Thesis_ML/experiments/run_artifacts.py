@@ -117,6 +117,7 @@ def stamp_metrics_artifact(
     tuning_enabled: bool,
     model_cost_tier: str,
     projected_runtime_seconds: int,
+    preprocessing_kind: str | None,
     tuning_summary_path: Path,
     tuning_best_params_path: Path,
     fit_timing_summary_path: Path,
@@ -158,6 +159,9 @@ def stamp_metrics_artifact(
     persisted_metrics["tuning_enabled"] = bool(tuning_enabled)
     persisted_metrics["model_cost_tier"] = str(model_cost_tier)
     persisted_metrics["projected_runtime_seconds"] = int(projected_runtime_seconds)
+    persisted_metrics["preprocessing_kind"] = (
+        str(preprocessing_kind) if preprocessing_kind is not None else None
+    )
     persisted_metrics["tuning_summary_path"] = str(tuning_summary_path.resolve())
     persisted_metrics["tuning_summary_path_relative"] = _relative_path(tuning_summary_path)
     persisted_metrics["tuning_best_params_path"] = str(tuning_best_params_path.resolve())
@@ -249,6 +253,7 @@ def build_run_config_payload(
     tuning_enabled: bool,
     model_cost_tier: str,
     projected_runtime_seconds: int,
+    preprocessing_kind: str | None,
     tuning_search_space_id: str | None,
     tuning_search_space_version: str | None,
     tuning_inner_cv_scheme: str | None,
@@ -357,6 +362,9 @@ def build_run_config_payload(
         "tuning_enabled": bool(tuning_enabled),
         "model_cost_tier": str(model_cost_tier),
         "projected_runtime_seconds": int(projected_runtime_seconds),
+        "preprocessing_kind": (
+            str(preprocessing_kind) if preprocessing_kind is not None else None
+        ),
         "tuning_search_space_id": tuning_search_space_id,
         "tuning_search_space_version": tuning_search_space_version,
         "tuning_inner_cv_scheme": tuning_inner_cv_scheme,

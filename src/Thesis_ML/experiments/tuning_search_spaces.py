@@ -17,6 +17,11 @@ _SEARCH_SPACES: dict[str, dict[str, Any]] = {
             "ridge": {"model__alpha": [0.1, 1.0, 10.0]},
             "logreg": {"model__C": [0.1, 1.0, 10.0], "model__penalty": ["l2"]},
             "linearsvc": {"model__C": [0.1, 1.0, 10.0]},
+            "xgboost": {
+                "model__n_estimators": [200],
+                "model__max_depth": [3, 6],
+                "model__learning_rate": [0.05, 0.1],
+            },
         },
     }
 }
@@ -40,4 +45,3 @@ def get_search_space(search_space_id: str, model_name: str) -> tuple[str, dict[s
 
 def known_search_space_ids() -> list[str]:
     return sorted(_SEARCH_SPACES)
-

@@ -15,6 +15,8 @@ from Thesis_ML.experiments.stage_registry import (
     FEATURE_CACHE_BUILD_CPU_EXECUTOR_ID,
     FEATURE_MATRIX_LOAD_CPU_EXECUTOR_ID,
     MODEL_FIT_CPU_EXECUTOR_ID,
+    MODEL_FIT_XGBOOST_CPU_EXECUTOR_ID,
+    MODEL_FIT_XGBOOST_GPU_EXECUTOR_ID,
     MODEL_FIT_TORCH_LOGREG_EXECUTOR_ID,
     MODEL_FIT_TORCH_RIDGE_EXECUTOR_ID,
     PERMUTATION_REFERENCE_EXECUTOR_ID,
@@ -56,9 +58,9 @@ def _compute_lane_for_backend(
     backend_family: StageBackendFamily,
     compute_policy: ResolvedComputePolicy,
 ) -> str | None:
-    if backend_family == StageBackendFamily.SKLEARN_CPU:
+    if backend_family in {StageBackendFamily.SKLEARN_CPU, StageBackendFamily.XGBOOST_CPU}:
         return "cpu"
-    if backend_family == StageBackendFamily.TORCH_GPU:
+    if backend_family in {StageBackendFamily.TORCH_GPU, StageBackendFamily.XGBOOST_GPU}:
         return "gpu"
     lane = compute_policy.assigned_compute_lane
     if isinstance(lane, str) and lane.strip() in {"cpu", "gpu"}:
@@ -141,6 +143,16 @@ def _backend_family_admissible(
         if effective_backend_family == StageBackendFamily.TORCH_GPU.value:
             return True, None
         return False, "policy_backend_family_excludes_torch_gpu"
+    if backend_family == StageBackendFamily.XGBOOST_CPU:
+        if effective_backend_family == StageBackendFamily.SKLEARN_CPU.value:
+            return True, None
+        if bool(compute_policy.allow_backend_fallback):
+            return True, None
+        return False, "policy_backend_family_excludes_xgboost_cpu"
+    if backend_family == StageBackendFamily.XGBOOST_GPU:
+        if effective_backend_family == StageBackendFamily.TORCH_GPU.value:
+            return True, None
+        return False, "policy_backend_family_excludes_xgboost_gpu"
     return False, "unknown_backend_family"
 
 
@@ -241,6 +253,8 @@ def _model_fit_executor_candidates(model_name: str) -> tuple[str, ...]:
         return (MODEL_FIT_CPU_EXECUTOR_ID, MODEL_FIT_TORCH_LOGREG_EXECUTOR_ID)
     if normalized == "ridge":
         return (MODEL_FIT_TORCH_RIDGE_EXECUTOR_ID, MODEL_FIT_CPU_EXECUTOR_ID)
+    if normalized == "xgboost":
+        return (MODEL_FIT_XGBOOST_GPU_EXECUTOR_ID, MODEL_FIT_XGBOOST_CPU_EXECUTOR_ID)
     return (MODEL_FIT_CPU_EXECUTOR_ID,)
 
 
@@ -254,6 +268,8 @@ def _tuning_executor_candidates(model_name: str) -> tuple[str, ...]:
         return (SPECIALIZED_LOGREG_TUNING_EXECUTOR_ID, TUNING_GENERIC_EXECUTOR_ID)
     if normalized == "ridge":
         return (TUNING_GENERIC_EXECUTOR_ID,)
+    if normalized == "xgboost":
+        return (TUNING_GENERIC_EXECUTOR_ID,)
     return (TUNING_GENERIC_EXECUTOR_ID,)
 
 
@@ -264,6 +280,8 @@ def _permutation_executor_candidates(model_name: str) -> tuple[str, ...]:
             PERMUTATION_RIDGE_GPU_PREFERRED_EXECUTOR_ID,
             PERMUTATION_REFERENCE_EXECUTOR_ID,
         )
+    if normalized == "xgboost":
+        return (PERMUTATION_REFERENCE_EXECUTOR_ID,)
     return (PERMUTATION_REFERENCE_EXECUTOR_ID,)
 
 
@@ -276,6 +294,9 @@ def _plan_stage_assignments_map(
 ) -> dict[StageKey, tuple[str, tuple[str, ...]]]:
     normalized_model_name = str(model_name).strip().lower()
     normalized_methodology = str(methodology_policy_name).strip()
+    preprocess_reason = "phase2_policy_preprocess_cpu_preferred"
+    if normalized_model_name == "xgboost":
+        preprocess_reason = "phase2_policy_preprocess_cpu_passthrough"
     tuning_reason_suffix = (
         "enabled"
         if bool(tuning_enabled) and normalized_methodology == "grouped_nested_tuning"
@@ -302,7 +323,7 @@ def _plan_stage_assignments_map(
             (SPATIAL_VALIDATION_CPU_EXECUTOR_ID,),
         ),
         StageKey.PREPROCESS: (
-            "phase2_policy_preprocess_cpu_preferred",
+            preprocess_reason,
             (PREPROCESS_CPU_EXECUTOR_ID,),
         ),
         StageKey.MODEL_FIT: (

@@ -1,4 +1,6 @@
-﻿from __future__ import annotations
+from __future__ import annotations
+
+from types import SimpleNamespace
 
 import pytest
 
@@ -10,6 +12,8 @@ from Thesis_ML.experiments.stage_registry import (
     MODEL_FIT_CPU_EXECUTOR_ID,
     MODEL_FIT_TORCH_LOGREG_EXECUTOR_ID,
     MODEL_FIT_TORCH_RIDGE_EXECUTOR_ID,
+    MODEL_FIT_XGBOOST_CPU_EXECUTOR_ID,
+    MODEL_FIT_XGBOOST_GPU_EXECUTOR_ID,
     PERMUTATION_REFERENCE_EXECUTOR_ID,
     PERMUTATION_RIDGE_GPU_PREFERRED_EXECUTOR_ID,
     SPECIALIZED_LOGREG_TUNING_EXECUTOR_ID,
@@ -76,6 +80,45 @@ def _assignment_map(result) -> dict[str, dict[str, object]]:
     return {
         str(assignment.stage): assignment.model_dump(mode="json") for assignment in result.assignments
     }
+
+
+def _mock_stage_registry_backend_support_xgboost(
+    *,
+    gpu_supported: bool,
+    cpu_supported: bool,
+):
+    def _resolver(model_name: str, compute_policy: ResolvedComputePolicy | None):
+        normalized = str(model_name).strip().lower()
+        effective_family = (
+            str(compute_policy.effective_backend_family)
+            if compute_policy is not None
+            else "sklearn_cpu"
+        )
+        if normalized != "xgboost":
+            return SimpleNamespace(
+                model_name=normalized,
+                effective_backend_family=effective_family,
+                supported=True,
+                backend_id=None,
+                reason=None,
+            )
+        if effective_family == "torch_gpu":
+            return SimpleNamespace(
+                model_name="xgboost",
+                effective_backend_family=effective_family,
+                supported=bool(gpu_supported),
+                backend_id=("xgboost_gpu_reference_v1" if gpu_supported else None),
+                reason=(None if gpu_supported else "xgboost_gpu_backend_unavailable_for_test"),
+            )
+        return SimpleNamespace(
+            model_name="xgboost",
+            effective_backend_family=effective_family,
+            supported=bool(cpu_supported),
+            backend_id=("xgboost_cpu_reference_v1" if cpu_supported else None),
+            reason=(None if cpu_supported else "xgboost_cpu_backend_unavailable_for_test"),
+        )
+
+    return _resolver
 
 
 def test_stage_planner_cpu_only_ridge_uses_cpu_fallback_for_gpu_preferred_stages() -> None:
@@ -222,3 +265,78 @@ def test_stage_planner_enforces_official_admissibility_for_executor_selection() 
             tuning_enabled=True,
             n_permutations=8,
         )
+
+
+def test_stage_planner_xgboost_gpu_only_prefers_gpu_executor_when_supported(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "Thesis_ML.experiments.stage_registry.resolve_backend_support",
+        _mock_stage_registry_backend_support_xgboost(
+            gpu_supported=True,
+            cpu_supported=True,
+        ),
+    )
+    result = plan_stage_execution(
+        framework_mode=FrameworkMode.EXPLORATORY,
+        compute_policy=_torch_compute_policy(),
+        model_name="xgboost",
+        methodology_policy_name="grouped_nested_tuning",
+        tuning_enabled=True,
+        n_permutations=8,
+    )
+    assignments = _assignment_map(result)
+    assert assignments[StageKey.MODEL_FIT.value]["executor_id"] == MODEL_FIT_XGBOOST_GPU_EXECUTOR_ID
+    assert assignments[StageKey.MODEL_FIT.value]["fallback_used"] is False
+    assert assignments[StageKey.TUNING.value]["executor_id"] == TUNING_GENERIC_EXECUTOR_ID
+    assert (
+        assignments[StageKey.PERMUTATION.value]["executor_id"]
+        == PERMUTATION_REFERENCE_EXECUTOR_ID
+    )
+
+
+def test_stage_planner_xgboost_fallback_to_cpu_requires_policy_allowance(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "Thesis_ML.experiments.stage_registry.resolve_backend_support",
+        _mock_stage_registry_backend_support_xgboost(
+            gpu_supported=False,
+            cpu_supported=True,
+        ),
+    )
+    with pytest.raises(ValueError, match="No admissible stage executor"):
+        plan_stage_execution(
+            framework_mode=FrameworkMode.EXPLORATORY,
+            compute_policy=_torch_compute_policy(),
+            model_name="xgboost",
+            methodology_policy_name="grouped_nested_tuning",
+            tuning_enabled=True,
+            n_permutations=4,
+        )
+
+    allow_fallback_policy = ResolvedComputePolicy(
+        hardware_mode_requested="gpu_only",
+        hardware_mode_effective="gpu_only",
+        requested_backend_family="torch_gpu",
+        effective_backend_family="torch_gpu",
+        gpu_device_id=0,
+        gpu_device_name="synthetic_gpu",
+        gpu_device_total_memory_mb=4096,
+        deterministic_compute=False,
+        allow_backend_fallback=True,
+        backend_stack_id="torch_gpu_reference_v1",
+        backend_fallback_used=False,
+        backend_fallback_reason=None,
+    )
+    result = plan_stage_execution(
+        framework_mode=FrameworkMode.EXPLORATORY,
+        compute_policy=allow_fallback_policy,
+        model_name="xgboost",
+        methodology_policy_name="grouped_nested_tuning",
+        tuning_enabled=True,
+        n_permutations=4,
+    )
+    assignments = _assignment_map(result)
+    assert assignments[StageKey.MODEL_FIT.value]["executor_id"] == MODEL_FIT_XGBOOST_CPU_EXECUTOR_ID
+    assert assignments[StageKey.MODEL_FIT.value]["fallback_used"] is True

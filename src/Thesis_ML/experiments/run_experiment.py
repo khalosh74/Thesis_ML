@@ -18,8 +18,6 @@ import nibabel as nib
 import numpy as np
 import pandas as pd
 import sklearn
-from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import StandardScaler
 
 from Thesis_ML.artifacts.registry import (
     ARTIFACT_TYPE_EXPERIMENT_REPORT,
@@ -65,7 +63,13 @@ from Thesis_ML.experiments.model_catalog import (
 from Thesis_ML.experiments.model_catalog import (
     projected_runtime_seconds as resolve_projected_runtime_seconds,
 )
-from Thesis_ML.experiments.model_factory import MODEL_NAMES, make_model
+from Thesis_ML.experiments.model_factory import (
+    DEFAULT_BATCH_MODEL_NAMES,
+    MODEL_NAMES,
+    build_pipeline as build_model_pipeline,
+    make_model,
+    model_preprocess_kind,
+)
 from Thesis_ML.experiments.official_contracts import (
     validate_official_preflight,
     validate_run_artifact_contract,
@@ -166,6 +170,8 @@ def _resolve_backend_family_from_backend_id(
     normalized = backend_id.strip().lower()
     if not normalized:
         return str(fallback_family)
+    if "xgboost" in normalized:
+        return "xgboost_gpu" if "gpu" in normalized else "xgboost_cpu"
     if normalized == "cpu_reference":
         return "sklearn_cpu"
     if "torch" in normalized or "gpu" in normalized:
@@ -193,17 +199,11 @@ def _build_pipeline(
     class_weight_policy: str = "none",
     compute_policy=None,
 ):
-    model = _make_model(
-        name=model_name,
+    return build_model_pipeline(
+        model_name=model_name,
         seed=seed,
         class_weight_policy=class_weight_policy,
         compute_policy=compute_policy,
-    )
-    return Pipeline(
-        steps=[
-            ("scaler", StandardScaler(with_mean=True, with_std=True)),
-            ("model", model),
-        ]
     )
 
 
@@ -469,6 +469,7 @@ def run_experiment(
         )
 
     target_column = _resolve_target_column(target)
+    resolved_preprocessing_kind = model_preprocess_kind(model)
     context_start = perf_counter()
     (
         resolved_framework_mode,
@@ -1166,6 +1167,7 @@ def run_experiment(
             tuning_enabled=bool(methodology_policy.tuning_enabled),
             model_cost_tier=str(resolved_model_cost_tier),
             projected_runtime_seconds=int(resolved_projected_runtime_seconds),
+            preprocessing_kind=resolved_preprocessing_kind,
             tuning_summary_path=tuning_summary_path,
             tuning_best_params_path=tuning_best_params_path,
             fit_timing_summary_path=fit_timing_summary_path,
@@ -1274,6 +1276,7 @@ def run_experiment(
             tuning_enabled=bool(methodology_policy.tuning_enabled),
             model_cost_tier=str(resolved_model_cost_tier),
             projected_runtime_seconds=int(resolved_projected_runtime_seconds),
+            preprocessing_kind=resolved_preprocessing_kind,
             tuning_search_space_id=effective_tuning_space_id,
             tuning_search_space_version=effective_tuning_space_version,
             tuning_inner_cv_scheme=effective_tuning_inner_cv_scheme,
@@ -1582,7 +1585,10 @@ def _build_parser() -> argparse.ArgumentParser:
         "--model",
         required=True,
         choices=[*MODEL_NAMES, "all"],
-        help="Model to evaluate.",
+        help=(
+            "Model to evaluate. 'all' runs the conservative default batch "
+            "(ridge, logreg, linearsvc) and excludes exploratory-only models."
+        ),
     )
     parser.add_argument(
         "--cv",
@@ -1767,7 +1773,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 
-    models = list(MODEL_NAMES) if args.model == "all" else [args.model]
+    models = list(DEFAULT_BATCH_MODEL_NAMES) if args.model == "all" else [args.model]
     subgroup_dimensions = list(args.subgroup_dimension) if list(args.subgroup_dimension) else None
     results: list[dict[str, Any]] = []
     run_batch: list[dict[str, Any]] = []

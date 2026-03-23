@@ -18,6 +18,16 @@ from Thesis_ML.experiments.backends.torch_ridge import (
     TORCH_RIDGE_BACKEND_ID,
     make_torch_ridge_estimator,
 )
+from Thesis_ML.experiments.backends.xgboost_cpu import (
+    XGBOOST_CPU_BACKEND_ID,
+    make_xgboost_cpu_estimator,
+    xgboost_cpu_support_status,
+)
+from Thesis_ML.experiments.backends.xgboost_gpu import (
+    XGBOOST_GPU_BACKEND_ID,
+    make_xgboost_gpu_estimator,
+    xgboost_gpu_support_status,
+)
 from Thesis_ML.experiments.compute_policy import ResolvedComputePolicy
 
 
@@ -27,17 +37,18 @@ def _unsupported_backend_message(
     effective_backend_family: str,
 ) -> str:
     return (
-        "Unsupported backend resolution for PR 4: "
+        "Unsupported backend resolution: "
         f"model='{model_name}', effective_backend_family='{effective_backend_family}'. "
-        "Supported backend families are: 'sklearn_cpu' for all models and "
-        "'torch_gpu' for ridge/logreg only."
+        "Supported backend families are: "
+        "'sklearn_cpu' (cpu_reference + xgboost_cpu) and "
+        "'torch_gpu' (torch ridge/logreg + xgboost_gpu)."
     )
 
 
 def _unsupported_torch_gpu_model_message(model_name: str) -> str:
     return (
-        "Unsupported torch_gpu backend request for PR 4: "
-        f"model='{model_name}'. Only ridge and logreg are implemented for torch_gpu."
+        "Unsupported torch_gpu backend request: "
+        f"model='{model_name}'. Supported models: ridge, logreg, xgboost."
     )
 
 
@@ -49,6 +60,15 @@ def resolve_backend_support(
     effective_backend_family = effective_backend_family_for_resolution(compute_policy)
 
     if effective_backend_family == "sklearn_cpu":
+        if normalized_model_name == "xgboost":
+            supported, reason = xgboost_cpu_support_status()
+            return BackendSupport(
+                model_name=normalized_model_name,
+                effective_backend_family=effective_backend_family,
+                supported=bool(supported),
+                backend_id=(XGBOOST_CPU_BACKEND_ID if supported else None),
+                reason=(None if supported else str(reason or "xgboost_cpu_backend_unavailable")),
+            )
         try:
             resolve_cpu_reference_constructor(normalized_model_name)
         except ValueError as exc:
@@ -69,6 +89,20 @@ def resolve_backend_support(
         )
 
     if effective_backend_family == "torch_gpu":
+        if normalized_model_name == "xgboost":
+            gpu_device_id = (
+                int(compute_policy.gpu_device_id)
+                if compute_policy is not None and compute_policy.gpu_device_id is not None
+                else None
+            )
+            supported, reason = xgboost_gpu_support_status(gpu_device_id=gpu_device_id)
+            return BackendSupport(
+                model_name=normalized_model_name,
+                effective_backend_family=effective_backend_family,
+                supported=bool(supported),
+                backend_id=(XGBOOST_GPU_BACKEND_ID if supported else None),
+                reason=(None if supported else str(reason or "xgboost_gpu_backend_unavailable")),
+            )
         if normalized_model_name not in {"ridge", "logreg"}:
             return BackendSupport(
                 model_name=normalized_model_name,
@@ -117,6 +151,14 @@ def resolve_backend_constructor(
 
     if support.backend_id == CPU_REFERENCE_BACKEND_ID:
         constructor = resolve_cpu_reference_constructor(support.model_name)
+    elif support.backend_id == XGBOOST_CPU_BACKEND_ID:
+
+        def constructor(*, seed: int, class_weight_policy: str = "none"):
+            return make_xgboost_cpu_estimator(
+                seed=seed,
+                class_weight_policy=class_weight_policy,
+            )
+
     elif support.backend_id == TORCH_RIDGE_BACKEND_ID:
         if compute_policy is None or compute_policy.gpu_device_id is None:
             raise ValueError(
@@ -139,6 +181,20 @@ def resolve_backend_constructor(
 
         def constructor(*, seed: int, class_weight_policy: str = "none"):
             return make_torch_logreg_estimator(
+                seed=seed,
+                class_weight_policy=class_weight_policy,
+                gpu_device_id=int(compute_policy.gpu_device_id),
+                deterministic_compute=bool(compute_policy.deterministic_compute),
+            )
+
+    elif support.backend_id == XGBOOST_GPU_BACKEND_ID:
+        if compute_policy is None or compute_policy.gpu_device_id is None:
+            raise ValueError(
+                "xgboost_gpu backend resolution requires compute_policy with a resolved gpu_device_id."
+            )
+
+        def constructor(*, seed: int, class_weight_policy: str = "none"):
+            return make_xgboost_gpu_estimator(
                 seed=seed,
                 class_weight_policy=class_weight_policy,
                 gpu_device_id=int(compute_policy.gpu_device_id),

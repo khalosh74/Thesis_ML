@@ -10,7 +10,10 @@ from Thesis_ML.experiments.backend_registry import (
     resolve_backend_constructor,
     resolve_backend_support,
 )
-from Thesis_ML.experiments.backends.cpu_reference import build_cpu_reference_pipeline
+from Thesis_ML.experiments.backends.cpu_reference import (
+    CPU_REFERENCE_MODEL_CONSTRUCTORS,
+    build_cpu_reference_pipeline,
+)
 from Thesis_ML.experiments.backends.torch_logreg import (
     TORCH_LOGREG_BACKEND_ID,
     TorchLogisticRegression,
@@ -19,11 +22,13 @@ from Thesis_ML.experiments.backends.torch_ridge import (
     TORCH_RIDGE_BACKEND_ID,
     TorchRidgeClassifier,
 )
+from Thesis_ML.experiments.backends.xgboost_cpu import XGBOOST_CPU_BACKEND_ID
+from Thesis_ML.experiments.backends.xgboost_gpu import XGBOOST_GPU_BACKEND_ID
 from Thesis_ML.experiments.compute_policy import (
     CPU_REFERENCE_BACKEND_STACK_ID,
     ResolvedComputePolicy,
 )
-from Thesis_ML.experiments.model_factory import ALL_MODEL_NAMES, build_pipeline, make_model
+from Thesis_ML.experiments.model_factory import build_pipeline, make_model
 
 
 def _resolved_cpu_policy(
@@ -220,9 +225,9 @@ def test_torch_backend_requests_for_unsupported_models_fail_clearly(model_name: 
     assert support.supported is False
     assert support.backend_id is None
     assert support.reason is not None
-    assert "Only ridge and logreg are implemented for torch_gpu" in support.reason
+    assert "Supported models: ridge, logreg, xgboost." in support.reason
 
-    with pytest.raises(ValueError, match="Only ridge and logreg are implemented for torch_gpu"):
+    with pytest.raises(ValueError, match="Supported models: ridge, logreg, xgboost."):
         resolve_backend_constructor(model_name, compute_policy)
 
 
@@ -230,7 +235,7 @@ def test_cpu_reference_pipeline_preserves_expected_behavior_contracts() -> None:
     x_matrix, labels = _toy_dataset()
     compute_policy = _resolved_cpu_policy()
 
-    for model_name in ALL_MODEL_NAMES:
+    for model_name in sorted(CPU_REFERENCE_MODEL_CONSTRUCTORS):
         pipeline_via_registry = build_pipeline(
             model_name=model_name,
             seed=19,
@@ -277,3 +282,103 @@ def test_cpu_reference_pipeline_preserves_expected_behavior_contracts() -> None:
             assert np.asarray(fitted_model.intercept_).shape == np.asarray(
                 pipeline_cpu_reference.named_steps["model"].intercept_
             ).shape
+
+
+def test_xgboost_cpu_support_resolution_unavailable_reports_reason(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "Thesis_ML.experiments.backend_registry.xgboost_cpu_support_status",
+        lambda: (False, "xgboost_missing_for_test"),
+    )
+    support = resolve_backend_support("xgboost", _resolved_cpu_policy())
+    assert support.supported is False
+    assert support.backend_id is None
+    assert support.reason == "xgboost_missing_for_test"
+
+
+def test_xgboost_cpu_resolution_and_constructor_when_available(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _SentinelEstimator:
+        def __init__(self, *, seed: int, class_weight_policy: str) -> None:
+            self.seed = int(seed)
+            self.class_weight_policy = str(class_weight_policy)
+
+    monkeypatch.setattr(
+        "Thesis_ML.experiments.backend_registry.xgboost_cpu_support_status",
+        lambda: (True, None),
+    )
+    monkeypatch.setattr(
+        "Thesis_ML.experiments.backend_registry.make_xgboost_cpu_estimator",
+        lambda *, seed, class_weight_policy: _SentinelEstimator(
+            seed=int(seed),
+            class_weight_policy=str(class_weight_policy),
+        ),
+    )
+
+    resolution = resolve_backend_constructor("xgboost", _resolved_cpu_policy())
+    estimator = resolution.build_estimator(seed=23, class_weight_policy="none")
+    assert resolution.backend_id == XGBOOST_CPU_BACKEND_ID
+    assert resolution.effective_backend_family == "sklearn_cpu"
+    assert isinstance(estimator, _SentinelEstimator)
+    assert estimator.seed == 23
+    assert estimator.class_weight_policy == "none"
+
+
+def test_xgboost_gpu_resolution_and_constructor_when_available(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _SentinelEstimator:
+        def __init__(
+            self,
+            *,
+            seed: int,
+            class_weight_policy: str,
+            gpu_device_id: int,
+            deterministic_compute: bool,
+        ) -> None:
+            self.seed = int(seed)
+            self.class_weight_policy = str(class_weight_policy)
+            self.gpu_device_id = int(gpu_device_id)
+            self.deterministic_compute = bool(deterministic_compute)
+
+    monkeypatch.setattr(
+        "Thesis_ML.experiments.backend_registry.xgboost_gpu_support_status",
+        lambda *, gpu_device_id: (True, None),
+    )
+    monkeypatch.setattr(
+        "Thesis_ML.experiments.backend_registry.make_xgboost_gpu_estimator",
+        lambda *, seed, class_weight_policy, gpu_device_id, deterministic_compute: _SentinelEstimator(
+            seed=int(seed),
+            class_weight_policy=str(class_weight_policy),
+            gpu_device_id=int(gpu_device_id),
+            deterministic_compute=bool(deterministic_compute),
+        ),
+    )
+
+    resolution = resolve_backend_constructor("xgboost", _resolved_torch_policy())
+    estimator = resolution.build_estimator(seed=31, class_weight_policy="none")
+    assert resolution.backend_id == XGBOOST_GPU_BACKEND_ID
+    assert resolution.effective_backend_family == "torch_gpu"
+    assert isinstance(estimator, _SentinelEstimator)
+    assert estimator.seed == 31
+    assert estimator.class_weight_policy == "none"
+    assert estimator.gpu_device_id == 0
+    assert estimator.deterministic_compute is True
+
+
+def test_xgboost_gpu_support_resolution_unavailable_reports_reason(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "Thesis_ML.experiments.backend_registry.xgboost_gpu_support_status",
+        lambda *, gpu_device_id: (False, "xgboost_gpu_missing_for_test"),
+    )
+    support = resolve_backend_support("xgboost", _resolved_torch_policy())
+    assert support.supported is False
+    assert support.backend_id is None
+    assert support.reason == "xgboost_gpu_missing_for_test"
+
+    with pytest.raises(ValueError, match="xgboost_gpu_missing_for_test"):
+        resolve_backend_constructor("xgboost", _resolved_torch_policy())

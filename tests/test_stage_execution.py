@@ -106,6 +106,32 @@ def test_stage_execution_bridge_honors_actual_estimator_backend_for_compute_stag
     assert assignments_by_stage["evaluation"].backend_family == "torch_gpu"
 
 
+def test_stage_execution_bridge_honors_xgboost_backend_family_for_compute_stages() -> None:
+    compute_policy = resolve_compute_policy(
+        framework_mode=FrameworkMode.EXPLORATORY,
+        hardware_mode="gpu_only",
+        deterministic_compute=False,
+        allow_backend_fallback=True,
+        capability_snapshot=None,
+    )
+    stage_result = build_stage_execution_result(
+        compute_policy=compute_policy,
+        planned_sections=["model_fit", "interpretability", "evaluation"],
+        executed_sections=["model_fit", "interpretability", "evaluation"],
+        reused_sections=[],
+        tuning_enabled=True,
+        n_permutations=8,
+        actual_estimator_backend_family="xgboost_gpu",
+        reporting_status="planned",
+    )
+
+    assignments_by_stage = {row.stage: row for row in stage_result.assignments}
+    assert assignments_by_stage["model_fit"].backend_family == "xgboost_gpu"
+    assert assignments_by_stage["tuning"].backend_family == "xgboost_gpu"
+    assert assignments_by_stage["permutation"].backend_family == "xgboost_gpu"
+    assert assignments_by_stage["model_fit"].compute_lane == "gpu"
+
+
 def test_stage_execution_payload_is_backward_safe_optional_metadata() -> None:
     assert stage_execution_payload(None) is None
 

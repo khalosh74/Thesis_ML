@@ -15,6 +15,7 @@ Exploratory mode (`thesisml-run-experiment`):
 - default reports root: `outputs/reports/exploratory/`
 - metadata: `framework_mode=exploratory`, `canonical_run=false`
 - science-affecting CLI flags are allowed
+- exploratory-only model families (for example `xgboost`) are allowed only here
 
 Locked comparison mode (`thesisml-run-comparison`):
 - purpose: predeclared method-lock comparisons from registered specs
@@ -27,6 +28,7 @@ Confirmatory mode (`thesisml-run-protocol`):
 - default reports root: `outputs/reports/confirmatory/`
 - metadata: `framework_mode=confirmatory`, `canonical_run=true`
 - science-affecting settings come only from canonical protocol JSON
+- exploratory-only models are rejected in protocol validation
 
 ## Exploratory command
 

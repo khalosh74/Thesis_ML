@@ -73,6 +73,12 @@ Optional extra for Optuna-backed search mode:
 python -m uv sync --frozen --extra dev --extra optuna
 ```
 
+Optional extra for exploratory XGBoost model-family support:
+
+```powershell
+python -m uv sync --frozen --extra dev --extra xgboost
+```
+
 ## Bootstrap commands (clean machine)
 
 You can run the scripts:
@@ -476,9 +482,11 @@ Mode-level manifests:
 
 Edit `src/Thesis_ML/experiments/model_factory.py`:
 - Add a new case in `make_model`.
-- Keep preprocessing/model composition inside `build_pipeline` so transforms are fit only on
-  training folds.
+- Keep model-specific preprocessing/model composition inside `build_pipeline` so transforms are
+  fit only on training folds.
 - Add the model name to `MODEL_NAMES`.
+- If the model is exploratory-only, keep it out of official-path admission checks in
+  `protocols/models.py` and `comparisons/models.py`.
 - Keep output schema unchanged (`metrics.json`, `fold_metrics.csv`, `predictions.csv`) for
   comparability.
 

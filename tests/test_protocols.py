@@ -108,6 +108,30 @@ def test_load_canonical_protocol_validates() -> None:
     }
 
 
+def test_protocol_validation_rejects_exploratory_only_model_in_model_policy(
+    tmp_path: Path,
+) -> None:
+    payload = json.loads(_canonical_protocol_path().read_text(encoding="utf-8"))
+    payload["model_policy"]["models"] = ["xgboost"]
+    protocol_path = tmp_path / "invalid_protocol_xgboost_model_policy.json"
+    protocol_path.write_text(f"{json.dumps(payload, indent=2)}\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="exploratory-only"):
+        load_protocol(protocol_path)
+
+
+def test_protocol_validation_rejects_exploratory_only_model_in_suite_override(
+    tmp_path: Path,
+) -> None:
+    payload = json.loads(_canonical_protocol_path().read_text(encoding="utf-8"))
+    payload["official_run_suites"][0]["models"] = ["xgboost"]
+    protocol_path = tmp_path / "invalid_protocol_xgboost_suite_override.json"
+    protocol_path.write_text(f"{json.dumps(payload, indent=2)}\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="exploratory-only"):
+        load_protocol(protocol_path)
+
+
 def test_load_confirmatory_freeze_protocol_validates_and_adapts() -> None:
     protocol = load_protocol(_confirmatory_freeze_protocol_path())
     assert protocol.protocol_schema_version == "thesis-protocol-v1"
