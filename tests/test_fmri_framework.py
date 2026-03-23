@@ -1351,12 +1351,21 @@ def test_within_subject_interpretability_rejects_unsupported_model(
     index_csv = tmp_path / "dataset_index.csv"
     build_dataset_index(data_root=data_root, out_csv=index_csv)
 
-    def _dummy_model(*_args: object, **_kwargs: object) -> DummyClassifier:
-        return DummyClassifier(strategy="most_frequent")
+    from sklearn.pipeline import Pipeline
+    from sklearn.preprocessing import StandardScaler
+    from sklearn.dummy import DummyClassifier
+
+    def _dummy_pipeline(*_args: object, **_kwargs: object) -> Pipeline:
+        return Pipeline(
+            steps=[
+                ("scaler", StandardScaler()),
+                ("model", DummyClassifier(strategy="most_frequent")),
+            ]
+        )
 
     module = importlib.import_module("Thesis_ML.experiments.run_experiment")
-    monkeypatch.setattr(module, "_make_model", _dummy_model)
-
+    monkeypatch.setattr(module, "_build_pipeline", _dummy_pipeline)
+    
     with pytest.raises(
         ValueError,
         match="Interpretability export requires a fitted linear model with a 'coef_' attribute.",

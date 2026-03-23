@@ -248,7 +248,7 @@ def test_confirmatory_preflight_rejects_locked_model_drift_for_non_control_runs(
             permutation_metric_name="balanced_accuracy",
             methodology_policy_name="fixed_baselines_only",
             class_weight_policy="none",
-            model="elasticnet",
+            model="linearsvc",
             tuning_enabled=False,
             tuning_search_space_id=None,
             tuning_search_space_version=None,
