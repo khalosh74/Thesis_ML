@@ -14,7 +14,7 @@ NOISE_PATTERNS = (
     "dist/",
     ".mypy_cache/",
 )
-SKIP_TOP_LEVEL = {".venv", ".venv-uv", "venv", "Data", "data"}
+SKIP_TOP_LEVEL = {".venv", ".venv-uv", ".venv-gpu "venv", "Data", "data"}
 REQUIRED_GOVERNANCE_FILES = (
     "LICENSE",
     "CITATION.cff",

@@ -14,7 +14,7 @@
         "charliermarsh.ruff"
       ],
       "settings": {
-        "python.defaultInterpreterPath": "/workspace/.venv/bin/python",
+        "python.defaultInterpreterPath": "/workspace/.venv-gpu/bin/python",
         "python.testing.pytestEnabled": true
       }
     }
