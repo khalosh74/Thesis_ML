@@ -6,6 +6,7 @@ from pathlib import Path
 import nibabel as nib
 import numpy as np
 import pandas as pd
+import pytest
 
 from Thesis_ML.artifacts.registry import (
     ARTIFACT_TYPE_EXPERIMENT_REPORT,
@@ -145,17 +146,23 @@ def test_dataset_selection_binary_valence_like_drops_neutral(tmp_path: Path) -> 
     )
     index_df.to_csv(index_csv, index=False)
 
-    selected = dataset_selection(
-        DatasetSelectionInput(
+    selection_output = dataset_selection(
+    DatasetSelectionInput(
             index_csv=index_csv,
             target_column="binary_valence_like",
             cv_mode="within_subject_loso_session",
             subject="sub-001",
         )
-    ).selected_index_df
+    )
+    selected = selection_output.selected_index_df
+    audit_df = selection_output.target_derivation_audit_df
+    
 
     assert set(selected["sample_id"].astype(str).tolist()) == {"s1", "s2"}
     assert set(selected["binary_valence_like"].astype(str).tolist()) == {"negative", "positive"}
+    assert int(len(audit_df)) == 1
+    assert audit_df.iloc[0]["sample_id"] == "s3"
+    assert audit_df.iloc[0]["drop_category"] == "intended_target_exclusion"
 
 
 def test_run_experiment_registers_section_boundary_artifacts(tmp_path: Path) -> None:
@@ -620,3 +627,76 @@ def test_model_fit_emits_fold_progress_events(tmp_path: Path) -> None:
     assert fold_events
     assert any("starting outer fold" in event.message for event in fold_events)
     assert any("finished outer fold" in event.message for event in fold_events)
+
+
+def test_dataset_selection_rejects_unsupported_emotion_for_coarse_affect(
+    tmp_path: Path,
+) -> None:
+    index_csv = tmp_path / "dataset_index.csv"
+    index_df = pd.DataFrame(
+        [
+            {
+                "sample_id": "s1",
+                "subject": "sub-001",
+                "session": "ses-01",
+                "task": "passive",
+                "modality": "audio",
+                "emotion": "joy",
+            },
+            {
+                "sample_id": "s2",
+                "subject": "sub-001",
+                "session": "ses-02",
+                "task": "passive",
+                "modality": "video",
+                "emotion": "happiness",
+            },
+        ]
+    )
+    index_df.to_csv(index_csv, index=False)
+
+    with pytest.raises(ValueError, match="unsupported or missing source labels"):
+        dataset_selection(
+            DatasetSelectionInput(
+                index_csv=index_csv,
+                target_column="coarse_affect",
+                cv_mode="within_subject_loso_session",
+                subject="sub-001",
+            )
+        )
+
+def test_dataset_selection_rejects_unsupported_upstream_emotion_for_binary_valence_like(
+    tmp_path: Path,
+) -> None:
+    index_csv = tmp_path / "dataset_index.csv"
+    index_df = pd.DataFrame(
+        [
+            {
+                "sample_id": "s1",
+                "subject": "sub-001",
+                "session": "ses-01",
+                "task": "passive",
+                "modality": "audio",
+                "emotion": "joy",
+            },
+            {
+                "sample_id": "s2",
+                "subject": "sub-001",
+                "session": "ses-02",
+                "task": "passive",
+                "modality": "video",
+                "emotion": "happiness",
+            },
+        ]
+    )
+    index_df.to_csv(index_csv, index=False)
+
+    with pytest.raises(ValueError, match="unsupported or missing source labels"):
+        dataset_selection(
+            DatasetSelectionInput(
+                index_csv=index_csv,
+                target_column="binary_valence_like",
+                cv_mode="within_subject_loso_session",
+                subject="sub-001",
+            )
+        )

@@ -10,7 +10,13 @@ from Thesis_ML.artifacts.registry import (
     compute_config_hash,
     register_artifact,
 )
-from Thesis_ML.data.affect_labels import with_binary_valence_like, with_coarse_affect
+from Thesis_ML.data.affect_labels import (
+    blocking_target_derivation_audit_rows,
+    build_target_derivation_audit,
+    summarize_target_derivation_audit,
+    with_binary_valence_like,
+    with_coarse_affect,
+)
 from Thesis_ML.experiments.section_models import (
     DatasetSelectionInput,
     DatasetSelectionOutput,
@@ -72,6 +78,22 @@ def dataset_selection(section_input: DatasetSelectionInput) -> DatasetSelectionO
                 "No samples found for frozen_cross_person_transfer after subject filtering."
             )
 
+    target_derivation_audit_df = build_target_derivation_audit(
+        index_df,
+        target_column=section_input.target_column,
+    )
+    blocking_target_audit_df = blocking_target_derivation_audit_rows(target_derivation_audit_df)
+
+    if not blocking_target_audit_df.empty:
+        summary = summarize_target_derivation_audit(blocking_target_audit_df)
+        raise ValueError(
+            "Dataset selection found unsupported or missing source labels for derived target "
+            f"'{section_input.target_column}'. "
+            f"n_rows={summary['n_rows']}, "
+            f"by_category={summary['by_category']}, "
+            f"sample_ids_head={summary['sample_ids_head']}"
+        )
+
     index_df = index_df.dropna(subset=[section_input.target_column]).copy()
     index_df[section_input.target_column] = index_df[section_input.target_column].astype(str)
     if index_df.empty:
@@ -84,7 +106,10 @@ def dataset_selection(section_input: DatasetSelectionInput) -> DatasetSelectionO
         if str(section_input.test_subject) not in subjects_after_target:
             raise ValueError(f"No samples found for test_subject '{section_input.test_subject}'.")
 
-    return DatasetSelectionOutput(selected_index_df=index_df)
+    return DatasetSelectionOutput(
+        selected_index_df=index_df,
+        target_derivation_audit_df=target_derivation_audit_df,
+    )
 
 
 def feature_cache_build(section_input: FeatureCacheBuildInput) -> FeatureCacheBuildOutput:

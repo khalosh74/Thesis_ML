@@ -50,6 +50,7 @@ class DatasetSelectionInput(_SectionModel):
 
 class DatasetSelectionOutput(_SectionModel):
     selected_index_df: pd.DataFrame
+    target_derivation_audit_df: pd.DataFrame = Field(default_factory=pd.DataFrame)
 
 
 class FeatureCacheBuildInput(_SectionModel):

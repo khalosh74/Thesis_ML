@@ -100,6 +100,7 @@ def evaluate_official_data_policy(
     filter_task: str | None,
     filter_modality: str | None,
     official_context: dict[str, Any],
+    target_derivation_audit_df: pd.DataFrame | None = None,
 ) -> dict[str, Any]:
     policy_payload = official_context.get("data_policy")
     if isinstance(policy_payload, dict):
@@ -110,6 +111,50 @@ def evaluate_official_data_policy(
 
     warnings_list: list[dict[str, Any]] = []
     blocking_list: list[dict[str, Any]] = []
+
+    if target_derivation_audit_df is None:
+        target_derivation_audit_df = pd.DataFrame()
+
+    target_derivation_audit_rows = (
+        target_derivation_audit_df.to_dict(orient="records")
+        if not target_derivation_audit_df.empty
+        else []
+    )
+
+    target_derivation_summary: dict[str, Any] = {
+        "n_rows": int(len(target_derivation_audit_df)),
+        "by_category": {},
+    }
+    if not target_derivation_audit_df.empty and "drop_category" in target_derivation_audit_df.columns:
+        counts = (
+            target_derivation_audit_df["drop_category"]
+            .astype(str)
+            .value_counts(dropna=False)
+            .sort_index()
+            .to_dict()
+        )
+        target_derivation_summary["by_category"] = {
+            str(key): int(value) for key, value in counts.items()
+        }
+
+    intended_exclusion_count = int(
+        (
+            target_derivation_audit_df["drop_category"].astype(str) == "intended_target_exclusion"
+        ).sum()
+    ) if not target_derivation_audit_df.empty and "drop_category" in target_derivation_audit_df.columns else 0
+
+    if intended_exclusion_count > 0:
+        warnings_list.append(
+            _issue(
+                code="target_derivation_intended_exclusion",
+                severity="warning",
+                message="Rows were intentionally excluded during derived-target construction.",
+                details={
+                    "target_column": target_column,
+                    "count": intended_exclusion_count,
+                },
+            )
+        )
 
     required_columns = set(_BASE_REQUIRED_INDEX_COLUMNS) | {target_column}
     required_columns.update(str(value) for value in data_policy.required_index_columns)
@@ -588,6 +633,8 @@ def evaluate_official_data_policy(
         "blocking_issues": blocking_list,
         "warning_issues": warnings_list,
         "required_columns": sorted(required_columns),
+        "target_derivation_summary": target_derivation_summary,
+        "target_derivation_audit_rows": target_derivation_audit_rows,
     }
 
 
@@ -663,6 +710,8 @@ def write_official_data_artifacts(
     external_dataset_card_path = report_dir / "external_dataset_card.json"
     external_dataset_summary_path = report_dir / "external_dataset_summary.json"
     external_validation_compatibility_path = report_dir / "external_validation_compatibility.json"
+    target_derivation_audit_json_path = report_dir / "target_derivation_audit.json"
+    target_derivation_audit_csv_path = report_dir / "target_derivation_audit.csv"
 
     dataset_summary = dict(assessment.get("dataset_summary", {}))
     dataset_summary_json_path.write_text(
@@ -681,12 +730,23 @@ def write_official_data_artifacts(
         missingness_csv_path,
         index=False,
     )
+    
     leakage_payload = dict(assessment.get("leakage_audit", {}))
     leakage_audit_path.write_text(f"{json.dumps(leakage_payload, indent=2)}\n", encoding="utf-8")
     quality_payload = dict(assessment.get("data_quality_report", {}))
     data_quality_report_path.write_text(
         f"{json.dumps(quality_payload, indent=2)}\n",
         encoding="utf-8",
+    )
+
+    target_derivation_rows = list(assessment.get("target_derivation_audit_rows", []))
+    target_derivation_audit_json_path.write_text(
+        f"{json.dumps(target_derivation_rows, indent=2)}\n",
+        encoding="utf-8",
+    )
+    pd.DataFrame(target_derivation_rows).to_csv(
+        target_derivation_audit_csv_path,
+        index=False,
     )
 
     external_dataset_card = dict(assessment.get("external_dataset_card", {}))
@@ -763,6 +823,8 @@ def write_official_data_artifacts(
         "external_validation_compatibility_json": str(
             external_validation_compatibility_path.resolve()
         ),
+        "target_derivation_audit_json": str(target_derivation_audit_json_path.resolve()),
+        "target_derivation_audit_csv": str(target_derivation_audit_csv_path.resolve()),
     }
     return {
         "data_policy_effective": data_policy_effective,

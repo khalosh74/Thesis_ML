@@ -160,6 +160,25 @@ def test_write_official_data_artifacts_creates_expected_files(tmp_path: Path) ->
         filter_task=None,
         filter_modality=None,
         official_context={},
+        target_derivation_audit_df=pd.DataFrame(
+            [
+                {
+                    "sample_id": "s3",
+                    "subject": "sub-001",
+                    "session": "ses-03",
+                    "task": "passive",
+                    "modality": "audio",
+                    "emotion": "neutral",
+                    "coarse_affect": "neutral",
+                    "binary_valence_like": pd.NA,
+                    "target_column": "binary_valence_like",
+                    "source_column": "coarse_affect",
+                    "source_value": "neutral",
+                    "drop_category": "intended_target_exclusion",
+                    "drop_reason": "coarse_affect='neutral' is intentionally excluded from binary_valence_like.",
+                }
+            ]
+        ),
     )
 
     report_dir = tmp_path / "report"
@@ -194,3 +213,5 @@ def test_write_official_data_artifacts_creates_expected_files(tmp_path: Path) ->
     assert (report_dir / "missingness_report.csv").exists()
     assert (report_dir / "leakage_audit.json").exists()
     assert (report_dir / "external_validation_compatibility.json").exists()
+    assert (report_dir / "target_derivation_audit.json").exists()
+    assert (report_dir / "target_derivation_audit.csv").exists()

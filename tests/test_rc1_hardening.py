@@ -376,3 +376,69 @@ def test_run_experiment_failure_writes_structured_status(
     assert status["error_type"] == "RuntimeError"
     assert status["failure_stage"] == "runtime"
     assert "stage_timings_seconds" in status
+
+def test_confirmatory_preflight_rejects_unsupported_target_derivation_labels(
+    tmp_path: Path,
+) -> None:
+    index_csv = tmp_path / "dataset_index.csv"
+    _write_index(
+        index_csv,
+        [
+            {
+                "sample_id": "s1",
+                "subject": "sub-001",
+                "session": "ses-01",
+                "task": "passive",
+                "modality": "audio",
+                "beta_path": "b1.nii",
+                "mask_path": "m1.nii",
+                "regressor_label": "run-1_passive_joy_audio",
+                "emotion": "joy",
+            },
+            {
+                "sample_id": "s2",
+                "subject": "sub-001",
+                "session": "ses-02",
+                "task": "passive",
+                "modality": "audio",
+                "beta_path": "b2.nii",
+                "mask_path": "m1.nii",
+                "regressor_label": "run-1_passive_happiness_audio",
+                "emotion": "happiness",
+            },
+        ],
+    )
+
+    with pytest.raises(
+        OfficialContractValidationError,
+        match="unsupported or missing source labels",
+    ):
+        validate_official_preflight(
+            framework_mode=FrameworkMode.CONFIRMATORY,
+            index_csv=index_csv,
+            data_root=tmp_path,
+            cache_dir=tmp_path / "cache",
+            target_column="coarse_affect",
+            cv_mode="within_subject_loso_session",
+            subject="sub-001",
+            train_subject=None,
+            test_subject=None,
+            filter_task=None,
+            filter_modality=None,
+            n_permutations=10,
+            primary_metric_name="balanced_accuracy",
+            permutation_metric_name="balanced_accuracy",
+            methodology_policy_name="fixed_baselines_only",
+            class_weight_policy="none",
+            model="ridge",
+            tuning_enabled=False,
+            tuning_search_space_id=None,
+            tuning_search_space_version=None,
+            tuning_inner_group_field=None,
+            subgroup_reporting_enabled=False,
+            subgroup_dimensions=[],
+            subgroup_min_samples_per_group=1,
+            subgroup_min_classes_per_group=1,
+            subgroup_report_small_groups=False,
+            official_context=_confirmatory_lock_context(),
+        )

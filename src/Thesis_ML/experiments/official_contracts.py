@@ -8,7 +8,12 @@ import pandas as pd
 
 from Thesis_ML.config.framework_mode import FrameworkMode
 from Thesis_ML.config.metric_policy import validate_metric_name
-from Thesis_ML.data.affect_labels import with_coarse_affect
+from Thesis_ML.data.affect_labels import (
+    blocking_target_derivation_audit_rows,
+    build_target_derivation_audit,
+    summarize_target_derivation_audit,
+    with_coarse_affect,
+)
 from Thesis_ML.experiments.data_reporting import evaluate_official_data_policy
 from Thesis_ML.experiments.errors import (
     OfficialArtifactContractError,
@@ -202,6 +207,24 @@ def validate_official_preflight(
         selected = selected[
             selected["subject"].astype(str).isin({str(train_subject), str(test_subject)})
         ].copy()
+
+    target_derivation_audit_df = build_target_derivation_audit(
+        selected,
+        target_column=target_column,
+    )
+    blocking_target_audit_df = blocking_target_derivation_audit_rows(target_derivation_audit_df)
+
+    if not blocking_target_audit_df.empty:
+        summary = summarize_target_derivation_audit(blocking_target_audit_df)
+        raise OfficialContractValidationError(
+            "Official run has unsupported or missing source labels for a derived target.",
+            details={
+                "target_column": target_column,
+                "n_problem_rows": summary["n_rows"],
+                "by_category": summary["by_category"],
+                "sample_ids_head": summary["sample_ids_head"],
+            },
+        )
 
     selected = selected.dropna(subset=[target_column]).copy()
     selected[target_column] = selected[target_column].astype(str)
@@ -586,6 +609,7 @@ def validate_official_preflight(
         filter_task=filter_task,
         filter_modality=filter_modality,
         official_context=official_context,
+        target_derivation_audit_df=target_derivation_audit_df,
     )
     blocking_issues = list(data_assessment.get("blocking_issues", []))
     if blocking_issues:
