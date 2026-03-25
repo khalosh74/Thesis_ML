@@ -1181,7 +1181,7 @@ def test_spatial_compatibility_mismatch_fails_with_clear_error(
     assert expected_reason in reasons
 
 
-def test_spatial_compatibility_missing_legacy_signature_fails_explicitly(tmp_path: Path) -> None:
+def test_spatial_compatibility_missing_legacy_signature_rebuilds_automatically(tmp_path: Path,) -> None:
     data_root = tmp_path / "Data"
     labels = [
         "run-1_passive_anger_audio",
@@ -1205,6 +1205,7 @@ def test_spatial_compatibility_missing_legacy_signature_fails_explicitly(tmp_pat
     )
     manifest = pd.read_csv(manifest_path)
     legacy_npz_path = Path(manifest.loc[0, "cache_path"])
+
     with np.load(legacy_npz_path, allow_pickle=False) as npz:
         legacy_payload = {
             "X": np.asarray(npz["X"], dtype=np.float32),
@@ -1212,32 +1213,36 @@ def test_spatial_compatibility_missing_legacy_signature_fails_explicitly(tmp_pat
             "metadata_json": np.asarray(npz["metadata_json"]),
             "group_id": np.asarray(npz["group_id"]),
         }
+
     np.savez_compressed(legacy_npz_path, **legacy_payload)
 
     reports_root = tmp_path / "reports" / "experiments"
-    run_id = "legacy_missing_spatial_signature"
-    with pytest.raises(
-        ValueError,
-        match="missing spatial signature metadata",
-    ):
-        run_experiment(
-            index_csv=index_csv,
-            data_root=data_root,
-            cache_dir=cache_dir,
-            target="coarse_affect",
-            model="ridge",
-            cv="within_subject_loso_session",
-            subject="sub-001",
-            run_id=run_id,
-            reports_root=reports_root,
-        )
+    run_id = "legacy_missing_spatial_signature_rebuild"
 
-    spatial_report_path = reports_root / run_id / "spatial_compatibility_report.json"
-    assert spatial_report_path.exists()
-    report = json.loads(spatial_report_path.read_text(encoding="utf-8"))
-    assert report["passed"] is False
-    reasons = json.dumps(report["mismatches"])
-    assert "missing spatial signature metadata" in reasons
+    run_experiment(
+        index_csv=index_csv,
+        data_root=data_root,
+        cache_dir=cache_dir,
+        target="coarse_affect",
+        model="ridge",
+        cv="within_subject_loso_session",
+        subject="sub-001",
+        run_id=run_id,
+        reports_root=reports_root,
+    )
+
+    rebuilt_manifest = pd.read_csv(cache_dir / "cache_manifest.csv")
+    assert len(rebuilt_manifest) >= 1
+    rebuilt_row = rebuilt_manifest.loc[
+        rebuilt_manifest["cache_path"] == str(legacy_npz_path.resolve())
+    ].iloc[0]
+
+    assert bool(rebuilt_row["skipped_existing"]) is False
+    assert rebuilt_row["cache_rebuild_reason"] == "missing_spatial_signature"
+
+    with np.load(legacy_npz_path, allow_pickle=False) as npz:
+        assert "spatial_signature_json" in npz.files
+        assert "cache_input_signature_json" in npz.files
 
 
 @pytest.mark.parametrize("model_name", ["ridge", "linearsvc", "logreg"])
@@ -1455,3 +1460,160 @@ def test_feature_cache_rejects_mixed_mask_paths_even_when_cache_exists(tmp_path:
     message = str(exc.value)
     assert "contains multiple resolved mask paths" in message
     assert "sub-001_ses-01_BAS2" in message
+
+def test_feature_cache_skips_existing_when_current_signature_matches(tmp_path: Path) -> None:
+    data_root = tmp_path / "Data"
+    _create_glm_session(
+        glm_dir=data_root / "sub-001" / "ses-01" / "BAS2",
+        labels=[
+            "run-1_passive_anger_audio",
+            "run-1_passive_happiness_video",
+        ],
+    )
+
+    out_csv = tmp_path / "dataset_index.csv"
+    build_dataset_index(data_root=data_root, out_csv=out_csv)
+
+    cache_dir = tmp_path / "cache"
+    build_feature_cache(index_csv=out_csv, data_root=data_root, cache_dir=cache_dir)
+    manifest_path = build_feature_cache(index_csv=out_csv, data_root=data_root, cache_dir=cache_dir)
+
+    manifest = pd.read_csv(manifest_path)
+    assert len(manifest) == 1
+    assert bool(manifest.loc[0, "skipped_existing"]) is True
+    assert manifest.loc[0, "cache_validation_status"] == "matched_current_signature"
+    assert pd.isna(manifest.loc[0, "cache_rebuild_reason"])
+    assert pd.notna(manifest.loc[0, "cache_input_signature_sha256"])
+
+def test_feature_cache_rebuilds_when_beta_path_changes_in_index(tmp_path: Path) -> None:
+    data_root = tmp_path / "Data"
+    glm_dir = data_root / "sub-001" / "ses-01" / "BAS2"
+    _create_glm_session(
+        glm_dir=glm_dir,
+        labels=[
+            "run-1_passive_anger_audio",
+            "run-1_passive_happiness_video",
+        ],
+    )
+
+    out_csv = tmp_path / "dataset_index.csv"
+    build_dataset_index(data_root=data_root, out_csv=out_csv)
+
+    cache_dir = tmp_path / "cache"
+    first_manifest_path = build_feature_cache(index_csv=out_csv, data_root=data_root, cache_dir=cache_dir)
+    first_manifest = pd.read_csv(first_manifest_path)
+    npz_path = Path(first_manifest.loc[0, "cache_path"])
+
+    with np.load(npz_path, allow_pickle=False) as npz:
+        first_x = np.asarray(npz["X"], dtype=np.float32).copy()
+
+    alt_beta_path = glm_dir / "beta_9999.nii"
+    _write_nifti(
+        alt_beta_path,
+        np.full((3, 3, 3), fill_value=11.0, dtype=np.float32),
+        affine=np.eye(4, dtype=np.float64),
+    )
+
+    index_df = pd.read_csv(out_csv)
+    index_df.loc[1, "beta_path"] = alt_beta_path.relative_to(data_root).as_posix()
+    index_df.to_csv(out_csv, index=False)
+
+    second_manifest_path = build_feature_cache(
+        index_csv=out_csv,
+        data_root=data_root,
+        cache_dir=cache_dir,
+    )
+    second_manifest = pd.read_csv(second_manifest_path)
+
+    assert len(second_manifest) == 1
+    assert bool(second_manifest.loc[0, "skipped_existing"]) is False
+    assert second_manifest.loc[0, "cache_rebuild_reason"] == "cache_input_signature_mismatch"
+
+    with np.load(npz_path, allow_pickle=False) as npz:
+        second_x = np.asarray(npz["X"], dtype=np.float32)
+
+    assert second_x.shape == first_x.shape
+    assert not np.array_equal(first_x, second_x)
+    assert np.allclose(second_x[1], 11.0)
+
+def test_feature_cache_rebuilds_when_group_row_count_changes(tmp_path: Path) -> None:
+    data_root = tmp_path / "Data"
+    glm_dir = data_root / "sub-001" / "ses-01" / "BAS2"
+    _create_glm_session(
+        glm_dir=glm_dir,
+        labels=[
+            "run-1_passive_anger_audio",
+            "run-1_passive_happiness_video",
+        ],
+    )
+
+    out_csv = tmp_path / "dataset_index.csv"
+    build_dataset_index(data_root=data_root, out_csv=out_csv)
+
+    cache_dir = tmp_path / "cache"
+    first_manifest_path = build_feature_cache(index_csv=out_csv, data_root=data_root, cache_dir=cache_dir)
+    first_manifest = pd.read_csv(first_manifest_path)
+    npz_path = Path(first_manifest.loc[0, "cache_path"])
+
+    index_df = pd.read_csv(out_csv)
+    index_df = index_df.iloc[[0]].copy()
+    index_df.to_csv(out_csv, index=False)
+
+    second_manifest_path = build_feature_cache(
+        index_csv=out_csv,
+        data_root=data_root,
+        cache_dir=cache_dir,
+    )
+    second_manifest = pd.read_csv(second_manifest_path)
+
+    assert len(second_manifest) == 1
+    assert bool(second_manifest.loc[0, "skipped_existing"]) is False
+    assert second_manifest.loc[0, "cache_rebuild_reason"] == "cache_input_signature_mismatch"
+    assert int(second_manifest.loc[0, "n_samples"]) == 1
+
+    with np.load(npz_path, allow_pickle=False) as npz:
+        x_matrix = np.asarray(npz["X"], dtype=np.float32)
+
+    assert x_matrix.shape[0] == 1
+
+def test_feature_cache_rebuilds_legacy_cache_missing_input_signature(tmp_path: Path) -> None:
+    data_root = tmp_path / "Data"
+    _create_glm_session(
+        glm_dir=data_root / "sub-001" / "ses-01" / "BAS2",
+        labels=[
+            "run-1_passive_anger_audio",
+            "run-1_passive_happiness_video",
+        ],
+    )
+
+    out_csv = tmp_path / "dataset_index.csv"
+    build_dataset_index(data_root=data_root, out_csv=out_csv)
+
+    cache_dir = tmp_path / "cache"
+    manifest_path = build_feature_cache(index_csv=out_csv, data_root=data_root, cache_dir=cache_dir)
+    manifest = pd.read_csv(manifest_path)
+    npz_path = Path(manifest.loc[0, "cache_path"])
+
+    with np.load(npz_path, allow_pickle=False) as npz:
+        legacy_payload = {
+            "X": np.asarray(npz["X"]),
+            "y": np.asarray(npz["y"]),
+            "metadata_json": np.asarray(npz["metadata_json"]),
+            "group_id": np.asarray(npz["group_id"]),
+            "spatial_signature_json": np.asarray(npz["spatial_signature_json"]),
+        }
+
+    np.savez_compressed(npz_path, **legacy_payload)
+
+    rebuilt_manifest_path = build_feature_cache(
+        index_csv=out_csv,
+        data_root=data_root,
+        cache_dir=cache_dir,
+    )
+    rebuilt_manifest = pd.read_csv(rebuilt_manifest_path)
+
+    assert bool(rebuilt_manifest.loc[0, "skipped_existing"]) is False
+    assert rebuilt_manifest.loc[0, "cache_rebuild_reason"] == "missing_cache_input_signature"
+
+    with np.load(npz_path, allow_pickle=False) as npz:
+        assert "cache_input_signature_json" in npz.files

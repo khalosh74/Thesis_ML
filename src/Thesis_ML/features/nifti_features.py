@@ -19,6 +19,7 @@ from Thesis_ML.data.affect_labels import with_coarse_affect
 
 LOGGER = logging.getLogger(__name__)
 _SPATIAL_SIGNATURE_VERSION = 1
+_CACHE_INPUT_SIGNATURE_VERSION = 1
 _BETA_MASK_AFFINE_ATOL = 1e-5
 
 _REQUIRED_INDEX_COLUMNS = {
@@ -48,6 +49,8 @@ def _mask_sha256(mask_bool: np.ndarray) -> str:
     mask_bytes = np.ascontiguousarray(mask_bool.astype(np.uint8, copy=False)).tobytes()
     return hashlib.sha256(mask_bytes).hexdigest()
 
+def _canonical_json(value: Any) -> str:
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False)
 
 def _build_spatial_signature(
     mask_img: nib.spatialimages.SpatialImage, mask_bool: np.ndarray
@@ -172,27 +175,80 @@ def _signature_manifest_fields(signature: dict[str, Any] | None) -> dict[str, ob
         "mask_sha256": str(signature["mask_sha256"]) if "mask_sha256" in signature else pd.NA,
     }
 
+def _cache_input_manifest_fields(signature: dict[str, Any] | None) -> dict[str, object]:
+    if not signature:
+        return {
+            "cache_input_signature_version": pd.NA,
+            "cache_input_row_count": pd.NA,
+            "cache_input_signature_sha256": pd.NA,
+        }
 
-def _read_existing_cache_signature(cache_path: Path) -> dict[str, Any] | None:
+    return {
+        "cache_input_signature_version": int(
+            signature.get("signature_version", _CACHE_INPUT_SIGNATURE_VERSION)
+        ),
+        "cache_input_row_count": int(signature.get("n_rows", 0)),
+        "cache_input_signature_sha256": str(signature.get("sha256", "")),
+    }
+
+def _read_existing_cache_metadata(
+    cache_path: Path,
+) -> dict[str, dict[str, Any] | None]:
     try:
         with np.load(cache_path, allow_pickle=False) as npz:
-            signature: dict[str, Any] | None = None
+            spatial_signature: dict[str, Any] | None = None
             if "spatial_signature_json" in npz.files:
                 raw = str(npz["spatial_signature_json"].item())
                 parsed = json.loads(raw)
                 if isinstance(parsed, dict):
-                    signature = parsed
-            if signature is None:
-                return None
-            if "X" in npz.files:
+                    spatial_signature = parsed
+
+            if spatial_signature is not None and "X" in npz.files:
                 x_matrix = np.asarray(npz["X"])
                 if x_matrix.ndim == 2:
-                    signature = dict(signature)
-                    signature["feature_count"] = int(x_matrix.shape[1])
-            return signature
+                    spatial_signature = dict(spatial_signature)
+                    spatial_signature["feature_count"] = int(x_matrix.shape[1])
+
+            cache_input_signature: dict[str, Any] | None = None
+            if "cache_input_signature_json" in npz.files:
+                raw = str(npz["cache_input_signature_json"].item())
+                parsed = json.loads(raw)
+                if isinstance(parsed, dict):
+                    cache_input_signature = parsed
+
+            return {
+                "spatial_signature": spatial_signature,
+                "cache_input_signature": cache_input_signature,
+            }
     except Exception as exc:
-        LOGGER.warning("Failed to read existing cache signature from %s: %s", cache_path, exc)
-        return None
+        LOGGER.warning("Failed to read existing cache metadata from %s: %s", cache_path, exc)
+        return {
+            "spatial_signature": None,
+            "cache_input_signature": None,
+        }
+
+def _validate_existing_cache_against_current(
+    *,
+    existing_spatial_signature: dict[str, Any] | None,
+    existing_cache_input_signature: dict[str, Any] | None,
+    current_spatial_signature: dict[str, Any],
+    current_cache_input_signature: dict[str, Any],
+) -> tuple[bool, str]:
+    if existing_spatial_signature is None:
+        return False, "missing_spatial_signature"
+
+    if existing_cache_input_signature is None:
+        return False, "missing_cache_input_signature"
+
+    if _canonical_json(existing_spatial_signature) != _canonical_json(current_spatial_signature):
+        return False, "spatial_signature_mismatch"
+
+    existing_sha = str(existing_cache_input_signature.get("sha256", "")).strip()
+    current_sha = str(current_cache_input_signature.get("sha256", "")).strip()
+    if existing_sha != current_sha:
+        return False, "cache_input_signature_mismatch"
+
+    return True, "matched_current_signature"
 
 def _resolve_single_group_mask_path(
     *,
@@ -229,6 +285,67 @@ def _resolve_single_group_mask_path(
         )
 
     return Path(unique_mask_paths[0])
+
+def _build_cache_input_signature(
+    *,
+    group_rows: pd.DataFrame,
+    data_root: Path,
+    group_id: Any,
+    mask_path: Path,
+    spatial_signature: dict[str, Any],
+) -> dict[str, Any]:
+    if group_rows.empty:
+        raise ValueError(f"Cannot build cache input signature for empty group '{group_id}'.")
+
+    signature_rows: list[dict[str, str]] = []
+    seen_sample_ids: set[str] = set()
+
+    for _, row in group_rows.iterrows():
+        sample_id = str(row["sample_id"]).strip()
+        if not sample_id:
+            raise ValueError(
+                f"Feature cache group '{group_id}' contains a blank sample_id."
+            )
+        if sample_id in seen_sample_ids:
+            raise ValueError(
+                f"Feature cache group '{group_id}' contains duplicate sample_id '{sample_id}'."
+            )
+        seen_sample_ids.add(sample_id)
+
+        beta_path_text = str(row["beta_path"]).strip()
+        if not beta_path_text:
+            raise ValueError(
+                f"Feature cache group '{group_id}' contains a blank beta_path."
+            )
+
+        resolved_beta_path = _resolve_data_path(beta_path_text, data_root=data_root).resolve()
+        signature_rows.append(
+            {
+                "sample_id": sample_id,
+                "beta_path": str(resolved_beta_path),
+            }
+        )
+
+    signature_rows = sorted(signature_rows, key=lambda item: item["sample_id"])
+
+    payload = {
+        "signature_version": _CACHE_INPUT_SIGNATURE_VERSION,
+        "group_id": str(group_id),
+        "n_rows": int(len(signature_rows)),
+        "resolved_mask_path": str(mask_path.resolve()),
+        "mask_sha256": str(spatial_signature["mask_sha256"]),
+        "image_shape": list(spatial_signature["image_shape"]),
+        "affine": spatial_signature["affine"],
+        "rows": signature_rows,
+    }
+
+    canonical_payload = _canonical_json(payload)
+    return {
+        "signature_version": _CACHE_INPUT_SIGNATURE_VERSION,
+        "n_rows": int(len(signature_rows)),
+        "sha256": hashlib.sha256(canonical_payload.encode("utf-8")).hexdigest(),
+        "payload": payload,
+    }
 
 def build_feature_cache(
     index_csv: Path,
@@ -282,27 +399,55 @@ def build_feature_cache(
             data_root=data_root,
             group_id=group_id,
         )
-
-        if target_path.exists() and not force:
-            existing_signature = _read_existing_cache_signature(target_path)
-            manifest_rows.append(
-                {
-                    "group_id": str(group_id),
-                    "cache_path": str(target_path.resolve()),
-                    "n_samples": int(len(group_rows)),
-                    "n_voxels": (
-                        int(existing_signature["feature_count"])
-                        if existing_signature and "feature_count" in existing_signature
-                        else pd.NA
-                    ),
-                    "skipped_existing": True,
-                    **_signature_manifest_fields(existing_signature),
-                }
-            )
-            continue
-
+        
         mask_bool, spatial_signature = _load_mask_and_signature(mask_path)
         mask_affine = np.asarray(spatial_signature["affine"], dtype=np.float64)
+
+        current_cache_input_signature = _build_cache_input_signature(
+            group_rows=group_rows,
+            data_root=data_root,
+            group_id=group_id,
+            mask_path=mask_path,
+            spatial_signature=spatial_signature,
+        )
+
+        cache_validation_status = "new_cache"
+        cache_rebuild_reason: object = pd.NA
+
+        if target_path.exists() and not force:
+            existing_metadata = _read_existing_cache_metadata(target_path)
+            existing_spatial_signature = existing_metadata["spatial_signature"]
+            existing_cache_input_signature = existing_metadata["cache_input_signature"]
+
+            cache_matches, validation_reason = _validate_existing_cache_against_current(
+                existing_spatial_signature=existing_spatial_signature,
+                existing_cache_input_signature=existing_cache_input_signature,
+                current_spatial_signature=spatial_signature,
+                current_cache_input_signature=current_cache_input_signature,
+            )
+
+            if cache_matches:
+                manifest_rows.append(
+                    {
+                        "group_id": str(group_id),
+                        "cache_path": str(target_path.resolve()),
+                        "n_samples": int(len(group_rows)),
+                        "n_voxels": int(spatial_signature["feature_count"]),
+                        "skipped_existing": True,
+                        "cache_validation_status": validation_reason,
+                        "cache_rebuild_reason": pd.NA,
+                        **_signature_manifest_fields(existing_spatial_signature),
+                        **_cache_input_manifest_fields(existing_cache_input_signature),
+                    }
+                )
+                continue
+
+            cache_validation_status = "rebuild_after_validation"
+            cache_rebuild_reason = validation_reason
+
+        elif target_path.exists() and force:
+            cache_validation_status = "force_rebuild"
+            cache_rebuild_reason = "force_rebuild"
 
         vectors: list[np.ndarray] = []
         for _, row in group_rows.iterrows():
@@ -338,7 +483,8 @@ def build_feature_cache(
             y=y,
             metadata_json=np.array(metadata_json),
             group_id=np.array(str(group_id)),
-            spatial_signature_json=np.array(json.dumps(spatial_signature, sort_keys=True)),
+            spatial_signature_json=np.array(_canonical_json(spatial_signature)),
+            cache_input_signature_json=np.array(_canonical_json(current_cache_input_signature)),
         )
 
         manifest_rows.append(
@@ -348,7 +494,10 @@ def build_feature_cache(
                 "n_samples": int(x_matrix.shape[0]),
                 "n_voxels": int(x_matrix.shape[1]),
                 "skipped_existing": False,
+                "cache_validation_status": cache_validation_status,
+                "cache_rebuild_reason": cache_rebuild_reason,
                 **_signature_manifest_fields(spatial_signature),
+                **_cache_input_manifest_fields(current_cache_input_signature),
             }
         )
 
