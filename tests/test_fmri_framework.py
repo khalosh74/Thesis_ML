@@ -1381,3 +1381,77 @@ def test_within_subject_interpretability_rejects_unsupported_model(
             run_id="unsupported_model_interpretability",
             reports_root=tmp_path / "reports" / "experiments",
         )
+
+def test_feature_cache_rejects_mixed_mask_paths_within_group(tmp_path: Path) -> None:
+    data_root = tmp_path / "Data"
+    glm_dir = data_root / "sub-001" / "ses-01" / "BAS2"
+    _create_glm_session(
+        glm_dir=glm_dir,
+        labels=[
+            "run-1_passive_anger_audio",
+            "run-1_passive_happiness_video",
+        ],
+    )
+
+    alt_mask = glm_dir / "mask_alt.nii"
+    alt_mask_data = np.zeros((3, 3, 3), dtype=np.float32)
+    alt_mask_data[:-1, 1:, 1:] = 1.0
+    _write_nifti(alt_mask, alt_mask_data)
+
+    out_csv = tmp_path / "dataset_index.csv"
+    build_dataset_index(data_root=data_root, out_csv=out_csv)
+
+    dataset = pd.read_csv(out_csv)
+    assert len(dataset) == 2
+    dataset.loc[1, "mask_path"] = alt_mask.relative_to(data_root).as_posix()
+    dataset.to_csv(out_csv, index=False)
+
+    with pytest.raises(ValueError) as exc:
+        build_feature_cache(
+            index_csv=out_csv,
+            data_root=data_root,
+            cache_dir=tmp_path / "cache",
+        )
+
+    message = str(exc.value)
+    assert "contains multiple resolved mask paths" in message
+    assert "sub-001_ses-01_BAS2" in message
+    assert "mask.nii" in message
+    assert "mask_alt.nii" in message
+
+def test_feature_cache_rejects_mixed_mask_paths_even_when_cache_exists(tmp_path: Path) -> None:
+    data_root = tmp_path / "Data"
+    glm_dir = data_root / "sub-001" / "ses-01" / "BAS2"
+    _create_glm_session(
+        glm_dir=glm_dir,
+        labels=[
+            "run-1_passive_anger_audio",
+            "run-1_passive_happiness_video",
+        ],
+    )
+
+    out_csv = tmp_path / "dataset_index.csv"
+    build_dataset_index(data_root=data_root, out_csv=out_csv)
+
+    cache_dir = tmp_path / "cache"
+    build_feature_cache(index_csv=out_csv, data_root=data_root, cache_dir=cache_dir)
+
+    alt_mask = glm_dir / "mask_alt.nii"
+    alt_mask_data = np.zeros((3, 3, 3), dtype=np.float32)
+    alt_mask_data[:-1, 1:, 1:] = 1.0
+    _write_nifti(alt_mask, alt_mask_data)
+
+    dataset = pd.read_csv(out_csv)
+    dataset.loc[1, "mask_path"] = alt_mask.relative_to(data_root).as_posix()
+    dataset.to_csv(out_csv, index=False)
+
+    with pytest.raises(ValueError) as exc:
+        build_feature_cache(
+            index_csv=out_csv,
+            data_root=data_root,
+            cache_dir=cache_dir,
+        )
+
+    message = str(exc.value)
+    assert "contains multiple resolved mask paths" in message
+    assert "sub-001_ses-01_BAS2" in message

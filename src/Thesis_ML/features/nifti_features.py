@@ -194,6 +194,41 @@ def _read_existing_cache_signature(cache_path: Path) -> dict[str, Any] | None:
         LOGGER.warning("Failed to read existing cache signature from %s: %s", cache_path, exc)
         return None
 
+def _resolve_single_group_mask_path(
+    *,
+    group_rows: pd.DataFrame,
+    data_root: Path,
+    group_id: Any,
+) -> Path:
+    if group_rows.empty:
+        raise ValueError(f"Feature cache group '{group_id}' is empty.")
+
+    resolved_mask_paths: list[str] = []
+    for raw_mask_path in group_rows["mask_path"].tolist():
+        if pd.isna(raw_mask_path):
+            raise ValueError(
+                f"Feature cache group '{group_id}' contains a null mask_path."
+            )
+
+        mask_text = str(raw_mask_path).strip()
+        if not mask_text:
+            raise ValueError(
+                f"Feature cache group '{group_id}' contains a blank mask_path."
+            )
+
+        resolved_path = _resolve_data_path(mask_text, data_root=data_root).resolve()
+        resolved_mask_paths.append(str(resolved_path))
+
+    unique_mask_paths = sorted(set(resolved_mask_paths))
+    if len(unique_mask_paths) != 1:
+        raise ValueError(
+            "Feature cache group "
+            f"'{group_id}' contains multiple resolved mask paths; "
+            "expected exactly one mask per cache group. "
+            f"Found {len(unique_mask_paths)}: {unique_mask_paths}"
+        )
+
+    return Path(unique_mask_paths[0])
 
 def build_feature_cache(
     index_csv: Path,
@@ -241,6 +276,12 @@ def build_feature_cache(
         group_rows = group_rows.reset_index(drop=True)
         target_path = _cache_path_for_group(cache_dir, group_rows)
         target_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        mask_path = _resolve_single_group_mask_path(
+            group_rows=group_rows,
+            data_root=data_root,
+            group_id=group_id,
+        )
 
         if target_path.exists() and not force:
             existing_signature = _read_existing_cache_signature(target_path)
@@ -260,7 +301,6 @@ def build_feature_cache(
             )
             continue
 
-        mask_path = _resolve_data_path(str(group_rows.iloc[0]["mask_path"]), data_root=data_root)
         mask_bool, spatial_signature = _load_mask_and_signature(mask_path)
         mask_affine = np.asarray(spatial_signature["affine"], dtype=np.float64)
 
