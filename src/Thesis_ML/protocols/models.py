@@ -57,6 +57,7 @@ REQUIRED_PROTOCOL_ARTIFACTS = (
     "confidence_intervals.json",
     "metric_intervals.csv",
     "report_index.csv",
+    "claim_outcomes.json",
 )
 REQUIRED_RUN_ARTIFACTS_BASELINE = (
     "config.json",
@@ -132,6 +133,30 @@ class ModelSelectionStrategy(StrEnum):
 class SensitivityRole(StrEnum):
     OFFICIAL_SECONDARY_ANALYSES = "official_secondary_analyses"
     EXPLORATORY_ONLY = "exploratory_only"
+
+
+class ClaimRole(StrEnum):
+    PRIMARY = "primary"
+    SECONDARY = "secondary"
+    SUPPORTING = "supporting"
+
+
+class ClaimCategory(StrEnum):
+    WITHIN_PERSON_DECODING = "within_person_decoding"
+    CROSS_PERSON_TRANSFER = "cross_person_transfer"
+    INTERPRETABILITY_ROBUSTNESS = "interpretability_robustness"
+    CONTROL_EVIDENCE = "control_evidence"
+
+
+class ClaimDecisionRule(StrEnum):
+    DESCRIPTIVE_ONLY = "descriptive_only"
+    ABOVE_BASELINE_AND_PERMUTATION = "above_baseline_and_permutation"
+    SUPPORTING_EVIDENCE_ONLY = "supporting_evidence_only"
+
+
+class EstimandScope(StrEnum):
+    WITHIN_SUBJECT_LOSO_SESSION = "within_subject_loso_session"
+    FROZEN_CROSS_PERSON_TRANSFER = "frozen_cross_person_transfer"
 
 
 class TransferPair(_ProtocolModel):
@@ -410,6 +435,110 @@ class ArtifactContract(_ProtocolModel):
         return self
 
 
+class ClaimSpec(_ProtocolModel):
+    claim_id: str = Field(min_length=1)
+    title: str = Field(min_length=1)
+    description: str = Field(min_length=1)
+    role: ClaimRole
+    category: ClaimCategory
+    estimand_scope: EstimandScope
+    decision_metric: str
+    decision_rule: ClaimDecisionRule
+    suite_ids: list[str] = Field(min_length=1)
+    baseline_required: bool = False
+    permutation_required: bool = False
+    interpretation_limits: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _validate_claim(self) -> "ClaimSpec":
+        self.decision_metric = validate_metric_name(self.decision_metric)
+
+        if len(set(self.suite_ids)) != len(self.suite_ids):
+            raise ValueError("claim suite_ids must be unique")
+
+        if self.role == ClaimRole.PRIMARY:
+            if self.category != ClaimCategory.WITHIN_PERSON_DECODING:
+                raise ValueError("primary claim must use category='within_person_decoding'")
+            if self.estimand_scope != EstimandScope.WITHIN_SUBJECT_LOSO_SESSION:
+                raise ValueError(
+                    "primary claim must use estimand_scope='within_subject_loso_session'"
+                )
+
+        if self.category == ClaimCategory.CROSS_PERSON_TRANSFER:
+            if self.role == ClaimRole.PRIMARY:
+                raise ValueError("cross_person_transfer claim cannot be primary")
+            if self.estimand_scope != EstimandScope.FROZEN_CROSS_PERSON_TRANSFER:
+                raise ValueError(
+                    "cross_person_transfer claim must use estimand_scope='frozen_cross_person_transfer'"
+                )
+
+        if self.category == ClaimCategory.INTERPRETABILITY_ROBUSTNESS:
+            if self.role != ClaimRole.SUPPORTING:
+                raise ValueError("interpretability_robustness claim must be supporting")
+            if self.decision_rule != ClaimDecisionRule.SUPPORTING_EVIDENCE_ONLY:
+                raise ValueError(
+                    "interpretability_robustness claim must use decision_rule='supporting_evidence_only'"
+                )
+
+        if self.decision_rule == ClaimDecisionRule.ABOVE_BASELINE_AND_PERMUTATION:
+            if not self.baseline_required:
+                raise ValueError(
+                    "above_baseline_and_permutation claim must set baseline_required=true"
+                )
+            if not self.permutation_required:
+                raise ValueError(
+                    "above_baseline_and_permutation claim must set permutation_required=true"
+                )
+
+        if self.role == ClaimRole.SUPPORTING:
+            if self.decision_rule == ClaimDecisionRule.ABOVE_BASELINE_AND_PERMUTATION:
+                raise ValueError(
+                    "supporting claim cannot use decision_rule='above_baseline_and_permutation'"
+                )
+
+        if self.role != ClaimRole.PRIMARY and not self.interpretation_limits:
+            raise ValueError("non-primary claim must declare at least one interpretation limit")
+
+        return self
+
+
+class SuccessCriteria(_ProtocolModel):
+    primary_claim_id: str = Field(min_length=1)
+    require_dummy_baseline_outperformance: bool = True
+    require_permutation_pass: bool = True
+    permutation_alpha: float = 0.05
+    require_complete_primary_suite_evidence: bool = True
+    secondary_cannot_substitute_for_primary: bool = True
+    supporting_cannot_substitute_for_primary: bool = True
+    transfer_is_secondary_only: bool = True
+    interpretability_is_supporting_only: bool = True
+
+    @model_validator(mode="after")
+    def _validate_success_criteria(self) -> "SuccessCriteria":
+        if not (0.0 < float(self.permutation_alpha) <= 1.0):
+            raise ValueError("permutation_alpha must be in (0, 1]")
+
+        if self.transfer_is_secondary_only is not True:
+            raise ValueError("transfer_is_secondary_only must be true in this protocol version")
+
+        if self.interpretability_is_supporting_only is not True:
+            raise ValueError(
+                "interpretability_is_supporting_only must be true in this protocol version"
+            )
+
+        if self.secondary_cannot_substitute_for_primary is not True:
+            raise ValueError(
+                "secondary_cannot_substitute_for_primary must be true in this protocol version"
+            )
+
+        if self.supporting_cannot_substitute_for_primary is not True:
+            raise ValueError(
+                "supporting_cannot_substitute_for_primary must be true in this protocol version"
+            )
+
+        return self
+
+
 class SuiteSpec(_ProtocolModel):
     suite_id: str = Field(min_length=1)
     description: str = Field(min_length=1)
@@ -484,6 +613,8 @@ class ThesisProtocol(_ProtocolModel):
     description: str = Field(min_length=1)
     notes: str | None = None
     confirmatory_lock: dict[str, Any] | None = None
+    claims: list[ClaimSpec] = Field(min_length=1)
+    success_criteria: SuccessCriteria
     scientific_contract: ScientificContract
     split_policy: SplitPolicy
     model_policy: ModelPolicy
@@ -686,6 +817,129 @@ class ThesisProtocol(_ProtocolModel):
             raise ValueError(
                 "thesis_confirmatory_v1 requires confirmatory_lock metadata for hard-gate enforcement."
             )
+
+        claim_ids = [claim.claim_id for claim in self.claims]
+        if len(set(claim_ids)) != len(claim_ids):
+            raise ValueError("claims must have unique claim_id values")
+
+        claim_by_id = {claim.claim_id: claim for claim in self.claims}
+        suite_by_id = {suite.suite_id: suite for suite in self.official_run_suites}
+        suite_ids = set(suite_by_id.keys())
+
+        primary_claims = [claim for claim in self.claims if claim.role == ClaimRole.PRIMARY]
+        if len(primary_claims) != 1:
+            raise ValueError("protocol must declare exactly one primary claim")
+        primary_claim_id = self.success_criteria.primary_claim_id
+        if primary_claim_id not in claim_by_id:
+            raise ValueError("success_criteria.primary_claim_id must reference an existing claim")
+
+        primary_claim = claim_by_id[primary_claim_id]
+        if primary_claim.role != ClaimRole.PRIMARY:
+            raise ValueError("success_criteria.primary_claim_id must reference the primary claim")
+
+        if primary_claim.decision_metric != self.metric_policy.primary_metric:
+            raise ValueError(
+                "primary claim decision_metric must match metric_policy.primary_metric"
+            )
+
+        for suite in self.official_run_suites:
+            for claim_id in suite.claim_ids:
+                if claim_id not in claim_by_id:
+                    raise ValueError(
+                        f"suite '{suite.suite_id}' references unknown claim_id '{claim_id}'"
+                    )
+
+        for claim in self.claims:
+            for suite_id in claim.suite_ids:
+                if suite_id not in suite_ids:
+                    raise ValueError(
+                        f"claim '{claim.claim_id}' references unknown suite_id '{suite_id}'"
+                    )
+
+        for suite in self.official_run_suites:
+            for claim_id in suite.claim_ids:
+                claim = claim_by_id[claim_id]
+                if suite.suite_id not in claim.suite_ids:
+                    raise ValueError(
+                        f"suite '{suite.suite_id}' references claim '{claim_id}' but that claim does not reference the suite"
+                    )
+
+        for claim in self.claims:
+            for suite_id in claim.suite_ids:
+                suite = suite_by_id[suite_id]
+                if claim.claim_id not in suite.claim_ids:
+                    raise ValueError(
+                        f"claim '{claim.claim_id}' references suite '{suite_id}' but that suite does not reference the claim"
+                    )
+
+        for claim in self.claims:
+            for suite_id in claim.suite_ids:
+                suite = suite_by_id[suite_id]
+
+                if claim.estimand_scope == EstimandScope.WITHIN_SUBJECT_LOSO_SESSION:
+                    if suite.split_mode != "within_subject_loso_session":
+                        raise ValueError(
+                            f"claim '{claim.claim_id}' requires split_mode='within_subject_loso_session' but suite '{suite_id}' uses '{suite.split_mode}'"
+                        )
+
+                if claim.estimand_scope == EstimandScope.FROZEN_CROSS_PERSON_TRANSFER:
+                    if suite.split_mode != "frozen_cross_person_transfer":
+                        raise ValueError(
+                            f"claim '{claim.claim_id}' requires split_mode='frozen_cross_person_transfer' but suite '{suite_id}' uses '{suite.split_mode}'"
+                        )
+
+        for claim in self.claims:
+            for suite_id in claim.suite_ids:
+                suite = suite_by_id[suite_id]
+
+                if claim.role == ClaimRole.PRIMARY:
+                    if suite.suite_type != EvidenceRunRole.PRIMARY:
+                        raise ValueError(
+                            f"primary claim '{claim.claim_id}' must reference only PRIMARY suites"
+                        )
+
+                if claim.category == ClaimCategory.CROSS_PERSON_TRANSFER:
+                    if suite.suite_type == EvidenceRunRole.PRIMARY:
+                        raise ValueError(
+                            f"cross_person_transfer claim '{claim.claim_id}' cannot reference PRIMARY suites"
+                        )
+
+        if primary_claim.baseline_required:
+            if not self.control_policy.dummy_baseline.enabled:
+                raise ValueError(
+                    "primary claim requires dummy baseline but control_policy.dummy_baseline.enabled is false"
+                )
+
+        if primary_claim.permutation_required:
+            if not self.control_policy.permutation.enabled:
+                raise ValueError(
+                    "primary claim requires permutation but control_policy.permutation.enabled is false"
+                )
+
+        has_interpretability_claim = any(
+            claim.category == ClaimCategory.INTERPRETABILITY_ROBUSTNESS for claim in self.claims
+        )
+
+        if has_interpretability_claim and not self.interpretability_policy.enabled:
+            raise ValueError(
+                "interpretability claim declared but interpretability_policy.enabled is false"
+            )
+
+        if self.success_criteria.interpretability_is_supporting_only:
+            for claim in self.claims:
+                if claim.category == ClaimCategory.INTERPRETABILITY_ROBUSTNESS:
+                    if claim.role != ClaimRole.SUPPORTING:
+                        raise ValueError(
+                            "interpretability claim must be supporting when interpretability_is_supporting_only=true"
+                        )
+
+        if self.success_criteria.transfer_is_secondary_only:
+            for claim in self.claims:
+                if claim.category == ClaimCategory.CROSS_PERSON_TRANSFER:
+                    if claim.role == ClaimRole.PRIMARY:
+                        raise ValueError(
+                            "cross_person_transfer claim cannot be primary when transfer_is_secondary_only=true"
+                        )
 
         return self
 
@@ -1027,7 +1281,11 @@ class ProtocolRunResult(_ProtocolModel):
                         f"ProtocolRunResult.{field_name} must be null unless status is failed or timed_out."
                     )
         if normalized_status != RUN_STATUS_TIMED_OUT:
-            for field_name in ("timeout_seconds", "elapsed_seconds", "timeout_diagnostics_path"):
+            for field_name in (
+                "timeout_seconds",
+                "elapsed_seconds",
+                "timeout_diagnostics_path",
+            ):
                 if getattr(self, field_name) is not None:
                     raise ValueError(
                         f"ProtocolRunResult.{field_name} must be null unless status='timed_out'."

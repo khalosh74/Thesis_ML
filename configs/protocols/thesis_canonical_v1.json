@@ -222,7 +222,8 @@
       "repeated_run_summary.json",
       "confidence_intervals.json",
       "metric_intervals.csv",
-      "report_index.csv"
+      "report_index.csv",
+      "claim_outcomes.json"
     ],
     "required_run_metadata_fields": [
       "framework_mode",
@@ -244,6 +245,73 @@
       "suite_id",
       "claim_ids"
     ]
+  },
+  "claims": [
+    {
+      "claim_id": "C01_primary_within_subject_generalization",
+      "title": "Primary within-subject generalization claim",
+      "description": "Within-subject held-out-session decoding is the primary confirmatory claim.",
+      "role": "primary",
+      "category": "within_person_decoding",
+      "estimand_scope": "within_subject_loso_session",
+      "decision_metric": "balanced_accuracy",
+      "decision_rule": "above_baseline_and_permutation",
+      "suite_ids": [
+        "primary_within_subject"
+      ],
+      "baseline_required": true,
+      "permutation_required": true,
+      "interpretation_limits": []
+    },
+    {
+      "claim_id": "C02_cross_person_transfer_directional",
+      "title": "Secondary cross-person transfer claim",
+      "description": "Cross-person transfer is secondary evidence and must not be treated as primary confirmatory evidence.",
+      "role": "secondary",
+      "category": "cross_person_transfer",
+      "estimand_scope": "frozen_cross_person_transfer",
+      "decision_metric": "balanced_accuracy",
+      "decision_rule": "descriptive_only",
+      "suite_ids": [
+        "secondary_cross_person_transfer"
+      ],
+      "baseline_required": false,
+      "permutation_required": false,
+      "interpretation_limits": [
+        "Does not substitute for the primary claim",
+        "Must not be interpreted as primary confirmatory evidence"
+      ]
+    },
+    {
+      "claim_id": "C03_primary_controls_dummy_and_permutation",
+      "title": "Primary controls evidence claim",
+      "description": "Dummy baseline and permutation testing support the validity of the primary confirmatory analysis.",
+      "role": "supporting",
+      "category": "control_evidence",
+      "estimand_scope": "within_subject_loso_session",
+      "decision_metric": "balanced_accuracy",
+      "decision_rule": "supporting_evidence_only",
+      "suite_ids": [
+        "primary_controls"
+      ],
+      "baseline_required": false,
+      "permutation_required": false,
+      "interpretation_limits": [
+        "Supports validity of the primary analysis",
+        "Does not substitute for the primary claim"
+      ]
+    }
+  ],
+  "success_criteria": {
+    "primary_claim_id": "C01_primary_within_subject_generalization",
+    "require_dummy_baseline_outperformance": true,
+    "require_permutation_pass": true,
+    "permutation_alpha": 0.05,
+    "require_complete_primary_suite_evidence": true,
+    "secondary_cannot_substitute_for_primary": true,
+    "supporting_cannot_substitute_for_primary": true,
+    "transfer_is_secondary_only": true,
+    "interpretability_is_supporting_only": true
   },
   "official_run_suites": [
     {

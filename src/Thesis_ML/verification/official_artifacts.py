@@ -379,9 +379,10 @@ def _verify_official_max_both_metadata(
             details={"config_lane": config_lane, "metrics_lane": metrics_lane},
         )
 
-    if bool(config_payload.get("deterministic_compute")) is not True or bool(
-        metrics_payload.get("deterministic_compute")
-    ) is not True:
+    if (
+        bool(config_payload.get("deterministic_compute")) is not True
+        or bool(metrics_payload.get("deterministic_compute")) is not True
+    ):
         _add_issue(
             issues,
             code="official_max_both_determinism_missing",
@@ -418,7 +419,10 @@ def _verify_official_max_both_metadata(
                 message="Official max_both GPU lane requires assigned_backend_family='torch_gpu'.",
                 path=report_dir,
             )
-        if config_payload.get("gpu_device_id") is None or metrics_payload.get("gpu_device_id") is None:
+        if (
+            config_payload.get("gpu_device_id") is None
+            or metrics_payload.get("gpu_device_id") is None
+        ):
             _add_issue(
                 issues,
                 code="official_max_both_gpu_device_missing",

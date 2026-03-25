@@ -308,6 +308,12 @@ def _write_confirmatory_output(root: Path) -> Path:
                     ],
                     "missing_checks": [],
                 },
+                "claim_outcomes_summary": {
+                    "primary_claim_id": "C01",
+                    "primary_claim_verdict": "supported",
+                    "n_claims": 1,
+                },
+                "claim_outcomes_path": "claim_outcomes.json",
                 "confirmatory_reporting_contract": {
                     "protocol_id": "thesis-canonical",
                     "protocol_version": "1.0.0",

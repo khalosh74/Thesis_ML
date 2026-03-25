@@ -501,6 +501,33 @@ def adapt_confirmatory_freeze_to_thesis_protocol(
             "suites": ([secondary_suite_id] if include_secondary else []),
         },
         "artifact_contract": ArtifactContract().model_dump(mode="json"),
+        "claims": [
+            {
+                "claim_id": "confirmatory_primary_claim",
+                "title": "Primary within-subject confirmatory claim",
+                "description": "Within-subject held-out-session decoding is the primary confirmatory claim.",
+                "role": "primary",
+                "category": "within_person_decoding",
+                "estimand_scope": "within_subject_loso_session",
+                "decision_metric": primary_metric,
+                "decision_rule": "above_baseline_and_permutation",
+                "suite_ids": [primary_suite_id],
+                "baseline_required": bool(controls.get("dummy_baseline", True)),
+                "permutation_required": bool(controls.get("permutation_test", True)),
+                "interpretation_limits": [],
+            }
+        ],
+        "success_criteria": {
+            "primary_claim_id": "confirmatory_primary_claim",
+            "require_dummy_baseline_outperformance": bool(controls.get("dummy_baseline", True)),
+            "require_permutation_pass": bool(controls.get("permutation_test", True)),
+            "permutation_alpha": float(confirmatory_lock["multiplicity_primary_alpha"]),
+            "require_complete_primary_suite_evidence": True,
+            "secondary_cannot_substitute_for_primary": True,
+            "supporting_cannot_substitute_for_primary": True,
+            "transfer_is_secondary_only": True,
+            "interpretability_is_supporting_only": True,
+        },
         "official_run_suites": [
             {
                 "suite_id": primary_suite_id,
@@ -521,6 +548,25 @@ def adapt_confirmatory_freeze_to_thesis_protocol(
     }
 
     if include_secondary:
+        adapted_payload["claims"].append(
+            {
+                "claim_id": "confirmatory_secondary_transfer_claim",
+                "title": "Secondary cross-person transfer claim",
+                "description": "Cross-person transfer is secondary evidence only.",
+                "role": "secondary",
+                "category": "cross_person_transfer",
+                "estimand_scope": "frozen_cross_person_transfer",
+                "decision_metric": primary_metric,
+                "decision_rule": "descriptive_only",
+                "suite_ids": [secondary_suite_id],
+                "baseline_required": False,
+                "permutation_required": False,
+                "interpretation_limits": [
+                    "Does not substitute for the primary claim",
+                    "Must not be interpreted as primary confirmatory evidence",
+                ],
+            }
+        )
         adapted_payload["official_run_suites"].append(
             {
                 "suite_id": secondary_suite_id,

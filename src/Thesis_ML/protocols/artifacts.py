@@ -9,6 +9,7 @@ import pandas as pd
 
 from Thesis_ML.config.framework_mode import FrameworkMode
 from Thesis_ML.config.metric_policy import resolve_effective_metric_policy
+from Thesis_ML.protocols.claim_evaluator import evaluate_claim_outcomes
 from Thesis_ML.experiments.evidence_statistics import (
     aggregate_repeated_runs,
     grouped_bootstrap_percentile_interval,
@@ -423,6 +424,7 @@ def _suite_summary(
     run_results: list[ProtocolRunResult],
     *,
     reporting_contract: dict[str, Any],
+    claim_outcomes: dict[str, Any],
 ) -> dict[str, Any]:
     metric_policy_effective = resolve_effective_metric_policy(
         primary_metric=compiled_manifest.metric_policy.primary_metric,
@@ -496,6 +498,14 @@ def _suite_summary(
         "confirmatory_reporting_contract": reporting_contract,
         "suite_status_counts": by_suite,
         "n_runs": int(len(run_results)),
+        "claim_outcomes_summary": {
+            "primary_claim_id": claim_outcomes.get("primary_claim_id"),
+            "primary_claim_verdict": claim_outcomes.get("primary_claim_verdict"),
+            "n_claims": len(claim_outcomes.get("claims", []))
+            if isinstance(claim_outcomes.get("claims"), list)
+            else 0,
+        },
+        "claim_outcomes_path": "claim_outcomes.json",
     }
 
 
@@ -727,6 +737,7 @@ def write_protocol_artifacts(
     protocol_dir = Path(output_dir)
     protocol_dir.mkdir(parents=True, exist_ok=True)
 
+    claim_outcomes_path = protocol_dir / "claim_outcomes.json"
     protocol_json_path = protocol_dir / "protocol.json"
     compiled_manifest_path = protocol_dir / "compiled_protocol_manifest.json"
     claim_map_path = protocol_dir / "claim_to_run_map.json"
@@ -767,6 +778,12 @@ def write_protocol_artifacts(
         deviation_log_payload,
         dry_run=dry_run,
     )
+    claim_outcomes_payload = evaluate_claim_outcomes(
+        protocol=protocol,
+        compiled_manifest=compiled_manifest,
+        run_results=run_results,
+        reporting_contract=reporting_contract,
+    )
     resolved_confirmatory_status = str(
         reporting_contract.get("deviations_from_protocol", {}).get(
             "confirmatory_status",
@@ -781,6 +798,7 @@ def write_protocol_artifacts(
             compiled_manifest,
             run_results,
             reporting_contract=reporting_contract,
+            claim_outcomes=claim_outcomes_payload,
         ),
     )
     _write_json(
@@ -795,6 +813,7 @@ def write_protocol_artifacts(
             stage_timings=stage_timings,
         ),
     )
+    _write_json(claim_outcomes_path, claim_outcomes_payload)
 
     report_rows = _report_index_rows(
         protocol,
@@ -837,4 +856,5 @@ def write_protocol_artifacts(
         "confidence_intervals": str(confidence_intervals_path.resolve()),
         "metric_intervals": str(metric_intervals_path.resolve()),
         "report_index": str(report_index_path.resolve()),
+        "claim_outcomes": str(claim_outcomes_path.resolve()),
     }
