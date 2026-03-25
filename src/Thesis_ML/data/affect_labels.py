@@ -182,8 +182,8 @@ def build_target_derivation_audit(
     dropped["source_column"] = "coarse_affect"
 
     source_values: list[object] = []
-    categories = []
-    reasons = []
+    categories: list[str] = []
+    reasons: list[str] = []
 
     for _, row in dropped.iterrows():
         coarse_value = row.get("coarse_affect", pd.NA)

@@ -5,7 +5,9 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
+import numpy as np
 
+from Thesis_ML.experiments.cv_split_plan import build_cv_split_plan
 from Thesis_ML.config.framework_mode import FrameworkMode
 from Thesis_ML.config.methodology import DataPolicy
 from Thesis_ML.data.affect_labels import with_coarse_affect
@@ -83,6 +85,117 @@ def _resolve_external_index_path(path_text: str, *, index_csv: Path) -> Path:
         return cwd_resolved
     return (index_csv.parent / candidate).resolve()
 
+
+def _build_exact_cv_split_audit(
+    *,
+    selected_index_df: pd.DataFrame,
+    target_column: str,
+    cv_mode: str,
+    subject: str | None,
+    train_subject: str | None,
+    test_subject: str | None,
+) -> dict[str, Any]:
+    split_plan = build_cv_split_plan(
+        metadata_df=selected_index_df,
+        target_column=target_column,
+        cv_mode=cv_mode,
+        subject=subject,
+        train_subject=train_subject,
+        test_subject=test_subject,
+        seed=0 if cv_mode == "record_random_split" else None,
+    )
+
+    n_rows = int(len(selected_index_df))
+    test_counts = np.zeros(n_rows, dtype=int)
+    fold_rows: list[dict[str, Any]] = []
+    global_failures: list[str] = []
+
+    for fold in split_plan.folds:
+        overlap_count = int(np.intersect1d(fold.train_idx, fold.test_idx).size)
+        test_counts[fold.test_idx] += 1
+
+        fold_failures: list[str] = []
+        if overlap_count > 0:
+            fold_failures.append("train_test_index_overlap")
+
+        if cv_mode == "within_subject_loso_session":
+            if fold.train_subjects != (str(subject),):
+                fold_failures.append("train_subject_mismatch")
+            if fold.test_subjects != (str(subject),):
+                fold_failures.append("test_subject_mismatch")
+            if len(fold.test_sessions) != 1:
+                fold_failures.append("expected_single_test_session")
+            if set(fold.train_sessions).intersection(set(fold.test_sessions)):
+                fold_failures.append("session_overlap")
+
+        elif cv_mode == "frozen_cross_person_transfer":
+            if fold.train_subjects != (str(train_subject),):
+                fold_failures.append("train_subject_mismatch")
+            if fold.test_subjects != (str(test_subject),):
+                fold_failures.append("test_subject_mismatch")
+            if set(fold.train_subjects).intersection(set(fold.test_subjects)):
+                fold_failures.append("subject_overlap")
+
+        elif cv_mode == "loso_session":
+            if set(fold.train_sessions).intersection(set(fold.test_sessions)):
+                fold_failures.append("session_overlap")
+
+        fold_rows.append(
+            {
+                "fold": int(fold.fold),
+                "status": "fail" if fold_failures else "pass",
+                "failure_codes": "|".join(fold_failures),
+                "train_sample_count": int(len(fold.train_idx)),
+                "test_sample_count": int(len(fold.test_idx)),
+                "train_subjects": "|".join(fold.train_subjects),
+                "test_subjects": "|".join(fold.test_subjects),
+                "train_sessions": "|".join(fold.train_sessions),
+                "test_sessions": "|".join(fold.test_sessions),
+                "train_test_index_overlap_count": overlap_count,
+            }
+        )
+        global_failures.extend(fold_failures)
+
+    if cv_mode == "frozen_cross_person_transfer":
+        expected_test_mask = (
+            selected_index_df["subject"].astype(str) == str(test_subject)
+        ).to_numpy(dtype=bool)
+    else:
+        expected_test_mask = np.ones(n_rows, dtype=bool)
+
+    missing_expected_test_rows = int(np.sum(expected_test_mask & (test_counts == 0)))
+    unexpected_test_rows = int(np.sum((~expected_test_mask) & (test_counts > 0)))
+    duplicate_test_coverage_rows = int(np.sum(test_counts > 1))
+
+    if missing_expected_test_rows > 0:
+        global_failures.append("missing_expected_test_rows")
+    if unexpected_test_rows > 0:
+        global_failures.append("unexpected_test_rows")
+    if duplicate_test_coverage_rows > 0:
+        global_failures.append("duplicate_test_coverage_rows")
+
+    if cv_mode == "within_subject_loso_session":
+        expected_n_folds = int(selected_index_df["session"].astype(str).nunique(dropna=False))
+    elif cv_mode == "frozen_cross_person_transfer":
+        expected_n_folds = 1
+    else:
+        expected_n_folds = int(len(split_plan.folds))
+
+    if int(len(split_plan.folds)) != int(expected_n_folds):
+        global_failures.append("unexpected_fold_count")
+
+    return {
+        "status": "fail" if global_failures else "pass",
+        "cv_mode": cv_mode,
+        "n_rows": n_rows,
+        "n_folds": int(len(split_plan.folds)),
+        "expected_n_folds": int(expected_n_folds),
+        "missing_expected_test_rows": missing_expected_test_rows,
+        "unexpected_test_rows": unexpected_test_rows,
+        "duplicate_test_coverage_rows": duplicate_test_coverage_rows,
+        "failure_codes": sorted(set(global_failures)),
+        "fold_rows": fold_rows,
+    }
 
 def evaluate_official_data_policy(
     *,
@@ -417,39 +530,70 @@ def evaluate_official_data_policy(
             )
         )
 
-    group_overlap_detected = False
-    if data_policy.leakage.fail_on_cv_group_overlap:
-        if cv_mode == "within_subject_loso_session":
-            n_sessions = int(selected_index_df["session"].astype(str).nunique(dropna=False))
-            group_overlap_detected = bool(n_sessions < 2)
-        elif cv_mode == "frozen_cross_person_transfer" and train_subject and test_subject:
-            scoped = selected_index_df.copy()
-            scoped["subject"] = scoped["subject"].astype(str)
-            train_sessions = set(
-                scoped.loc[scoped["subject"] == str(train_subject), "session"]
-                .astype(str)
-                .tolist()
-            )
-            test_sessions = set(
-                scoped.loc[scoped["subject"] == str(test_subject), "session"].astype(str).tolist()
-            )
-            group_overlap_detected = False if train_sessions and test_sessions else True
-    group_overlap_status = "fail" if group_overlap_detected else "pass"
+    try:
+        cv_split_audit = _build_exact_cv_split_audit(
+            selected_index_df=selected_index_df,
+            target_column=target_column,
+            cv_mode=cv_mode,
+            subject=subject,
+            train_subject=train_subject,
+            test_subject=test_subject,
+        )
+    except ValueError as exc:
+        cv_split_audit = {
+            "status": "fail",
+            "cv_mode": cv_mode,
+            "planner_error": str(exc),
+            "n_rows": int(len(selected_index_df)),
+            "n_folds": 0,
+            "expected_n_folds": 0,
+            "missing_expected_test_rows": int(len(selected_index_df)),
+            "unexpected_test_rows": 0,
+            "duplicate_test_coverage_rows": 0,
+            "failure_codes": ["split_planner_error"],
+            "fold_rows": [],
+        }
+
+    cv_split_status = (
+        "fail"
+        if cv_split_audit.get("status") == "fail" and data_policy.leakage.fail_on_cv_group_overlap
+        else "pass"
+    )
     leakage_checks.append(
         {
-            "check": "cv_group_overlap_guardrail",
-            "status": group_overlap_status,
-            "overlap_detected": bool(group_overlap_detected),
+            "check": "cv_split_plan_exact",
+            "status": cv_split_status,
             "blocking_policy": bool(data_policy.leakage.fail_on_cv_group_overlap),
+            "n_folds": int(cv_split_audit.get("n_folds", 0)),
+            "expected_n_folds": int(cv_split_audit.get("expected_n_folds", 0)),
+            "missing_expected_test_rows": int(cv_split_audit.get("missing_expected_test_rows", 0)),
+            "unexpected_test_rows": int(cv_split_audit.get("unexpected_test_rows", 0)),
+            "duplicate_test_coverage_rows": int(
+                cv_split_audit.get("duplicate_test_coverage_rows", 0)
+            ),
+            "failure_codes": list(cv_split_audit.get("failure_codes", [])),
         }
     )
-    if group_overlap_status == "fail":
+    if cv_split_status == "fail":
         blocking_list.append(
             _issue(
-                code="leakage_cv_group_overlap",
+                code="leakage_cv_split_plan_invalid",
                 severity="blocking",
-                message="CV group-overlap guardrail failed for selected subset.",
-                details={"cv_mode": cv_mode},
+                message="Exact CV split audit failed for selected subset.",
+                details={
+                    "cv_mode": cv_mode,
+                    "planner_error": cv_split_audit.get("planner_error"),
+                    "failure_codes": cv_split_audit.get("failure_codes", []),
+                    "n_folds": int(cv_split_audit.get("n_folds", 0)),
+                    "expected_n_folds": int(cv_split_audit.get("expected_n_folds", 0)),
+                    "missing_expected_test_rows": int(
+                        cv_split_audit.get("missing_expected_test_rows", 0)
+                    ),
+                    "unexpected_test_rows": int(cv_split_audit.get("unexpected_test_rows", 0)),
+                    "duplicate_test_coverage_rows": int(
+                        cv_split_audit.get("duplicate_test_coverage_rows", 0)
+                    ),
+                },
             )
         )
 
@@ -466,6 +610,7 @@ def evaluate_official_data_policy(
         "target_column": target_column,
         "verdict": leakage_verdict,
         "checks": leakage_checks,
+        "cv_split_audit": cv_split_audit,
     }
 
     external_card: dict[str, Any] = {
@@ -635,6 +780,8 @@ def evaluate_official_data_policy(
         "required_columns": sorted(required_columns),
         "target_derivation_summary": target_derivation_summary,
         "target_derivation_audit_rows": target_derivation_audit_rows,
+        "cv_split_audit": cv_split_audit,
+        "cv_split_audit_rows": list(cv_split_audit.get("fold_rows", [])),
     }
 
 
@@ -707,6 +854,8 @@ def write_official_data_artifacts(
     class_balance_csv_path = report_dir / "class_balance_report.csv"
     missingness_csv_path = report_dir / "missingness_report.csv"
     leakage_audit_path = report_dir / "leakage_audit.json"
+    cv_split_audit_json_path = report_dir / "cv_split_audit.json"
+    cv_split_audit_csv_path = report_dir / "cv_split_audit.csv"
     external_dataset_card_path = report_dir / "external_dataset_card.json"
     external_dataset_summary_path = report_dir / "external_dataset_summary.json"
     external_validation_compatibility_path = report_dir / "external_validation_compatibility.json"
@@ -733,6 +882,15 @@ def write_official_data_artifacts(
     
     leakage_payload = dict(assessment.get("leakage_audit", {}))
     leakage_audit_path.write_text(f"{json.dumps(leakage_payload, indent=2)}\n", encoding="utf-8")
+    cv_split_payload = dict(assessment.get("cv_split_audit", {}))
+    cv_split_audit_json_path.write_text(
+        f"{json.dumps(cv_split_payload, indent=2)}\n",
+        encoding="utf-8",
+    )
+    pd.DataFrame(list(assessment.get("cv_split_audit_rows", []))).to_csv(
+        cv_split_audit_csv_path,
+        index=False,
+    )
     quality_payload = dict(assessment.get("data_quality_report", {}))
     data_quality_report_path.write_text(
         f"{json.dumps(quality_payload, indent=2)}\n",
@@ -797,6 +955,19 @@ def write_official_data_artifacts(
         "leakage_sensitive_structure": {
             "verdict": leakage_payload.get("verdict"),
             "checks": leakage_payload.get("checks", []),
+            "cv_split_audit_summary": {
+                "status": cv_split_payload.get("status"),
+                "n_folds": cv_split_payload.get("n_folds"),
+                "expected_n_folds": cv_split_payload.get("expected_n_folds"),
+                "missing_expected_test_rows": cv_split_payload.get(
+                    "missing_expected_test_rows"
+                ),
+                "unexpected_test_rows": cv_split_payload.get("unexpected_test_rows"),
+                "duplicate_test_coverage_rows": cv_split_payload.get(
+                    "duplicate_test_coverage_rows"
+                ),
+                "failure_codes": cv_split_payload.get("failure_codes", []),
+            },
         },
         "external_validation": external_compatibility,
         "intended_use": data_policy_effective.get("intended_use"),
@@ -818,6 +989,8 @@ def write_official_data_artifacts(
         "class_balance_report_csv": str(class_balance_csv_path.resolve()),
         "missingness_report_csv": str(missingness_csv_path.resolve()),
         "leakage_audit_json": str(leakage_audit_path.resolve()),
+        "cv_split_audit_json": str(cv_split_audit_json_path.resolve()),
+        "cv_split_audit_csv": str(cv_split_audit_csv_path.resolve()),
         "external_dataset_card_json": str(external_dataset_card_path.resolve()),
         "external_dataset_summary_json": str(external_dataset_summary_path.resolve()),
         "external_validation_compatibility_json": str(

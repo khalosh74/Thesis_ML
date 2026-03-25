@@ -16,6 +16,7 @@ from Thesis_ML.experiments.evidence_statistics import build_calibration_outputs
 from Thesis_ML.experiments.metrics import classification_metric_score
 from Thesis_ML.experiments.progress import emit_progress
 from Thesis_ML.experiments.stage_execution import StageAssignment
+from Thesis_ML.experiments.cv_split_plan import build_cv_split_plan
 from Thesis_ML.experiments.stage_registry import (
     MODEL_FIT_CPU_EXECUTOR_ID,
     PERMUTATION_REFERENCE_EXECUTOR_ID,
@@ -118,94 +119,18 @@ def _assignment_executor_id(
 def execute_model_fit(section_input: ModelFitInput) -> dict[str, Any]:
     y = section_input.metadata_df[section_input.target_column].astype(str).to_numpy()
 
-    if section_input.cv_mode == "frozen_cross_person_transfer":
-        subjects = section_input.metadata_df["subject"].astype(str)
-        train_mask = subjects == str(section_input.train_subject)
-        test_mask = subjects == str(section_input.test_subject)
-        train_idx = np.flatnonzero(train_mask.to_numpy())
-        test_idx = np.flatnonzero(test_mask.to_numpy())
+    split_plan = build_cv_split_plan(
+        metadata_df=section_input.metadata_df,
+        target_column=section_input.target_column,
+        cv_mode=section_input.cv_mode,
+        subject=section_input.subject,
+        train_subject=section_input.train_subject,
+        test_subject=section_input.test_subject,
+        seed=section_input.seed,
+    )
 
-        if len(train_idx) == 0:
-            raise ValueError(
-                f"No cache-aligned samples found for train_subject '{section_input.train_subject}'."
-            )
-        if len(test_idx) == 0:
-            raise ValueError(
-                f"No cache-aligned samples found for test_subject '{section_input.test_subject}'."
-            )
-
-        unique_labels_train = np.unique(y[train_idx])
-        if len(unique_labels_train) < 2:
-            raise ValueError("Training data requires at least 2 target classes.")
-
-        groups = section_input.metadata_df["session"].astype(str).to_numpy()
-        splits: list[tuple[np.ndarray, np.ndarray]] = [(train_idx, test_idx)]
-    elif section_input.cv_mode == "within_subject_loso_session":
-        subjects = section_input.metadata_df["subject"].astype(str)
-        unique_subjects = sorted(subjects.unique().tolist())
-        if len(unique_subjects) != 1 or unique_subjects[0] != section_input.subject:
-            raise ValueError(
-                "within_subject_loso_session requires exactly one subject in the evaluated data."
-            )
-
-        groups = section_input.metadata_df["session"].astype(str).to_numpy()
-        unique_groups = np.unique(groups)
-        unique_labels = np.unique(y)
-        if len(unique_groups) < 2:
-            raise ValueError("Grouped CV requires at least 2 unique subject-session groups.")
-        if len(unique_labels) < 2:
-            raise ValueError("Classification requires at least 2 target classes.")
-
-        splitter = LeaveOneGroupOut()
-        splits = list(splitter.split(section_input.x_matrix, y, groups))
-        if len(splits) < 2:
-            raise ValueError("Grouped CV produced fewer than 2 folds.")
-    elif section_input.cv_mode == "loso_session":
-        groups = (
-            section_input.metadata_df["subject"].astype(str)
-            + "_"
-            + section_input.metadata_df["session"].astype(str)
-        ).to_numpy()
-        unique_groups = np.unique(groups)
-        unique_labels = np.unique(y)
-        if len(unique_groups) < 2:
-            raise ValueError("Grouped CV requires at least 2 unique subject-session groups.")
-        if len(unique_labels) < 2:
-            raise ValueError("Classification requires at least 2 target classes.")
-
-        splitter = LeaveOneGroupOut()
-        splits = list(splitter.split(section_input.x_matrix, y, groups))
-        if len(splits) < 2:
-            raise ValueError("Grouped CV produced fewer than 2 folds.")
-    elif section_input.cv_mode == "record_random_split":
-        groups = (
-            section_input.metadata_df["subject"].astype(str)
-            + "_"
-            + section_input.metadata_df["session"].astype(str)
-        ).to_numpy()
-        unique_labels = np.unique(y)
-        if len(unique_labels) < 2:
-            raise ValueError("Classification requires at least 2 target classes.")
-        min_class_count = int(pd.Series(y).value_counts().min())
-        if min_class_count < 2:
-            raise ValueError(
-                "record_random_split requires at least 2 samples per class for stratified folds."
-            )
-        n_splits = int(min(5, min_class_count))
-        if n_splits < 2:
-            raise ValueError(
-                "record_random_split produced fewer than 2 stratified folds from selected data."
-            )
-        splitter = StratifiedKFold(
-            n_splits=n_splits,
-            shuffle=True,
-            random_state=int(section_input.seed),
-        )
-        splits = list(splitter.split(section_input.x_matrix, y))
-        if len(splits) < 2:
-            raise ValueError("record_random_split produced fewer than 2 folds.")
-    else:
-        raise ValueError(f"Unsupported cv_mode '{section_input.cv_mode}'.")
+    groups = split_plan.groups
+    splits = [(fold.train_idx, fold.test_idx) for fold in split_plan.folds]
 
     planned_outer_folds = int(len(splits))
     max_outer_folds = section_input.max_outer_folds

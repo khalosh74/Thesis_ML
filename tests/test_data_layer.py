@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pandas as pd
@@ -212,6 +213,100 @@ def test_write_official_data_artifacts_creates_expected_files(tmp_path: Path) ->
     assert (report_dir / "class_balance_report.csv").exists()
     assert (report_dir / "missingness_report.csv").exists()
     assert (report_dir / "leakage_audit.json").exists()
+    assert (report_dir / "cv_split_audit.json").exists()
+    assert (report_dir / "cv_split_audit.csv").exists()
     assert (report_dir / "external_validation_compatibility.json").exists()
     assert (report_dir / "target_derivation_audit.json").exists()
     assert (report_dir / "target_derivation_audit.csv").exists()
+
+    split_payload = json.loads((report_dir / "cv_split_audit.json").read_text(encoding="utf-8"))
+    assert split_payload["status"] == "pass"
+    assert int(split_payload["n_folds"]) == 2
+    
+
+
+def test_evaluate_official_data_policy_builds_exact_within_subject_split_audit(
+    tmp_path: Path,
+) -> None:
+    frame = _index_frame()
+    index_csv = tmp_path / "dataset_index.csv"
+    frame.to_csv(index_csv, index=False)
+
+    assessment = evaluate_official_data_policy(
+        framework_mode=FrameworkMode.CONFIRMATORY,
+        index_csv=index_csv,
+        data_root=tmp_path,
+        cache_dir=tmp_path / "cache",
+        full_index_df=frame,
+        selected_index_df=frame,
+        target_column="coarse_affect",
+        cv_mode="within_subject_loso_session",
+        subject="sub-001",
+        train_subject=None,
+        test_subject=None,
+        filter_task=None,
+        filter_modality=None,
+        official_context={},
+    )
+
+    cv_split_audit = assessment["cv_split_audit"]
+    assert cv_split_audit["status"] == "pass"
+    assert int(cv_split_audit["n_folds"]) == 2
+    assert int(cv_split_audit["expected_n_folds"]) == 2
+    assert int(cv_split_audit["missing_expected_test_rows"]) == 0
+    assert int(cv_split_audit["unexpected_test_rows"]) == 0
+    assert int(cv_split_audit["duplicate_test_coverage_rows"]) == 0
+
+    rows = assessment["cv_split_audit_rows"]
+    assert len(rows) == 2
+    assert {row["test_sessions"] for row in rows} == {"ses-01", "ses-02"}
+    assert all(row["status"] == "pass" for row in rows)
+
+def test_evaluate_official_data_policy_blocks_within_subject_subject_mix(
+    tmp_path: Path,
+) -> None:
+    frame = _index_frame().copy()
+    frame.loc[1, "subject"] = "sub-002"
+    index_csv = tmp_path / "dataset_index.csv"
+    frame.to_csv(index_csv, index=False)
+
+    assessment = evaluate_official_data_policy(
+        framework_mode=FrameworkMode.CONFIRMATORY,
+        index_csv=index_csv,
+        data_root=tmp_path,
+        cache_dir=tmp_path / "cache",
+        full_index_df=frame,
+        selected_index_df=frame,
+        target_column="coarse_affect",
+        cv_mode="within_subject_loso_session",
+        subject="sub-001",
+        train_subject=None,
+        test_subject=None,
+        filter_task=None,
+        filter_modality=None,
+        official_context={
+            "data_policy": {
+                "leakage": {
+                    "enabled": True,
+                    "fail_on_duplicate_sample_id": True,
+                    "warn_on_duplicate_beta_path": True,
+                    "fail_on_duplicate_beta_path": False,
+                    "fail_on_subject_overlap_for_transfer": True,
+                    "fail_on_cv_group_overlap": True,
+                }
+            }
+        },
+    )
+
+    assert any(
+        issue["code"] == "leakage_cv_split_plan_invalid"
+        for issue in assessment["blocking_issues"]
+    )
+
+    cv_split_audit = assessment["cv_split_audit"]
+    assert cv_split_audit["status"] == "fail"
+    assert "split_planner_error" in cv_split_audit["failure_codes"]
+    assert (
+        "within_subject_loso_session requires exactly one subject in the evaluated data."
+        in cv_split_audit["planner_error"]
+    )
