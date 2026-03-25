@@ -310,3 +310,88 @@ def test_evaluate_official_data_policy_blocks_within_subject_subject_mix(
         "within_subject_loso_session requires exactly one subject in the evaluated data."
         in cv_split_audit["planner_error"]
     )
+
+def test_evaluate_official_data_policy_loso_session_allows_same_session_name_across_subjects(
+    tmp_path: Path,
+) -> None:
+    
+    frame = pd.DataFrame(
+        [
+            {
+                "sample_id": "s1",
+                "subject": "sub-001",
+                "session": "ses-01",
+                "task": "passive",
+                "modality": "audio",
+                "emotion": "happiness",
+                "coarse_affect": "positive",
+                "beta_path": "sub-001/ses-01/BAS/beta_0001.nii",
+                "mask_path": "sub-001/ses-01/BAS/mask.nii",
+                "regressor_label": "run-1_passive_happiness_audio",
+            },
+            {
+                "sample_id": "s2",
+                "subject": "sub-001",
+                "session": "ses-02",
+                "task": "passive",
+                "modality": "audio",
+                "emotion": "anger",
+                "coarse_affect": "negative",
+                "beta_path": "sub-001/ses-02/BAS/beta_0001.nii",
+                "mask_path": "sub-001/ses-02/BAS/mask.nii",
+                "regressor_label": "run-1_passive_anger_audio",
+            },
+            {
+                "sample_id": "s3",
+                "subject": "sub-002",
+                "session": "ses-01",
+                "task": "passive",
+                "modality": "audio",
+                "emotion": "happiness",
+                "coarse_affect": "positive",
+                "beta_path": "sub-002/ses-01/BAS/beta_0001.nii",
+                "mask_path": "sub-002/ses-01/BAS/mask.nii",
+                "regressor_label": "run-1_passive_happiness_audio",
+            },
+            {
+                "sample_id": "s4",
+                "subject": "sub-002",
+                "session": "ses-02",
+                "task": "passive",
+                "modality": "audio",
+                "emotion": "anger",
+                "coarse_affect": "negative",
+                "beta_path": "sub-002/ses-02/BAS/beta_0001.nii",
+                "mask_path": "sub-002/ses-02/BAS/mask.nii",
+                "regressor_label": "run-1_passive_anger_audio",
+            },
+        ]
+    )
+
+    index_csv = tmp_path / "dataset_index.csv"
+    frame.to_csv(index_csv, index=False)
+
+    assessment = evaluate_official_data_policy(
+        framework_mode=FrameworkMode.CONFIRMATORY,
+        index_csv=index_csv,
+        data_root=tmp_path,
+        cache_dir=tmp_path / "cache",
+        full_index_df=frame,
+        selected_index_df=frame,
+        target_column="coarse_affect",
+        cv_mode="loso_session",
+        subject=None,
+        train_subject=None,
+        test_subject=None,
+        filter_task=None,
+        filter_modality=None,
+        official_context={},
+    )
+
+    cv_split_audit = assessment["cv_split_audit"]
+    assert cv_split_audit["status"] == "pass"
+    assert "group_overlap" not in cv_split_audit["failure_codes"]
+
+    rows = assessment["cv_split_audit_rows"]
+    assert len(rows) == 4
+    assert all(row["status"] == "pass" for row in rows)

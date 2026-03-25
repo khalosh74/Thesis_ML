@@ -17,6 +17,8 @@ class PlannedFold:
     test_subjects: tuple[str, ...]
     train_sessions: tuple[str, ...]
     test_sessions: tuple[str, ...]
+    train_groups: tuple[str, ...]
+    test_groups: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -35,6 +37,7 @@ def _sorted_unique_strings(series: pd.Series) -> tuple[str, ...]:
 def _build_fold(
     *,
     metadata_df: pd.DataFrame,
+    groups: np.ndarray,
     fold_index: int,
     train_idx: np.ndarray,
     test_idx: np.ndarray,
@@ -45,6 +48,9 @@ def _build_fold(
     train_meta = metadata_df.iloc[train_idx]
     test_meta = metadata_df.iloc[test_idx]
 
+    train_groups = pd.Series(groups[train_idx]).astype(str)
+    test_groups = pd.Series(groups[test_idx]).astype(str)
+
     return PlannedFold(
         fold=fold_index,
         train_idx=train_idx,
@@ -53,6 +59,8 @@ def _build_fold(
         test_subjects=_sorted_unique_strings(test_meta["subject"]),
         train_sessions=_sorted_unique_strings(train_meta["session"]),
         test_sessions=_sorted_unique_strings(test_meta["session"]),
+        train_groups=_sorted_unique_strings(train_groups),
+        test_groups=_sorted_unique_strings(test_groups),
     )
 
 
@@ -167,12 +175,14 @@ def build_cv_split_plan(
     folds = tuple(
         _build_fold(
             metadata_df=metadata_df,
+            groups=groups,
             fold_index=fold_index,
             train_idx=train_idx,
             test_idx=test_idx,
         )
         for fold_index, (train_idx, test_idx) in enumerate(raw_splits)
     )
+    
     return CVSplitPlan(
         cv_mode=str(cv_mode),
         groups=np.asarray(groups).astype(str, copy=False),

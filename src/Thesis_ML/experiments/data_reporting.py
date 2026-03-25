@@ -137,8 +137,8 @@ def _build_exact_cv_split_audit(
                 fold_failures.append("subject_overlap")
 
         elif cv_mode == "loso_session":
-            if set(fold.train_sessions).intersection(set(fold.test_sessions)):
-                fold_failures.append("session_overlap")
+            if set(fold.train_groups).intersection(set(fold.test_groups)):
+                fold_failures.append("group_overlap")
 
         fold_rows.append(
             {
@@ -151,6 +151,8 @@ def _build_exact_cv_split_audit(
                 "test_subjects": "|".join(fold.test_subjects),
                 "train_sessions": "|".join(fold.train_sessions),
                 "test_sessions": "|".join(fold.test_sessions),
+                "train_groups": "|".join(fold.train_groups),
+                "test_groups": "|".join(fold.test_groups),
                 "train_test_index_overlap_count": overlap_count,
             }
         )
