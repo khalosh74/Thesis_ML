@@ -41,7 +41,7 @@
     "regressor_label",
     "bas"
   ],
-  "index_csv_sha256": "650c1134907755a3d54ce6402cf3b9bf63fb8c60e76e350fe31cfb659c65c04c",
+  "index_csv_sha256": "597f22f9235bb856611f4da9bca8b8bc7df295e1a630c9174525047cb13bfa2e",
   "files": [
     {
       "path": "cache/.gitkeep",
@@ -55,8 +55,8 @@
     },
     {
       "path": "data_root/processed/extractions/sub-001/ses-01/BAS2/session_summary.json",
-      "sha256": "65a13fd7aaa141cd438dfbe798fc552b85eb36979687903c7b5839cbe554a58f",
-      "size_bytes": 355
+      "sha256": "e9423c0c4169b8fb719c8fceb450d3399a9222ca698cd14555c3cb40833c1f72",
+      "size_bytes": 497
     },
     {
       "path": "data_root/processed/extractions/sub-001/ses-02/BAS2/regressor_beta_mapping.csv",
@@ -65,8 +65,8 @@
     },
     {
       "path": "data_root/processed/extractions/sub-001/ses-02/BAS2/session_summary.json",
-      "sha256": "e15422d92c7c1be6f6d536a183652b5d85994280614d8f034ca341b655f8a6a2",
-      "size_bytes": 355
+      "sha256": "c758c30e08462b61aaca1fd372cb56126024f1f21062090ab329285d7e30cdcc",
+      "size_bytes": 497
     },
     {
       "path": "data_root/processed/extractions/sub-002/ses-01/BAS2/regressor_beta_mapping.csv",
@@ -75,8 +75,8 @@
     },
     {
       "path": "data_root/processed/extractions/sub-002/ses-01/BAS2/session_summary.json",
-      "sha256": "b1ee955db452137ca3ec710e8efc9b65c68c7dcd5f68c0462c7e44b317278a72",
-      "size_bytes": 355
+      "sha256": "bb9cfedfa7a2748ce0063d0e9614fd49b0aba0feac234b1140cf579d436cab56",
+      "size_bytes": 497
     },
     {
       "path": "data_root/processed/extractions/sub-002/ses-02/BAS2/regressor_beta_mapping.csv",
@@ -85,8 +85,8 @@
     },
     {
       "path": "data_root/processed/extractions/sub-002/ses-02/BAS2/session_summary.json",
-      "sha256": "d35e291f4696c6227474d7560bf56a87e28ceecffa34aa5be7dfbe3fcd261915",
-      "size_bytes": 355
+      "sha256": "80c0223b4df295713ab1fc99b0408f42078dd52c32becc0cd36774475809013d",
+      "size_bytes": 497
     },
     {
       "path": "data_root/sub-001/ses-01/BAS2/beta_0001.nii",
@@ -210,8 +210,8 @@
     },
     {
       "path": "dataset_index.csv",
-      "sha256": "650c1134907755a3d54ce6402cf3b9bf63fb8c60e76e350fe31cfb659c65c04c",
-      "size_bytes": 4286
+      "sha256": "597f22f9235bb856611f4da9bca8b8bc7df295e1a630c9174525047cb13bfa2e",
+      "size_bytes": 12729
     },
     {
       "path": "README.md",

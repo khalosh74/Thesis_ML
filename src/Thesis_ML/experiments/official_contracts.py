@@ -10,11 +10,18 @@ from Thesis_ML.config.framework_mode import FrameworkMode
 from Thesis_ML.experiments.selection_manifest import apply_dataset_selection_filters
 from Thesis_ML.config.metric_policy import validate_metric_name
 from Thesis_ML.data.affect_labels import (
+    blocking_derived_label_inconsistency_rows,
     blocking_target_derivation_audit_rows,
+    build_derived_label_inconsistency_audit,
     build_target_derivation_audit,
+    summarize_derived_label_inconsistency_audit,
     summarize_target_derivation_audit,
     with_binary_valence_like,
     with_coarse_affect,
+)
+from Thesis_ML.data.index_validation import (
+    DatasetIndexValidationError,
+    validate_dataset_index_strict,
 )
 from Thesis_ML.experiments.data_reporting import evaluate_official_data_policy
 from Thesis_ML.experiments.errors import (
@@ -180,16 +187,79 @@ def validate_official_preflight(
             details={"index_csv": str(index_csv)},
         )
 
+    try:
+        frame = validate_dataset_index_strict(
+            frame,
+            data_root=data_root,
+            required_columns=_REQUIRED_INDEX_COLUMNS | {target_column},
+            require_integrity_columns=True,
+        )
+    except DatasetIndexValidationError as exc:
+        raise OfficialContractValidationError(
+            f"Official strict dataset-index validation failed: {exc}",
+            details={"error": str(exc), "index_csv": str(index_csv)},
+        ) from exc
+
+    derived_label_inconsistency_audit_df = build_derived_label_inconsistency_audit(
+        frame,
+        emotion_column="emotion",
+        coarse_column="coarse_affect",
+        binary_column="binary_valence_like",
+    )
+    blocking_derived_label_inconsistency_df = blocking_derived_label_inconsistency_rows(
+        derived_label_inconsistency_audit_df
+    )
+    if not blocking_derived_label_inconsistency_df.empty:
+        summary = summarize_derived_label_inconsistency_audit(
+            blocking_derived_label_inconsistency_df
+        )
+        raise OfficialContractValidationError(
+            "Official run dataset index contains inconsistent stored derived labels.",
+            details={
+                "n_problem_rows": summary["n_rows"],
+                "by_category": summary["by_category"],
+                "sample_ids_head": summary["sample_ids_head"],
+            },
+        )
+
     frame = with_coarse_affect(
         frame,
         emotion_column="emotion",
         coarse_column="coarse_affect",
+        strict_recompute=True,
+        attach_mapping_metadata=True,
     )
     frame = with_binary_valence_like(
         frame,
         coarse_column="coarse_affect",
         binary_column="binary_valence_like",
+        strict_recompute=True,
+        attach_mapping_metadata=True,
     )
+
+    unknown_column = "glm_has_unknown_regressors"
+    if unknown_column in frame.columns:
+        normalized_unknown = (
+            frame[unknown_column]
+            .astype(str)
+            .str.strip()
+            .str.lower()
+            .map({"true": True, "1": True, "yes": True, "false": False, "0": False, "no": False})
+        )
+        if bool(normalized_unknown.isna().any()):
+            raise OfficialContractValidationError(
+                "Official run dataset index has invalid glm_has_unknown_regressors values.",
+                details={"column": unknown_column},
+            )
+        if bool(normalized_unknown.any()):
+            affected = frame.loc[normalized_unknown, "sample_id"].astype(str).tolist()[:10]
+            raise OfficialContractValidationError(
+                "Official run blocked: dataset index indicates unknown GLM regressors.",
+                details={
+                    "n_rows_with_unknown_regressors": int(normalized_unknown.sum()),
+                    "sample_ids_head": affected,
+                },
+            )
 
     _require_columns(
         frame,
@@ -634,6 +704,7 @@ def validate_official_preflight(
         filter_modality=filter_modality,
         official_context=official_context,
         target_derivation_audit_df=target_derivation_audit_df,
+        derived_label_inconsistency_audit_df=derived_label_inconsistency_audit_df,
         selection_exclusion_manifest_df=selection_result.exclusion_manifest_df,
     )
     blocking_issues = list(data_assessment.get("blocking_issues", []))

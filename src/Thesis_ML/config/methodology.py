@@ -343,7 +343,9 @@ class LeakageDataPolicy(_MethodologyModel):
     enabled: bool = True
     fail_on_duplicate_sample_id: bool = True
     warn_on_duplicate_beta_path: bool = True
-    fail_on_duplicate_beta_path: bool = False
+    fail_on_duplicate_beta_path: bool = True
+    warn_on_duplicate_beta_content_hash: bool = True
+    fail_on_duplicate_beta_content_hash: bool = True
     fail_on_subject_overlap_for_transfer: bool = True
     fail_on_cv_group_overlap: bool = True
 

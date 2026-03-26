@@ -44,6 +44,8 @@ def collect_dataset_fingerprint(
     test_subject: str | None,
     filter_task: str | None,
     filter_modality: str | None,
+    selected_beta_path_sha256: str | None = None,
+    cv_split_manifest_sha256: str | None = None,
 ) -> dict[str, Any]:
     selected = selected_index_df.copy()
     selected_subjects = sorted({str(value) for value in selected.get("subject", [])})
@@ -57,6 +59,13 @@ def collect_dataset_fingerprint(
     hash_columns = ["sample_id"]
     if target_column in selected.columns:
         hash_columns.append(target_column)
+
+    beta_path_column = "beta_path_canonical" if "beta_path_canonical" in selected.columns else "beta_path"
+    if selected_beta_path_sha256 is None and beta_path_column in selected.columns:
+        selected_beta_path_sha256 = dataframe_records_sha256(
+            selected,
+            columns=["sample_id", beta_path_column],
+        )
 
     return {
         "index_csv": str(Path(index_csv).resolve()),
@@ -80,6 +89,8 @@ def collect_dataset_fingerprint(
         "test_subject": test_subject,
         "filter_task": filter_task,
         "filter_modality": filter_modality,
+        "selected_beta_path_sha256": selected_beta_path_sha256,
+        "cv_split_manifest_sha256": cv_split_manifest_sha256,
     }
 
 

@@ -167,6 +167,86 @@ def test_dataset_selection_binary_valence_like_drops_neutral(tmp_path: Path) -> 
     assert exclusion_manifest.iloc[0]["exclusion_reason"] == "target_missing_after_derivation"
 
 
+def test_dataset_selection_rejects_inconsistent_stored_coarse_affect(
+    tmp_path: Path,
+) -> None:
+    index_csv = tmp_path / "dataset_index.csv"
+    index_df = pd.DataFrame(
+        [
+            {
+                "sample_id": "s1",
+                "subject": "sub-001",
+                "session": "ses-01",
+                "task": "passive",
+                "modality": "audio",
+                "emotion": "anger",
+                "coarse_affect": "positive",
+            },
+            {
+                "sample_id": "s2",
+                "subject": "sub-001",
+                "session": "ses-02",
+                "task": "passive",
+                "modality": "video",
+                "emotion": "happiness",
+                "coarse_affect": "positive",
+            },
+        ]
+    )
+    index_df.to_csv(index_csv, index=False)
+
+    with pytest.raises(ValueError, match="inconsistent stored derived labels"):
+        dataset_selection(
+            DatasetSelectionInput(
+                index_csv=index_csv,
+                target_column="coarse_affect",
+                cv_mode="within_subject_loso_session",
+                subject="sub-001",
+            )
+        )
+
+
+def test_dataset_selection_rejects_inconsistent_stored_binary_valence_like(
+    tmp_path: Path,
+) -> None:
+    index_csv = tmp_path / "dataset_index.csv"
+    index_df = pd.DataFrame(
+        [
+            {
+                "sample_id": "s1",
+                "subject": "sub-001",
+                "session": "ses-01",
+                "task": "passive",
+                "modality": "audio",
+                "emotion": "anger",
+                "coarse_affect": "negative",
+                "binary_valence_like": "positive",
+            },
+            {
+                "sample_id": "s2",
+                "subject": "sub-001",
+                "session": "ses-02",
+                "task": "passive",
+                "modality": "video",
+                "emotion": "happiness",
+                "coarse_affect": "positive",
+                "binary_valence_like": "positive",
+            },
+        ]
+    )
+    index_df.to_csv(index_csv, index=False)
+
+    with pytest.raises(ValueError, match="inconsistent stored derived labels"):
+        dataset_selection(
+            DatasetSelectionInput(
+                index_csv=index_csv,
+                target_column="binary_valence_like",
+                cv_mode="within_subject_loso_session",
+                subject="sub-001",
+            )
+        )
+
+
 def test_run_experiment_registers_section_boundary_artifacts(tmp_path: Path) -> None:
     data_root = tmp_path / "Data"
     labels = [

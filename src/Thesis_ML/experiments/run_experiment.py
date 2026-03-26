@@ -833,6 +833,8 @@ def run_experiment(
             test_subject=test_subject,
             filter_task=filter_task,
             filter_modality=filter_modality,
+            selected_beta_path_sha256=preflight.data_assessment.get("selected_beta_path_sha256"),
+            cv_split_manifest_sha256=preflight.data_assessment.get("cv_split_manifest_sha256"),
         )
         required_run_artifacts = list(preflight.required_run_artifacts)
         required_run_metadata_fields = list(preflight.required_run_metadata_fields)
@@ -925,6 +927,9 @@ def run_experiment(
             )
             if not data_policy_effective:
                 data_policy_effective = dict(data_artifact_info.get("data_policy_effective", {}))
+            data_fingerprint_payload = data_artifact_info.get("dataset_fingerprint")
+            if isinstance(data_fingerprint_payload, dict):
+                dataset_fingerprint = dict(data_fingerprint_payload)
         except Exception as exc:
             failure = _failure_payload(exc)
             stage_timings["total"] = float(perf_counter() - overall_start)

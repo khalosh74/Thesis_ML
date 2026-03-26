@@ -192,6 +192,7 @@ def extract_glm_session(
     glm_dir: Path,
     out_dir: Path,
     absolute_paths: bool = False,
+    fail_on_unknown_regressors: bool = False,
 ) -> dict[str, Any]:
     """Extract a single BAS2 GLM session into tabular outputs."""
     glm_dir = Path(glm_dir)
@@ -215,6 +216,13 @@ def extract_glm_session(
         lambda beta_file: _beta_path_for_row(glm_dir, beta_file, absolute_paths=absolute_paths)
     )
     mapping["beta_exists"] = mapping["beta_file"].map(lambda name: (glm_dir / name).exists())
+    unknown_mask = mapping["regressor_type"].astype(str) == "unknown"
+    unknown_labels = mapping.loc[unknown_mask, "raw_label"].astype(str).tolist()
+    unknown_beta_indexes = (
+        mapping.loc[unknown_mask, "beta_index"].astype(int).tolist()
+        if unknown_mask.any()
+        else []
+    )
 
     out_dir.mkdir(parents=True, exist_ok=True)
     mapping_path = out_dir / "regressor_beta_mapping.csv"
@@ -236,6 +244,10 @@ def extract_glm_session(
             str(key): int(value)
             for key, value in mapping["regressor_type"].value_counts(dropna=False).items()
         },
+        "n_unknown_regressors": int(unknown_mask.sum()),
+        "unknown_regressor_labels": unknown_labels,
+        "unknown_regressor_beta_indexes": unknown_beta_indexes,
+        "has_unknown_regressors": bool(unknown_mask.any()),
     }
 
     spm_metadata, spm_error = _maybe_load_spm_metadata(spm_mat_path)
@@ -246,6 +258,13 @@ def extract_glm_session(
     summary_path = out_dir / "session_summary.json"
     summary_path.write_text(f"{json.dumps(summary, indent=2)}\n", encoding="utf-8")
 
+    if fail_on_unknown_regressors and bool(unknown_mask.any()):
+        raise ValueError(
+            "Strict GLM extraction failed because unknown regressors were found. "
+            f"n_unknown_regressors={int(unknown_mask.sum())}, "
+            f"unknown_regressor_labels={unknown_labels[:10]}"
+        )
+
     return {
         "glm_dir": str(glm_dir.resolve()),
         "out_dir": str(out_dir.resolve()),
@@ -254,6 +273,8 @@ def extract_glm_session(
         "n_regressors_csv": int(len(mapping)),
         "n_beta_present": int(mapping["beta_exists"].sum()),
         "regressor_type_counts": summary["regressor_type_counts"],
+        "n_unknown_regressors": int(summary["n_unknown_regressors"]),
+        "has_unknown_regressors": bool(summary["has_unknown_regressors"]),
     }
 
 
@@ -268,6 +289,11 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Write absolute paths in output files.",
     )
+    parser.add_argument(
+        "--fail-on-unknown-regressors",
+        action="store_true",
+        help="Fail if regressor_labels.csv contains unknown regressor labels.",
+    )
     return parser
 
 
@@ -280,6 +306,7 @@ def main(argv: list[str] | None = None) -> int:
         glm_dir=Path(args.glm_dir),
         out_dir=Path(args.out_dir),
         absolute_paths=args.absolute_paths,
+        fail_on_unknown_regressors=bool(args.fail_on_unknown_regressors),
     )
     print(json.dumps(result, indent=2))
     return 0

@@ -15,11 +15,20 @@ import numpy as np
 import pandas as pd
 from nibabel.spatialimages import SpatialImage
 
-from Thesis_ML.data.affect_labels import with_coarse_affect
+from Thesis_ML.data.affect_labels import (
+    with_binary_valence_like,
+    with_coarse_affect,
+)
+from Thesis_ML.data.index_validation import (
+    CANONICAL_BETA_PATH_COLUMN,
+    CANONICAL_MASK_PATH_COLUMN,
+    DatasetIndexValidationError,
+    validate_dataset_index_strict,
+)
 
 LOGGER = logging.getLogger(__name__)
 _SPATIAL_SIGNATURE_VERSION = 1
-_CACHE_INPUT_SIGNATURE_VERSION = 1
+_CACHE_INPUT_SIGNATURE_VERSION = 2
 _BETA_MASK_AFFINE_ATOL = 1e-5
 
 _REQUIRED_INDEX_COLUMNS = {
@@ -36,13 +45,6 @@ _REQUIRED_INDEX_COLUMNS = {
 
 def _sanitize_token(value: str) -> str:
     return re.sub(r"[^A-Za-z0-9._-]+", "_", value)
-
-
-def _resolve_data_path(path_value: str, data_root: Path) -> Path:
-    path = Path(path_value)
-    if path.is_absolute():
-        return path
-    return data_root / path
 
 
 def _mask_sha256(mask_bool: np.ndarray) -> str:
@@ -260,20 +262,16 @@ def _resolve_single_group_mask_path(
         raise ValueError(f"Feature cache group '{group_id}' is empty.")
 
     resolved_mask_paths: list[str] = []
-    for raw_mask_path in group_rows["mask_path"].tolist():
-        if pd.isna(raw_mask_path):
-            raise ValueError(
-                f"Feature cache group '{group_id}' contains a null mask_path."
-            )
-
+    mask_path_column = (
+        CANONICAL_MASK_PATH_COLUMN
+        if CANONICAL_MASK_PATH_COLUMN in group_rows.columns
+        else "mask_path"
+    )
+    for raw_mask_path in group_rows[mask_path_column].tolist():
         mask_text = str(raw_mask_path).strip()
         if not mask_text:
-            raise ValueError(
-                f"Feature cache group '{group_id}' contains a blank mask_path."
-            )
-
-        resolved_path = _resolve_data_path(mask_text, data_root=data_root).resolve()
-        resolved_mask_paths.append(str(resolved_path))
+            raise ValueError(f"Feature cache group '{group_id}' contains a blank {mask_path_column}.")
+        resolved_mask_paths.append(str(Path(mask_text).resolve()))
 
     unique_mask_paths = sorted(set(resolved_mask_paths))
     if len(unique_mask_paths) != 1:
@@ -312,19 +310,33 @@ def _build_cache_input_signature(
             )
         seen_sample_ids.add(sample_id)
 
-        beta_path_text = str(row["beta_path"]).strip()
+        beta_path_column = (
+            CANONICAL_BETA_PATH_COLUMN
+            if CANONICAL_BETA_PATH_COLUMN in group_rows.columns
+            else "beta_path"
+        )
+        beta_path_text = str(row[beta_path_column]).strip()
         if not beta_path_text:
             raise ValueError(
-                f"Feature cache group '{group_id}' contains a blank beta_path."
+                f"Feature cache group '{group_id}' contains a blank {beta_path_column}."
             )
 
-        resolved_beta_path = _resolve_data_path(beta_path_text, data_root=data_root).resolve()
-        signature_rows.append(
-            {
-                "sample_id": sample_id,
-                "beta_path": str(resolved_beta_path),
-            }
-        )
+        signature_row: dict[str, str] = {
+            "sample_id": sample_id,
+            "beta_path": str(Path(beta_path_text).resolve()),
+        }
+        for column_name in (
+            "beta_file_sha256",
+            "coarse_affect_mapping_version",
+            "coarse_affect_mapping_sha256",
+            "binary_valence_mapping_version",
+            "binary_valence_mapping_sha256",
+        ):
+            if column_name in row.index and not pd.isna(row[column_name]):
+                value = str(row[column_name]).strip()
+                if value:
+                    signature_row[column_name] = value
+        signature_rows.append(signature_row)
 
     signature_rows = sorted(signature_rows, key=lambda item: item["sample_id"])
 
@@ -369,10 +381,56 @@ def build_feature_cache(
         raise FileNotFoundError(f"data_root does not exist: {data_root}")
 
     index_df = pd.read_csv(index_csv)
-    missing = _REQUIRED_INDEX_COLUMNS - set(index_df.columns)
-    if missing:
-        raise ValueError(f"index_csv missing required columns: {sorted(missing)}")
-    index_df = with_coarse_affect(index_df, emotion_column="emotion", coarse_column="coarse_affect")
+    index_df = with_coarse_affect(
+        index_df,
+        emotion_column="emotion",
+        coarse_column="coarse_affect",
+        strict_recompute=True,
+        attach_mapping_metadata=True,
+    )
+    index_df = with_binary_valence_like(
+        index_df,
+        coarse_column="coarse_affect",
+        binary_column="binary_valence_like",
+        strict_recompute=True,
+        attach_mapping_metadata=True,
+    )
+
+    try:
+        index_df = validate_dataset_index_strict(
+            index_df,
+            data_root=data_root,
+            required_columns=_REQUIRED_INDEX_COLUMNS,
+            require_integrity_columns=True,
+        )
+    except DatasetIndexValidationError as exc:
+        raise ValueError(f"Strict dataset index validation failed for feature cache build: {exc}") from exc
+
+    def _normalize_unknown_flag(value: Any) -> bool:
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, int) and value in {0, 1}:
+            return bool(value)
+        normalized = str(value).strip().lower()
+        if normalized in {"true", "1", "yes"}:
+            return True
+        if normalized in {"false", "0", "no"}:
+            return False
+        raise ValueError(f"Invalid glm_has_unknown_regressors value in index: {value!r}")
+
+    if "glm_has_unknown_regressors" in index_df.columns:
+        unknown_mask = index_df["glm_has_unknown_regressors"].map(_normalize_unknown_flag)
+        if bool(unknown_mask.any()):
+            unknown_rows = index_df.loc[unknown_mask]
+            preview = (
+                unknown_rows["sample_id"].astype(str).tolist()[:10]
+                if "sample_id" in unknown_rows.columns
+                else []
+            )
+            raise ValueError(
+                "Feature cache build blocked because dataset index reports unknown GLM regressors. "
+                f"n_rows={int(unknown_mask.sum())}, sample_ids_head={preview}"
+            )
 
     if group_key not in index_df.columns:
         if group_key == "subject_session_bas":
@@ -451,7 +509,12 @@ def build_feature_cache(
 
         vectors: list[np.ndarray] = []
         for _, row in group_rows.iterrows():
-            beta_path = _resolve_data_path(str(row["beta_path"]), data_root=data_root)
+            beta_path_column = (
+                CANONICAL_BETA_PATH_COLUMN
+                if CANONICAL_BETA_PATH_COLUMN in group_rows.columns
+                else "beta_path"
+            )
+            beta_path = Path(str(row[beta_path_column])).resolve()
             vectors.append(
                 extract_masked_vector(
                     beta_path=beta_path,

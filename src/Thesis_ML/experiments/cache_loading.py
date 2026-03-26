@@ -17,6 +17,21 @@ from Thesis_ML.experiments.spatial_validation import (
 LOGGER = logging.getLogger(__name__)
 
 
+def _canonical_metadata_json(payload: dict[str, Any]) -> str:
+    return json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
+
+
+def _resolve_metadata_beta_path(metadata: dict[str, Any]) -> str:
+    for key in ("beta_path_canonical", "beta_path"):
+        value = metadata.get(key)
+        if value is None:
+            continue
+        text = str(value).strip()
+        if text:
+            return text
+    return ""
+
+
 def load_features_from_cache(
     index_df: pd.DataFrame,
     cache_manifest_path: Path,
@@ -26,10 +41,41 @@ def load_features_from_cache(
     manifest = pd.read_csv(cache_manifest_path)
     if manifest.empty:
         raise ValueError(f"Cache manifest is empty: {cache_manifest_path}")
+    required_manifest_columns = {"group_id", "cache_path"}
+    missing_manifest_columns = sorted(required_manifest_columns - set(manifest.columns))
+    if missing_manifest_columns:
+        raise ValueError(
+            "Cache manifest is missing required columns: "
+            + ", ".join(missing_manifest_columns)
+        )
+
+    duplicate_group_mask = manifest["group_id"].astype(str).duplicated(keep=False)
+    if bool(duplicate_group_mask.any()):
+        duplicates = (
+            manifest.loc[duplicate_group_mask, "group_id"].astype(str).drop_duplicates().tolist()
+        )
+        raise ValueError(
+            "Cache manifest contains duplicate group_id values, which is not allowed. "
+            f"duplicates={duplicates[:10]}"
+        )
+
+    duplicate_cache_path_mask = manifest["cache_path"].astype(str).duplicated(keep=False)
+    if bool(duplicate_cache_path_mask.any()):
+        duplicates = (
+            manifest.loc[duplicate_cache_path_mask, "cache_path"]
+            .astype(str)
+            .drop_duplicates()
+            .tolist()
+        )
+        raise ValueError(
+            "Cache manifest contains duplicate cache_path values, which is not allowed. "
+            f"duplicates={duplicates[:10]}"
+        )
 
     selected_ids = set(index_df["sample_id"].astype(str))
     feature_map: dict[str, np.ndarray] = {}
     metadata_map: dict[str, dict[str, Any]] = {}
+    sample_source_map: dict[str, dict[str, Any]] = {}
     selected_cache_groups: list[dict[str, Any]] = []
 
     for _, row in manifest.iterrows():
@@ -57,11 +103,62 @@ def load_features_from_cache(
             )
 
         selected_in_group = 0
+        seen_in_group: set[str] = set()
         for row_idx, metadata in enumerate(metadata_records):
             sample_id = str(metadata.get("sample_id", ""))
+            if sample_id:
+                if sample_id in seen_in_group:
+                    raise ValueError(
+                        "Cache file contains duplicate sample_id rows in the same group. "
+                        f"group_id='{group_id}', sample_id='{sample_id}', cache_path='{cache_path}'."
+                    )
+                seen_in_group.add(sample_id)
             if sample_id and sample_id in selected_ids:
-                feature_map[sample_id] = x_block[row_idx]
-                metadata_map[sample_id] = metadata
+                current_vector = np.asarray(x_block[row_idx], dtype=np.float32)
+                metadata_payload = dict(metadata)
+                canonical_beta_path = _resolve_metadata_beta_path(metadata_payload)
+                metadata_json = _canonical_metadata_json(metadata_payload)
+
+                existing_entry = sample_source_map.get(sample_id)
+                if existing_entry is not None:
+                    previous_group_id = str(existing_entry["group_id"])
+                    previous_cache_path = str(existing_entry["cache_path"])
+                    previous_metadata_json = str(existing_entry["metadata_json"])
+                    previous_beta_path = str(existing_entry["beta_path"])
+                    previous_vector = np.asarray(existing_entry["vector"], dtype=np.float32)
+
+                    differences: list[str] = []
+                    if previous_metadata_json != metadata_json:
+                        differences.append("metadata_mismatch")
+                    if previous_beta_path != canonical_beta_path:
+                        differences.append("canonical_beta_path_mismatch")
+                    if previous_vector.shape != current_vector.shape or not np.array_equal(
+                        previous_vector, current_vector
+                    ):
+                        differences.append("feature_vector_mismatch")
+
+                    if previous_group_id != str(group_id):
+                        raise ValueError(
+                            "Duplicate sample_id detected across multiple cache groups, which is not allowed. "
+                            f"sample_id='{sample_id}', first_group='{previous_group_id}', "
+                            f"second_group='{group_id}', first_cache='{previous_cache_path}', "
+                            f"second_cache='{cache_path}', differences={differences or ['none']}."
+                        )
+                    raise ValueError(
+                        "Duplicate sample_id detected within cache loading with conflicting entries. "
+                        f"sample_id='{sample_id}', group_id='{group_id}', cache_path='{cache_path}', "
+                        f"differences={differences or ['none']}."
+                    )
+
+                feature_map[sample_id] = current_vector
+                metadata_map[sample_id] = metadata_payload
+                sample_source_map[sample_id] = {
+                    "group_id": str(group_id),
+                    "cache_path": str(cache_path.resolve()),
+                    "metadata_json": metadata_json,
+                    "beta_path": canonical_beta_path,
+                    "vector": current_vector.copy(),
+                }
                 selected_in_group += 1
 
         if selected_in_group > 0:

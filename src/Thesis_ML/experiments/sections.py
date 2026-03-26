@@ -11,8 +11,11 @@ from Thesis_ML.artifacts.registry import (
     register_artifact,
 )
 from Thesis_ML.data.affect_labels import (
+    blocking_derived_label_inconsistency_rows,
     blocking_target_derivation_audit_rows,
+    build_derived_label_inconsistency_audit,
     build_target_derivation_audit,
+    summarize_derived_label_inconsistency_audit,
     summarize_target_derivation_audit,
     with_binary_valence_like,
     with_coarse_affect,
@@ -41,15 +44,38 @@ def dataset_selection(section_input: DatasetSelectionInput) -> DatasetSelectionO
     if index_df.empty:
         raise ValueError(f"Dataset index is empty: {section_input.index_csv}")
 
+    stored_labels_frame = index_df.copy()
+    derived_label_inconsistency_audit_df = build_derived_label_inconsistency_audit(
+        stored_labels_frame,
+        emotion_column="emotion",
+        coarse_column="coarse_affect",
+        binary_column="binary_valence_like",
+    )
+    blocking_inconsistency_df = blocking_derived_label_inconsistency_rows(
+        derived_label_inconsistency_audit_df
+    )
+    if not blocking_inconsistency_df.empty:
+        summary = summarize_derived_label_inconsistency_audit(blocking_inconsistency_df)
+        raise ValueError(
+            "Dataset selection found inconsistent stored derived labels. "
+            f"n_rows={summary['n_rows']}, "
+            f"by_category={summary['by_category']}, "
+            f"sample_ids_head={summary['sample_ids_head']}"
+        )
+
     index_df = with_coarse_affect(
         index_df,
         emotion_column="emotion",
         coarse_column="coarse_affect",
+        strict_recompute=True,
+        attach_mapping_metadata=True,
     )
     index_df = with_binary_valence_like(
         index_df,
         coarse_column="coarse_affect",
         binary_column="binary_valence_like",
+        strict_recompute=True,
+        attach_mapping_metadata=True,
     )
 
     target_derivation_audit_df = build_target_derivation_audit(
@@ -156,12 +182,18 @@ def feature_matrix_load(section_input: FeatureMatrixLoadInput) -> FeatureMatrixL
         affine_atol=section_input.affine_atol,
     )
     metadata_df = with_coarse_affect(
-        metadata_df, emotion_column="emotion", coarse_column="coarse_affect"
+        metadata_df,
+        emotion_column="emotion",
+        coarse_column="coarse_affect",
+        strict_recompute=True,
+        attach_mapping_metadata=True,
     )
     metadata_df = with_binary_valence_like(
         metadata_df,
         coarse_column="coarse_affect",
         binary_column="binary_valence_like",
+        strict_recompute=True,
+        attach_mapping_metadata=True,
     )
 
     artifact = register_artifact(

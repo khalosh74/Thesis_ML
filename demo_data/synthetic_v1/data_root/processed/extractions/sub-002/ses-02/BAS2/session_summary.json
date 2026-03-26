@@ -12,5 +12,9 @@
   "n_beta_present": 4,
   "regressor_type_counts": {
     "emotion_condition": 4
-  }
+  },
+  "n_unknown_regressors": 0,
+  "unknown_regressor_labels": [],
+  "unknown_regressor_beta_indexes": [],
+  "has_unknown_regressors": false
 }

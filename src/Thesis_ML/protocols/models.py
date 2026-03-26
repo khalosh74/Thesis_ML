@@ -70,6 +70,8 @@ REQUIRED_RUN_ARTIFACTS_BASELINE = (
     "class_balance_report.csv",
     "missingness_report.csv",
     "leakage_audit.json",
+    "cv_split_manifest.json",
+    "cv_split_manifest.csv",
     "external_dataset_card.json",
     "external_dataset_summary.json",
     "external_validation_compatibility.json",
@@ -400,6 +402,8 @@ class ArtifactContract(_ProtocolModel):
                 "dataset_summary.json",
                 "data_quality_report.json",
                 "leakage_audit.json",
+                "cv_split_manifest.json",
+                "cv_split_manifest.csv",
             )
             if name not in self.required_run_artifacts
         ]

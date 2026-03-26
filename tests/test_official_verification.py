@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import json
 from pathlib import Path
 
@@ -26,9 +27,46 @@ def _write_confirmatory_output(root: Path) -> Path:
     run_dir = root / "runs" / "run_001"
     run_dir.mkdir(parents=True, exist_ok=True)
 
+    cv_split_manifest_rows = [
+        {
+            "fold": 0,
+            "partition": "train",
+            "sample_id": "s1",
+            "beta_path": "/tmp/beta_0001.nii",
+            "subject": "sub-001",
+            "session": "ses-01",
+            "bas": "BAS2",
+            "task": "passive",
+            "modality": "audio",
+            "target_label": "negative",
+        },
+        {
+            "fold": 0,
+            "partition": "test",
+            "sample_id": "s2",
+            "beta_path": "/tmp/beta_0002.nii",
+            "subject": "sub-001",
+            "session": "ses-02",
+            "bas": "BAS2",
+            "task": "passive",
+            "modality": "audio",
+            "target_label": "positive",
+        },
+    ]
+    cv_split_manifest_sha256 = hashlib.sha256(
+        json.dumps(
+            cv_split_manifest_rows,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+        ).encode("utf-8")
+    ).hexdigest()
+
     dataset_fingerprint = {
         "index_csv_sha256": "abc123",
         "selected_sample_id_sha256": "def456",
+        "selected_beta_path_sha256": "ghi789",
+        "cv_split_manifest_sha256": cv_split_manifest_sha256,
         "target_column": "coarse_affect",
         "cv_mode": "within_subject_loso_session",
     }
@@ -73,7 +111,9 @@ def _write_confirmatory_output(root: Path) -> Path:
                 "enabled": True,
                 "fail_on_duplicate_sample_id": True,
                 "warn_on_duplicate_beta_path": True,
-                "fail_on_duplicate_beta_path": False,
+                "fail_on_duplicate_beta_path": True,
+                "warn_on_duplicate_beta_content_hash": True,
+                "fail_on_duplicate_beta_content_hash": True,
                 "fail_on_subject_overlap_for_transfer": True,
                 "fail_on_cv_group_overlap": True,
             },
@@ -94,6 +134,9 @@ def _write_confirmatory_output(root: Path) -> Path:
             "dataset_summary_json": str((run_dir / "dataset_summary.json").resolve()),
             "data_quality_report_json": str((run_dir / "data_quality_report.json").resolve()),
             "leakage_audit_json": str((run_dir / "leakage_audit.json").resolve()),
+            "cv_split_manifest_json": str((run_dir / "cv_split_manifest.json").resolve()),
+            "cv_split_manifest_csv": str((run_dir / "cv_split_manifest.csv").resolve()),
+            "cv_split_manifest_sha256": cv_split_manifest_sha256,
         },
         "evidence_policy_effective": {
             "repeat_evaluation": {"repeat_count": 1, "seed_stride": 1000},
@@ -214,6 +257,28 @@ def _write_confirmatory_output(root: Path) -> Path:
         json.dumps({"verdict": "pass", "checks": []}, indent=2) + "\n",
         encoding="utf-8",
     )
+    (run_dir / "cv_split_manifest.json").write_text(
+        json.dumps(
+            {
+                "status": "pass",
+                "schema_version": "cv-split-manifest-v1",
+                "cv_mode": "within_subject_loso_session",
+                "target_column": "coarse_affect",
+                "row_count": len(cv_split_manifest_rows),
+                "rows": cv_split_manifest_rows,
+                "sha256": cv_split_manifest_sha256,
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (run_dir / "cv_split_manifest.csv").write_text(
+        "fold,partition,sample_id,beta_path,subject,session,bas,task,modality,target_label\n"
+        "0,train,s1,/tmp/beta_0001.nii,sub-001,ses-01,BAS2,passive,audio,negative\n"
+        "0,test,s2,/tmp/beta_0002.nii,sub-001,ses-02,BAS2,passive,audio,positive\n",
+        encoding="utf-8",
+    )
     (run_dir / "external_dataset_card.json").write_text(
         json.dumps({"enabled": False, "datasets": []}, indent=2) + "\n",
         encoding="utf-8",
@@ -272,6 +337,8 @@ def _write_confirmatory_output(root: Path) -> Path:
                     "class_balance_report.csv",
                     "missingness_report.csv",
                     "leakage_audit.json",
+                    "cv_split_manifest.json",
+                    "cv_split_manifest.csv",
                     "external_dataset_card.json",
                     "external_dataset_summary.json",
                     "external_validation_compatibility.json",
@@ -546,6 +613,25 @@ def test_verify_official_artifacts_requires_explicit_lane_metadata_for_official_
     )
 
 
+def test_verify_official_artifacts_detects_split_manifest_hash_mismatch(
+    tmp_path: Path,
+) -> None:
+    output_dir = tmp_path / "protocol_runs" / "thesis-canonical__1.0.0"
+    run_dir = _write_confirmatory_output(output_dir)
+
+    config_path = run_dir / "config.json"
+    config_payload = json.loads(config_path.read_text(encoding="utf-8"))
+    config_payload["dataset_fingerprint"]["cv_split_manifest_sha256"] = "0" * 64
+    config_path.write_text(f"{json.dumps(config_payload, indent=2)}\n", encoding="utf-8")
+
+    summary = verify_official_artifacts(output_dir=output_dir)
+    assert summary["passed"] is False
+    assert any(
+        issue["code"] == "cv_split_manifest_hash_mismatch_recorded"
+        for issue in summary["issues"]
+    )
+
+
 def test_compare_official_outputs_detects_deterministic_mismatch(tmp_path: Path) -> None:
     left_dir = tmp_path / "left"
     right_dir = tmp_path / "right"
@@ -566,3 +652,52 @@ def test_compare_official_outputs_detects_deterministic_mismatch(tmp_path: Path)
     assert any(
         mismatch["code"] == "run_artifacts_mismatch" for mismatch in mismatch_summary["mismatches"]
     )
+
+
+def test_compare_official_outputs_ignores_stage_duration_seconds(tmp_path: Path) -> None:
+    left_dir = tmp_path / "left"
+    right_dir = tmp_path / "right"
+
+    left_run_dir = _write_confirmatory_output(left_dir)
+    right_run_dir = _write_confirmatory_output(right_dir)
+
+    left_config_path = left_run_dir / "config.json"
+    right_config_path = right_run_dir / "config.json"
+    left_metrics_path = left_run_dir / "metrics.json"
+    right_metrics_path = right_run_dir / "metrics.json"
+
+    left_payload = json.loads(left_config_path.read_text(encoding="utf-8"))
+    right_payload = json.loads(right_config_path.read_text(encoding="utf-8"))
+    left_metrics_payload = json.loads(left_metrics_path.read_text(encoding="utf-8"))
+    right_metrics_payload = json.loads(right_metrics_path.read_text(encoding="utf-8"))
+
+    left_payload["stage_execution"] = {
+        "telemetry": [
+            {"stage": "dataset_selection", "duration_seconds": 0.11},
+            {"stage": "evaluation", "duration_seconds": 0.22},
+        ]
+    }
+    right_payload["stage_execution"] = {
+        "telemetry": [
+            {"stage": "dataset_selection", "duration_seconds": 0.91},
+            {"stage": "evaluation", "duration_seconds": 0.82},
+        ]
+    }
+    left_metrics_payload["permutation_test"] = {
+        **left_metrics_payload["permutation_test"],
+        "fold_cache_build_seconds": 0.45,
+        "permutation_loop_seconds": 1.23,
+    }
+    right_metrics_payload["permutation_test"] = {
+        **right_metrics_payload["permutation_test"],
+        "fold_cache_build_seconds": 0.67,
+        "permutation_loop_seconds": 1.89,
+    }
+
+    left_config_path.write_text(f"{json.dumps(left_payload, indent=2)}\n", encoding="utf-8")
+    right_config_path.write_text(f"{json.dumps(right_payload, indent=2)}\n", encoding="utf-8")
+    left_metrics_path.write_text(f"{json.dumps(left_metrics_payload, indent=2)}\n", encoding="utf-8")
+    right_metrics_path.write_text(f"{json.dumps(right_metrics_payload, indent=2)}\n", encoding="utf-8")
+
+    equal_summary = compare_official_outputs(left_dir=left_dir, right_dir=right_dir)
+    assert equal_summary["passed"] is True

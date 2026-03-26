@@ -22,6 +22,8 @@ from Thesis_ML.artifacts.registry import (
     list_artifacts_for_run,
 )
 from Thesis_ML.data.affect_labels import COARSE_AFFECT_BY_EMOTION, derive_coarse_affect
+from Thesis_ML.data.index_validation import file_sha256
+from Thesis_ML.experiments.cache_loading import load_features_from_cache
 from Thesis_ML.data.index_dataset import build_dataset_index
 from Thesis_ML.experiments.run_experiment import _build_parser, _make_model, run_experiment
 from Thesis_ML.features.nifti_features import build_feature_cache
@@ -1419,10 +1421,8 @@ def test_feature_cache_rejects_mixed_mask_paths_within_group(tmp_path: Path) -> 
         )
 
     message = str(exc.value)
-    assert "contains multiple resolved mask paths" in message
+    assert "subject_session_bas group must map to exactly one canonical mask path" in message
     assert "sub-001_ses-01_BAS2" in message
-    assert "mask.nii" in message
-    assert "mask_alt.nii" in message
 
 def test_feature_cache_rejects_mixed_mask_paths_even_when_cache_exists(tmp_path: Path) -> None:
     data_root = tmp_path / "Data"
@@ -1458,7 +1458,7 @@ def test_feature_cache_rejects_mixed_mask_paths_even_when_cache_exists(tmp_path:
         )
 
     message = str(exc.value)
-    assert "contains multiple resolved mask paths" in message
+    assert "subject_session_bas group must map to exactly one canonical mask path" in message
     assert "sub-001_ses-01_BAS2" in message
 
 def test_feature_cache_skips_existing_when_current_signature_matches(tmp_path: Path) -> None:
@@ -1516,6 +1516,7 @@ def test_feature_cache_rebuilds_when_beta_path_changes_in_index(tmp_path: Path) 
 
     index_df = pd.read_csv(out_csv)
     index_df.loc[1, "beta_path"] = alt_beta_path.relative_to(data_root).as_posix()
+    index_df.loc[1, "beta_file_sha256"] = file_sha256(alt_beta_path)
     index_df.to_csv(out_csv, index=False)
 
     second_manifest_path = build_feature_cache(
@@ -1617,3 +1618,76 @@ def test_feature_cache_rebuilds_legacy_cache_missing_input_signature(tmp_path: P
 
     with np.load(npz_path, allow_pickle=False) as npz:
         assert "cache_input_signature_json" in npz.files
+
+
+def test_load_features_from_cache_rejects_duplicate_sample_id_within_cache_group(
+    tmp_path: Path,
+) -> None:
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    cache_path = cache_dir / "group_a.npz"
+
+    metadata_rows = [
+        {"sample_id": "s1", "beta_path": "beta_0001.nii"},
+        {"sample_id": "s1", "beta_path": "beta_0001.nii"},
+    ]
+    np.savez_compressed(
+        cache_path,
+        X=np.asarray([[1.0, 2.0], [3.0, 4.0]], dtype=np.float32),
+        y=np.asarray(["anger", "happiness"], dtype=np.str_),
+        metadata_json=np.array(json.dumps(metadata_rows)),
+        group_id=np.array("group_a"),
+    )
+
+    manifest = pd.DataFrame(
+        [{"group_id": "group_a", "cache_path": str(cache_path.resolve())}]
+    )
+    manifest_path = cache_dir / "cache_manifest.csv"
+    manifest.to_csv(manifest_path, index=False)
+
+    index_df = pd.DataFrame([{"sample_id": "s1"}])
+    with pytest.raises(ValueError, match="duplicate sample_id rows in the same group"):
+        load_features_from_cache(
+            index_df=index_df,
+            cache_manifest_path=manifest_path,
+        )
+
+
+def test_load_features_from_cache_rejects_duplicate_sample_id_across_cache_groups(
+    tmp_path: Path,
+) -> None:
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    cache_path_a = cache_dir / "group_a.npz"
+    cache_path_b = cache_dir / "group_b.npz"
+
+    np.savez_compressed(
+        cache_path_a,
+        X=np.asarray([[1.0, 2.0]], dtype=np.float32),
+        y=np.asarray(["anger"], dtype=np.str_),
+        metadata_json=np.array(json.dumps([{"sample_id": "s1", "beta_path": "beta_0001.nii"}])),
+        group_id=np.array("group_a"),
+    )
+    np.savez_compressed(
+        cache_path_b,
+        X=np.asarray([[1.0, 2.0]], dtype=np.float32),
+        y=np.asarray(["anger"], dtype=np.str_),
+        metadata_json=np.array(json.dumps([{"sample_id": "s1", "beta_path": "beta_0001.nii"}])),
+        group_id=np.array("group_b"),
+    )
+
+    manifest = pd.DataFrame(
+        [
+            {"group_id": "group_a", "cache_path": str(cache_path_a.resolve())},
+            {"group_id": "group_b", "cache_path": str(cache_path_b.resolve())},
+        ]
+    )
+    manifest_path = cache_dir / "cache_manifest.csv"
+    manifest.to_csv(manifest_path, index=False)
+
+    index_df = pd.DataFrame([{"sample_id": "s1"}])
+    with pytest.raises(ValueError, match="across multiple cache groups"):
+        load_features_from_cache(
+            index_df=index_df,
+            cache_manifest_path=manifest_path,
+        )

@@ -6,6 +6,15 @@ import pandas as pd
 import pytest
 
 from Thesis_ML.config.framework_mode import FrameworkMode
+from Thesis_ML.data.affect_labels import (
+    BINARY_VALENCE_MAPPING_SHA256,
+    BINARY_VALENCE_MAPPING_VERSION,
+    COARSE_AFFECT_MAPPING_SHA256,
+    COARSE_AFFECT_MAPPING_VERSION,
+    derive_binary_valence_like,
+    derive_coarse_affect,
+)
+from Thesis_ML.data.index_validation import file_sha256
 from Thesis_ML.experiments.errors import (
     OfficialArtifactContractError,
     OfficialContractValidationError,
@@ -73,7 +82,49 @@ def _confirmatory_lock_context() -> dict[str, object]:
 
 def _write_index(path: Path, rows: list[dict[str, object]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    pd.DataFrame(rows).to_csv(path, index=False)
+    data_root = path.parent
+    enriched_rows: list[dict[str, object]] = []
+    for raw_row in rows:
+        row = dict(raw_row)
+        subject = str(row.get("subject", ""))
+        session = str(row.get("session", ""))
+        bas = str(row.get("bas", "BAS2"))
+        row["bas"] = bas
+        row.setdefault("subject_session", f"{subject}_{session}")
+        row.setdefault("subject_session_bas", f"{subject}_{session}_{bas}")
+
+        beta_path = data_root / str(row.get("beta_path", "")).strip()
+        mask_path = data_root / str(row.get("mask_path", "")).strip()
+        beta_path.parent.mkdir(parents=True, exist_ok=True)
+        mask_path.parent.mkdir(parents=True, exist_ok=True)
+        if not beta_path.exists():
+            beta_path.write_bytes(b"beta")
+        if not mask_path.exists():
+            mask_path.write_bytes(b"mask")
+
+        coarse_affect = row.get("coarse_affect")
+        if coarse_affect is None or pd.isna(coarse_affect) or not str(coarse_affect).strip():
+            coarse_affect = derive_coarse_affect(row.get("emotion"))
+        row["coarse_affect"] = coarse_affect
+
+        binary_valence = row.get("binary_valence_like")
+        if binary_valence is None or pd.isna(binary_valence) or not str(binary_valence).strip():
+            binary_valence = derive_binary_valence_like(coarse_affect)
+        row["binary_valence_like"] = binary_valence
+
+        row.setdefault("beta_file_sha256", file_sha256(beta_path))
+        row.setdefault("mask_file_sha256", file_sha256(mask_path))
+        row.setdefault("coarse_affect_mapping_version", COARSE_AFFECT_MAPPING_VERSION)
+        row.setdefault("coarse_affect_mapping_sha256", COARSE_AFFECT_MAPPING_SHA256)
+        row.setdefault("binary_valence_mapping_version", BINARY_VALENCE_MAPPING_VERSION)
+        row.setdefault("binary_valence_mapping_sha256", BINARY_VALENCE_MAPPING_SHA256)
+        row.setdefault("glm_has_unknown_regressors", False)
+        row.setdefault("glm_unknown_regressor_count", 0)
+        row.setdefault("glm_unknown_regressor_labels_json", "[]")
+
+        enriched_rows.append(row)
+
+    pd.DataFrame(enriched_rows).to_csv(path, index=False)
 
 
 def test_official_preflight_rejects_missing_required_dataset_columns(tmp_path: Path) -> None:

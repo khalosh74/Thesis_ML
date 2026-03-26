@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import json
 from pathlib import Path
 from typing import Any, Literal
@@ -42,6 +43,8 @@ _REQUIRED_DATA_RUN_ARTIFACTS = (
     "class_balance_report.csv",
     "missingness_report.csv",
     "leakage_audit.json",
+    "cv_split_manifest.json",
+    "cv_split_manifest.csv",
     "external_dataset_card.json",
     "external_dataset_summary.json",
     "external_validation_compatibility.json",
@@ -97,6 +100,11 @@ def _load_json(
         )
         return None
     return payload
+
+
+def _stable_json_sha256(payload: Any) -> str:
+    normalized = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
 
 
 def _expected_mode(
@@ -314,6 +322,152 @@ def _verify_data_layer_artifacts(
                     code="external_validation_field_missing",
                     message=f"external_validation_compatibility.json missing required field '{key}'.",
                     path=report_dir / "external_validation_compatibility.json",
+                )
+
+    split_manifest_payload = _load_json(
+        report_dir / "cv_split_manifest.json",
+        issues,
+        code_prefix="cv_split_manifest",
+    )
+    split_manifest_csv_path = report_dir / "cv_split_manifest.csv"
+    csv_row_count = 0
+    csv_columns: list[str] = []
+    if split_manifest_csv_path.exists():
+        with split_manifest_csv_path.open("r", encoding="utf-8", newline="") as handle:
+            reader = csv.DictReader(handle)
+            csv_columns = list(reader.fieldnames or [])
+            for _ in reader:
+                csv_row_count += 1
+    expected_columns = {
+        "fold",
+        "partition",
+        "sample_id",
+        "beta_path",
+        "subject",
+        "session",
+        "bas",
+        "task",
+        "modality",
+        "target_label",
+    }
+    if split_manifest_csv_path.exists() and not expected_columns.issubset(set(csv_columns)):
+        _add_issue(
+            issues,
+            code="cv_split_manifest_csv_columns_missing",
+            message="cv_split_manifest.csv is missing required columns.",
+            path=split_manifest_csv_path,
+            details={"missing_columns": sorted(expected_columns - set(csv_columns))},
+        )
+
+    expected_selected_rows = None
+    if isinstance(dataset_card, dict):
+        selected_subset = (
+            dataset_card.get("coverage", {})
+            if isinstance(dataset_card.get("coverage"), dict)
+            else {}
+        )
+        selected_payload = (
+            selected_subset.get("selected_subset", {})
+            if isinstance(selected_subset.get("selected_subset"), dict)
+            else {}
+        )
+        n_rows = selected_payload.get("n_rows")
+        if isinstance(n_rows, int):
+            expected_selected_rows = int(n_rows)
+
+    if isinstance(split_manifest_payload, dict):
+        rows = split_manifest_payload.get("rows")
+        if not isinstance(rows, list):
+            _add_issue(
+                issues,
+                code="cv_split_manifest_rows_missing",
+                message="cv_split_manifest.json must contain a 'rows' list.",
+                path=report_dir / "cv_split_manifest.json",
+            )
+            rows = []
+        if expected_selected_rows is not None and expected_selected_rows > 0 and not rows:
+            _add_issue(
+                issues,
+                code="cv_split_manifest_empty_unexpected",
+                message="cv_split_manifest.json rows are empty despite a non-empty selected subset.",
+                path=report_dir / "cv_split_manifest.json",
+                details={"expected_selected_rows": expected_selected_rows},
+            )
+        if expected_selected_rows is not None and expected_selected_rows > 0 and csv_row_count == 0:
+            _add_issue(
+                issues,
+                code="cv_split_manifest_csv_empty_unexpected",
+                message="cv_split_manifest.csv has no rows despite a non-empty selected subset.",
+                path=split_manifest_csv_path,
+                details={"expected_selected_rows": expected_selected_rows},
+            )
+
+        computed_hash = _stable_json_sha256(rows)
+        payload_hash = split_manifest_payload.get("sha256")
+        if isinstance(payload_hash, str) and payload_hash.strip():
+            if payload_hash.strip() != computed_hash:
+                _add_issue(
+                    issues,
+                    code="cv_split_manifest_hash_mismatch_internal",
+                    message="cv_split_manifest.json sha256 does not match the manifest rows content.",
+                    path=report_dir / "cv_split_manifest.json",
+                    details={
+                        "recorded_sha256": payload_hash,
+                        "computed_sha256": computed_hash,
+                    },
+                )
+        else:
+            _add_issue(
+                issues,
+                code="cv_split_manifest_hash_missing",
+                message="cv_split_manifest.json must include non-empty sha256.",
+                path=report_dir / "cv_split_manifest.json",
+            )
+
+        if csv_row_count != len(rows):
+            _add_issue(
+                issues,
+                code="cv_split_manifest_row_count_mismatch",
+                message="cv_split_manifest.json and cv_split_manifest.csv row counts differ.",
+                path=report_dir / "cv_split_manifest.csv",
+                details={"json_rows": int(len(rows)), "csv_rows": int(csv_row_count)},
+            )
+
+        recorded_hashes: list[tuple[str, str]] = []
+        config_fingerprint = config_payload.get("dataset_fingerprint")
+        metrics_fingerprint = metrics_payload.get("dataset_fingerprint")
+        card_fingerprint = (
+            dataset_card.get("dataset_identity", {}).get("dataset_fingerprint")
+            if isinstance(dataset_card, dict)
+            and isinstance(dataset_card.get("dataset_identity"), dict)
+            else None
+        )
+        for source_label, payload in (
+            ("config.dataset_fingerprint", config_fingerprint),
+            ("metrics.dataset_fingerprint", metrics_fingerprint),
+            ("dataset_card.dataset_identity.dataset_fingerprint", card_fingerprint),
+        ):
+            if not isinstance(payload, dict):
+                continue
+            candidate = payload.get("cv_split_manifest_sha256")
+            if isinstance(candidate, str) and candidate.strip():
+                recorded_hashes.append((source_label, candidate.strip()))
+
+        for source_label, recorded_hash in recorded_hashes:
+            if recorded_hash != computed_hash:
+                _add_issue(
+                    issues,
+                    code="cv_split_manifest_hash_mismatch_recorded",
+                    message=(
+                        "Recorded cv_split_manifest_sha256 does not match "
+                        "cv_split_manifest.json content."
+                    ),
+                    path=report_dir / "cv_split_manifest.json",
+                    details={
+                        "source": source_label,
+                        "recorded_sha256": recorded_hash,
+                        "computed_sha256": computed_hash,
+                    },
                 )
 
 

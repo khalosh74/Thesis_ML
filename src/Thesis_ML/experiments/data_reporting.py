@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 from typing import Any
@@ -11,6 +12,11 @@ from Thesis_ML.experiments.cv_split_plan import build_cv_split_plan
 from Thesis_ML.config.framework_mode import FrameworkMode
 from Thesis_ML.config.methodology import DataPolicy
 from Thesis_ML.data.affect_labels import with_coarse_affect
+from Thesis_ML.data.index_validation import (
+    CANONICAL_BETA_PATH_COLUMN,
+    DatasetIndexValidationError,
+    canonicalize_index_paths,
+)
 
 _BASE_REQUIRED_INDEX_COLUMNS = {
     "sample_id",
@@ -22,6 +28,24 @@ _BASE_REQUIRED_INDEX_COLUMNS = {
     "mask_path",
     "regressor_label",
 }
+
+
+def _stable_json_sha256(payload: Any) -> str:
+    normalized = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
+def _normalize_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int) and value in {0, 1}:
+        return bool(value)
+    normalized = str(value).strip().lower()
+    if normalized in {"true", "1", "yes"}:
+        return True
+    if normalized in {"false", "0", "no"}:
+        return False
+    raise ValueError(f"Invalid boolean value: {value!r}")
 
 
 def _distribution(series: pd.Series) -> dict[str, int]:
@@ -199,6 +223,73 @@ def _build_exact_cv_split_audit(
         "fold_rows": fold_rows,
     }
 
+
+def _build_cv_split_manifest(
+    *,
+    selected_index_df: pd.DataFrame,
+    target_column: str,
+    cv_mode: str,
+    subject: str | None,
+    train_subject: str | None,
+    test_subject: str | None,
+) -> dict[str, Any]:
+    split_plan = build_cv_split_plan(
+        metadata_df=selected_index_df,
+        target_column=target_column,
+        cv_mode=cv_mode,
+        subject=subject,
+        train_subject=train_subject,
+        test_subject=test_subject,
+        seed=0 if cv_mode == "record_random_split" else None,
+    )
+    if CANONICAL_BETA_PATH_COLUMN in selected_index_df.columns:
+        beta_path_column = CANONICAL_BETA_PATH_COLUMN
+    else:
+        beta_path_column = "beta_path"
+
+    rows: list[dict[str, Any]] = []
+    for fold in split_plan.folds:
+        for partition, index_values in (("train", fold.train_idx), ("test", fold.test_idx)):
+            fold_frame = selected_index_df.iloc[np.asarray(index_values, dtype=int)]
+            for _, row in fold_frame.iterrows():
+                rows.append(
+                    {
+                        "fold": int(fold.fold),
+                        "partition": str(partition),
+                        "sample_id": str(row.get("sample_id", "")),
+                        "beta_path": str(row.get(beta_path_column, "")),
+                        "subject": str(row.get("subject", "")),
+                        "session": str(row.get("session", "")),
+                        "bas": str(row.get("bas", "")),
+                        "task": str(row.get("task", "")),
+                        "modality": str(row.get("modality", "")),
+                        "target_label": str(row.get(target_column, "")),
+                    }
+                )
+
+    sort_keys = [
+        "fold",
+        "partition",
+        "sample_id",
+        "beta_path",
+        "subject",
+        "session",
+        "bas",
+        "task",
+        "modality",
+        "target_label",
+    ]
+    rows = sorted(rows, key=lambda item: tuple(item.get(key, "") for key in sort_keys))
+    return {
+        "status": "pass",
+        "schema_version": "cv-split-manifest-v1",
+        "cv_mode": str(cv_mode),
+        "target_column": str(target_column),
+        "row_count": int(len(rows)),
+        "rows": rows,
+        "sha256": _stable_json_sha256(rows),
+    }
+
 def evaluate_official_data_policy(
     *,
     framework_mode: FrameworkMode,
@@ -216,6 +307,7 @@ def evaluate_official_data_policy(
     filter_modality: str | None,
     official_context: dict[str, Any],
     target_derivation_audit_df: pd.DataFrame | None = None,
+    derived_label_inconsistency_audit_df: pd.DataFrame | None = None,
     selection_exclusion_manifest_df: pd.DataFrame | None = None,
 ) -> dict[str, Any]:
     policy_payload = official_context.get("data_policy")
@@ -311,6 +403,33 @@ def evaluate_official_data_policy(
             )
         )
 
+    if derived_label_inconsistency_audit_df is None:
+        derived_label_inconsistency_audit_df = pd.DataFrame()
+
+    derived_label_inconsistency_rows = (
+        derived_label_inconsistency_audit_df.to_dict(orient="records")
+        if not derived_label_inconsistency_audit_df.empty
+        else []
+    )
+    derived_label_inconsistency_summary: dict[str, Any] = {
+        "n_rows": int(len(derived_label_inconsistency_audit_df)),
+        "by_category": {},
+    }
+    if (
+        not derived_label_inconsistency_audit_df.empty
+        and "inconsistency_category" in derived_label_inconsistency_audit_df.columns
+    ):
+        counts = (
+            derived_label_inconsistency_audit_df["inconsistency_category"]
+            .astype(str)
+            .value_counts(dropna=False)
+            .sort_index()
+            .to_dict()
+        )
+        derived_label_inconsistency_summary["by_category"] = {
+            str(key): int(value) for key, value in counts.items()
+        }
+
     required_columns = set(_BASE_REQUIRED_INDEX_COLUMNS) | {target_column}
     required_columns.update(str(value) for value in data_policy.required_index_columns)
     missing_required_columns = sorted(required_columns - set(full_index_df.columns))
@@ -323,6 +442,133 @@ def evaluate_official_data_policy(
                 details={"missing_columns": missing_required_columns},
             )
         )
+
+    selected_index_for_checks = selected_index_df.copy()
+    beta_path_canonicalization_status = "pass"
+    beta_path_canonicalization_error: str | None = None
+    try:
+        selected_index_for_checks = canonicalize_index_paths(
+            selected_index_for_checks,
+            data_root=data_root,
+            require_exists=False,
+        )
+    except DatasetIndexValidationError as exc:
+        beta_path_canonicalization_status = "fail"
+        beta_path_canonicalization_error = str(exc)
+        blocking_list.append(
+            _issue(
+                code="leakage_beta_path_canonicalization_failed",
+                severity="blocking",
+                message="Failed to canonicalize selected beta/mask paths for leakage checks.",
+                details={"error": str(exc)},
+            )
+        )
+        selected_index_for_checks[CANONICAL_BETA_PATH_COLUMN] = (
+            selected_index_for_checks["beta_path"].astype(str).str.strip()
+        )
+
+    if CANONICAL_BETA_PATH_COLUMN in selected_index_for_checks.columns:
+        selected_beta_records = (
+            selected_index_for_checks[["sample_id", CANONICAL_BETA_PATH_COLUMN]]
+            .astype(str)
+            .rename(columns={CANONICAL_BETA_PATH_COLUMN: "beta_path"})
+            .sort_values(by=["sample_id", "beta_path"], kind="mergesort")
+            .to_dict(orient="records")
+        )
+    else:
+        selected_beta_records = (
+            selected_index_for_checks[["sample_id", "beta_path"]]
+            .astype(str)
+            .sort_values(by=["sample_id", "beta_path"], kind="mergesort")
+            .to_dict(orient="records")
+        )
+    selected_beta_path_sha256 = _stable_json_sha256(selected_beta_records)
+
+    mapping_integrity_summary = {
+        "coarse_affect_mapping_versions": sorted(
+            {
+                str(value).strip()
+                for value in selected_index_df.get("coarse_affect_mapping_version", pd.Series(dtype=object))
+                if str(value).strip() and str(value).strip().lower() != "nan"
+            }
+        ),
+        "coarse_affect_mapping_hashes": sorted(
+            {
+                str(value).strip()
+                for value in selected_index_df.get("coarse_affect_mapping_sha256", pd.Series(dtype=object))
+                if str(value).strip() and str(value).strip().lower() != "nan"
+            }
+        ),
+        "binary_valence_mapping_versions": sorted(
+            {
+                str(value).strip()
+                for value in selected_index_df.get("binary_valence_mapping_version", pd.Series(dtype=object))
+                if str(value).strip() and str(value).strip().lower() != "nan"
+            }
+        ),
+        "binary_valence_mapping_hashes": sorted(
+            {
+                str(value).strip()
+                for value in selected_index_df.get("binary_valence_mapping_sha256", pd.Series(dtype=object))
+                if str(value).strip() and str(value).strip().lower() != "nan"
+            }
+        ),
+    }
+
+    glm_unknown_regressor_summary = {
+        "n_rows_with_unknown_regressors": 0,
+        "total_unknown_regressor_count": 0,
+        "sample_ids_head": [],
+        "unknown_regressor_labels_head": [],
+    }
+    if {
+        "glm_has_unknown_regressors",
+        "glm_unknown_regressor_count",
+        "glm_unknown_regressor_labels_json",
+    } <= set(selected_index_df.columns):
+        try:
+            unknown_mask = selected_index_df["glm_has_unknown_regressors"].map(_normalize_bool)
+        except ValueError as exc:
+            blocking_list.append(
+                _issue(
+                    code="glm_unknown_regressors_boolean_invalid",
+                    severity="blocking",
+                    message="glm_has_unknown_regressors contains invalid boolean values.",
+                    details={"error": str(exc)},
+                )
+            )
+            unknown_mask = pd.Series(False, index=selected_index_df.index)
+        unknown_rows = selected_index_df.loc[unknown_mask].copy()
+        unknown_labels: list[str] = []
+        for raw in unknown_rows.get("glm_unknown_regressor_labels_json", pd.Series(dtype=object)):
+            try:
+                parsed = json.loads(str(raw))
+            except Exception:
+                parsed = []
+            if isinstance(parsed, list):
+                unknown_labels.extend(str(value) for value in parsed)
+        glm_unknown_regressor_summary = {
+            "n_rows_with_unknown_regressors": int(len(unknown_rows)),
+            "total_unknown_regressor_count": int(
+                pd.to_numeric(
+                    unknown_rows.get("glm_unknown_regressor_count", pd.Series(dtype=float)),
+                    errors="coerce",
+                ).fillna(0).sum()
+            ),
+            "sample_ids_head": unknown_rows.get("sample_id", pd.Series(dtype=object))
+            .astype(str)
+            .tolist()[:10],
+            "unknown_regressor_labels_head": sorted(set(unknown_labels))[:20],
+        }
+        if int(len(unknown_rows)) > 0:
+            blocking_list.append(
+                _issue(
+                    code="glm_unknown_regressors_present",
+                    severity="blocking",
+                    message="Selected subset contains rows with unknown GLM regressors.",
+                    details=glm_unknown_regressor_summary,
+                )
+            )
 
     summary_full = _scope_summary(full_index_df, scope="full_index", target_column=target_column)
     summary_selected = _scope_summary(
@@ -341,6 +587,9 @@ def evaluate_official_data_policy(
         "filter_modality": filter_modality,
         "full_index": summary_full,
         "selected_subset": summary_selected,
+        "mapping_integrity": mapping_integrity_summary,
+        "glm_unknown_regressor_summary": glm_unknown_regressor_summary,
+        "derived_label_inconsistency_summary": derived_label_inconsistency_summary,
     }
     dataset_summary_rows = [
         {
@@ -473,7 +722,9 @@ def evaluate_official_data_policy(
             )
 
     leakage_checks: list[dict[str, Any]] = []
-    duplicate_sample_ids = int(selected_index_df["sample_id"].astype(str).duplicated().sum())
+    duplicate_sample_ids = int(
+        selected_index_for_checks["sample_id"].astype(str).duplicated().sum()
+    )
     duplicate_sample_status = (
         "fail"
         if duplicate_sample_ids > 0 and data_policy.leakage.fail_on_duplicate_sample_id
@@ -508,7 +759,14 @@ def evaluate_official_data_policy(
             )
         )
 
-    duplicate_beta_paths = int(selected_index_df["beta_path"].astype(str).duplicated().sum())
+    canonical_beta_column = (
+        CANONICAL_BETA_PATH_COLUMN
+        if CANONICAL_BETA_PATH_COLUMN in selected_index_for_checks.columns
+        else "beta_path"
+    )
+    duplicate_beta_paths = int(
+        selected_index_for_checks[canonical_beta_column].astype(str).duplicated().sum()
+    )
     duplicate_beta_status = "pass"
     if duplicate_beta_paths > 0:
         if data_policy.leakage.fail_on_duplicate_beta_path:
@@ -517,7 +775,7 @@ def evaluate_official_data_policy(
                 _issue(
                     code="leakage_duplicate_beta_path",
                     severity="blocking",
-                    message="Duplicate beta_path values detected in selected subset.",
+                    message="Duplicate canonical beta_path values detected in selected subset.",
                     details={"count": duplicate_beta_paths},
                 )
             )
@@ -527,7 +785,7 @@ def evaluate_official_data_policy(
                 _issue(
                     code="leakage_duplicate_beta_path_warning",
                     severity="warning",
-                    message="Duplicate beta_path values detected in selected subset.",
+                    message="Duplicate canonical beta_path values detected in selected subset.",
                     details={"count": duplicate_beta_paths},
                 )
             )
@@ -536,7 +794,67 @@ def evaluate_official_data_policy(
             "check": "duplicate_beta_path",
             "status": duplicate_beta_status,
             "count": duplicate_beta_paths,
+            "canonicalization_status": beta_path_canonicalization_status,
+            "canonicalization_error": beta_path_canonicalization_error,
             "blocking_policy": bool(data_policy.leakage.fail_on_duplicate_beta_path),
+        }
+    )
+
+    duplicate_beta_hash_status = "pass"
+    duplicate_beta_hash_count = 0
+    missing_beta_hash_count = 0
+    beta_hash_column = "beta_file_sha256"
+    if beta_hash_column in selected_index_for_checks.columns:
+        beta_hashes = selected_index_for_checks[beta_hash_column].astype(str).str.strip().str.lower()
+        valid_hashes = beta_hashes[
+            beta_hashes.str.fullmatch(r"[0-9a-f]{64}", na=False)
+        ].copy()
+        duplicate_beta_hash_count = int(valid_hashes.duplicated().sum())
+        missing_beta_hash_count = int(len(beta_hashes) - len(valid_hashes))
+    else:
+        missing_beta_hash_count = int(len(selected_index_for_checks))
+
+    if missing_beta_hash_count > 0:
+        duplicate_beta_hash_status = "warning"
+        warnings_list.append(
+            _issue(
+                code="leakage_duplicate_beta_content_hash_missing_warning",
+                severity="warning",
+                message=(
+                    "Selected subset is missing valid beta_file_sha256 integrity values; "
+                    "duplicate beta-content-hash checks are incomplete."
+                ),
+                details={"count": missing_beta_hash_count},
+            )
+        )
+    elif duplicate_beta_hash_count > 0:
+        if data_policy.leakage.fail_on_duplicate_beta_content_hash:
+            duplicate_beta_hash_status = "fail"
+            blocking_list.append(
+                _issue(
+                    code="leakage_duplicate_beta_content_hash",
+                    severity="blocking",
+                    message="Duplicate beta_file_sha256 values detected in selected subset.",
+                    details={"count": duplicate_beta_hash_count},
+                )
+            )
+        elif data_policy.leakage.warn_on_duplicate_beta_content_hash:
+            duplicate_beta_hash_status = "warning"
+            warnings_list.append(
+                _issue(
+                    code="leakage_duplicate_beta_content_hash_warning",
+                    severity="warning",
+                    message="Duplicate beta_file_sha256 values detected in selected subset.",
+                    details={"count": duplicate_beta_hash_count},
+                )
+            )
+    leakage_checks.append(
+        {
+            "check": "duplicate_beta_content_hash",
+            "status": duplicate_beta_hash_status,
+            "count": int(duplicate_beta_hash_count),
+            "missing_hash_count": int(missing_beta_hash_count),
+            "blocking_policy": bool(data_policy.leakage.fail_on_duplicate_beta_content_hash),
         }
     )
 
@@ -596,6 +914,27 @@ def evaluate_official_data_policy(
             "fold_rows": [],
         }
 
+    try:
+        cv_split_manifest = _build_cv_split_manifest(
+            selected_index_df=selected_index_for_checks,
+            target_column=target_column,
+            cv_mode=cv_mode,
+            subject=subject,
+            train_subject=train_subject,
+            test_subject=test_subject,
+        )
+    except ValueError as exc:
+        cv_split_manifest = {
+            "status": "fail",
+            "schema_version": "cv-split-manifest-v1",
+            "cv_mode": cv_mode,
+            "target_column": target_column,
+            "row_count": 0,
+            "rows": [],
+            "sha256": None,
+            "planner_error": str(exc),
+        }
+
     cv_split_status = (
         "fail"
         if cv_split_audit.get("status") == "fail" and data_policy.leakage.fail_on_cv_group_overlap
@@ -614,6 +953,21 @@ def evaluate_official_data_policy(
                 cv_split_audit.get("duplicate_test_coverage_rows", 0)
             ),
             "failure_codes": list(cv_split_audit.get("failure_codes", [])),
+        }
+    )
+    cv_split_manifest_status = (
+        "fail"
+        if cv_split_manifest.get("status") == "fail" and data_policy.leakage.fail_on_cv_group_overlap
+        else "pass"
+    )
+    leakage_checks.append(
+        {
+            "check": "cv_split_manifest",
+            "status": cv_split_manifest_status,
+            "blocking_policy": bool(data_policy.leakage.fail_on_cv_group_overlap),
+            "row_count": int(cv_split_manifest.get("row_count", 0)),
+            "sha256": cv_split_manifest.get("sha256"),
+            "planner_error": cv_split_manifest.get("planner_error"),
         }
     )
     if cv_split_status == "fail":
@@ -638,6 +992,18 @@ def evaluate_official_data_policy(
                 },
             )
         )
+    if cv_split_manifest_status == "fail":
+        blocking_list.append(
+            _issue(
+                code="leakage_cv_split_manifest_invalid",
+                severity="blocking",
+                message="CV split manifest generation failed for selected subset.",
+                details={
+                    "cv_mode": cv_mode,
+                    "planner_error": cv_split_manifest.get("planner_error"),
+                },
+            )
+        )
 
     leakage_verdict = (
         "fail"
@@ -653,6 +1019,7 @@ def evaluate_official_data_policy(
         "verdict": leakage_verdict,
         "checks": leakage_checks,
         "cv_split_audit": cv_split_audit,
+        "cv_split_manifest_sha256": cv_split_manifest.get("sha256"),
     }
 
     external_card: dict[str, Any] = {
@@ -804,6 +1171,10 @@ def evaluate_official_data_policy(
         },
         "leakage_audit_verdict": leakage_verdict,
         "external_validation_status": external_compatibility["status"],
+        "derived_label_inconsistency_summary": derived_label_inconsistency_summary,
+        "mapping_integrity": mapping_integrity_summary,
+        "glm_unknown_regressor_summary": glm_unknown_regressor_summary,
+        "cv_split_manifest_sha256": cv_split_manifest.get("sha256"),
     }
 
     return {
@@ -822,8 +1193,14 @@ def evaluate_official_data_policy(
         "required_columns": sorted(required_columns),
         "target_derivation_summary": target_derivation_summary,
         "target_derivation_audit_rows": target_derivation_audit_rows,
+        "derived_label_inconsistency_summary": derived_label_inconsistency_summary,
+        "derived_label_inconsistency_audit_rows": derived_label_inconsistency_rows,
         "cv_split_audit": cv_split_audit,
         "cv_split_audit_rows": list(cv_split_audit.get("fold_rows", [])),
+        "cv_split_manifest": cv_split_manifest,
+        "cv_split_manifest_rows": list(cv_split_manifest.get("rows", [])),
+        "cv_split_manifest_sha256": cv_split_manifest.get("sha256"),
+        "selected_beta_path_sha256": selected_beta_path_sha256,
         "selection_exclusion_summary": selection_exclusion_summary,
         "selection_exclusion_rows": selection_exclusion_rows,
     }
@@ -900,6 +1277,8 @@ def write_official_data_artifacts(
     leakage_audit_path = report_dir / "leakage_audit.json"
     cv_split_audit_json_path = report_dir / "cv_split_audit.json"
     cv_split_audit_csv_path = report_dir / "cv_split_audit.csv"
+    cv_split_manifest_json_path = report_dir / "cv_split_manifest.json"
+    cv_split_manifest_csv_path = report_dir / "cv_split_manifest.csv"
     external_dataset_card_path = report_dir / "external_dataset_card.json"
     external_dataset_summary_path = report_dir / "external_dataset_summary.json"
     external_validation_compatibility_path = report_dir / "external_validation_compatibility.json"
@@ -946,6 +1325,15 @@ def write_official_data_artifacts(
         cv_split_audit_csv_path,
         index=False,
     )
+    cv_split_manifest_payload = dict(assessment.get("cv_split_manifest", {}))
+    cv_split_manifest_json_path.write_text(
+        f"{json.dumps(cv_split_manifest_payload, indent=2)}\n",
+        encoding="utf-8",
+    )
+    pd.DataFrame(list(assessment.get("cv_split_manifest_rows", []))).to_csv(
+        cv_split_manifest_csv_path,
+        index=False,
+    )
     quality_payload = dict(assessment.get("data_quality_report", {}))
     data_quality_report_path.write_text(
         f"{json.dumps(quality_payload, indent=2)}\n",
@@ -979,6 +1367,20 @@ def write_official_data_artifacts(
     )
 
     data_policy_effective = dict(assessment.get("data_policy_effective", {}))
+    dataset_fingerprint_payload = (
+        dict(dataset_fingerprint) if isinstance(dataset_fingerprint, dict) else {}
+    )
+    selected_beta_path_sha256 = assessment.get("selected_beta_path_sha256")
+    cv_split_manifest_sha256 = assessment.get("cv_split_manifest_sha256")
+    if selected_beta_path_sha256:
+        dataset_fingerprint_payload["selected_beta_path_sha256"] = str(
+            selected_beta_path_sha256
+        )
+    if cv_split_manifest_sha256:
+        dataset_fingerprint_payload["cv_split_manifest_sha256"] = str(
+            cv_split_manifest_sha256
+        )
+
     dataset_card_payload = {
         "schema_version": "official-dataset-card-v1",
         "framework_mode": framework_mode.value,
@@ -986,7 +1388,7 @@ def write_official_data_artifacts(
             "index_csv": str(index_csv.resolve()),
             "data_root": str(data_root.resolve()),
             "cache_dir": str(cache_dir.resolve()),
-            "dataset_fingerprint": dict(dataset_fingerprint) if dataset_fingerprint else None,
+            "dataset_fingerprint": dataset_fingerprint_payload or None,
         },
         "unit_of_analysis": sample_unit or "beta_event",
         "target_definition": {
@@ -994,6 +1396,8 @@ def write_official_data_artifacts(
             "label_policy": label_policy,
             "target_mapping_version": target_mapping_version,
             "target_mapping_hash": target_mapping_hash,
+            "mapping_integrity": assessment.get("dataset_summary", {})
+            .get("mapping_integrity", {}),
         },
         "selection_scope": {
             "cv_mode": cv_mode,
@@ -1023,7 +1427,14 @@ def write_official_data_artifacts(
                 ),
                 "failure_codes": cv_split_payload.get("failure_codes", []),
             },
+            "cv_split_manifest_sha256": cv_split_manifest_payload.get("sha256"),
         },
+        "glm_unknown_regressor_summary": assessment.get("dataset_summary", {}).get(
+            "glm_unknown_regressor_summary", {}
+        ),
+        "derived_label_inconsistency_summary": assessment.get(
+            "derived_label_inconsistency_summary", {}
+        ),
         "external_validation": external_compatibility,
         "intended_use": data_policy_effective.get("intended_use"),
         "not_intended_use": data_policy_effective.get("not_intended_use", []),
@@ -1055,6 +1466,9 @@ def write_official_data_artifacts(
         "leakage_audit_json": str(leakage_audit_path.resolve()),
         "cv_split_audit_json": str(cv_split_audit_json_path.resolve()),
         "cv_split_audit_csv": str(cv_split_audit_csv_path.resolve()),
+        "cv_split_manifest_json": str(cv_split_manifest_json_path.resolve()),
+        "cv_split_manifest_csv": str(cv_split_manifest_csv_path.resolve()),
+        "cv_split_manifest_sha256": str(cv_split_manifest_payload.get("sha256", "")),
         "external_dataset_card_json": str(external_dataset_card_path.resolve()),
         "external_dataset_summary_json": str(external_dataset_summary_path.resolve()),
         "external_validation_compatibility_json": str(
@@ -1069,6 +1483,7 @@ def write_official_data_artifacts(
         "data_policy_effective": data_policy_effective,
         "data_artifacts": data_artifacts,
         "data_quality_report": quality_payload,
+        "dataset_fingerprint": dataset_fingerprint_payload or None,
     }
 
 

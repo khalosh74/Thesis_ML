@@ -174,3 +174,56 @@ def test_replay_official_paths_fails_when_mode_has_timed_out_runs(
         ]
     )
     assert exit_code == 1
+
+
+def test_replay_official_paths_fails_on_split_manifest_hash_verification_issue(
+    tmp_path: Path, monkeypatch
+) -> None:
+    module = _load_replay_module()
+    comparison_output = tmp_path / "comparison_output"
+    comparison_output.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(
+        module,
+        "_run_comparison",
+        lambda **_: {
+            "comparison_id": "cmp",
+            "comparison_version": "1.0.0",
+            "comparison_output_dir": str(comparison_output),
+            "n_completed": 1,
+            "n_failed": 0,
+            "n_planned": 0,
+        },
+    )
+    monkeypatch.setattr(
+        module,
+        "verify_official_artifacts",
+        lambda **_: {
+            "passed": False,
+            "issues": [{"code": "cv_split_manifest_hash_mismatch_recorded"}],
+        },
+    )
+    monkeypatch.setattr(
+        module,
+        "build_reproducibility_manifest",
+        lambda **_: {"manifest_schema_version": "reproducibility-manifest-v1"},
+    )
+    monkeypatch.setattr(
+        module,
+        "write_reproducibility_manifest",
+        lambda *, manifest, output_path: output_path.write_text(
+            f"{json.dumps(manifest, indent=2)}\n",
+            encoding="utf-8",
+        ),
+    )
+
+    exit_code = module.main(
+        [
+            "--mode",
+            "comparison",
+            "--use-demo-dataset",
+            "--reports-root",
+            str(tmp_path / "reports"),
+        ]
+    )
+    assert exit_code == 1
