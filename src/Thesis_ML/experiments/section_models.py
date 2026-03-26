@@ -51,6 +51,8 @@ class DatasetSelectionInput(_SectionModel):
 class DatasetSelectionOutput(_SectionModel):
     selected_index_df: pd.DataFrame
     target_derivation_audit_df: pd.DataFrame = Field(default_factory=pd.DataFrame)
+    selection_exclusion_manifest_df: pd.DataFrame = Field(default_factory=pd.DataFrame)
+    selection_summary: dict[str, Any] = Field(default_factory=dict)
 
 
 class FeatureCacheBuildInput(_SectionModel):

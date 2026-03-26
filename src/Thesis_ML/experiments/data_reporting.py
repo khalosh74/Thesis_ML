@@ -216,6 +216,7 @@ def evaluate_official_data_policy(
     filter_modality: str | None,
     official_context: dict[str, Any],
     target_derivation_audit_df: pd.DataFrame | None = None,
+    selection_exclusion_manifest_df: pd.DataFrame | None = None,
 ) -> dict[str, Any]:
     policy_payload = official_context.get("data_policy")
     if isinstance(policy_payload, dict):
@@ -226,6 +227,45 @@ def evaluate_official_data_policy(
 
     warnings_list: list[dict[str, Any]] = []
     blocking_list: list[dict[str, Any]] = []
+
+    if selection_exclusion_manifest_df is None:
+        selection_exclusion_manifest_df = pd.DataFrame()
+
+    selection_exclusion_rows = (
+        selection_exclusion_manifest_df.to_dict(orient="records")
+        if not selection_exclusion_manifest_df.empty
+        else []
+    )
+
+    selection_exclusion_summary: dict[str, Any] = {
+        "n_rows": int(len(selection_exclusion_manifest_df)),
+        "by_stage": {},
+        "by_reason": {},
+    }
+
+    if not selection_exclusion_manifest_df.empty:
+        if "exclusion_stage" in selection_exclusion_manifest_df.columns:
+            by_stage = (
+                selection_exclusion_manifest_df["exclusion_stage"]
+                .astype(str)
+                .value_counts(dropna=False)
+                .sort_index()
+                .to_dict()
+            )
+            selection_exclusion_summary["by_stage"] = {
+                str(key): int(value) for key, value in by_stage.items()
+            }
+        if "exclusion_reason" in selection_exclusion_manifest_df.columns:
+            by_reason = (
+                selection_exclusion_manifest_df["exclusion_reason"]
+                .astype(str)
+                .value_counts(dropna=False)
+                .sort_index()
+                .to_dict()
+            )
+            selection_exclusion_summary["by_reason"] = {
+                str(key): int(value) for key, value in by_reason.items()
+            }
 
     if target_derivation_audit_df is None:
         target_derivation_audit_df = pd.DataFrame()
@@ -784,6 +824,8 @@ def evaluate_official_data_policy(
         "target_derivation_audit_rows": target_derivation_audit_rows,
         "cv_split_audit": cv_split_audit,
         "cv_split_audit_rows": list(cv_split_audit.get("fold_rows", [])),
+        "selection_exclusion_summary": selection_exclusion_summary,
+        "selection_exclusion_rows": selection_exclusion_rows,
     }
 
 
@@ -863,6 +905,8 @@ def write_official_data_artifacts(
     external_validation_compatibility_path = report_dir / "external_validation_compatibility.json"
     target_derivation_audit_json_path = report_dir / "target_derivation_audit.json"
     target_derivation_audit_csv_path = report_dir / "target_derivation_audit.csv"
+    selection_exclusion_summary_path = report_dir / "selection_exclusion_summary.json"
+    selection_exclusion_manifest_csv_path = report_dir / "selection_exclusion_manifest.csv"
 
     dataset_summary = dict(assessment.get("dataset_summary", {}))
     dataset_summary_json_path.write_text(
@@ -884,6 +928,15 @@ def write_official_data_artifacts(
     
     leakage_payload = dict(assessment.get("leakage_audit", {}))
     leakage_audit_path.write_text(f"{json.dumps(leakage_payload, indent=2)}\n", encoding="utf-8")
+    selection_exclusion_summary = dict(assessment.get("selection_exclusion_summary", {}))
+    selection_exclusion_summary_path.write_text(
+        f"{json.dumps(selection_exclusion_summary, indent=2)}\n",
+        encoding="utf-8",
+    )
+    pd.DataFrame(list(assessment.get("selection_exclusion_rows", []))).to_csv(
+        selection_exclusion_manifest_csv_path,
+        index=False,
+    )
     cv_split_payload = dict(assessment.get("cv_split_audit", {}))
     cv_split_audit_json_path.write_text(
         f"{json.dumps(cv_split_payload, indent=2)}\n",
@@ -975,6 +1028,15 @@ def write_official_data_artifacts(
         "intended_use": data_policy_effective.get("intended_use"),
         "not_intended_use": data_policy_effective.get("not_intended_use", []),
         "known_limitations": data_policy_effective.get("known_limitations", []),
+        "selection_scope": {
+            "cv_mode": cv_mode,
+            "subject": subject,
+            "train_subject": train_subject,
+            "test_subject": test_subject,
+            "filter_task": filter_task,
+            "filter_modality": filter_modality,
+            "selection_exclusions": dict(assessment.get("selection_exclusion_summary", {})),
+        },
     }
     dataset_card_json_path.write_text(
         f"{json.dumps(dataset_card_payload, indent=2)}\n",
@@ -1000,6 +1062,8 @@ def write_official_data_artifacts(
         ),
         "target_derivation_audit_json": str(target_derivation_audit_json_path.resolve()),
         "target_derivation_audit_csv": str(target_derivation_audit_csv_path.resolve()),
+        "selection_exclusion_summary_json": str(selection_exclusion_summary_path.resolve()),
+        "selection_exclusion_manifest_csv": str(selection_exclusion_manifest_csv_path.resolve()),
     }
     return {
         "data_policy_effective": data_policy_effective,

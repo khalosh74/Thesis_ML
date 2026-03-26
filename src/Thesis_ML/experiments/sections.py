@@ -34,13 +34,18 @@ from Thesis_ML.experiments.section_models import (
     SpatialValidationOutput,
 )
 from Thesis_ML.features.nifti_features import build_feature_cache
-
+from Thesis_ML.experiments.selection_manifest import apply_dataset_selection_filters
 
 def dataset_selection(section_input: DatasetSelectionInput) -> DatasetSelectionOutput:
     index_df = pd.read_csv(section_input.index_csv)
     if index_df.empty:
         raise ValueError(f"Dataset index is empty: {section_input.index_csv}")
-    index_df = with_coarse_affect(index_df, emotion_column="emotion", coarse_column="coarse_affect")
+
+    index_df = with_coarse_affect(
+        index_df,
+        emotion_column="emotion",
+        coarse_column="coarse_affect",
+    )
     index_df = with_binary_valence_like(
         index_df,
         coarse_column="coarse_affect",
@@ -58,31 +63,13 @@ def dataset_selection(section_input: DatasetSelectionInput) -> DatasetSelectionO
         if required not in index_df.columns:
             raise ValueError(f"Dataset index missing required column: {required}")
 
-    if section_input.filter_task is not None:
-        index_df = index_df[index_df["task"] == section_input.filter_task].copy()
-    if section_input.filter_modality is not None:
-        index_df = index_df[index_df["modality"] == section_input.filter_modality].copy()
-
-    if section_input.cv_mode == "within_subject_loso_session":
-        index_df = index_df[index_df["subject"].astype(str) == str(section_input.subject)].copy()
-        if index_df.empty:
-            raise ValueError(
-                f"No samples found for subject '{section_input.subject}' after filtering."
-            )
-
-    if section_input.cv_mode == "frozen_cross_person_transfer":
-        selected = {str(section_input.train_subject), str(section_input.test_subject)}
-        index_df = index_df[index_df["subject"].astype(str).isin(selected)].copy()
-        if index_df.empty:
-            raise ValueError(
-                "No samples found for frozen_cross_person_transfer after subject filtering."
-            )
-
     target_derivation_audit_df = build_target_derivation_audit(
         index_df,
         target_column=section_input.target_column,
     )
-    blocking_target_audit_df = blocking_target_derivation_audit_rows(target_derivation_audit_df)
+    blocking_target_audit_df = blocking_target_derivation_audit_rows(
+        target_derivation_audit_df
+    )
 
     if not blocking_target_audit_df.empty:
         summary = summarize_target_derivation_audit(blocking_target_audit_df)
@@ -94,21 +81,60 @@ def dataset_selection(section_input: DatasetSelectionInput) -> DatasetSelectionO
             f"sample_ids_head={summary['sample_ids_head']}"
         )
 
-    index_df = index_df.dropna(subset=[section_input.target_column]).copy()
-    index_df[section_input.target_column] = index_df[section_input.target_column].astype(str)
+    selection_result = apply_dataset_selection_filters(
+        index_df,
+        target_column=section_input.target_column,
+        cv_mode=section_input.cv_mode,
+        subject=section_input.subject,
+        train_subject=section_input.train_subject,
+        test_subject=section_input.test_subject,
+        filter_task=section_input.filter_task,
+        filter_modality=section_input.filter_modality,
+    )
+
+    index_df = selection_result.selected_index_df
     if index_df.empty:
+        if (
+            section_input.cv_mode == "within_subject_loso_session"
+            and section_input.subject is not None
+        ):
+            raise ValueError(f"No samples found for subject '{section_input.subject}'")
+
+        if (
+            section_input.cv_mode == "frozen_cross_person_transfer"
+            and section_input.train_subject is not None
+            and section_input.test_subject is not None
+        ):
+            raise ValueError(
+                "No samples left for frozen cross-person transfer pair "
+                f"train_subject='{section_input.train_subject}', "
+                f"test_subject='{section_input.test_subject}'."
+            )
+
         raise ValueError("No samples left after filtering and target cleanup.")
+
+    if section_input.cv_mode == "within_subject_loso_session":
+        if str(section_input.subject) not in set(index_df["subject"].astype(str).unique()):
+            raise ValueError(
+                f"No samples found for subject '{section_input.subject}' after filtering."
+            )
 
     if section_input.cv_mode == "frozen_cross_person_transfer":
         subjects_after_target = set(index_df["subject"].astype(str).unique().tolist())
         if str(section_input.train_subject) not in subjects_after_target:
-            raise ValueError(f"No samples found for train_subject '{section_input.train_subject}'.")
+            raise ValueError(
+                f"No samples found for train_subject '{section_input.train_subject}'."
+            )
         if str(section_input.test_subject) not in subjects_after_target:
-            raise ValueError(f"No samples found for test_subject '{section_input.test_subject}'.")
+            raise ValueError(
+                f"No samples found for test_subject '{section_input.test_subject}'."
+            )
 
     return DatasetSelectionOutput(
         selected_index_df=index_df,
         target_derivation_audit_df=target_derivation_audit_df,
+        selection_exclusion_manifest_df=selection_result.exclusion_manifest_df,
+        selection_summary=selection_result.selection_summary,
     )
 
 

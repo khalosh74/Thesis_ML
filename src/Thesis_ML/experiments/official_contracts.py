@@ -7,6 +7,7 @@ from typing import Any
 import pandas as pd
 
 from Thesis_ML.config.framework_mode import FrameworkMode
+from Thesis_ML.experiments.selection_manifest import apply_dataset_selection_filters
 from Thesis_ML.config.metric_policy import validate_metric_name
 from Thesis_ML.data.affect_labels import (
     blocking_target_derivation_audit_rows,
@@ -179,55 +180,19 @@ def validate_official_preflight(
 
     frame = with_coarse_affect(frame, emotion_column="emotion", coarse_column="coarse_affect")
     _require_columns(frame, required=_REQUIRED_INDEX_COLUMNS | {target_column}, label="Dataset index")
-    filtered_frame = frame.copy()
-    if filter_task is not None:
-        filtered_frame = filtered_frame[
-            filtered_frame["task"].astype(str) == str(filter_task)
-        ].copy()
-    if filter_modality is not None:
-        filtered_frame = filtered_frame[
-            filtered_frame["modality"].astype(str) == str(filter_modality)
-        ].copy()
-
-    selected = filtered_frame.copy()
-
-    if cv_mode == "within_subject_loso_session":
-        selected = selected[selected["subject"].astype(str) == str(subject)].copy()
-    elif cv_mode == "frozen_cross_person_transfer":
-        if train_subject is None or test_subject is None:
-            raise OfficialContractValidationError(
-                "frozen_cross_person_transfer requires train_subject and test_subject.",
-                details={"train_subject": train_subject, "test_subject": test_subject},
-            )
-        if str(train_subject) == str(test_subject):
-            raise OfficialContractValidationError(
-                "frozen_cross_person_transfer requires train_subject and test_subject to differ.",
-                details={"train_subject": train_subject, "test_subject": test_subject},
-            )
-        selected = selected[
-            selected["subject"].astype(str).isin({str(train_subject), str(test_subject)})
-        ].copy()
-
-    target_derivation_audit_df = build_target_derivation_audit(
-        selected,
+    
+    selection_result = apply_dataset_selection_filters(
+        frame,
         target_column=target_column,
+        cv_mode=cv_mode,
+        subject=subject,
+        train_subject=train_subject,
+        test_subject=test_subject,
+        filter_task=filter_task,
+        filter_modality=filter_modality,
     )
-    blocking_target_audit_df = blocking_target_derivation_audit_rows(target_derivation_audit_df)
+    selected = selection_result.selected_index_df
 
-    if not blocking_target_audit_df.empty:
-        summary = summarize_target_derivation_audit(blocking_target_audit_df)
-        raise OfficialContractValidationError(
-            "Official run has unsupported or missing source labels for a derived target.",
-            details={
-                "target_column": target_column,
-                "n_problem_rows": summary["n_rows"],
-                "by_category": summary["by_category"],
-                "sample_ids_head": summary["sample_ids_head"],
-            },
-        )
-
-    selected = selected.dropna(subset=[target_column]).copy()
-    selected[target_column] = selected[target_column].astype(str)
     if selected.empty:
         raise OfficialContractValidationError(
             "Official run filtering produced an empty dataset subset.",
@@ -238,6 +203,7 @@ def validate_official_preflight(
                 "test_subject": test_subject,
                 "filter_task": filter_task,
                 "filter_modality": filter_modality,
+                "selection_summary": selection_result.selection_summary,
             },
         )
 
@@ -610,6 +576,7 @@ def validate_official_preflight(
         filter_modality=filter_modality,
         official_context=official_context,
         target_derivation_audit_df=target_derivation_audit_df,
+        selection_exclusion_manifest_df=selection_result.exclusion_manifest_df,
     )
     blocking_issues = list(data_assessment.get("blocking_issues", []))
     if blocking_issues:

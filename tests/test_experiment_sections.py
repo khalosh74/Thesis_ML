@@ -147,7 +147,7 @@ def test_dataset_selection_binary_valence_like_drops_neutral(tmp_path: Path) -> 
     index_df.to_csv(index_csv, index=False)
 
     selection_output = dataset_selection(
-    DatasetSelectionInput(
+        DatasetSelectionInput(
             index_csv=index_csv,
             target_column="binary_valence_like",
             cv_mode="within_subject_loso_session",
@@ -155,14 +155,16 @@ def test_dataset_selection_binary_valence_like_drops_neutral(tmp_path: Path) -> 
         )
     )
     selected = selection_output.selected_index_df
-    audit_df = selection_output.target_derivation_audit_df
+    exclusion_manifest = selection_output.selection_exclusion_manifest_df
     
 
     assert set(selected["sample_id"].astype(str).tolist()) == {"s1", "s2"}
     assert set(selected["binary_valence_like"].astype(str).tolist()) == {"negative", "positive"}
-    assert int(len(audit_df)) == 1
-    assert audit_df.iloc[0]["sample_id"] == "s3"
-    assert audit_df.iloc[0]["drop_category"] == "intended_target_exclusion"
+
+    assert int(len(exclusion_manifest)) == 1
+    assert exclusion_manifest.iloc[0]["sample_id"] == "s3"
+    assert exclusion_manifest.iloc[0]["exclusion_stage"] == "target_cleanup"
+    assert exclusion_manifest.iloc[0]["exclusion_reason"] == "target_missing_after_derivation"
 
 
 def test_run_experiment_registers_section_boundary_artifacts(tmp_path: Path) -> None:
@@ -700,3 +702,47 @@ def test_dataset_selection_rejects_unsupported_upstream_emotion_for_binary_valen
                 subject="sub-001",
             )
         )
+
+
+def test_dataset_selection_records_task_filter_exclusions(tmp_path: Path) -> None:
+    index_csv = tmp_path / "dataset_index.csv"
+    index_df = pd.DataFrame(
+        [
+            {
+                "sample_id": "s1",
+                "subject": "sub-001",
+                "session": "ses-01",
+                "task": "passive",
+                "modality": "audio",
+                "emotion": "anger",
+            },
+            {
+                "sample_id": "s2",
+                "subject": "sub-001",
+                "session": "ses-02",
+                "task": "emo",
+                "modality": "audio",
+                "emotion": "happiness",
+            },
+        ]
+    )
+    index_df.to_csv(index_csv, index=False)
+
+    selection_output = dataset_selection(
+        DatasetSelectionInput(
+            index_csv=index_csv,
+            target_column="coarse_affect",
+            cv_mode="within_subject_loso_session",
+            subject="sub-001",
+            filter_task="passive",
+        )
+    )
+
+    selected = selection_output.selected_index_df
+    exclusion_manifest = selection_output.selection_exclusion_manifest_df
+
+    assert set(selected["sample_id"].astype(str).tolist()) == {"s1"}
+    assert int(len(exclusion_manifest)) == 1
+    assert exclusion_manifest.iloc[0]["sample_id"] == "s2"
+    assert exclusion_manifest.iloc[0]["exclusion_stage"] == "filter_task"
+    assert exclusion_manifest.iloc[0]["exclusion_reason"] == "task_mismatch"

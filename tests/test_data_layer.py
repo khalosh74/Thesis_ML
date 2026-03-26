@@ -180,6 +180,27 @@ def test_write_official_data_artifacts_creates_expected_files(tmp_path: Path) ->
                 }
             ]
         ),
+        selection_exclusion_manifest_df=pd.DataFrame(
+            [
+                {
+                    "sample_id": "s3",
+                    "subject": "sub-001",
+                    "session": "ses-03",
+                    "task": "emo",
+                    "modality": "audio",
+                    "target_column": "coarse_affect",
+                    "target_value": pd.NA,
+                    "exclusion_stage": "filter_task",
+                    "exclusion_reason": "task_mismatch",
+                    "cv_mode": "within_subject_loso_session",
+                    "requested_subject": "sub-001",
+                    "requested_train_subject": pd.NA,
+                    "requested_test_subject": pd.NA,
+                    "requested_filter_task": "passive",
+                    "requested_filter_modality": pd.NA,
+                }
+            ]
+        ),
     )
 
     report_dir = tmp_path / "report"
@@ -222,6 +243,8 @@ def test_write_official_data_artifacts_creates_expected_files(tmp_path: Path) ->
     split_payload = json.loads((report_dir / "cv_split_audit.json").read_text(encoding="utf-8"))
     assert split_payload["status"] == "pass"
     assert int(split_payload["n_folds"]) == 2
+    assert (report_dir / "selection_exclusion_summary.json").exists()
+    assert (report_dir / "selection_exclusion_manifest.csv").exists()
     
 
 
@@ -395,3 +418,53 @@ def test_evaluate_official_data_policy_loso_session_allows_same_session_name_acr
     rows = assessment["cv_split_audit_rows"]
     assert len(rows) == 4
     assert all(row["status"] == "pass" for row in rows)
+
+def test_evaluate_official_data_policy_carries_selection_exclusion_summary(tmp_path: Path) -> None:
+    frame = _index_frame()
+    index_csv = tmp_path / "dataset_index.csv"
+    frame.to_csv(index_csv, index=False)
+
+    exclusion_manifest = pd.DataFrame(
+        [
+            {
+                "sample_id": "s9",
+                "subject": "sub-002",
+                "session": "ses-01",
+                "task": "emo",
+                "modality": "audio",
+                "target_column": "coarse_affect",
+                "target_value": pd.NA,
+                "exclusion_stage": "cv_scope",
+                "exclusion_reason": "subject_mismatch_for_within_subject",
+                "cv_mode": "within_subject_loso_session",
+                "requested_subject": "sub-001",
+                "requested_train_subject": pd.NA,
+                "requested_test_subject": pd.NA,
+                "requested_filter_task": pd.NA,
+                "requested_filter_modality": pd.NA,
+            }
+        ]
+    )
+
+    assessment = evaluate_official_data_policy(
+        framework_mode=FrameworkMode.CONFIRMATORY,
+        index_csv=index_csv,
+        data_root=tmp_path,
+        cache_dir=tmp_path / "cache",
+        full_index_df=frame,
+        selected_index_df=frame,
+        target_column="coarse_affect",
+        cv_mode="within_subject_loso_session",
+        subject="sub-001",
+        train_subject=None,
+        test_subject=None,
+        filter_task=None,
+        filter_modality=None,
+        official_context={},
+        selection_exclusion_manifest_df=exclusion_manifest,
+    )
+
+    summary = assessment["selection_exclusion_summary"]
+    assert int(summary["n_rows"]) == 1
+    assert summary["by_stage"]["cv_scope"] == 1
+    assert summary["by_reason"]["subject_mismatch_for_within_subject"] == 1
