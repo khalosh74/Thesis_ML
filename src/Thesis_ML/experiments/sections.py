@@ -52,17 +52,6 @@ def dataset_selection(section_input: DatasetSelectionInput) -> DatasetSelectionO
         binary_column="binary_valence_like",
     )
 
-    for required in (
-        "sample_id",
-        "subject",
-        "session",
-        "task",
-        "modality",
-        section_input.target_column,
-    ):
-        if required not in index_df.columns:
-            raise ValueError(f"Dataset index missing required column: {required}")
-
     target_derivation_audit_df = build_target_derivation_audit(
         index_df,
         target_column=section_input.target_column,
@@ -113,22 +102,12 @@ def dataset_selection(section_input: DatasetSelectionInput) -> DatasetSelectionO
 
         raise ValueError("No samples left after filtering and target cleanup.")
 
-    if section_input.cv_mode == "within_subject_loso_session":
-        if str(section_input.subject) not in set(index_df["subject"].astype(str).unique()):
-            raise ValueError(
-                f"No samples found for subject '{section_input.subject}' after filtering."
-            )
-
     if section_input.cv_mode == "frozen_cross_person_transfer":
         subjects_after_target = set(index_df["subject"].astype(str).unique().tolist())
         if str(section_input.train_subject) not in subjects_after_target:
-            raise ValueError(
-                f"No samples found for train_subject '{section_input.train_subject}'."
-            )
+            raise ValueError(f"No samples found for train_subject '{section_input.train_subject}'.")
         if str(section_input.test_subject) not in subjects_after_target:
-            raise ValueError(
-                f"No samples found for test_subject '{section_input.test_subject}'."
-            )
+            raise ValueError(f"No samples found for test_subject '{section_input.test_subject}'.")
 
     return DatasetSelectionOutput(
         selected_index_df=index_df,
@@ -136,7 +115,6 @@ def dataset_selection(section_input: DatasetSelectionInput) -> DatasetSelectionO
         selection_exclusion_manifest_df=selection_result.exclusion_manifest_df,
         selection_summary=selection_result.selection_summary,
     )
-
 
 def feature_cache_build(section_input: FeatureCacheBuildInput) -> FeatureCacheBuildOutput:
     manifest_path = build_feature_cache(

@@ -99,7 +99,6 @@ def with_binary_valence_like(
 
     return result
 
-
 _TARGET_DERIVATION_AUDIT_COLUMNS = [
     "sample_id",
     "subject",
@@ -182,8 +181,8 @@ def build_target_derivation_audit(
     dropped["source_column"] = "coarse_affect"
 
     source_values: list[object] = []
-    categories: list[str] = []
-    reasons: list[str] = []
+    categories = []
+    reasons = []
 
     for _, row in dropped.iterrows():
         coarse_value = row.get("coarse_affect", pd.NA)

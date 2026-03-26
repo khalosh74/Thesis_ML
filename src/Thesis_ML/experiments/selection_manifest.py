@@ -75,7 +75,12 @@ def _build_exclusion_rows(
     return working[_SELECTION_EXCLUSION_COLUMNS].reset_index(drop=True)
 
 
-def _selection_summary(exclusion_manifest_df: pd.DataFrame, *, input_rows: int, selected_rows: int) -> dict[str, Any]:
+def _selection_summary(
+    exclusion_manifest_df: pd.DataFrame,
+    *,
+    input_rows: int,
+    selected_rows: int,
+) -> dict[str, Any]:
     if exclusion_manifest_df.empty:
         return {
             "input_rows": int(input_rows),
@@ -237,6 +242,3 @@ def apply_dataset_selection_filters(
         exclusion_manifest_df=exclusion_manifest_df,
         selection_summary=summary,
     )
-
-
-__all__ = ["SelectionManifestResult", "apply_dataset_selection_filters"]

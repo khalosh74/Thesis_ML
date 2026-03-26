@@ -13,6 +13,7 @@ from Thesis_ML.data.affect_labels import (
     blocking_target_derivation_audit_rows,
     build_target_derivation_audit,
     summarize_target_derivation_audit,
+    with_binary_valence_like,
     with_coarse_affect,
 )
 from Thesis_ML.experiments.data_reporting import evaluate_official_data_policy
@@ -45,6 +46,7 @@ _SUBGROUP_COLUMN_MAP = {
 }
 _TARGET_SOURCE_COLUMN_MAP = {
     "coarse_affect": "emotion",
+    "binary_valence_like": "coarse_affect",
 }
 _REQUIRED_RUN_ARTIFACT_MINIMUM = {"config.json", "metrics.json"}
 _REQUIRED_RUN_METADATA_MINIMUM = {"framework_mode", "canonical_run"}
@@ -178,9 +180,52 @@ def validate_official_preflight(
             details={"index_csv": str(index_csv)},
         )
 
-    frame = with_coarse_affect(frame, emotion_column="emotion", coarse_column="coarse_affect")
-    _require_columns(frame, required=_REQUIRED_INDEX_COLUMNS | {target_column}, label="Dataset index")
-    
+    frame = with_coarse_affect(
+        frame,
+        emotion_column="emotion",
+        coarse_column="coarse_affect",
+    )
+    frame = with_binary_valence_like(
+        frame,
+        coarse_column="coarse_affect",
+        binary_column="binary_valence_like",
+    )
+
+    _require_columns(
+        frame,
+        required=_REQUIRED_INDEX_COLUMNS | {target_column},
+        label="Dataset index",
+    )
+
+    target_derivation_audit_df = build_target_derivation_audit(
+        frame,
+        target_column=target_column,
+    )
+    blocking_target_audit_df = blocking_target_derivation_audit_rows(
+        target_derivation_audit_df
+    )
+    if not blocking_target_audit_df.empty:
+        summary = summarize_target_derivation_audit(blocking_target_audit_df)
+        raise OfficialContractValidationError(
+            "Official run has unsupported or missing source labels for a derived target.",
+            details={
+                "target_column": target_column,
+                "n_problem_rows": summary["n_rows"],
+                "by_category": summary["by_category"],
+                "sample_ids_head": summary["sample_ids_head"],
+            },
+        )
+
+    scope_frame = frame.copy()
+    if filter_task is not None:
+        scope_frame = scope_frame[
+            scope_frame["task"].astype(str) == str(filter_task)
+        ].copy()
+    if filter_modality is not None:
+        scope_frame = scope_frame[
+            scope_frame["modality"].astype(str) == str(filter_modality)
+        ].copy()
+
     selection_result = apply_dataset_selection_filters(
         frame,
         target_column=target_column,
@@ -220,7 +265,19 @@ def validate_official_preflight(
                 "within_subject_loso_session requires at least two sessions in selected subset.",
                 details={"n_sessions": n_sessions},
             )
+
     if cv_mode == "frozen_cross_person_transfer":
+        if train_subject is None or test_subject is None:
+            raise OfficialContractValidationError(
+                "frozen_cross_person_transfer requires train_subject and test_subject.",
+                details={"train_subject": train_subject, "test_subject": test_subject},
+            )
+        if str(train_subject) == str(test_subject):
+            raise OfficialContractValidationError(
+                "frozen_cross_person_transfer requires train_subject and test_subject to differ.",
+                details={"train_subject": train_subject, "test_subject": test_subject},
+            )
+
         subjects_present = set(selected["subject"].astype(str).unique().tolist())
         missing_subjects = [
             value
@@ -290,6 +347,7 @@ def validate_official_preflight(
                     "Confirmatory locked source column is missing from dataset index.",
                     details={"source_column": expected_source_column},
                 )
+
             expected_mapping_version = str(
                 confirmatory_lock.get("target_mapping_version", "")
             ).strip()
@@ -394,7 +452,7 @@ def validate_official_preflight(
                 )
 
             minimum_subjects = int(confirmatory_lock.get("minimum_subjects", 1))
-            subjects_in_scope = sorted(filtered_frame["subject"].astype(str).unique().tolist())
+            subjects_in_scope = sorted(scope_frame["subject"].astype(str).unique().tolist())
             if len(subjects_in_scope) < minimum_subjects:
                 raise OfficialContractValidationError(
                     "Confirmatory dataset scope does not meet minimum_subjects.",
@@ -408,7 +466,7 @@ def validate_official_preflight(
                 confirmatory_lock.get("minimum_sessions_per_subject", 1)
             )
             session_counts = (
-                filtered_frame.groupby(filtered_frame["subject"].astype(str))["session"]
+                scope_frame.groupby(scope_frame["subject"].astype(str))["session"]
                 .nunique(dropna=False)
                 .astype(int)
                 .to_dict()
