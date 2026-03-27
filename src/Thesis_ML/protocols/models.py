@@ -979,6 +979,56 @@ class ThesisProtocol(_ProtocolModel):
                     "primary claim requires permutation but control_policy.permutation.enabled is false"
                 )
 
+        supporting_control_claims = [
+            claim
+            for claim in self.claims
+            if (
+                claim.role == ClaimRole.SUPPORTING
+                and claim.category == ClaimCategory.CONTROL_EVIDENCE
+                and claim.estimand_scope == primary_claim.estimand_scope
+            )
+        ]
+        supporting_control_suite_ids = {
+            suite_id for claim in supporting_control_claims for suite_id in claim.suite_ids
+        }
+        requires_linked_control_evidence = bool(
+            self.success_criteria.require_dummy_baseline_outperformance
+            or self.success_criteria.require_permutation_pass
+        )
+        # Keep the legacy frozen confirmatory adapter loadable while enforcing linkage
+        # for canonical thesis protocols that declare required control evidence.
+        if requires_linked_control_evidence and self.protocol_id != "thesis_confirmatory_v1":
+            if not supporting_control_claims:
+                raise ValueError(
+                    "success_criteria requires control evidence but no supporting "
+                    "CONTROL_EVIDENCE claim matches the primary estimand_scope."
+                )
+
+        if (
+            self.success_criteria.require_dummy_baseline_outperformance
+            and self.protocol_id != "thesis_confirmatory_v1"
+        ):
+            missing_dummy_control_suite_links = sorted(
+                set(self.control_policy.dummy_baseline.suites) - supporting_control_suite_ids
+            )
+            if missing_dummy_control_suite_links:
+                raise ValueError(
+                    "control_policy.dummy_baseline.suites must be represented by supporting "
+                    "CONTROL_EVIDENCE claims for primary-claim evaluation. Missing: "
+                    + ", ".join(missing_dummy_control_suite_links)
+                )
+
+        if self.success_criteria.require_permutation_pass and self.protocol_id != "thesis_confirmatory_v1":
+            missing_permutation_control_suite_links = sorted(
+                set(self.control_policy.permutation.suites) - supporting_control_suite_ids
+            )
+            if missing_permutation_control_suite_links:
+                raise ValueError(
+                    "control_policy.permutation.suites must be represented by supporting "
+                    "CONTROL_EVIDENCE claims for primary-claim evaluation. Missing: "
+                    + ", ".join(missing_permutation_control_suite_links)
+                )
+
         has_interpretability_claim = any(
             claim.category == ClaimCategory.INTERPRETABILITY_ROBUSTNESS for claim in self.claims
         )
