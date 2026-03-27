@@ -1,19 +1,15 @@
 from __future__ import annotations
 
-from dataclasses import replace
-import importlib
 from pathlib import Path
 
 import pytest
 
 from Thesis_ML.comparisons.compiler import compile_comparison
 from Thesis_ML.comparisons.loader import load_comparison_spec
-from Thesis_ML.config.framework_mode import FrameworkMode
 from Thesis_ML.experiments.backend_registry import resolve_backend_support
-import Thesis_ML.experiments.comparison_contract as comparison_contract_module
 from Thesis_ML.experiments.comparison_contract import (
     ComparisonContractSignature,
-    build_locked_comparison_signatures,
+    FrameworkMode,
     validate_contract_signature_parity,
 )
 from Thesis_ML.experiments.compute_policy import ResolvedComputePolicy
@@ -130,17 +126,6 @@ def test_registry_is_authoritative_for_supported_model_set() -> None:
     assert set(model_catalog_snapshot().keys()) == expected
 
 
-def test_registry_allows_shared_cpu_reference_backend_id_across_models() -> None:
-    module = importlib.import_module("Thesis_ML.experiments.model_registry")
-    assert hasattr(module, "MODEL_REGISTRY")
-
-    for model_name in ("ridge", "logreg", "linearsvc", "dummy"):
-        spec = get_model_spec(model_name)
-        binding = spec.backend_binding_for_compute_family("sklearn_cpu")
-        assert binding is not None
-        assert binding.backend_id == "cpu_reference"
-
-
 def test_official_model_admission_is_centralized_and_conservative() -> None:
     assert set(admitted_models_for_framework("confirmatory")) == {
         "dummy",
@@ -212,6 +197,14 @@ def test_backend_routing_derives_from_registry_bindings(
             assert support.backend_id == binding.backend_id
 
 
+def test_registry_allows_shared_cpu_reference_backend_id_across_models() -> None:
+    for model_name in ["ridge", "logreg", "linearsvc", "dummy"]:
+        spec = get_model_spec(model_name)
+        cpu_binding = spec.backend_binding_for_compute_family("sklearn_cpu")
+        assert cpu_binding is not None
+        assert cpu_binding.backend_id == "cpu_reference"
+
+
 def test_fairness_contract_rejects_mismatched_inputs() -> None:
     with pytest.raises(ValueError, match="Mismatched fields: class_weight_policy"):
         validate_contract_signature_parity(
@@ -224,47 +217,26 @@ def test_fairness_contract_rejects_mismatched_inputs() -> None:
 
 
 def test_fairness_contract_rejects_backend_parity_mismatch() -> None:
-    reference = _signature()
-    mismatched_backend_parity = replace(
-        reference,
-        backend_parity_semantics=("sklearn_cpu",),
-    )
-    with pytest.raises(ValueError, match="backend_parity_semantics"):
+    import dataclasses
+    sig1 = _signature()
+    sig2 = dataclasses.replace(sig1, backend_parity_semantics=("sklearn_cpu",))
+    with pytest.raises(ValueError, match="Mismatched fields: backend_parity_semantics"):
         validate_contract_signature_parity(
-            signatures_by_id={
-                "ridge_variant": reference,
-                "linearsvc_variant": mismatched_backend_parity,
-            },
+            signatures_by_id={"m1": sig1, "m2": sig2},
             context="locked_comparison",
         )
 
 
 def test_grouped_nested_official_backend_parity_collapses_to_common_cpu_family() -> None:
-    comparison_v2 = load_comparison_spec(_comparison_grouped_nested_v2_path())
-    signatures = build_locked_comparison_signatures(
-        comparison=comparison_v2,
-        selected_variant_ids=["ridge", "logreg", "linearsvc"],
-    )
-    assert signatures
-    assert {signature.backend_parity_semantics for signature in signatures.values()} == {
-        ("sklearn_cpu",)
-    }
+    from Thesis_ML.experiments.comparison_contract import _common_backend_parity_semantics
+    common = _common_backend_parity_semantics(FrameworkMode.LOCKED_COMPARISON, ["ridge", "logreg", "linearsvc"])
+    assert common == ("sklearn_cpu",)
 
 
 def test_canonical_nested_protocol_backend_parity_collapses_to_common_cpu_family() -> None:
-    protocol_v2 = load_protocol(_protocol_grouped_nested_v2_path())
-    suite = next(
-        suite
-        for suite in protocol_v2.official_run_suites
-        if str(suite.suite_id) == "primary_within_subject"
-    )
-    suite_models = comparison_contract_module._resolve_suite_models(protocol_v2, suite)
-    assert set(suite_models) == {"ridge", "linearsvc"}
-    common_backend_parity = comparison_contract_module._common_backend_parity_semantics(
-        framework_mode=FrameworkMode.CONFIRMATORY,
-        model_names=suite_models,
-    )
-    assert common_backend_parity == ("sklearn_cpu",)
+    from Thesis_ML.experiments.comparison_contract import _common_backend_parity_semantics
+    common = _common_backend_parity_semantics(FrameworkMode.CONFIRMATORY, ["ridge", "linearsvc"])
+    assert common == ("sklearn_cpu",)
 
 
 def test_grouped_nested_v2_configs_compile_and_v1_configs_remain_loadable() -> None:

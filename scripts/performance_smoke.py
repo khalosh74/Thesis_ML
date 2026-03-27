@@ -22,14 +22,14 @@ def _timed(label: str, fn: Any) -> tuple[Any, float]:
     return value, time.perf_counter() - start
 
 
-def _run_subprocess(cmd: list[str], *, cwd: Path) -> dict[str, Any]:
+def _run_subprocess(cmd: list[str], *, cwd: Path, env: dict[str, str] | None = None) -> dict[str, Any]:
     start = time.perf_counter()
     completed = subprocess.run(
         cmd,
         cwd=cwd,
         capture_output=True,
         text=True,
-        env=os.environ.copy(),
+        env=env if env is not None else os.environ.copy(),
     )
     return {
         "command": cmd,
@@ -135,7 +135,6 @@ def main() -> int:
 
     comparison_cmd = comparison_cmd_base + [
         "--comparison",
-        # Canonical modeling-layer comparison workflow.
         "configs/comparisons/model_family_grouped_nested_comparison_v2.json",
         "--all-variants",
         "--reports-root",
@@ -144,7 +143,6 @@ def main() -> int:
     ]
     protocol_cmd = protocol_cmd_base + [
         "--protocol",
-        # Canonical modeling-layer protocol workflow (legacy frozen confirmatory stays in replay/audit paths).
         "configs/protocols/thesis_canonical_nested_v2.json",
         "--all-suites",
         "--reports-root",
@@ -152,8 +150,14 @@ def main() -> int:
         "--dry-run",
     ]
 
-    results["comparison_dry_run"] = _run_subprocess(comparison_cmd, cwd=REPO_ROOT)
-    results["protocol_dry_run"] = _run_subprocess(protocol_cmd, cwd=REPO_ROOT)
+    demo_root = REPO_ROOT / "demo_data" / "synthetic_v1"
+    env = os.environ.copy()
+    env["THESIS_ML_INDEX_CSV"] = str(demo_root / "dataset_index.csv")
+    env["THESIS_ML_DATA_ROOT"] = str(demo_root)
+    env["THESIS_ML_CACHE_DIR"] = str(reports_root / "cache")
+
+    results["comparison_dry_run"] = _run_subprocess(comparison_cmd, cwd=REPO_ROOT, env=env)
+    results["protocol_dry_run"] = _run_subprocess(protocol_cmd, cwd=REPO_ROOT, env=env)
 
     output_path.write_text(f"{json.dumps(results, indent=2)}\n", encoding="utf-8")
 

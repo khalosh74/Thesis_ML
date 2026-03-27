@@ -80,21 +80,15 @@ DEFAULT_CONFIRMATORY_REPORTS_ROOT = DEFAULT_REPORTS_ROOT / "confirmatory"
 DEFAULT_EXPERIMENT_REPORTS_ROOT = DEFAULT_EXPLORATORY_REPORTS_ROOT
 DEFAULT_PROTOCOL_REPORTS_ROOT = DEFAULT_CONFIRMATORY_REPORTS_ROOT
 DEFAULT_COMPARISON_SPEC_DIR = PROJECT_ROOT / "configs" / "comparisons"
-DEFAULT_COMPARISON_SPEC_PATH = (
-    DEFAULT_COMPARISON_SPEC_DIR / "model_family_grouped_nested_comparison_v2.json"
-)
+DEFAULT_COMPARISON_SPEC_PATH = DEFAULT_COMPARISON_SPEC_DIR / "model_family_grouped_nested_comparison_v2.json"
 DEFAULT_PROTOCOLS_DIR = PROJECT_ROOT / "configs" / "protocols"
 DEFAULT_TARGET_CONFIGS_DIR = PROJECT_ROOT / "configs" / "targets"
-# Canonical modeling-layer protocol default (grouped nested v2).
+
+# thesis_canonical_nested_v2.json is the canonical nested-tuning workflow
+# thesis_confirmatory_v1.json is the legacy frozen confirmatory path retained for hard-gate validation
 DEFAULT_THESIS_PROTOCOL_PATH = DEFAULT_PROTOCOLS_DIR / "thesis_canonical_nested_v2.json"
-# Legacy strict frozen confirmatory replay / hard-gate protocol default.
-DEFAULT_THESIS_CONFIRMATORY_PROTOCOL_PATH = (
-    DEFAULT_PROTOCOLS_DIR / "thesis_confirmatory_v1.json"
-)
-# Nested protocol alias intentionally points to canonical nested v2.
-DEFAULT_THESIS_NESTED_PROTOCOL_PATH = (
-    DEFAULT_PROTOCOLS_DIR / "thesis_canonical_nested_v2.json"
-)
+DEFAULT_THESIS_CONFIRMATORY_PROTOCOL_PATH = DEFAULT_PROTOCOLS_DIR / "thesis_confirmatory_v1.json"
+DEFAULT_THESIS_NESTED_PROTOCOL_PATH = DEFAULT_PROTOCOLS_DIR / "thesis_canonical_nested_v2.json"
 DEFAULT_CONFIRMATORY_PROTOCOL_SCHEMA_PATH = (
     PROJECT_ROOT / "schemas" / "confirmatory_protocol.schema.json"
 )

@@ -15,6 +15,10 @@ from Thesis_ML.protocols.models import ThesisProtocol
 
 
 def load_protocol(protocol_path: Path | str) -> ThesisProtocol:
+    # Notes on official protocols:
+    # - thesis_confirmatory_v1.json is retained for frozen confirmatory replay / hard-gate validation.
+    # - thesis_canonical_nested_v2.json is the canonical modeling-layer protocol.
+
     resolved_path = Path(protocol_path)
     if not resolved_path.exists():
         raise FileNotFoundError(f"Protocol file was not found: {resolved_path}")
@@ -43,8 +47,6 @@ def load_protocol(protocol_path: Path | str) -> ThesisProtocol:
             )
         # Confirmatory freeze protocols use the locked schema in schemas/ and are
         # adapted into the existing ThesisProtocol runtime contract after preflight.
-        # NOTE: `thesis_confirmatory_v1.json` is the legacy strict frozen confirmatory path.
-        # The current canonical nested-tuning modeling workflow is `thesis_canonical_nested_v2.json`.
         validated_payload = validate_confirmatory_freeze_preflight(resolved_path)
         try:
             return adapt_confirmatory_freeze_to_thesis_protocol(

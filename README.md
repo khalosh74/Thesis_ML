@@ -96,14 +96,16 @@ python -m uv run thesisml-run-decision-support --help
 python -m uv run thesisml-workbook --output outputs/workbooks/bootstrap_thesis_experiment_program.xlsx
 ```
 
-Official confirmatory thesis run path (frozen protocol):
+Canonical thesis modeling-layer protocol run:
 
 ```powershell
 python -m uv run thesisml-run-protocol `
-  --protocol configs/protocols/thesis_confirmatory_v1.json `
+  --protocol configs/protocols/thesis_canonical_nested_v2.json `
   --all-suites `
   --reports-root outputs/reports/confirmatory
 ```
+
+Canonical protocol note: `thesis_canonical_nested_v2.json` is the canonical modeling-layer protocol, while `thesis_confirmatory_v1.json` is retained for frozen confirmatory replay and hard-gate validation.
 
 Framework mode lifecycle:
 - `thesisml-run-experiment` -> exploratory mode (`framework_mode=exploratory`, `canonical_run=false`), default reports root `outputs/reports/exploratory/`
@@ -177,7 +179,7 @@ Locked comparison example:
 
 ```powershell
 python -m uv run thesisml-run-comparison `
-  --comparison configs/comparisons/model_family_comparison_v1.json `
+  --comparison configs/comparisons/model_family_grouped_nested_comparison_v2.json `
   --all-variants `
   --reports-root outputs/reports/comparisons
 ```
@@ -186,7 +188,7 @@ Grouped nested comparison example:
 
 ```powershell
 python -m uv run thesisml-run-comparison `
-  --comparison configs/comparisons/model_family_grouped_nested_comparison_v1.json `
+  --comparison configs/comparisons/model_family_grouped_nested_comparison_v2.json `
   --variant ridge `
   --reports-root outputs/reports/comparisons
 ```

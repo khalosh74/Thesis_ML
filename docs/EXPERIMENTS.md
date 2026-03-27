@@ -69,7 +69,7 @@ Dry-run:
 
 ```bash
 thesisml-run-protocol \
-  --protocol configs/protocols/thesis_canonical_nested_v2.json \
+  --protocol configs/protocols/thesis_confirmatory_v1.json \
   --all-suites \
   --dry-run
 ```
@@ -78,18 +78,17 @@ Execute official suites:
 
 ```bash
 thesisml-run-protocol \
-  --protocol configs/protocols/thesis_canonical_nested_v2.json \
+  --protocol configs/protocols/thesis_confirmatory_v1.json \
   --all-suites
 ```
 
 ## Canonical protocol and comparison sources
 
 Confirmatory source of truth:
-- `configs/protocols/thesis_canonical_nested_v2.json`
-- `configs/protocols/thesis_confirmatory_v1.json` is retained for legacy frozen confirmatory replay and hard-gate validation.
+- `configs/protocols/thesis_confirmatory_v1.json`
 
 Locked comparison source of truth:
-- `configs/comparisons/model_family_grouped_nested_comparison_v2.json`
+- `configs/comparisons/model_family_comparison_v1.json`
 
 For confirmatory and comparison runs, parameters such as target, split mode, model selection,
 metric policy, controls, and interpretability policy are loaded from JSON contracts, not ad hoc CLI flags.

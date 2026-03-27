@@ -35,7 +35,7 @@ def test_verify_repro_uses_default_protocol_config_when_omitted(
         captured["config_path"] = Path(kwargs["protocol_path"])
         return {
             "n_failed": 0,
-            "protocol_output_dir": str(tmp_path / "protocol_runs" / "thesis-canonical__1.0.0"),
+            "protocol_output_dir": str(tmp_path / "protocol_runs" / "thesis-canonical-nested__2.0.0"),
         }
 
     monkeypatch.setattr(module, "_run_protocol_once", _stub_run_protocol_once)
@@ -83,7 +83,7 @@ def test_verify_repro_uses_default_comparison_config_when_omitted(
         return {
             "n_failed": 0,
             "comparison_output_dir": str(
-                tmp_path / "comparison_runs" / "model-family-within-subject__1.0.0"
+                tmp_path / "comparison_runs" / "model-family-grouped-nested__2.0.0"
             ),
         }
 
