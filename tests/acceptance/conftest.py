@@ -42,7 +42,9 @@ def _create_tiny_glm_session(glm_dir: Path, labels: list[str]) -> None:
         if "_anger_" in label:
             beta[1:, 1:, 1:] += 2.0
         if "_happiness_" in label:
-            beta[1:, 1:, 1:] -= 2.0
+            # Keep synthetic acceptance vectors non-zero under the mask so
+            # feature-quality policy does not intentionally block the run.
+            beta[1:, 1:, 1:] -= 1.0
         _write_nifti(glm_dir / f"beta_{idx:04d}.nii", beta)
 
 
