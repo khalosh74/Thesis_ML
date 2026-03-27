@@ -161,9 +161,7 @@ def test_full_pipeline_stage_execution_metadata_is_additive(
         row.get("stage") == "tuning" and row.get("status") == "skipped"
         for row in stage_execution["telemetry"]
     )
-    assignment_by_stage = {
-        str(row.get("stage")): row for row in stage_execution["assignments"]
-    }
+    assignment_by_stage = {str(row.get("stage")): row for row in stage_execution["assignments"]}
     assert assignment_by_stage["model_fit"]["executor_id"] == MODEL_FIT_CPU_EXECUTOR_ID
     assert isinstance(assignment_by_stage["model_fit"]["reason"], str)
 
@@ -233,9 +231,7 @@ def test_linearsvc_tuning_and_permutation_dispatch_through_stage_planner(
 
     stage_execution = result.get("stage_execution")
     assert isinstance(stage_execution, dict)
-    assignment_by_stage = {
-        str(row.get("stage")): row for row in stage_execution["assignments"]
-    }
+    assignment_by_stage = {str(row.get("stage")): row for row in stage_execution["assignments"]}
     assert assignment_by_stage["model_fit"]["executor_id"] == MODEL_FIT_CPU_EXECUTOR_ID
     assert assignment_by_stage["tuning"]["executor_id"] == SPECIALIZED_LINEARSVC_TUNING_EXECUTOR_ID
     assert assignment_by_stage["permutation"]["executor_id"] == PERMUTATION_REFERENCE_EXECUTOR_ID
@@ -267,9 +263,7 @@ def test_logreg_tuning_dispatch_through_stage_planner_with_progress_telemetry(
 
     stage_execution = result.get("stage_execution")
     assert isinstance(stage_execution, dict)
-    assignment_by_stage = {
-        str(row.get("stage")): row for row in stage_execution["assignments"]
-    }
+    assignment_by_stage = {str(row.get("stage")): row for row in stage_execution["assignments"]}
     assert assignment_by_stage["model_fit"]["executor_id"] == MODEL_FIT_CPU_EXECUTOR_ID
     assert assignment_by_stage["tuning"]["executor_id"] == SPECIALIZED_LOGREG_TUNING_EXECUTOR_ID
     assert assignment_by_stage["tuning"]["fallback_used"] is False

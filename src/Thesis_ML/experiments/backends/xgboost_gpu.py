@@ -123,7 +123,6 @@ else:
             )
 
 
-
 def make_xgboost_gpu_estimator(
     *,
     seed: int,
@@ -155,8 +154,8 @@ def make_xgboost_gpu_estimator(
         estimator_kwargs["tree_method"] = "gpu_hist"
 
     estimator = XGBoostGpuClassifier(**estimator_kwargs)
-    setattr(estimator, "deterministic_compute", bool(deterministic_compute))
-    setattr(estimator, "gpu_device_id", int(gpu_device_id))
+    estimator.deterministic_compute = bool(deterministic_compute)
+    estimator.gpu_device_id = int(gpu_device_id)
     return estimator
 
 

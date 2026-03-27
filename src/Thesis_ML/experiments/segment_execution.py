@@ -170,12 +170,12 @@ class SegmentExecutionResult:
 
 def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutionResult:
     def _emit_section_event(
-    *,
-    section_name: str,
-    status: str,
-    completed_units: float | None,
-    total_units: float | None,
-    message: str,
+        *,
+        section_name: str,
+        status: str,
+        completed_units: float | None,
+        total_units: float | None,
+        message: str,
     ) -> None:
         emit_progress(
             request.progress_callback,
@@ -192,6 +192,7 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
                 "status": str(status),
             },
         )
+
     planned_sections = plan_section_path(request.start_section, request.end_section)
     total_sections = int(len(planned_sections))
     start_section = planned_sections[0]
@@ -746,5 +747,7 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
         interpretability_summary=interpretability_summary,
         compute_runtime_metadata=compute_runtime_metadata,
         section_timings_seconds=section_timings_seconds,
-        stage_assignments=[stage_assignment_map[stage] for stage in StageKey if stage in stage_assignment_map],
+        stage_assignments=[
+            stage_assignment_map[stage] for stage in StageKey if stage in stage_assignment_map
+        ],
     )

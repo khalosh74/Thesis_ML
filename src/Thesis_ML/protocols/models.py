@@ -35,11 +35,6 @@ from Thesis_ML.experiments.model_factory import (
     OFFICIAL_MODEL_NAMES,
     model_is_officially_admitted,
 )
-from Thesis_ML.features.preprocessing import (
-    BASELINE_STANDARD_SCALER_RECIPE_ID,
-    FEATURE_RECIPE_IDS,
-    resolve_feature_recipe_id,
-)
 from Thesis_ML.experiments.run_states import (
     RUN_STATUS_COMPLETED_LEGACY,
     RUN_STATUS_FAILED,
@@ -47,6 +42,11 @@ from Thesis_ML.experiments.run_states import (
     RUN_STATUS_SUCCESS,
     RUN_STATUS_TIMED_OUT,
     normalize_run_status,
+)
+from Thesis_ML.features.preprocessing import (
+    BASELINE_STANDARD_SCALER_RECIPE_ID,
+    FEATURE_RECIPE_IDS,
+    resolve_feature_recipe_id,
 )
 
 SUPPORTED_CV_MODES = frozenset({"within_subject_loso_session", "frozen_cross_person_transfer"})
@@ -354,7 +354,7 @@ class FeatureEngineeringPolicy(_ProtocolModel):
     emit_feature_qc_artifacts: bool = True
 
     @model_validator(mode="after")
-    def _validate_feature_engineering_policy(self) -> "FeatureEngineeringPolicy":
+    def _validate_feature_engineering_policy(self) -> FeatureEngineeringPolicy:
         self.feature_recipe_id = resolve_feature_recipe_id(self.feature_recipe_id)
         if self.feature_recipe_id not in set(FEATURE_RECIPE_IDS):
             allowed = ", ".join(sorted(FEATURE_RECIPE_IDS))
@@ -486,7 +486,7 @@ class ClaimSpec(_ProtocolModel):
     interpretation_limits: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
-    def _validate_claim(self) -> "ClaimSpec":
+    def _validate_claim(self) -> ClaimSpec:
         self.decision_metric = validate_metric_name(self.decision_metric)
 
         if len(set(self.suite_ids)) != len(self.suite_ids):
@@ -550,7 +550,7 @@ class SuccessCriteria(_ProtocolModel):
     interpretability_is_supporting_only: bool = True
 
     @model_validator(mode="after")
-    def _validate_success_criteria(self) -> "SuccessCriteria":
+    def _validate_success_criteria(self) -> SuccessCriteria:
         if not (0.0 < float(self.permutation_alpha) <= 1.0):
             raise ValueError("permutation_alpha must be in (0, 1]")
 

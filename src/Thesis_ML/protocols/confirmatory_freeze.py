@@ -12,12 +12,12 @@ from Thesis_ML.config.paths import (
     DEFAULT_TARGET_CONFIGS_DIR,
 )
 from Thesis_ML.config.schema_versions import THESIS_PROTOCOL_SCHEMA_VERSION
+from Thesis_ML.features.preprocessing import BASELINE_STANDARD_SCALER_RECIPE_ID
 from Thesis_ML.protocols.models import (
     ArtifactContract,
     ProtocolStatus,
     ThesisProtocol,
 )
-from Thesis_ML.features.preprocessing import BASELINE_STANDARD_SCALER_RECIPE_ID
 
 CONFIRMATORY_FREEZE_PROTOCOL_ID = "thesis_confirmatory_v1"
 

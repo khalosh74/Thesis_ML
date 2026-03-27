@@ -4,11 +4,11 @@ import argparse
 import json
 import sys
 from pathlib import Path
-
-from Thesis_ML.verification.campaign_runtime_profile import verify_campaign_runtime_profile
 from time import perf_counter
 
 from Thesis_ML.experiments.progress import ProgressEvent
+from Thesis_ML.verification.campaign_runtime_profile import verify_campaign_runtime_profile
+
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -98,6 +98,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     return parser
 
+
 class _ConsoleProgressReporter:
     def __init__(self) -> None:
         self._started = perf_counter()
@@ -136,7 +137,11 @@ class _ConsoleProgressReporter:
         percent_text = "--.-%"
         done_text = "?"
         left_text = "?"
-        if fraction is not None and event.total_units is not None and event.completed_units is not None:
+        if (
+            fraction is not None
+            and event.total_units is not None
+            and event.completed_units is not None
+        ):
             percent_text = f"{100.0 * fraction:5.1f}%"
             done_text = f"{int(event.completed_units)}/{int(event.total_units)}"
             left_text = str(int(remaining_units or 0.0))
@@ -152,9 +157,8 @@ class _ConsoleProgressReporter:
             or event.metadata.get("assigned_backend_family")
             or event.metadata.get("effective_backend_family")
         )
-        backend_id = (
-            event.metadata.get("actual_estimator_backend_id")
-            or event.metadata.get("backend_id")
+        backend_id = event.metadata.get("actual_estimator_backend_id") or event.metadata.get(
+            "backend_id"
         )
         hardware = event.metadata.get("hardware_mode_effective")
         hardware_requested = event.metadata.get("hardware_mode_requested")
@@ -191,6 +195,7 @@ class _ConsoleProgressReporter:
             line = f"{line} | {suffix}"
 
         print(line, file=sys.stderr, flush=True)
+
 
 def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()

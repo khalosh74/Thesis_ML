@@ -48,9 +48,7 @@ class _ProfileRunValidity:
 
 @dataclass
 class _ProfilingFeatureMatrixMemoizer:
-    _store: dict[str, tuple[np.ndarray, pd.DataFrame, dict[str, Any]]] = field(
-        default_factory=dict
-    )
+    _store: dict[str, tuple[np.ndarray, pd.DataFrame, dict[str, Any]]] = field(default_factory=dict)
     hits: int = 0
     misses: int = 0
     last_lookup_hit: bool = False
@@ -568,10 +566,7 @@ def verify_campaign_runtime_profile(
         raise ValueError("profile_permutations must be >= 0 when provided.")
     if resolved_profile_inner_folds is not None and resolved_profile_inner_folds < 0:
         raise ValueError("profile_inner_folds must be >= 0 when provided.")
-    if (
-        resolved_profile_tuning_candidates is not None
-        and resolved_profile_tuning_candidates < 0
-    ):
+    if resolved_profile_tuning_candidates is not None and resolved_profile_tuning_candidates < 0:
         raise ValueError("profile_tuning_candidates must be >= 0 when provided.")
     feature_matrix_memoizer = _ProfilingFeatureMatrixMemoizer()
 
@@ -685,7 +680,10 @@ def verify_campaign_runtime_profile(
                 min(configured_inner_fold_count, resolved_profile_inner_folds)
             )
         profiled_candidate_count: int | None = configured_candidate_count
-        if configured_candidate_count is not None and resolved_profile_tuning_candidates is not None:
+        if (
+            configured_candidate_count is not None
+            and resolved_profile_tuning_candidates is not None
+        ):
             if resolved_profile_tuning_candidates <= 0:
                 raise ValueError(
                     "profile_tuning_candidates must be > 0 when grouped nested tuning is active "
@@ -1038,8 +1036,8 @@ def verify_campaign_runtime_profile(
                 * float(configured_n_permutations)
                 / float(profiled_n_permutations)
             )
-            permutation_extrapolation_applied = (
-                int(profiled_n_permutations) != int(configured_n_permutations)
+            permutation_extrapolation_applied = int(profiled_n_permutations) != int(
+                configured_n_permutations
             )
             adjusted_elapsed_seconds = max(
                 0.0,
@@ -1110,9 +1108,7 @@ def verify_campaign_runtime_profile(
                     else None
                 ),
                 "profiled_candidate_count": (
-                    int(profiled_candidate_count)
-                    if profiled_candidate_count is not None
-                    else None
+                    int(profiled_candidate_count) if profiled_candidate_count is not None else None
                 ),
                 "tuning_extrapolation_applied": bool(tuning_extrapolation_applied),
             },
@@ -1162,9 +1158,7 @@ def verify_campaign_runtime_profile(
                     else None
                 ),
                 "profiled_candidate_count": (
-                    int(profiled_candidate_count)
-                    if profiled_candidate_count is not None
-                    else None
+                    int(profiled_candidate_count) if profiled_candidate_count is not None else None
                 ),
                 "measured_inner_tuning_seconds": (
                     float(measured_inner_tuning_seconds)

@@ -17,8 +17,9 @@ def coerce_framework_mode(value: FrameworkMode | str) -> FrameworkMode:
         return FrameworkMode(normalized)
     except ValueError as exc:
         allowed = ", ".join(mode.value for mode in FrameworkMode)
-        raise ValueError(f"Unsupported framework_mode '{value}'. Allowed values: {allowed}.") from exc
+        raise ValueError(
+            f"Unsupported framework_mode '{value}'. Allowed values: {allowed}."
+        ) from exc
 
 
 __all__ = ["FrameworkMode", "coerce_framework_mode"]
-

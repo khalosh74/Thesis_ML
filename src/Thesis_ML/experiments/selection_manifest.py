@@ -5,7 +5,6 @@ from typing import Any
 
 import pandas as pd
 
-
 _SELECTION_EXCLUSION_COLUMNS = [
     "sample_id",
     "subject",

@@ -202,9 +202,7 @@ class ConfidenceIntervalPolicy(_MethodologyModel):
                 "evidence_policy.confidence_intervals.confidence_level must be in (0.0, 1.0)."
             )
         if int(self.n_bootstrap) <= 0:
-            raise ValueError(
-                "evidence_policy.confidence_intervals.n_bootstrap must be > 0."
-            )
+            raise ValueError("evidence_policy.confidence_intervals.n_bootstrap must be > 0.")
         if int(self.seed) < 0:
             raise ValueError("evidence_policy.confidence_intervals.seed must be >= 0.")
         return self
@@ -237,9 +235,7 @@ class PermutationEvidencePolicy(_MethodologyModel):
         if alpha <= 0.0 or alpha > 1.0:
             raise ValueError("evidence_policy.permutation.alpha must be in (0.0, 1.0].")
         if int(self.minimum_permutations) < 0:
-            raise ValueError(
-                "evidence_policy.permutation.minimum_permutations must be >= 0."
-            )
+            raise ValueError("evidence_policy.permutation.minimum_permutations must be >= 0.")
         return self
 
 
@@ -338,8 +334,7 @@ class MissingnessDataPolicy(_MethodologyModel):
         if (
             self.max_missing_fraction_warning is not None
             and self.max_missing_fraction_blocking is not None
-            and float(self.max_missing_fraction_blocking)
-            < float(self.max_missing_fraction_warning)
+            and float(self.max_missing_fraction_blocking) < float(self.max_missing_fraction_warning)
         ):
             raise ValueError(
                 "data_policy.missingness.max_missing_fraction_blocking must be >= "

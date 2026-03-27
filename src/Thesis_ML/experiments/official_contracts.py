@@ -7,7 +7,6 @@ from typing import Any
 import pandas as pd
 
 from Thesis_ML.config.framework_mode import FrameworkMode
-from Thesis_ML.experiments.selection_manifest import apply_dataset_selection_filters
 from Thesis_ML.config.metric_policy import validate_metric_name
 from Thesis_ML.data.affect_labels import (
     blocking_derived_label_inconsistency_rows,
@@ -32,6 +31,7 @@ from Thesis_ML.experiments.model_factory import (
     OFFICIAL_MODEL_NAMES,
     model_is_officially_admitted,
 )
+from Thesis_ML.experiments.selection_manifest import apply_dataset_selection_filters
 
 _REQUIRED_INDEX_COLUMNS = {
     "sample_id",
@@ -271,9 +271,7 @@ def validate_official_preflight(
         frame,
         target_column=target_column,
     )
-    blocking_target_audit_df = blocking_target_derivation_audit_rows(
-        target_derivation_audit_df
-    )
+    blocking_target_audit_df = blocking_target_derivation_audit_rows(target_derivation_audit_df)
     if not blocking_target_audit_df.empty:
         summary = summarize_target_derivation_audit(blocking_target_audit_df)
         raise OfficialContractValidationError(
@@ -288,9 +286,7 @@ def validate_official_preflight(
 
     scope_frame = frame.copy()
     if filter_task is not None:
-        scope_frame = scope_frame[
-            scope_frame["task"].astype(str) == str(filter_task)
-        ].copy()
+        scope_frame = scope_frame[scope_frame["task"].astype(str) == str(filter_task)].copy()
     if filter_modality is not None:
         scope_frame = scope_frame[
             scope_frame["modality"].astype(str) == str(filter_modality)
@@ -400,9 +396,7 @@ def validate_official_preflight(
                     details={"expected_target": expected_target, "actual_target": target_column},
                 )
 
-            expected_source_column = str(
-                confirmatory_lock.get("target_source_column", "")
-            ).strip()
+            expected_source_column = str(confirmatory_lock.get("target_source_column", "")).strip()
             actual_source_column = _TARGET_SOURCE_COLUMN_MAP.get(str(target_column))
             if expected_source_column and actual_source_column != expected_source_column:
                 raise OfficialContractValidationError(
@@ -440,9 +434,7 @@ def validate_official_preflight(
                     details={"expected_split": expected_split, "actual_split": cv_mode},
                 )
 
-            expected_primary_metric = str(
-                confirmatory_lock.get("primary_metric", "")
-            ).strip()
+            expected_primary_metric = str(confirmatory_lock.get("primary_metric", "")).strip()
             if expected_primary_metric and validate_metric_name(
                 expected_primary_metric
             ) != validate_metric_name(primary_metric_name):
@@ -455,9 +447,8 @@ def validate_official_preflight(
                 )
 
             controls_payload = official_context.get("controls")
-            dummy_baseline_run = (
-                isinstance(controls_payload, dict)
-                and bool(controls_payload.get("dummy_baseline_run", False))
+            dummy_baseline_run = isinstance(controls_payload, dict) and bool(
+                controls_payload.get("dummy_baseline_run", False)
             )
             expected_model = str(confirmatory_lock.get("model_family", "")).strip()
             if dummy_baseline_run:
@@ -511,8 +502,7 @@ def validate_official_preflight(
                 )
 
             expected_required_columns = [
-                str(value)
-                for value in list(confirmatory_lock.get("required_index_columns", []))
+                str(value) for value in list(confirmatory_lock.get("required_index_columns", []))
             ]
             if expected_required_columns:
                 _require_columns(
@@ -568,8 +558,7 @@ def validate_official_preflight(
 
             if subgroup_reporting_enabled:
                 allowed_axes = {
-                    str(value)
-                    for value in list(confirmatory_lock.get("allowed_subgroup_axes", []))
+                    str(value) for value in list(confirmatory_lock.get("allowed_subgroup_axes", []))
                 }
                 if allowed_axes:
                     invalid_axes = [
@@ -583,9 +572,7 @@ def validate_official_preflight(
                                 "allowed_subgroup_axes": sorted(allowed_axes),
                             },
                         )
-                locked_min_samples = int(
-                    confirmatory_lock.get("subgroup_min_samples_per_group", 1)
-                )
+                locked_min_samples = int(confirmatory_lock.get("subgroup_min_samples_per_group", 1))
                 context_min_samples = int(subgroup_min_samples_per_group)
                 if context_min_samples < locked_min_samples:
                     raise OfficialContractValidationError(
@@ -595,9 +582,7 @@ def validate_official_preflight(
                             "actual_min_samples": context_min_samples,
                         },
                     )
-                locked_min_classes = int(
-                    confirmatory_lock.get("subgroup_min_classes_per_group", 1)
-                )
+                locked_min_classes = int(confirmatory_lock.get("subgroup_min_classes_per_group", 1))
                 context_min_classes = int(subgroup_min_classes_per_group)
                 if context_min_classes < locked_min_classes:
                     raise OfficialContractValidationError(
@@ -643,9 +628,7 @@ def validate_official_preflight(
                     "Confirmatory multiplicity policy is invalid: secondary_policy must be non-empty.",
                     details={"secondary_policy": multiplicity_secondary_policy},
                 )
-            if bool(
-                confirmatory_lock.get("multiplicity_exploratory_claims_allowed", False)
-            ):
+            if bool(confirmatory_lock.get("multiplicity_exploratory_claims_allowed", False)):
                 raise OfficialContractValidationError(
                     "Confirmatory multiplicity policy forbids exploratory_claims_allowed=true.",
                     details={"exploratory_claims_allowed": True},
@@ -783,12 +766,18 @@ def validate_run_artifact_contract(
     if bool(config_payload.get("canonical_run")) is not bool(canonical_run):
         raise OfficialArtifactContractError(
             "Official run config canonical_run drift detected.",
-            details={"expected": bool(canonical_run), "actual": config_payload.get("canonical_run")},
+            details={
+                "expected": bool(canonical_run),
+                "actual": config_payload.get("canonical_run"),
+            },
         )
     if bool(metrics_payload.get("canonical_run")) is not bool(canonical_run):
         raise OfficialArtifactContractError(
             "Official run metrics canonical_run drift detected.",
-            details={"expected": bool(canonical_run), "actual": metrics_payload.get("canonical_run")},
+            details={
+                "expected": bool(canonical_run),
+                "actual": metrics_payload.get("canonical_run"),
+            },
         )
 
     config_metric_policy = config_payload.get("metric_policy_effective")
@@ -800,7 +789,7 @@ def validate_run_artifact_contract(
                 "config_metric_policy_type": type(config_metric_policy).__name__,
                 "metrics_metric_policy_type": type(metrics_metric_policy).__name__,
             },
-            )
+        )
 
     config_data_policy = config_payload.get("data_policy_effective")
     metrics_data_policy = metrics_payload.get("data_policy_effective")
@@ -839,9 +828,9 @@ def validate_run_artifact_contract(
     permutation_payload = metrics_payload.get("permutation_test")
     if isinstance(permutation_payload, dict) and primary_metric is not None:
         metric_name = permutation_payload.get("metric_name")
-        if isinstance(metric_name, str) and validate_metric_name(metric_name) != validate_metric_name(
-            str(primary_metric)
-        ):
+        if isinstance(metric_name, str) and validate_metric_name(
+            metric_name
+        ) != validate_metric_name(str(primary_metric)):
             raise OfficialArtifactContractError(
                 "Permutation metric in metrics artifact does not match effective primary metric.",
                 details={

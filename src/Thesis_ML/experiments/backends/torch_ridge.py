@@ -77,9 +77,7 @@ def _resolve_cuda_device(torch: Any, requested_device_id: int) -> tuple[Any, int
     try:
         gpu_count = int(cuda_module.device_count())
     except Exception as exc:  # pragma: no cover - defensive probe guard
-        raise RuntimeError(
-            f"Failed to probe CUDA device count: {exc.__class__.__name__}."
-        ) from exc
+        raise RuntimeError(f"Failed to probe CUDA device count: {exc.__class__.__name__}.") from exc
     if gpu_count <= 0:
         raise RuntimeError("Torch CUDA is available but no visible GPU devices were found.")
     resolved_device_id = int(requested_device_id)
@@ -143,7 +141,11 @@ def _configure_torch_determinism(torch: Any, *, enabled: bool) -> tuple[bool, st
     return enforced, ";".join(limitations) if limitations else None
 
 
-def _build_ridge_target_matrix(y_indices: np.ndarray, *, n_classes: int,) -> tuple[np.ndarray, bool]:
+def _build_ridge_target_matrix(
+    y_indices: np.ndarray,
+    *,
+    n_classes: int,
+) -> tuple[np.ndarray, bool]:
     n_samples = int(y_indices.shape[0])
 
     if n_classes == 2:
@@ -156,7 +158,13 @@ def _build_ridge_target_matrix(y_indices: np.ndarray, *, n_classes: int,) -> tup
     return target, False
 
 
-def _prepare_weighted_centered_problem(x_array: np.ndarray, target_matrix: np.ndarray, sample_weights: np.ndarray, *, fit_intercept: bool, ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+def _prepare_weighted_centered_problem(
+    x_array: np.ndarray,
+    target_matrix: np.ndarray,
+    sample_weights: np.ndarray,
+    *,
+    fit_intercept: bool,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     weights = np.asarray(sample_weights, dtype=np.float64).reshape(-1)
     if weights.ndim != 1 or weights.shape[0] != x_array.shape[0]:
         raise ValueError("sample_weights must be a 1D vector aligned with X rows.")
@@ -184,7 +192,13 @@ def _prepare_weighted_centered_problem(x_array: np.ndarray, target_matrix: np.nd
     return weighted_x, weighted_target, feature_mean, target_mean
 
 
-def _add_alpha_to_diagonal(torch: Any, matrix: Any, alpha: float, *, device: Any, ) -> Any:
+def _add_alpha_to_diagonal(
+    torch: Any,
+    matrix: Any,
+    alpha: float,
+    *,
+    device: Any,
+) -> Any:
     if float(alpha) < 0.0:
         raise ValueError("Ridge alpha must be >= 0.")
 
@@ -204,7 +218,11 @@ def _add_alpha_to_diagonal(torch: Any, matrix: Any, alpha: float, *, device: Any
     return _as_torch_float_tensor(torch, matrix_np, device=device)
 
 
-def _solve_spd_system(torch: Any, system_matrix: Any, rhs: Any, ) -> Any:
+def _solve_spd_system(
+    torch: Any,
+    system_matrix: Any,
+    rhs: Any,
+) -> Any:
     linalg = getattr(torch, "linalg", None)
 
     if linalg is not None:
@@ -213,8 +231,12 @@ def _solve_spd_system(torch: Any, system_matrix: Any, rhs: Any, ) -> Any:
             try:
                 chol_out = cholesky_ex(system_matrix, check_errors=False)
                 chol_factor = chol_out.L if hasattr(chol_out, "L") else chol_out[0]
-                chol_info = chol_out.info if hasattr(chol_out, "info") else (
-                    chol_out[1] if isinstance(chol_out, tuple) and len(chol_out) > 1 else None
+                chol_info = (
+                    chol_out.info
+                    if hasattr(chol_out, "info")
+                    else (
+                        chol_out[1] if isinstance(chol_out, tuple) and len(chol_out) > 1 else None
+                    )
                 )
 
                 if chol_info is None or np.all(_to_numpy_array(chol_info) == 0):
@@ -229,8 +251,14 @@ def _solve_spd_system(torch: Any, system_matrix: Any, rhs: Any, ) -> Any:
             try:
                 solve_out = solve_ex(system_matrix, rhs, check_errors=False)
                 solve_result = solve_out.result if hasattr(solve_out, "result") else solve_out[0]
-                solve_info = solve_out.info if hasattr(solve_out, "info") else (
-                    solve_out[1] if isinstance(solve_out, tuple) and len(solve_out) > 1 else None
+                solve_info = (
+                    solve_out.info
+                    if hasattr(solve_out, "info")
+                    else (
+                        solve_out[1]
+                        if isinstance(solve_out, tuple) and len(solve_out) > 1
+                        else None
+                    )
                 )
 
                 if solve_info is None or np.all(_to_numpy_array(solve_info) == 0):
@@ -470,7 +498,16 @@ def solve_ridge_gpu_permutation_batch(
     }
 
 
-def _solve_adaptive_ridge_exact(torch: Any, x_array: np.ndarray, y_indices: np.ndarray, sample_weights: np.ndarray, *, alpha: float, fit_intercept: bool, device: Any,) -> tuple[np.ndarray, np.ndarray, bool, dict[str, Any]]:
+def _solve_adaptive_ridge_exact(
+    torch: Any,
+    x_array: np.ndarray,
+    y_indices: np.ndarray,
+    sample_weights: np.ndarray,
+    *,
+    alpha: float,
+    fit_intercept: bool,
+    device: Any,
+) -> tuple[np.ndarray, np.ndarray, bool, dict[str, Any]]:
     n_samples, n_features = x_array.shape
     n_classes = int(np.max(y_indices)) + 1
 
@@ -550,6 +587,7 @@ def _solve_adaptive_ridge_exact(torch: Any, x_array: np.ndarray, y_indices: np.n
         metadata,
     )
 
+
 class TorchRidgeClassifier(BaseEstimator, ClassifierMixin):
     def __init__(
         self,
@@ -575,7 +613,7 @@ class TorchRidgeClassifier(BaseEstimator, ClassifierMixin):
         y_array = np.asarray(y_labels)
 
         if float(self.alpha) < 0.0:
-            raise ValueError("TorchRidgeClassifier requires alpha >= 0.")  
+            raise ValueError("TorchRidgeClassifier requires alpha >= 0.")
         if x_array.ndim != 2:
             raise ValueError("TorchRidgeClassifier.fit requires a 2D feature matrix.")
         if y_array.ndim != 1:
@@ -591,7 +629,6 @@ class TorchRidgeClassifier(BaseEstimator, ClassifierMixin):
             raise ValueError("TorchRidgeClassifier.fit requires at least two target classes.")
 
         sample_weights = _resolve_sample_weights(y_text, self.class_weight)
-        sample_weight_sqrt = np.sqrt(sample_weights).astype(np.float64, copy=False)
 
         torch = _import_torch_module()
         device, resolved_device_id = _resolve_cuda_device(torch, self.gpu_device_id)
@@ -610,14 +647,16 @@ class TorchRidgeClassifier(BaseEstimator, ClassifierMixin):
         transfer_start = perf_counter()
         solver_start = perf_counter()
 
-        coefficient_weights, intercept_vector, binary_mode, ridge_solver_metadata = _solve_adaptive_ridge_exact(
-            torch,
-            x_array,
-            y_indices,
-            sample_weights,
-            alpha=float(self.alpha),
-            fit_intercept=bool(self.fit_intercept),
-            device=device,
+        coefficient_weights, intercept_vector, binary_mode, ridge_solver_metadata = (
+            _solve_adaptive_ridge_exact(
+                torch,
+                x_array,
+                y_indices,
+                sample_weights,
+                alpha=float(self.alpha),
+                fit_intercept=bool(self.fit_intercept),
+                device=device,
+            )
         )
 
         solver_elapsed = float(perf_counter() - solver_start)

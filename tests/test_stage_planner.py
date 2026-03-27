@@ -78,7 +78,8 @@ def _low_memory_torch_compute_policy() -> ResolvedComputePolicy:
 
 def _assignment_map(result) -> dict[str, dict[str, object]]:
     return {
-        str(assignment.stage): assignment.model_dump(mode="json") for assignment in result.assignments
+        str(assignment.stage): assignment.model_dump(mode="json")
+        for assignment in result.assignments
     }
 
 
@@ -141,8 +142,7 @@ def test_stage_planner_cpu_only_ridge_uses_cpu_fallback_for_gpu_preferred_stages
     assert isinstance(assignments[StageKey.MODEL_FIT.value]["fallback_reason"], str)
 
     assert (
-        assignments[StageKey.PERMUTATION.value]["executor_id"]
-        == PERMUTATION_REFERENCE_EXECUTOR_ID
+        assignments[StageKey.PERMUTATION.value]["executor_id"] == PERMUTATION_REFERENCE_EXECUTOR_ID
     )
     assert assignments[StageKey.PERMUTATION.value]["fallback_used"] is True
     assert assignments[StageKey.TUNING.value]["executor_id"] == TUNING_GENERIC_EXECUTOR_ID
@@ -159,10 +159,7 @@ def test_stage_planner_gpu_only_ridge_prefers_torch_gpu_executors() -> None:
     )
     assignments = _assignment_map(result)
 
-    assert (
-        assignments[StageKey.MODEL_FIT.value]["executor_id"]
-        == MODEL_FIT_TORCH_RIDGE_EXECUTOR_ID
-    )
+    assert assignments[StageKey.MODEL_FIT.value]["executor_id"] == MODEL_FIT_TORCH_RIDGE_EXECUTOR_ID
     assert assignments[StageKey.MODEL_FIT.value]["fallback_used"] is False
     assert (
         assignments[StageKey.PERMUTATION.value]["executor_id"]
@@ -183,8 +180,7 @@ def test_stage_planner_gpu_only_logreg_falls_from_cpu_preference_to_torch() -> N
     assignments = _assignment_map(result)
 
     assert (
-        assignments[StageKey.MODEL_FIT.value]["executor_id"]
-        == MODEL_FIT_TORCH_LOGREG_EXECUTOR_ID
+        assignments[StageKey.MODEL_FIT.value]["executor_id"] == MODEL_FIT_TORCH_LOGREG_EXECUTOR_ID
     )
     assert assignments[StageKey.MODEL_FIT.value]["fallback_used"] is True
     assert "policy_backend_family_excludes_sklearn_cpu" in str(
@@ -212,7 +208,9 @@ def test_stage_planner_cpu_only_logreg_prefers_specialized_exact_cpu_tuning() ->
     )
     assignments = _assignment_map(result)
 
-    assert assignments[StageKey.TUNING.value]["executor_id"] == SPECIALIZED_LOGREG_TUNING_EXECUTOR_ID
+    assert (
+        assignments[StageKey.TUNING.value]["executor_id"] == SPECIALIZED_LOGREG_TUNING_EXECUTOR_ID
+    )
     assert assignments[StageKey.TUNING.value]["fallback_used"] is False
 
 
@@ -229,7 +227,9 @@ def test_stage_planner_max_both_cpu_lane_keeps_conservative_cpu_behavior() -> No
 
     assert assignments[StageKey.MODEL_FIT.value]["executor_id"] == MODEL_FIT_CPU_EXECUTOR_ID
     assert assignments[StageKey.MODEL_FIT.value]["compute_lane"] == "cpu"
-    assert assignments[StageKey.PERMUTATION.value]["executor_id"] == PERMUTATION_REFERENCE_EXECUTOR_ID
+    assert (
+        assignments[StageKey.PERMUTATION.value]["executor_id"] == PERMUTATION_REFERENCE_EXECUTOR_ID
+    )
 
 
 def test_stage_planner_low_gpu_memory_downgrades_gpu_permutation_executor() -> None:
@@ -243,12 +243,11 @@ def test_stage_planner_low_gpu_memory_downgrades_gpu_permutation_executor() -> N
     )
     assignments = _assignment_map(result)
 
-    assert (
-        assignments[StageKey.MODEL_FIT.value]["executor_id"]
-        == MODEL_FIT_TORCH_RIDGE_EXECUTOR_ID
-    )
+    assert assignments[StageKey.MODEL_FIT.value]["executor_id"] == MODEL_FIT_TORCH_RIDGE_EXECUTOR_ID
     assert assignments[StageKey.MODEL_FIT.value]["fallback_used"] is False
-    assert assignments[StageKey.PERMUTATION.value]["executor_id"] == PERMUTATION_REFERENCE_EXECUTOR_ID
+    assert (
+        assignments[StageKey.PERMUTATION.value]["executor_id"] == PERMUTATION_REFERENCE_EXECUTOR_ID
+    )
     assert assignments[StageKey.PERMUTATION.value]["fallback_used"] is True
     assert "gpu_memory_below_stage_soft_limit" in str(
         assignments[StageKey.PERMUTATION.value]["fallback_reason"]
@@ -290,8 +289,7 @@ def test_stage_planner_xgboost_gpu_only_prefers_gpu_executor_when_supported(
     assert assignments[StageKey.MODEL_FIT.value]["fallback_used"] is False
     assert assignments[StageKey.TUNING.value]["executor_id"] == TUNING_GENERIC_EXECUTOR_ID
     assert (
-        assignments[StageKey.PERMUTATION.value]["executor_id"]
-        == PERMUTATION_REFERENCE_EXECUTOR_ID
+        assignments[StageKey.PERMUTATION.value]["executor_id"] == PERMUTATION_REFERENCE_EXECUTOR_ID
     )
 
 

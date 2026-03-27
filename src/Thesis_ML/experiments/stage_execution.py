@@ -310,7 +310,9 @@ def build_stage_execution_result(
             StageExecutionTelemetry(
                 stage=stage,
                 status=status,
-                duration_seconds=(float(duration_seconds) if duration_seconds is not None else None),
+                duration_seconds=(
+                    float(duration_seconds) if duration_seconds is not None else None
+                ),
                 details=details,
             )
         )

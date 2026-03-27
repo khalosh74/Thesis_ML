@@ -203,7 +203,7 @@ class _FakeTorchPermutationEstimator(BaseEstimator, ClassifierMixin):
     def __init__(self, backend_id: str = "torch_fake_gpu_v1") -> None:
         self.backend_id = backend_id
 
-    def fit(self, x_matrix: np.ndarray, y_labels: np.ndarray) -> "_FakeTorchPermutationEstimator":
+    def fit(self, x_matrix: np.ndarray, y_labels: np.ndarray) -> _FakeTorchPermutationEstimator:
         labels = np.asarray(y_labels)
         classes = np.unique(labels)
         self.classes_ = classes
@@ -233,7 +233,7 @@ class _FakeTorchRidgePermutationEstimator(BaseEstimator, ClassifierMixin):
         self,
         x_matrix: np.ndarray,
         y_labels: np.ndarray,
-    ) -> "_FakeTorchRidgePermutationEstimator":
+    ) -> _FakeTorchRidgePermutationEstimator:
         x_array = np.asarray(x_matrix, dtype=np.float64)
         labels = np.asarray(y_labels).astype(str, copy=False)
         classes = np.unique(labels)
@@ -411,7 +411,9 @@ def test_ridge_gpu_batched_dual_routes_for_supported_torch_ridge_case(monkeypatc
             ("model", _FakeTorchRidgePermutationEstimator()),
         ]
     )
-    monkeypatch.setattr(metrics_module, "supports_ridge_gpu_batched_dual", lambda _estimator: (True, None))
+    monkeypatch.setattr(
+        metrics_module, "supports_ridge_gpu_batched_dual", lambda _estimator: (True, None)
+    )
 
     execution_plan = metrics_module._resolve_permutation_execution_plan(
         pipeline_template,
@@ -542,7 +544,9 @@ def test_ridge_gpu_batched_dual_preserves_per_permutation_progress_events(monkey
     ]
 
 
-def test_ridge_gpu_batched_dual_payload_keeps_required_fields_and_additive_metadata(monkeypatch) -> None:
+def test_ridge_gpu_batched_dual_payload_keeps_required_fields_and_additive_metadata(
+    monkeypatch,
+) -> None:
     _patch_fake_ridge_gpu_specialized_primitives(monkeypatch)
     x_matrix, y, splits = _toy_permutation_inputs()
 

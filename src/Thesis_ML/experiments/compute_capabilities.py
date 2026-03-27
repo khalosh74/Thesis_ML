@@ -65,9 +65,7 @@ def detect_compute_capabilities(
         normalized_device_id = _safe_int(requested_device_id)
         if normalized_device_id is None or normalized_device_id < 0:
             requested_visible = False
-            incompatibility_reasons.append(
-                f"invalid_gpu_device_id:{requested_device_id}"
-            )
+            incompatibility_reasons.append(f"invalid_gpu_device_id:{requested_device_id}")
             normalized_device_id = None
 
     try:

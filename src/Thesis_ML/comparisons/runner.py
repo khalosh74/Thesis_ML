@@ -707,9 +707,7 @@ def execute_compiled_comparison(
         scheduled_assignments_by_run_id = _resolve_official_comparison_schedule_assignments(
             pending_run_specs=[
                 pending_spec
-                for pending_spec in (
-                    pending.get("spec") for pending in pending_run_executions
-                )
+                for pending_spec in (pending.get("spec") for pending in pending_run_executions)
                 if isinstance(pending_spec, CompiledComparisonRunSpec)
             ],
             compute_policy=resolved_compute_policy,

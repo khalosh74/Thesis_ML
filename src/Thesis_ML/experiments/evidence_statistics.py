@@ -15,7 +15,14 @@ def aggregate_repeated_runs(
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     if not rows:
         run_frame = pd.DataFrame(
-            columns=[*group_keys, "run_id", "base_run_id", "repeat_id", "metric_name", "metric_value"]
+            columns=[
+                *group_keys,
+                "run_id",
+                "base_run_id",
+                "repeat_id",
+                "metric_name",
+                "metric_value",
+            ]
         )
         summary_frame = pd.DataFrame(
             columns=[*group_keys, "n_runs", "mean_metric", "std_metric", "min_metric", "max_metric"]
@@ -303,4 +310,3 @@ def build_calibration_outputs(
         "brier_score": float(frame["squared_error"].mean()),
     }
     return summary, table
-

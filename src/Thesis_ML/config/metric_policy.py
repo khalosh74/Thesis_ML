@@ -28,9 +28,7 @@ def _macro_f1(
 
 
 _METRIC_FNS: dict[str, Callable[[list[str] | np.ndarray, list[str] | np.ndarray], float]] = {
-    "balanced_accuracy": lambda y_true, y_pred: float(
-        balanced_accuracy_score(y_true, y_pred)
-    ),
+    "balanced_accuracy": lambda y_true, y_pred: float(balanced_accuracy_score(y_true, y_pred)),
     "macro_f1": _macro_f1,
     "accuracy": lambda y_true, y_pred: float(accuracy_score(y_true, y_pred)),
 }
@@ -80,7 +78,9 @@ def metric_bundle(
     y_pred: list[str] | np.ndarray,
     metric_names: Iterable[str] | None = None,
 ) -> dict[str, float]:
-    names = list(metric_names) if metric_names is not None else sorted(SUPPORTED_CLASSIFICATION_METRICS)
+    names = (
+        list(metric_names) if metric_names is not None else sorted(SUPPORTED_CLASSIFICATION_METRICS)
+    )
     scores: dict[str, float] = {}
     for metric_name in names:
         normalized = validate_metric_name(metric_name)
@@ -187,7 +187,5 @@ def enforce_primary_metric_alignment(
             + f" != primary_metric={effective_policy.primary_metric}"
         )
     if mismatches:
-        raise ValueError(
-            f"{context} metric policy drift detected: " + "; ".join(mismatches)
-        )
+        raise ValueError(f"{context} metric policy drift detected: " + "; ".join(mismatches))
     return effective_policy

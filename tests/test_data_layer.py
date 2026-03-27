@@ -103,8 +103,7 @@ def test_evaluate_official_data_policy_flags_blocking_duplicate_sample_id(tmp_pa
 
     assert int(len(assessment["blocking_issues"])) >= 1
     assert any(
-        issue["code"] == "leakage_duplicate_sample_id"
-        for issue in assessment["blocking_issues"]
+        issue["code"] == "leakage_duplicate_sample_id" for issue in assessment["blocking_issues"]
     )
 
 
@@ -477,11 +476,12 @@ def test_write_official_data_artifacts_creates_expected_files(tmp_path: Path) ->
 
     dataset_fingerprint_payload = payload["dataset_fingerprint"]
     assert isinstance(dataset_fingerprint_payload, dict)
-    assert dataset_fingerprint_payload["cv_split_manifest_sha256"] == split_manifest_payload["sha256"]
+    assert (
+        dataset_fingerprint_payload["cv_split_manifest_sha256"] == split_manifest_payload["sha256"]
+    )
 
     assert (report_dir / "selection_exclusion_summary.json").exists()
     assert (report_dir / "selection_exclusion_manifest.csv").exists()
-    
 
 
 def test_evaluate_official_data_policy_builds_exact_within_subject_split_audit(
@@ -520,6 +520,7 @@ def test_evaluate_official_data_policy_builds_exact_within_subject_split_audit(
     assert len(rows) == 2
     assert {row["test_sessions"] for row in rows} == {"ses-01", "ses-02"}
     assert all(row["status"] == "pass" for row in rows)
+
 
 def test_evaluate_official_data_policy_blocks_within_subject_subject_mix(
     tmp_path: Path,
@@ -560,8 +561,7 @@ def test_evaluate_official_data_policy_blocks_within_subject_subject_mix(
     )
 
     assert any(
-        issue["code"] == "leakage_cv_split_plan_invalid"
-        for issue in assessment["blocking_issues"]
+        issue["code"] == "leakage_cv_split_plan_invalid" for issue in assessment["blocking_issues"]
     )
 
     cv_split_audit = assessment["cv_split_audit"]
@@ -572,10 +572,11 @@ def test_evaluate_official_data_policy_blocks_within_subject_subject_mix(
         in cv_split_audit["planner_error"]
     )
 
+
 def test_evaluate_official_data_policy_loso_session_allows_same_session_name_across_subjects(
     tmp_path: Path,
 ) -> None:
-    
+
     frame = pd.DataFrame(
         [
             {
@@ -656,6 +657,7 @@ def test_evaluate_official_data_policy_loso_session_allows_same_session_name_acr
     rows = assessment["cv_split_audit_rows"]
     assert len(rows) == 4
     assert all(row["status"] == "pass" for row in rows)
+
 
 def test_evaluate_official_data_policy_carries_selection_exclusion_summary(tmp_path: Path) -> None:
     frame = _index_frame()

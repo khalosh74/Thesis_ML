@@ -428,6 +428,7 @@ def test_run_experiment_failure_writes_structured_status(
     assert status["failure_stage"] == "runtime"
     assert "stage_timings_seconds" in status
 
+
 def test_confirmatory_preflight_rejects_unsupported_target_derivation_labels(
     tmp_path: Path,
 ) -> None:

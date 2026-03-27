@@ -1,4 +1,4 @@
-﻿"""Utilities for deriving thesis coarse-affect labels."""
+"""Utilities for deriving thesis coarse-affect labels."""
 
 from __future__ import annotations
 
@@ -291,9 +291,7 @@ def build_target_derivation_audit(
                 )
             else:
                 categories.append("source_missing")
-                reasons.append(
-                    "coarse_affect is missing before binary_valence_like derivation."
-                )
+                reasons.append("coarse_affect is missing before binary_valence_like derivation.")
             continue
 
         source_values.append(pd.NA)
@@ -430,11 +428,7 @@ def summarize_target_derivation_audit(audit_df: pd.DataFrame) -> dict[str, Any]:
         }
 
     by_category = (
-        audit_df["drop_category"]
-        .astype(str)
-        .value_counts(dropna=False)
-        .sort_index()
-        .to_dict()
+        audit_df["drop_category"].astype(str).value_counts(dropna=False).sort_index().to_dict()
     )
     sample_ids_head = []
     if "sample_id" in audit_df.columns:

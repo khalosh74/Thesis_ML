@@ -60,7 +60,9 @@ def collect_dataset_fingerprint(
     if target_column in selected.columns:
         hash_columns.append(target_column)
 
-    beta_path_column = "beta_path_canonical" if "beta_path_canonical" in selected.columns else "beta_path"
+    beta_path_column = (
+        "beta_path_canonical" if "beta_path_canonical" in selected.columns else "beta_path"
+    )
     if selected_beta_path_sha256 is None and beta_path_column in selected.columns:
         selected_beta_path_sha256 = dataframe_records_sha256(
             selected,

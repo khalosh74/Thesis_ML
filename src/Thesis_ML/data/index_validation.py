@@ -1,9 +1,10 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 import pandas as pd
 
@@ -78,7 +79,9 @@ def _require_data_root(data_root: Path) -> Path:
     return root.resolve(strict=True)
 
 
-def _require_contained_path(*, resolved_path: Path, data_root_resolved: Path, field_name: str) -> None:
+def _require_contained_path(
+    *, resolved_path: Path, data_root_resolved: Path, field_name: str
+) -> None:
     try:
         resolved_path.relative_to(data_root_resolved)
     except ValueError as exc:
@@ -285,7 +288,9 @@ def _validate_group_mask_uniqueness(
         raise DatasetIndexValidationError(
             f"Dataset index missing required group column '{group_column}'."
         )
-    mask_counts = frame.groupby(group_column, dropna=False)[mask_canonical_column].nunique(dropna=False)
+    mask_counts = frame.groupby(group_column, dropna=False)[mask_canonical_column].nunique(
+        dropna=False
+    )
     bad_groups = mask_counts[mask_counts != 1]
     if not bad_groups.empty:
         details = {str(index): int(value) for index, value in bad_groups.items()}
@@ -296,7 +301,9 @@ def _validate_group_mask_uniqueness(
 
 
 def _validate_integrity_columns(frame: pd.DataFrame) -> None:
-    missing = [column_name for column_name in INDEX_INTEGRITY_COLUMNS if column_name not in frame.columns]
+    missing = [
+        column_name for column_name in INDEX_INTEGRITY_COLUMNS if column_name not in frame.columns
+    ]
     if missing:
         raise DatasetIndexValidationError(
             "Dataset index is missing required integrity columns: " + ", ".join(sorted(missing))
@@ -306,8 +313,12 @@ def _validate_integrity_columns(frame: pd.DataFrame) -> None:
     mask_hash_cache: dict[str, str] = {}
 
     for row_idx, row in frame.iterrows():
-        beta_hash = _normalized_sha256(row.get("beta_file_sha256"), column_name="beta_file_sha256", row_idx=row_idx)
-        mask_hash = _normalized_sha256(row.get("mask_file_sha256"), column_name="mask_file_sha256", row_idx=row_idx)
+        beta_hash = _normalized_sha256(
+            row.get("beta_file_sha256"), column_name="beta_file_sha256", row_idx=row_idx
+        )
+        mask_hash = _normalized_sha256(
+            row.get("mask_file_sha256"), column_name="mask_file_sha256", row_idx=row_idx
+        )
         coarse_version = str(row.get("coarse_affect_mapping_version", "")).strip()
         binary_version = str(row.get("binary_valence_mapping_version", "")).strip()
         if not coarse_version:

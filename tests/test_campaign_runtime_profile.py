@@ -272,9 +272,7 @@ def test_campaign_runtime_profile_profile_nested_tuning_override_and_extrapolati
             )
         return validity
 
-    monkeypatch.setattr(
-        runtime_profile, "_profiling_validity_for_run", _patched_validity_for_run
-    )
+    monkeypatch.setattr(runtime_profile, "_profiling_validity_for_run", _patched_validity_for_run)
 
     def _fake_run_experiment(**kwargs: Any) -> dict[str, Any]:
         calls.append(dict(kwargs))
@@ -897,9 +895,7 @@ def test_model_fit_linearsvc_uses_specialized_tuning_executor(tmp_path: Path) ->
 
     tuned_rows = [row for row in output["tuning_records"] if str(row.get("status")) == "tuned"]
     assert tuned_rows
-    assert all(
-        row["tuning_executor"] == "linearsvc_grouped_nested_exact_v1" for row in tuned_rows
-    )
+    assert all(row["tuning_executor"] == "linearsvc_grouped_nested_exact_v1" for row in tuned_rows)
     assert all(bool(row["specialized_linearsvc_tuning_used"]) is True for row in tuned_rows)
     assert output["tuning_summary"]["specialized_linearsvc_tuning_used"] is True
 
@@ -1006,6 +1002,7 @@ def test_model_fit_outer_fold_cap_only_applies_when_profiling_flag_set(tmp_path:
 
     assert len(full_output["splits"]) >= 2
     assert len(capped_output["splits"]) == 1
+
 
 def test_campaign_runtime_profile_emits_progress_events(
     tmp_path: Path,

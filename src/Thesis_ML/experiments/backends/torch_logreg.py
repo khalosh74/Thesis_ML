@@ -58,9 +58,7 @@ def _resolve_cuda_device(torch: Any, requested_device_id: int) -> tuple[Any, int
     try:
         gpu_count = int(cuda_module.device_count())
     except Exception as exc:  # pragma: no cover - defensive probe guard
-        raise RuntimeError(
-            f"Failed to probe CUDA device count: {exc.__class__.__name__}."
-        ) from exc
+        raise RuntimeError(f"Failed to probe CUDA device count: {exc.__class__.__name__}.") from exc
     if gpu_count <= 0:
         raise RuntimeError("Torch CUDA is available but no visible GPU devices were found.")
     resolved_device_id = int(requested_device_id)
@@ -79,9 +77,7 @@ def _resolve_sample_weights(y_labels: np.ndarray, class_weight: str | None) -> n
     if class_weight is None:
         return np.ones(y_labels.shape[0], dtype=np.float64)
     if class_weight != "balanced":
-        raise ValueError(
-            "TorchLogisticRegression supports class_weight=None or 'balanced' only."
-        )
+        raise ValueError("TorchLogisticRegression supports class_weight=None or 'balanced' only.")
     classes, counts = np.unique(y_labels, return_counts=True)
     n_samples = int(y_labels.shape[0])
     n_classes = int(classes.shape[0])
@@ -199,9 +195,7 @@ class TorchLogisticRegression(BaseEstimator, ClassifierMixin):
         y_array = np.asarray(y_labels)
 
         if self.penalty != "l2":
-            raise ValueError(
-                "TorchLogisticRegression currently supports penalty='l2' only."
-            )
+            raise ValueError("TorchLogisticRegression currently supports penalty='l2' only.")
         if float(self.C) <= 0.0:
             raise ValueError("TorchLogisticRegression requires C > 0.")
         if int(self.max_iter) <= 0:
@@ -417,4 +411,3 @@ __all__ = [
     "make_torch_logreg_estimator",
     "resolve_torch_logreg_class_weight",
 ]
-

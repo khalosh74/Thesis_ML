@@ -86,8 +86,7 @@ def resolve_cpu_reference_constructor(model_name: str) -> EstimatorConstructor:
     if constructor is None:
         allowed = ", ".join(sorted(CPU_REFERENCE_MODEL_CONSTRUCTORS))
         raise ValueError(
-            "Unsupported CPU reference model "
-            f"'{model_name}'. Allowed values: {allowed}."
+            f"Unsupported CPU reference model '{model_name}'. Allowed values: {allowed}."
         )
     return constructor
 

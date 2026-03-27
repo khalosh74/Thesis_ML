@@ -485,9 +485,7 @@ def test_campaign_forwards_methodology_kwargs_for_e07_e08(
         row for row in seen_kwargs if row.get("methodology_policy_name") == "fixed_baselines_only"
     ]
     grouped_calls = [
-        row
-        for row in seen_kwargs
-        if row.get("methodology_policy_name") == "grouped_nested_tuning"
+        row for row in seen_kwargs if row.get("methodology_policy_name") == "grouped_nested_tuning"
     ]
 
     assert fixed_calls

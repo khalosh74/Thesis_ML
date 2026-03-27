@@ -8,10 +8,10 @@ from sklearn.preprocessing import StandardScaler
 from Thesis_ML.experiments.metrics import evaluate_permutations
 from Thesis_ML.features.preprocessing import (
     BASELINE_STANDARD_SCALER_RECIPE_ID,
-    PerSampleMeanCenter,
     SAMPLE_CENTER_STANDARD_SCALER_RECIPE_ID,
     SAMPLE_CENTER_VARIANCE_FILTER_STANDARD_SCALER_RECIPE_ID,
     VARIANCE_FILTER_STANDARD_SCALER_RECIPE_ID,
+    PerSampleMeanCenter,
     build_feature_preprocessing_recipe,
     resolve_feature_recipe_id,
 )
@@ -111,4 +111,3 @@ def test_permutation_path_supports_pipeline_scaler_step() -> None:
     assert payload["n_permutations"] == 3
     assert payload["metric_name"] == "balanced_accuracy"
     assert "p_value" in payload
-

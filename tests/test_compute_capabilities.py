@@ -35,7 +35,9 @@ class _FakeCuda:
 
 
 class _FakeTorch:
-    def __init__(self, *, cuda: _FakeCuda, torch_version: str = "2.4.1", cuda_version: str = "12.1") -> None:
+    def __init__(
+        self, *, cuda: _FakeCuda, torch_version: str = "2.4.1", cuda_version: str = "12.1"
+    ) -> None:
         self.__version__ = torch_version
         self.version = SimpleNamespace(cuda=cuda_version)
         self.cuda = cuda

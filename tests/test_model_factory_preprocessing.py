@@ -100,4 +100,3 @@ def test_build_feature_preprocessor_sample_center_variance_filter_recipe_is_pipe
         "variance_filter",
         "standard_scaler",
     ]
-

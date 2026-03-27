@@ -61,9 +61,7 @@ def test_official_confirmatory_gpu_only_allowlist_rejects_unsupported_models(
         deterministic_compute=True,
         capability_snapshot=_gpu_capability_snapshot(),
     )
-    manifest = SimpleNamespace(
-        runs=[SimpleNamespace(run_id=f"run_{model_name}", model=model_name)]
-    )
+    manifest = SimpleNamespace(runs=[SimpleNamespace(run_id=f"run_{model_name}", model=model_name)])
 
     with pytest.raises(ValueError, match="Official confirmatory gpu_only admission rejected"):
         _validate_official_protocol_gpu_admission(

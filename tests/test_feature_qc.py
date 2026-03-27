@@ -91,4 +91,3 @@ def test_merge_qc_into_metadata_records_attaches_all_qc_fields() -> None:
     for row in merged:
         for field_name in FEATURE_QC_SAMPLE_FIELDS:
             assert field_name in row
-

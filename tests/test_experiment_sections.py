@@ -16,6 +16,7 @@ from Thesis_ML.artifacts.registry import (
     list_artifacts_for_run,
 )
 from Thesis_ML.data.index_dataset import build_dataset_index
+from Thesis_ML.experiments.progress import ProgressEvent
 from Thesis_ML.experiments.run_experiment import (
     _build_pipeline,
     _compute_interpretability_stability,
@@ -35,7 +36,6 @@ from Thesis_ML.experiments.sections import (
     model_fit,
 )
 
-from Thesis_ML.experiments.progress import ProgressEvent
 
 def _write_nifti(path: Path, data: np.ndarray, affine: np.ndarray | None = None) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -156,7 +156,6 @@ def test_dataset_selection_binary_valence_like_drops_neutral(tmp_path: Path) -> 
     )
     selected = selection_output.selected_index_df
     exclusion_manifest = selection_output.selection_exclusion_manifest_df
-    
 
     assert set(selected["sample_id"].astype(str).tolist()) == {"s1", "s2"}
     assert set(selected["binary_valence_like"].astype(str).tolist()) == {"negative", "positive"}
@@ -631,6 +630,7 @@ def test_model_fit_record_random_split_generates_non_empty_folds(tmp_path: Path)
         assert int(len(train_idx)) > 0
         assert int(len(test_idx)) > 0
 
+
 def test_model_fit_emits_fold_progress_events(tmp_path: Path) -> None:
     events: list[ProgressEvent] = []
 
@@ -756,6 +756,7 @@ def test_dataset_selection_rejects_unsupported_emotion_for_coarse_affect(
                 subject="sub-001",
             )
         )
+
 
 def test_dataset_selection_rejects_unsupported_upstream_emotion_for_binary_valence_like(
     tmp_path: Path,

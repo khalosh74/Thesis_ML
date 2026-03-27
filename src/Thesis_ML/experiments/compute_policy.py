@@ -20,15 +20,32 @@ MAX_BOTH: HardwareMode = "max_both"
 CPU_REFERENCE_BACKEND_STACK_ID = "sklearn_cpu_reference_v1"
 GPU_BACKEND_NOT_IMPLEMENTED_REASON = "gpu_backend_not_implemented_pr1"
 TORCH_GPU_BACKEND_STACK_ID_FALLBACK = "torch_gpu_reference_v1"
+OFFICIAL_LOCKED_COMPARISON_GPU_ONLY_NOT_ADMITTED_REASON = (
+    "Official locked comparison compute controls are CPU-only for this milestone and "
+    "do not admit hardware_mode='gpu_only'."
+)
+OFFICIAL_LOCKED_COMPARISON_MAX_BOTH_NOT_ADMITTED_REASON = (
+    "Official locked comparison compute controls are CPU-only for this milestone and "
+    "do not admit hardware_mode='max_both'."
+)
+OFFICIAL_CONFIRMATORY_GPU_ONLY_NOT_ADMITTED_REASON = (
+    "Official confirmatory compute controls are CPU-only for this milestone and "
+    "do not admit hardware_mode='gpu_only'."
+)
+OFFICIAL_CONFIRMATORY_MAX_BOTH_NOT_ADMITTED_REASON = (
+    "Official confirmatory compute controls are CPU-only for this milestone and "
+    "do not admit hardware_mode='max_both'."
+)
+
+# Backward-compatible exported symbols retained for callers/tests that still import
+# the old determinism-gate names.
 LOCKED_COMPARISON_GPU_DETERMINISM_REQUIRED_REASON = (
-    "Official locked comparison gpu_only execution requires deterministic_compute=true."
+    OFFICIAL_LOCKED_COMPARISON_GPU_ONLY_NOT_ADMITTED_REASON
 )
 LOCKED_COMPARISON_MAX_BOTH_DETERMINISM_REQUIRED_REASON = (
-    "Official locked comparison max_both execution requires deterministic_compute=true."
+    OFFICIAL_LOCKED_COMPARISON_MAX_BOTH_NOT_ADMITTED_REASON
 )
-CONFIRMATORY_GPU_DETERMINISM_REQUIRED_REASON = (
-    "Official confirmatory gpu_only execution requires deterministic_compute=true."
-)
+CONFIRMATORY_GPU_DETERMINISM_REQUIRED_REASON = OFFICIAL_CONFIRMATORY_GPU_ONLY_NOT_ADMITTED_REASON
 COMPUTE_POLICY_FIELD_NAMES: tuple[str, ...] = (
     "hardware_mode_requested",
     "hardware_mode_effective",
@@ -99,9 +116,7 @@ def normalize_hardware_mode(value: HardwareMode | str) -> HardwareMode:
     normalized = str(value).strip().lower()
     if normalized not in HARDWARE_MODE_CHOICES:
         allowed = ", ".join(HARDWARE_MODE_CHOICES)
-        raise ValueError(
-            f"Unsupported hardware_mode '{value}'. Allowed values: {allowed}."
-        )
+        raise ValueError(f"Unsupported hardware_mode '{value}'. Allowed values: {allowed}.")
     return cast(HardwareMode, normalized)
 
 
@@ -166,36 +181,6 @@ def _resolve_locked_comparison_compute_policy(
             "allowed for official runs."
         )
 
-    if requested_mode == MAX_BOTH:
-        if not deterministic_compute:
-            raise ValueError(LOCKED_COMPARISON_MAX_BOTH_DETERMINISM_REQUIRED_REASON)
-        snapshot = capability_snapshot or detect_compute_capabilities(
-            requested_device_id=gpu_device_id
-        )
-        if not _gpu_compatible(snapshot):
-            raise ValueError(
-                _compatibility_error_message(
-                    hardware_mode=requested_mode,
-                    snapshot=snapshot,
-                )
-            )
-        return ResolvedComputePolicy(
-            hardware_mode_requested=requested_mode,
-            hardware_mode_effective=MAX_BOTH,
-            requested_backend_family="auto_mixed",
-            effective_backend_family="sklearn_cpu",
-            gpu_device_id=snapshot.device_id,
-            gpu_device_name=snapshot.device_name,
-            gpu_device_total_memory_mb=snapshot.device_total_memory_mb,
-            deterministic_compute=True,
-            allow_backend_fallback=False,
-            backend_stack_id=(
-                str(snapshot.tested_stack_id).strip() or TORCH_GPU_BACKEND_STACK_ID_FALLBACK
-            ),
-            backend_fallback_used=False,
-            backend_fallback_reason=None,
-        )
-
     if requested_mode == CPU_ONLY:
         return _cpu_reference_policy(
             requested_mode=requested_mode,
@@ -203,36 +188,11 @@ def _resolve_locked_comparison_compute_policy(
             allow_backend_fallback=False,
         )
 
-    if not deterministic_compute:
-        raise ValueError(LOCKED_COMPARISON_GPU_DETERMINISM_REQUIRED_REASON)
-
-    snapshot = capability_snapshot or detect_compute_capabilities(
-        requested_device_id=gpu_device_id
-    )
-    if not _gpu_compatible(snapshot):
-        raise ValueError(
-            _compatibility_error_message(
-                hardware_mode=requested_mode,
-                snapshot=snapshot,
-            )
-        )
-
-    return ResolvedComputePolicy(
-        hardware_mode_requested=requested_mode,
-        hardware_mode_effective=GPU_ONLY,
-        requested_backend_family="torch_gpu",
-        effective_backend_family="torch_gpu",
-        gpu_device_id=snapshot.device_id,
-        gpu_device_name=snapshot.device_name,
-        gpu_device_total_memory_mb=snapshot.device_total_memory_mb,
-        deterministic_compute=True,
-        allow_backend_fallback=False,
-        backend_stack_id=(
-            str(snapshot.tested_stack_id).strip() or TORCH_GPU_BACKEND_STACK_ID_FALLBACK
-        ),
-        backend_fallback_used=False,
-        backend_fallback_reason=None,
-    )
+    if requested_mode == GPU_ONLY:
+        raise ValueError(OFFICIAL_LOCKED_COMPARISON_GPU_ONLY_NOT_ADMITTED_REASON)
+    if requested_mode == MAX_BOTH:
+        raise ValueError(OFFICIAL_LOCKED_COMPARISON_MAX_BOTH_NOT_ADMITTED_REASON)
+    raise ValueError(f"Unsupported locked comparison hardware_mode '{requested_mode}'.")
 
 
 def _resolve_confirmatory_compute_policy(
@@ -249,12 +209,6 @@ def _resolve_confirmatory_compute_policy(
             "allowed for official runs."
         )
 
-    if requested_mode == MAX_BOTH:
-        raise ValueError(
-            "Official confirmatory compute controls do not admit hardware_mode='max_both' "
-            "in the current rollout."
-        )
-
     if requested_mode == CPU_ONLY:
         return _cpu_reference_policy(
             requested_mode=requested_mode,
@@ -262,36 +216,11 @@ def _resolve_confirmatory_compute_policy(
             allow_backend_fallback=False,
         )
 
-    if not deterministic_compute:
-        raise ValueError(CONFIRMATORY_GPU_DETERMINISM_REQUIRED_REASON)
-
-    snapshot = capability_snapshot or detect_compute_capabilities(
-        requested_device_id=gpu_device_id
-    )
-    if not _gpu_compatible(snapshot):
-        raise ValueError(
-            _compatibility_error_message(
-                hardware_mode=requested_mode,
-                snapshot=snapshot,
-            )
-        )
-
-    return ResolvedComputePolicy(
-        hardware_mode_requested=requested_mode,
-        hardware_mode_effective=GPU_ONLY,
-        requested_backend_family="torch_gpu",
-        effective_backend_family="torch_gpu",
-        gpu_device_id=snapshot.device_id,
-        gpu_device_name=snapshot.device_name,
-        gpu_device_total_memory_mb=snapshot.device_total_memory_mb,
-        deterministic_compute=True,
-        allow_backend_fallback=False,
-        backend_stack_id=(
-            str(snapshot.tested_stack_id).strip() or TORCH_GPU_BACKEND_STACK_ID_FALLBACK
-        ),
-        backend_fallback_used=False,
-        backend_fallback_reason=None,
-    )
+    if requested_mode == GPU_ONLY:
+        raise ValueError(OFFICIAL_CONFIRMATORY_GPU_ONLY_NOT_ADMITTED_REASON)
+    if requested_mode == MAX_BOTH:
+        raise ValueError(OFFICIAL_CONFIRMATORY_MAX_BOTH_NOT_ADMITTED_REASON)
+    raise ValueError(f"Unsupported confirmatory hardware_mode '{requested_mode}'.")
 
 
 def resolve_compute_policy(
@@ -337,9 +266,7 @@ def resolve_compute_policy(
             allow_backend_fallback=allow_backend_fallback,
         )
 
-    snapshot = capability_snapshot or detect_compute_capabilities(
-        requested_device_id=gpu_device_id
-    )
+    snapshot = capability_snapshot or detect_compute_capabilities(requested_device_id=gpu_device_id)
 
     if requested_mode == GPU_ONLY:
         if _gpu_compatible(snapshot):
@@ -429,11 +356,7 @@ def extract_compute_policy_payload(payload: dict[str, Any] | None) -> dict[str, 
         return None
     nested = payload.get("compute_policy")
     source = nested if isinstance(nested, dict) else payload
-    resolved = {
-        key: source.get(key)
-        for key in COMPUTE_POLICY_FIELD_NAMES
-        if key in source
-    }
+    resolved = {key: source.get(key) for key in COMPUTE_POLICY_FIELD_NAMES if key in source}
     if not resolved:
         return None
     required = {

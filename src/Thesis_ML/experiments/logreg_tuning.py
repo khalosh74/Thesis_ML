@@ -54,7 +54,9 @@ def _resolve_pipeline_components(
     model = pipeline_template.named_steps.get("model")
     if not isinstance(scaler, StandardScaler):
         raise ValueError("preprocessor_not_plain_standard_scaler")
-    if not bool(getattr(scaler, "with_mean", False)) or not bool(getattr(scaler, "with_std", False)):
+    if not bool(getattr(scaler, "with_mean", False)) or not bool(
+        getattr(scaler, "with_std", False)
+    ):
         raise ValueError("preprocessor_not_plain_standard_scaler")
     if not isinstance(model, LogisticRegression):
         raise ValueError(
@@ -247,8 +249,12 @@ def run_specialized_logreg_grouped_nested_tuning(
         groups=groups_array,
     )
 
-    candidate_scores = np.empty((profiled_candidate_count, profiled_inner_fold_count), dtype=np.float64)
-    candidate_fit_times = np.empty((profiled_candidate_count, profiled_inner_fold_count), dtype=np.float64)
+    candidate_scores = np.empty(
+        (profiled_candidate_count, profiled_inner_fold_count), dtype=np.float64
+    )
+    candidate_fit_times = np.empty(
+        (profiled_candidate_count, profiled_inner_fold_count), dtype=np.float64
+    )
     candidate_score_times = np.empty(
         (profiled_candidate_count, profiled_inner_fold_count), dtype=np.float64
     )

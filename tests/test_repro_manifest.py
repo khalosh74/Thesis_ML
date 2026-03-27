@@ -19,7 +19,9 @@ def test_repro_manifest_includes_required_top_level_sections(tmp_path: Path) -> 
 
     confirmatory_output = tmp_path / "confirmatory_output"
     confirmatory_output.mkdir(parents=True, exist_ok=True)
-    (confirmatory_output / "report_index.csv").write_text("run_id,status,report_dir\n", encoding="utf-8")
+    (confirmatory_output / "report_index.csv").write_text(
+        "run_id,status,report_dir\n", encoding="utf-8"
+    )
 
     replay_summary = {"passed": True, "mode": "confirmatory"}
     replay_verification_summary = {

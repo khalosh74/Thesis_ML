@@ -69,8 +69,12 @@ def test_grouped_bootstrap_interval_is_deterministic_for_seed() -> None:
     )
     assert first["status"] == "ok"
     assert second["status"] == "ok"
-    assert math.isclose(float(first["interval_lower"]), float(second["interval_lower"]), rel_tol=0.0)
-    assert math.isclose(float(first["interval_upper"]), float(second["interval_upper"]), rel_tol=0.0)
+    assert math.isclose(
+        float(first["interval_lower"]), float(second["interval_lower"]), rel_tol=0.0
+    )
+    assert math.isclose(
+        float(first["interval_upper"]), float(second["interval_upper"]), rel_tol=0.0
+    )
 
 
 def test_paired_sign_flip_detects_large_matched_difference() -> None:

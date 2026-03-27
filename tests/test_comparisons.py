@@ -75,9 +75,7 @@ def comparison_dataset(tmp_path: Path) -> dict[str, Path]:
     sessions = ("ses-01", "ses-02")
     for subject_index, subject in enumerate(subjects):
         for session_index, session in enumerate(sessions):
-            session_offset = float(
-                ((subject_index * len(sessions)) + session_index + 1) / 10.0
-            )
+            session_offset = float(((subject_index * len(sessions)) + session_index + 1) / 10.0)
             _create_glm_session(
                 glm_dir=data_root / subject / session / "BAS2",
                 labels=labels,

@@ -82,15 +82,15 @@ class ComputeRunAssignment:
         assigned_backend_family = cast(AssignedBackendFamily, backend_raw)
 
         if lane == "cpu" and assigned_backend_family != "sklearn_cpu":
-            raise ValueError(
-                "CPU lane assignments must use assigned_backend_family='sklearn_cpu'."
-            )
+            raise ValueError("CPU lane assignments must use assigned_backend_family='sklearn_cpu'.")
         if lane == "gpu" and assigned_backend_family != "torch_gpu":
             raise ValueError("GPU lane assignments must use assigned_backend_family='torch_gpu'.")
 
-        scheduler_mode_raw = str(
-            payload.get("scheduler_mode_effective", payload.get("hardware_mode_effective", ""))
-        ).strip().lower()
+        scheduler_mode_raw = (
+            str(payload.get("scheduler_mode_effective", payload.get("hardware_mode_effective", "")))
+            .strip()
+            .lower()
+        )
         if scheduler_mode_raw not in {CPU_ONLY, GPU_ONLY, MAX_BOTH}:
             raise ValueError(
                 "scheduled_compute_assignment.scheduler_mode_effective must be one of: "
@@ -178,10 +178,7 @@ def _torch_gpu_support_for_model(
     gpu_model_allowlist: set[str] | None = None,
 ) -> tuple[bool, str | None]:
     normalized_model_name = str(model_name).strip().lower()
-    if (
-        gpu_model_allowlist is not None
-        and normalized_model_name not in gpu_model_allowlist
-    ):
+    if gpu_model_allowlist is not None and normalized_model_name not in gpu_model_allowlist:
         return (
             False,
             f"gpu_lane_not_allowed_by_policy:{normalized_model_name}",
@@ -290,7 +287,10 @@ def plan_compute_schedule(
         ]
 
     if requested_mode == GPU_ONLY:
-        if not gpu_stack_available or str(base_compute_policy.effective_backend_family) != "torch_gpu":
+        if (
+            not gpu_stack_available
+            or str(base_compute_policy.effective_backend_family) != "torch_gpu"
+        ):
             if not bool(base_compute_policy.allow_backend_fallback):
                 raise ValueError(
                     "gpu_only scheduling requires a resolved GPU backend capability. "
@@ -354,10 +354,7 @@ def plan_compute_schedule(
                         scheduler_mode_effective=scheduler_mode_effective,
                         reason="gpu_only_model_fallback_cpu_lane",
                         fallback_used=True,
-                        fallback_reason=(
-                            "gpu_backend_unsupported_for_model:"
-                            f"{request.model_name}"
-                        ),
+                        fallback_reason=(f"gpu_backend_unsupported_for_model:{request.model_name}"),
                     )
                 )
                 continue
@@ -493,8 +490,7 @@ def materialize_scheduled_compute_policy(
         effective_backend_family=backend_family,
         gpu_device_id=(
             int(assignment.gpu_device_id)
-            if assignment.assigned_compute_lane == "gpu"
-            and assignment.gpu_device_id is not None
+            if assignment.assigned_compute_lane == "gpu" and assignment.gpu_device_id is not None
             else None
         ),
         gpu_device_name=(

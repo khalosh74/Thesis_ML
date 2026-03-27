@@ -195,9 +195,7 @@ def verify_bundle(bundle_dir: Path) -> dict[str, Any]:
         )
         verification_files = {}
 
-    replay_verification_rel = str(
-        verification_files.get("replay_verification_summary", "")
-    ).strip()
+    replay_verification_rel = str(verification_files.get("replay_verification_summary", "")).strip()
     if not replay_verification_rel:
         issues.append(
             {

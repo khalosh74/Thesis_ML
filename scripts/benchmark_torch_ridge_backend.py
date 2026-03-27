@@ -18,7 +18,6 @@ if str(SRC_ROOT) not in sys.path:
 
 from Thesis_ML.experiments.backends.torch_ridge import TorchRidgeClassifier  # noqa: E402
 
-
 CASE_LIBRARY: dict[str, dict[str, Any]] = {
     "voxel_binary_small": {
         "n_samples": 500,
@@ -266,11 +265,15 @@ def main() -> int:
     parser.add_argument("--out", type=str, default="")
     args = parser.parse_args()
 
-    selected_cases = list(args.case) if args.case else [
-        "voxel_binary_small",
-        "sample_heavy_control",
-        "voxel_multiclass_small",
-    ]
+    selected_cases = (
+        list(args.case)
+        if args.case
+        else [
+            "voxel_binary_small",
+            "sample_heavy_control",
+            "voxel_multiclass_small",
+        ]
+    )
 
     summary: dict[str, Any] = {
         "benchmark": "torch_ridge_backend",

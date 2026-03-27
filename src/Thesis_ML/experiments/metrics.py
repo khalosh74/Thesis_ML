@@ -300,7 +300,9 @@ def _execute_ridge_gpu_batched_dual_permutations(
             batch_size_hint=batch_size,
         )
         fold_states.append(fold_state)
-        fold_gpu_state_build_seconds += float(timing_metadata.get("fold_gpu_state_build_seconds", 0.0))
+        fold_gpu_state_build_seconds += float(
+            timing_metadata.get("fold_gpu_state_build_seconds", 0.0)
+        )
         fold_factorization_seconds += float(timing_metadata.get("fold_factorization_seconds", 0.0))
 
     y_true_all_constant: list[str] = [
@@ -316,7 +318,9 @@ def _execute_ridge_gpu_batched_dual_permutations(
         permuted_labels_by_fold: list[np.ndarray] = []
         for fold_cache in fold_caches:
             y_train_fold = np.asarray(fold_cache.y_train)
-            labels_batch = np.empty((int(y_train_fold.shape[0]), int(current_batch_size)), dtype=y_train_fold.dtype)
+            labels_batch = np.empty(
+                (int(y_train_fold.shape[0]), int(current_batch_size)), dtype=y_train_fold.dtype
+            )
             permuted_labels_by_fold.append(labels_batch)
 
         for local_perm_index in range(int(current_batch_size)):

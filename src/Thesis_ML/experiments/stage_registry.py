@@ -347,9 +347,7 @@ def _execute_tuning_linearsvc_specialized_entrypoint(
         "tuned_search_configured_inner_fold_count": int(
             specialized_result.configured_inner_fold_count
         ),
-        "tuned_search_profiled_inner_fold_count": int(
-            specialized_result.profiled_inner_fold_count
-        ),
+        "tuned_search_profiled_inner_fold_count": int(specialized_result.profiled_inner_fold_count),
         "tuning_extrapolation_applied": bool(specialized_result.tuning_extrapolation_applied),
         "measured_inner_tuning_seconds": float(specialized_result.measured_inner_tuning_seconds),
         "estimated_full_inner_tuning_seconds": float(
@@ -444,9 +442,7 @@ def _execute_tuning_logreg_specialized_entrypoint(
         "tuned_search_configured_inner_fold_count": int(
             specialized_result.configured_inner_fold_count
         ),
-        "tuned_search_profiled_inner_fold_count": int(
-            specialized_result.profiled_inner_fold_count
-        ),
+        "tuned_search_profiled_inner_fold_count": int(specialized_result.profiled_inner_fold_count),
         "tuning_extrapolation_applied": bool(specialized_result.tuning_extrapolation_applied),
         "measured_inner_tuning_seconds": float(specialized_result.measured_inner_tuning_seconds),
         "estimated_full_inner_tuning_seconds": float(
@@ -539,7 +535,9 @@ def _execute_permutation_ridge_gpu_preferred_entrypoint(
     fallback_reason = payload.get("specialized_ridge_gpu_fallback_reason")
     payload["permutation_executor_id"] = PERMUTATION_RIDGE_GPU_PREFERRED_EXECUTOR_ID
     payload["permutation_executor_fallback_reason"] = (
-        str(fallback_reason) if isinstance(fallback_reason, str) and fallback_reason.strip() else None
+        str(fallback_reason)
+        if isinstance(fallback_reason, str) and fallback_reason.strip()
+        else None
     )
     return payload
 

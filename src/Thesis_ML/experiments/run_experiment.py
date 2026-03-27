@@ -67,10 +67,12 @@ from Thesis_ML.experiments.model_factory import (
     DEFAULT_BATCH_MODEL_NAMES,
     MODEL_NAMES,
     SUPPORTED_FEATURE_RECIPE_IDS,
-    build_pipeline as build_model_pipeline,
     make_model,
     model_preprocess_kind,
     resolve_preprocessing_recipe,
+)
+from Thesis_ML.experiments.model_factory import (
+    build_pipeline as build_model_pipeline,
 )
 from Thesis_ML.experiments.official_contracts import (
     validate_official_preflight,
@@ -268,6 +270,7 @@ def _evaluate_permutations(
         progress_callback=progress_callback,
         progress_metadata=progress_metadata,
     )
+
 
 def _extract_linear_coefficients(estimator) -> tuple[np.ndarray, np.ndarray, list[str]]:
     return extract_linear_coefficients(estimator=estimator)
@@ -510,10 +513,9 @@ def run_experiment(
             )
         resolved_feature_recipe_id = context_recipe_id
     context_emit_feature_qc_artifacts = official_context.get("emit_feature_qc_artifacts")
-    if (
-        context_emit_feature_qc_artifacts is not None
-        and bool(context_emit_feature_qc_artifacts) != bool(emit_feature_qc_artifacts)
-    ):
+    if context_emit_feature_qc_artifacts is not None and bool(
+        context_emit_feature_qc_artifacts
+    ) != bool(emit_feature_qc_artifacts):
         raise ValueError(
             "Illegal override for official run key 'emit_feature_qc_artifacts'. "
             "Use protocol/comparison spec values only."
@@ -1099,16 +1101,18 @@ def run_experiment(
                         reuse_policy=reuse_policy,
                         reuse_completed_artifacts=should_reuse_completed_artifacts,
                         feature_recipe_id=resolved_feature_recipe_id,
-                        build_pipeline_fn=lambda model_name, seed, feature_recipe_id=None: _build_pipeline(
-                            model_name=model_name,
-                            seed=seed,
-                            class_weight_policy=methodology_policy.class_weight_policy.value,
-                            compute_policy=resolved_compute_policy,
-                            feature_recipe_id=(
-                                feature_recipe_id
-                                if feature_recipe_id is not None
-                                else resolved_feature_recipe_id
-                            ),
+                        build_pipeline_fn=lambda model_name, seed, feature_recipe_id=None: (
+                            _build_pipeline(
+                                model_name=model_name,
+                                seed=seed,
+                                class_weight_policy=methodology_policy.class_weight_policy.value,
+                                compute_policy=resolved_compute_policy,
+                                feature_recipe_id=(
+                                    feature_recipe_id
+                                    if feature_recipe_id is not None
+                                    else resolved_feature_recipe_id
+                                ),
+                            )
                         ),
                         progress_callback=progress_callback,
                         load_features_from_cache_fn=(

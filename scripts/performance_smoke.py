@@ -53,9 +53,7 @@ def _enable_minimal_executable_row(workbook) -> None:
     experiment_headers = [
         experiment_ws.cell(1, col).value for col in range(1, experiment_ws.max_column + 1)
     ]
-    experiment_cols = {
-        str(value): idx + 1 for idx, value in enumerate(experiment_headers) if value
-    }
+    experiment_cols = {str(value): idx + 1 for idx, value in enumerate(experiment_headers) if value}
     experiment_ws.cell(2, experiment_cols["experiment_id"], "E16")
     experiment_ws.cell(2, experiment_cols["enabled"], "Yes")
     experiment_ws.cell(2, experiment_cols["start_section"], "dataset_selection")

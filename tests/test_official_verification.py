@@ -350,7 +350,7 @@ def _write_confirmatory_output(root: Path) -> Path:
                         "suite_id",
                         "claim_ids",
                     ]
-                }
+                },
             },
             indent=2,
         )
@@ -649,9 +649,7 @@ def test_verify_official_artifacts_requires_explicit_lane_metadata_for_official_
 
     summary = verify_official_artifacts(output_dir=output_dir)
     assert summary["passed"] is False
-    assert any(
-        issue["code"] == "official_max_both_field_missing" for issue in summary["issues"]
-    )
+    assert any(issue["code"] == "official_max_both_field_missing" for issue in summary["issues"])
 
 
 def test_verify_official_artifacts_detects_split_manifest_hash_mismatch(
@@ -668,8 +666,7 @@ def test_verify_official_artifacts_detects_split_manifest_hash_mismatch(
     summary = verify_official_artifacts(output_dir=output_dir)
     assert summary["passed"] is False
     assert any(
-        issue["code"] == "cv_split_manifest_hash_mismatch_recorded"
-        for issue in summary["issues"]
+        issue["code"] == "cv_split_manifest_hash_mismatch_recorded" for issue in summary["issues"]
     )
 
 
@@ -737,8 +734,12 @@ def test_compare_official_outputs_ignores_stage_duration_seconds(tmp_path: Path)
 
     left_config_path.write_text(f"{json.dumps(left_payload, indent=2)}\n", encoding="utf-8")
     right_config_path.write_text(f"{json.dumps(right_payload, indent=2)}\n", encoding="utf-8")
-    left_metrics_path.write_text(f"{json.dumps(left_metrics_payload, indent=2)}\n", encoding="utf-8")
-    right_metrics_path.write_text(f"{json.dumps(right_metrics_payload, indent=2)}\n", encoding="utf-8")
+    left_metrics_path.write_text(
+        f"{json.dumps(left_metrics_payload, indent=2)}\n", encoding="utf-8"
+    )
+    right_metrics_path.write_text(
+        f"{json.dumps(right_metrics_payload, indent=2)}\n", encoding="utf-8"
+    )
 
     equal_summary = compare_official_outputs(left_dir=left_dir, right_dir=right_dir)
     assert equal_summary["passed"] is True

@@ -34,6 +34,7 @@ from Thesis_ML.experiments.runtime_policies import (
     validate_official_context_payload,
 )
 from Thesis_ML.experiments.timeout_watchdog import execute_run_with_timeout_watchdog
+from Thesis_ML.features.preprocessing import BASELINE_STANDARD_SCALER_RECIPE_ID
 from Thesis_ML.protocols.artifacts import write_protocol_artifacts
 from Thesis_ML.protocols.compiler import compile_protocol
 from Thesis_ML.protocols.models import (
@@ -43,7 +44,6 @@ from Thesis_ML.protocols.models import (
     ProtocolStatus,
     ThesisProtocol,
 )
-from Thesis_ML.features.preprocessing import BASELINE_STANDARD_SCALER_RECIPE_ID
 from Thesis_ML.verification.official_artifacts import verify_official_artifacts
 
 _OFFICIAL_CONFIRMATORY_GPU_ALLOWLIST: frozenset[tuple[str, str]] = frozenset(

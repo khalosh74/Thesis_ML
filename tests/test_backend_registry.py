@@ -137,7 +137,12 @@ def test_supported_models_resolve_to_cpu_reference_backend(
 
 
 @pytest.mark.parametrize(
-    ("model_name", "hardware_mode_requested", "hardware_mode_effective", "requested_backend_family"),
+    (
+        "model_name",
+        "hardware_mode_requested",
+        "hardware_mode_effective",
+        "requested_backend_family",
+    ),
     [
         ("ridge", "gpu_only", "gpu_only", "torch_gpu"),
         ("logreg", "gpu_only", "gpu_only", "torch_gpu"),
@@ -272,16 +277,18 @@ def test_cpu_reference_pipeline_preserves_expected_behavior_contracts() -> None:
             assert proba_registry.shape == proba_cpu_reference.shape
 
         fitted_model = pipeline_via_registry.named_steps["model"]
-        assert getattr(fitted_model, "classes_").tolist() == ["neg", "pos"]
-        assert int(getattr(fitted_model, "n_features_in_")) == x_matrix.shape[1]
+        assert fitted_model.classes_.tolist() == ["neg", "pos"]
+        assert int(fitted_model.n_features_in_) == x_matrix.shape[1]
 
         if hasattr(fitted_model, "coef_"):
-            assert np.asarray(fitted_model.coef_).shape == np.asarray(
-                pipeline_cpu_reference.named_steps["model"].coef_
-            ).shape
-            assert np.asarray(fitted_model.intercept_).shape == np.asarray(
-                pipeline_cpu_reference.named_steps["model"].intercept_
-            ).shape
+            assert (
+                np.asarray(fitted_model.coef_).shape
+                == np.asarray(pipeline_cpu_reference.named_steps["model"].coef_).shape
+            )
+            assert (
+                np.asarray(fitted_model.intercept_).shape
+                == np.asarray(pipeline_cpu_reference.named_steps["model"].intercept_).shape
+            )
 
 
 def test_xgboost_cpu_support_resolution_unavailable_reports_reason(
@@ -349,11 +356,13 @@ def test_xgboost_gpu_resolution_and_constructor_when_available(
     )
     monkeypatch.setattr(
         "Thesis_ML.experiments.backend_registry.make_xgboost_gpu_estimator",
-        lambda *, seed, class_weight_policy, gpu_device_id, deterministic_compute: _SentinelEstimator(
-            seed=int(seed),
-            class_weight_policy=str(class_weight_policy),
-            gpu_device_id=int(gpu_device_id),
-            deterministic_compute=bool(deterministic_compute),
+        lambda *, seed, class_weight_policy, gpu_device_id, deterministic_compute: (
+            _SentinelEstimator(
+                seed=int(seed),
+                class_weight_policy=str(class_weight_policy),
+                gpu_device_id=int(gpu_device_id),
+                deterministic_compute=bool(deterministic_compute),
+            )
         ),
     )
 

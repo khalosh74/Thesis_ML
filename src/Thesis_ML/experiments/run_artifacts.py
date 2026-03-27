@@ -377,9 +377,7 @@ def build_run_config_payload(
         "tuning_enabled": bool(tuning_enabled),
         "model_cost_tier": str(model_cost_tier),
         "projected_runtime_seconds": int(projected_runtime_seconds),
-        "preprocessing_kind": (
-            str(preprocessing_kind) if preprocessing_kind is not None else None
-        ),
+        "preprocessing_kind": (str(preprocessing_kind) if preprocessing_kind is not None else None),
         "feature_recipe_id": str(feature_recipe_id),
         "tuning_search_space_id": tuning_search_space_id,
         "tuning_search_space_version": tuning_search_space_version,

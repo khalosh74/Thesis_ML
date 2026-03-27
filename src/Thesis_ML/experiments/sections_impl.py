@@ -10,15 +10,16 @@ import numpy as np
 import pandas as pd
 from sklearn.base import clone
 from sklearn.metrics import confusion_matrix
-from sklearn.model_selection import LeaveOneGroupOut, ParameterGrid, StratifiedKFold
+from sklearn.model_selection import LeaveOneGroupOut, ParameterGrid
 
 from Thesis_ML.config.methodology import FeatureQualityPolicy
 from Thesis_ML.config.metric_policy import metric_bundle
+from Thesis_ML.experiments.cv_split_plan import build_cv_split_plan
 from Thesis_ML.experiments.evidence_statistics import build_calibration_outputs
 from Thesis_ML.experiments.metrics import classification_metric_score
+from Thesis_ML.experiments.model_factory import model_supports_linear_interpretability
 from Thesis_ML.experiments.progress import emit_progress
 from Thesis_ML.experiments.stage_execution import StageAssignment
-from Thesis_ML.experiments.cv_split_plan import build_cv_split_plan
 from Thesis_ML.experiments.stage_registry import (
     MODEL_FIT_CPU_EXECUTOR_ID,
     PERMUTATION_REFERENCE_EXECUTOR_ID,
@@ -30,7 +31,6 @@ from Thesis_ML.experiments.stage_registry import (
     run_permutation_executor,
     run_tuning_executor,
 )
-from Thesis_ML.experiments.model_factory import model_supports_linear_interpretability
 from Thesis_ML.experiments.tuning_search_spaces import get_search_space
 from Thesis_ML.features.feature_qc import (
     FEATURE_QC_SAMPLE_FIELDS,
@@ -362,9 +362,7 @@ def execute_model_fit(section_input: ModelFitInput) -> dict[str, Any]:
                     y_train=y[train_idx],
                 )
                 estimator = fit_payload["estimator"]
-                estimator_fit_elapsed_seconds = float(
-                    fit_payload["estimator_fit_elapsed_seconds"]
-                )
+                estimator_fit_elapsed_seconds = float(fit_payload["estimator_fit_elapsed_seconds"])
                 tuning_result = run_tuning_executor(
                     executor_id=tuning_executor_id,
                     fallback_executor_id=tuning_fallback_executor_id,
@@ -440,9 +438,7 @@ def execute_model_fit(section_input: ModelFitInput) -> dict[str, Any]:
                         "specialized_linearsvc_tuning_used": bool(
                             specialized_linearsvc_tuning_used
                         ),
-                        "specialized_logreg_tuning_used": bool(
-                            specialized_logreg_tuning_used
-                        ),
+                        "specialized_logreg_tuning_used": bool(specialized_logreg_tuning_used),
                         "tuning_progress_event_count": (
                             int(tuning_progress_event_count)
                             if tuning_progress_event_count is not None
@@ -475,7 +471,9 @@ def execute_model_fit(section_input: ModelFitInput) -> dict[str, Any]:
                 x_outer_train = section_input.x_matrix[train_idx]
                 y_outer_train = y[train_idx]
                 inner_groups = np.asarray(groups[train_idx]).astype(str, copy=False)
-                inner_splits = list(LeaveOneGroupOut().split(x_outer_train, y_outer_train, inner_groups))
+                inner_splits = list(
+                    LeaveOneGroupOut().split(x_outer_train, y_outer_train, inner_groups)
+                )
                 inner_group_count = int(len(inner_splits))
                 if inner_group_count < 2:
                     raise ValueError(
@@ -658,18 +656,12 @@ def execute_model_fit(section_input: ModelFitInput) -> dict[str, Any]:
                         "best_score": float(best_score),
                         "best_params_json": best_params_json,
                         "n_candidates": int(tuned_search_candidate_count),
-                        "configured_candidate_count": int(
-                            tuned_search_configured_candidate_count
-                        ),
-                        "profiled_candidate_count": int(
-                            tuned_search_profiled_candidate_count
-                        ),
+                        "configured_candidate_count": int(tuned_search_configured_candidate_count),
+                        "profiled_candidate_count": int(tuned_search_profiled_candidate_count),
                         "configured_inner_fold_count": int(
                             tuned_search_configured_inner_fold_count
                         ),
-                        "profiled_inner_fold_count": int(
-                            tuned_search_profiled_inner_fold_count
-                        ),
+                        "profiled_inner_fold_count": int(tuned_search_profiled_inner_fold_count),
                         "tuning_extrapolation_applied": bool(tuning_extrapolation_applied),
                         "measured_inner_tuning_seconds": measured_inner_tuning_seconds,
                         "estimated_full_inner_tuning_seconds": estimated_full_inner_tuning_seconds,
@@ -679,9 +671,7 @@ def execute_model_fit(section_input: ModelFitInput) -> dict[str, Any]:
                         "specialized_linearsvc_tuning_used": bool(
                             specialized_linearsvc_tuning_used
                         ),
-                        "specialized_logreg_tuning_used": bool(
-                            specialized_logreg_tuning_used
-                        ),
+                        "specialized_logreg_tuning_used": bool(specialized_logreg_tuning_used),
                         "tuning_progress_event_count": (
                             int(tuning_progress_event_count)
                             if tuning_progress_event_count is not None
@@ -1008,7 +998,10 @@ def execute_model_fit(section_input: ModelFitInput) -> dict[str, Any]:
                 sum(float(row.get("measured_inner_tuning_seconds") or 0.0) for row in tuned_rows)
             ),
             "estimated_full_tuned_search_total": float(
-                sum(float(row.get("estimated_full_tuned_search_seconds") or 0.0) for row in tuned_rows)
+                sum(
+                    float(row.get("estimated_full_tuned_search_seconds") or 0.0)
+                    for row in tuned_rows
+                )
             ),
             "tuning_split_scale_total": float(
                 sum(float(row.get("tuning_split_scale_seconds") or 0.0) for row in tuned_rows)
@@ -1089,7 +1082,10 @@ def execute_model_fit(section_input: ModelFitInput) -> dict[str, Any]:
                 sum(float(row.get("measured_inner_tuning_seconds") or 0.0) for row in fold_rows)
             ),
             "estimated_full_tuned_search": float(
-                sum(float(row.get("estimated_full_tuned_search_seconds") or 0.0) for row in fold_rows)
+                sum(
+                    float(row.get("estimated_full_tuned_search_seconds") or 0.0)
+                    for row in fold_rows
+                )
             ),
         },
         "fold_timings": [
@@ -1269,8 +1265,9 @@ def execute_interpretability(section_input: InterpretabilityInput) -> dict[str, 
         not_applicable_reason = (
             "Interpretability export is enabled only for within_subject_loso_session."
         )
-        if section_input.cv_mode == "within_subject_loso_session" and not model_supports_linear_interpretability(
-            section_input.model
+        if (
+            section_input.cv_mode == "within_subject_loso_session"
+            and not model_supports_linear_interpretability(section_input.model)
         ):
             not_applicable_reason = (
                 "Interpretability export currently supports linear coefficient models only."
@@ -1410,7 +1407,9 @@ def _selected_feature_qc_rows(
     if metadata_df.empty:
         return _fallback_feature_qc_rows_from_matrix(x_matrix)
     missing_columns = [
-        field_name for field_name in FEATURE_QC_SAMPLE_FIELDS if field_name not in metadata_df.columns
+        field_name
+        for field_name in FEATURE_QC_SAMPLE_FIELDS
+        if field_name not in metadata_df.columns
     ]
     if missing_columns:
         raise ValueError(
@@ -1421,7 +1420,9 @@ def _selected_feature_qc_rows(
     for _, row in metadata_df.iterrows():
         sample_id = str(row.get("sample_id", "")).strip()
         if not sample_id:
-            raise ValueError("Selected metadata contains blank sample_id while building feature QC.")
+            raise ValueError(
+                "Selected metadata contains blank sample_id while building feature QC."
+            )
         payload: dict[str, Any] = {
             "group_id": "selected_subset",
             "sample_id": sample_id,
@@ -1454,9 +1455,7 @@ def _build_feature_qc_summary(
         "mean_repair_fraction": float(summary.get("mean_repair_fraction", 0.0)),
         "n_all_zero_vectors": int(summary.get("n_all_zero_vectors", 0)),
         "n_constant_vectors": int(summary.get("n_constant_vectors", 0)),
-        "mean_vector_std_after_repair": float(
-            summary.get("mean_vector_std_after_repair", 0.0)
-        ),
+        "mean_vector_std_after_repair": float(summary.get("mean_vector_std_after_repair", 0.0)),
         "min_vector_std_after_repair": float(summary.get("min_vector_std_after_repair", 0.0)),
     }
 

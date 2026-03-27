@@ -112,9 +112,7 @@ def resolve_backend_support(
                 reason=_unsupported_torch_gpu_model_message(normalized_model_name),
             )
         backend_id = (
-            TORCH_RIDGE_BACKEND_ID
-            if normalized_model_name == "ridge"
-            else TORCH_LOGREG_BACKEND_ID
+            TORCH_RIDGE_BACKEND_ID if normalized_model_name == "ridge" else TORCH_LOGREG_BACKEND_ID
         )
         return BackendSupport(
             model_name=normalized_model_name,

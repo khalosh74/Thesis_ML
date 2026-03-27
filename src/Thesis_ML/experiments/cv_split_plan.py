@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -88,13 +87,9 @@ def build_cv_split_plan(
         test_idx = np.flatnonzero(test_mask.to_numpy())
 
         if len(train_idx) == 0:
-            raise ValueError(
-                f"No cache-aligned samples found for train_subject '{train_subject}'."
-            )
+            raise ValueError(f"No cache-aligned samples found for train_subject '{train_subject}'.")
         if len(test_idx) == 0:
-            raise ValueError(
-                f"No cache-aligned samples found for test_subject '{test_subject}'."
-            )
+            raise ValueError(f"No cache-aligned samples found for test_subject '{test_subject}'.")
 
         unique_labels_train = np.unique(y[train_idx])
         if len(unique_labels_train) < 2:
@@ -182,7 +177,7 @@ def build_cv_split_plan(
         )
         for fold_index, (train_idx, test_idx) in enumerate(raw_splits)
     )
-    
+
     return CVSplitPlan(
         cv_mode=str(cv_mode),
         groups=np.asarray(groups).astype(str, copy=False),

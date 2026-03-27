@@ -102,7 +102,9 @@ class _FakeTorch:
         return str(name)
 
     @staticmethod
-    def as_tensor(value: np.ndarray, dtype: object | None = None, device: object | None = None) -> _FakeTensor:
+    def as_tensor(
+        value: np.ndarray, dtype: object | None = None, device: object | None = None
+    ) -> _FakeTensor:
         del device
         array = np.asarray(value, dtype=dtype)
         return _FakeTensor(array)
@@ -237,6 +239,7 @@ def test_torch_ridge_rejects_invalid_gpu_device_id(
     with pytest.raises(RuntimeError, match="outside visible CUDA range"):
         estimator.fit(x_matrix, labels)
 
+
 def test_torch_ridge_uses_dual_solver_when_features_exceed_samples(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -287,6 +290,7 @@ def test_torch_ridge_uses_primal_solver_when_samples_exceed_features(
     metadata = estimator.get_backend_runtime_metadata()
     assert metadata["ridge_solver_family"] == "primal"
     assert metadata["ridge_system_dimension"] == x_matrix.shape[1]
+
 
 def test_torch_ridge_multiclass_prediction_parity_is_reasonable(
     monkeypatch: pytest.MonkeyPatch,

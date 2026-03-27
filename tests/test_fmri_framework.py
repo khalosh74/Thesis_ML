@@ -22,9 +22,9 @@ from Thesis_ML.artifacts.registry import (
     list_artifacts_for_run,
 )
 from Thesis_ML.data.affect_labels import COARSE_AFFECT_BY_EMOTION, derive_coarse_affect
+from Thesis_ML.data.index_dataset import build_dataset_index
 from Thesis_ML.data.index_validation import file_sha256
 from Thesis_ML.experiments.cache_loading import load_features_from_cache
-from Thesis_ML.data.index_dataset import build_dataset_index
 from Thesis_ML.experiments.run_experiment import _build_parser, _make_model, run_experiment
 from Thesis_ML.features.feature_qc import FEATURE_QC_SAMPLE_FIELDS
 from Thesis_ML.features.nifti_features import build_feature_cache
@@ -1210,7 +1210,9 @@ def test_spatial_compatibility_mismatch_fails_with_clear_error(
     assert expected_reason in reasons
 
 
-def test_spatial_compatibility_missing_legacy_signature_rebuilds_automatically(tmp_path: Path,) -> None:
+def test_spatial_compatibility_missing_legacy_signature_rebuilds_automatically(
+    tmp_path: Path,
+) -> None:
     data_root = tmp_path / "Data"
     labels = [
         "run-1_passive_anger_audio",
@@ -1387,7 +1389,6 @@ def test_within_subject_interpretability_rejects_unsupported_model(
 
     from sklearn.pipeline import Pipeline
     from sklearn.preprocessing import StandardScaler
-    from sklearn.dummy import DummyClassifier
 
     def _dummy_pipeline(*_args: object, **_kwargs: object) -> Pipeline:
         return Pipeline(
@@ -1399,7 +1400,7 @@ def test_within_subject_interpretability_rejects_unsupported_model(
 
     module = importlib.import_module("Thesis_ML.experiments.run_experiment")
     monkeypatch.setattr(module, "_build_pipeline", _dummy_pipeline)
-    
+
     with pytest.raises(
         ValueError,
         match="Interpretability export requires a fitted linear model with a 'coef_' attribute.",
@@ -1415,6 +1416,7 @@ def test_within_subject_interpretability_rejects_unsupported_model(
             run_id="unsupported_model_interpretability",
             reports_root=tmp_path / "reports" / "experiments",
         )
+
 
 def test_feature_cache_rejects_mixed_mask_paths_within_group(tmp_path: Path) -> None:
     data_root = tmp_path / "Data"
@@ -1450,6 +1452,7 @@ def test_feature_cache_rejects_mixed_mask_paths_within_group(tmp_path: Path) -> 
     message = str(exc.value)
     assert "subject_session_bas group must map to exactly one canonical mask path" in message
     assert "sub-001_ses-01_BAS2" in message
+
 
 def test_feature_cache_rejects_mixed_mask_paths_even_when_cache_exists(tmp_path: Path) -> None:
     data_root = tmp_path / "Data"
@@ -1488,6 +1491,7 @@ def test_feature_cache_rejects_mixed_mask_paths_even_when_cache_exists(tmp_path:
     assert "subject_session_bas group must map to exactly one canonical mask path" in message
     assert "sub-001_ses-01_BAS2" in message
 
+
 def test_feature_cache_skips_existing_when_current_signature_matches(tmp_path: Path) -> None:
     data_root = tmp_path / "Data"
     _create_glm_session(
@@ -1512,6 +1516,7 @@ def test_feature_cache_skips_existing_when_current_signature_matches(tmp_path: P
     assert pd.isna(manifest.loc[0, "cache_rebuild_reason"])
     assert pd.notna(manifest.loc[0, "cache_input_signature_sha256"])
 
+
 def test_feature_cache_rebuilds_when_beta_path_changes_in_index(tmp_path: Path) -> None:
     data_root = tmp_path / "Data"
     glm_dir = data_root / "sub-001" / "ses-01" / "BAS2"
@@ -1527,7 +1532,9 @@ def test_feature_cache_rebuilds_when_beta_path_changes_in_index(tmp_path: Path) 
     build_dataset_index(data_root=data_root, out_csv=out_csv)
 
     cache_dir = tmp_path / "cache"
-    first_manifest_path = build_feature_cache(index_csv=out_csv, data_root=data_root, cache_dir=cache_dir)
+    first_manifest_path = build_feature_cache(
+        index_csv=out_csv, data_root=data_root, cache_dir=cache_dir
+    )
     first_manifest = pd.read_csv(first_manifest_path)
     npz_path = Path(first_manifest.loc[0, "cache_path"])
 
@@ -1564,6 +1571,7 @@ def test_feature_cache_rebuilds_when_beta_path_changes_in_index(tmp_path: Path) 
     assert not np.array_equal(first_x, second_x)
     assert np.allclose(second_x[1], 11.0)
 
+
 def test_feature_cache_rebuilds_when_group_row_count_changes(tmp_path: Path) -> None:
     data_root = tmp_path / "Data"
     glm_dir = data_root / "sub-001" / "ses-01" / "BAS2"
@@ -1579,7 +1587,9 @@ def test_feature_cache_rebuilds_when_group_row_count_changes(tmp_path: Path) -> 
     build_dataset_index(data_root=data_root, out_csv=out_csv)
 
     cache_dir = tmp_path / "cache"
-    first_manifest_path = build_feature_cache(index_csv=out_csv, data_root=data_root, cache_dir=cache_dir)
+    first_manifest_path = build_feature_cache(
+        index_csv=out_csv, data_root=data_root, cache_dir=cache_dir
+    )
     first_manifest = pd.read_csv(first_manifest_path)
     npz_path = Path(first_manifest.loc[0, "cache_path"])
 
@@ -1603,6 +1613,7 @@ def test_feature_cache_rebuilds_when_group_row_count_changes(tmp_path: Path) -> 
         x_matrix = np.asarray(npz["X"], dtype=np.float32)
 
     assert x_matrix.shape[0] == 1
+
 
 def test_feature_cache_rebuilds_legacy_cache_missing_input_signature(tmp_path: Path) -> None:
     data_root = tmp_path / "Data"
@@ -1666,9 +1677,7 @@ def test_load_features_from_cache_rejects_duplicate_sample_id_within_cache_group
         group_id=np.array("group_a"),
     )
 
-    manifest = pd.DataFrame(
-        [{"group_id": "group_a", "cache_path": str(cache_path.resolve())}]
-    )
+    manifest = pd.DataFrame([{"group_id": "group_a", "cache_path": str(cache_path.resolve())}])
     manifest_path = cache_dir / "cache_manifest.csv"
     manifest.to_csv(manifest_path, index=False)
 

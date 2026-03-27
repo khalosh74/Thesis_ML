@@ -9,7 +9,6 @@ import pandas as pd
 
 from Thesis_ML.config.framework_mode import FrameworkMode
 from Thesis_ML.config.metric_policy import resolve_effective_metric_policy
-from Thesis_ML.protocols.claim_evaluator import evaluate_claim_outcomes
 from Thesis_ML.experiments.evidence_statistics import (
     aggregate_repeated_runs,
     grouped_bootstrap_percentile_interval,
@@ -22,6 +21,7 @@ from Thesis_ML.experiments.run_states import (
     is_run_success_status,
     normalize_run_status,
 )
+from Thesis_ML.protocols.claim_evaluator import evaluate_claim_outcomes
 from Thesis_ML.protocols.models import (
     CompiledProtocolManifest,
     ProtocolRunResult,

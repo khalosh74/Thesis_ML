@@ -77,9 +77,7 @@ def protocol_dataset(tmp_path: Path) -> dict[str, Path]:
     sessions = ("ses-01", "ses-02")
     for subject_index, subject in enumerate(subjects):
         for session_index, session in enumerate(sessions):
-            session_offset = float(
-                ((subject_index * len(sessions)) + session_index + 1) / 10.0
-            )
+            session_offset = float(((subject_index * len(sessions)) + session_index + 1) / 10.0)
             _create_glm_session(
                 glm_dir=data_root / subject / session / "BAS2",
                 labels=labels,
@@ -147,9 +145,7 @@ def test_confirmatory_protocol_rejects_nonbaseline_feature_recipe_id(
     tmp_path: Path,
 ) -> None:
     payload = json.loads(_canonical_protocol_path().read_text(encoding="utf-8"))
-    payload["feature_engineering_policy"]["feature_recipe_id"] = (
-        "sample_center_standard_scaler_v1"
-    )
+    payload["feature_engineering_policy"]["feature_recipe_id"] = "sample_center_standard_scaler_v1"
     protocol_path = tmp_path / "invalid_protocol_nonbaseline_feature_recipe.json"
     protocol_path.write_text(f"{json.dumps(payload, indent=2)}\n", encoding="utf-8")
 

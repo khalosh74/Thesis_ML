@@ -164,11 +164,12 @@ def test_official_locked_comparison_max_both_assigns_gpu_lane_only_to_ridge(
         if row["compute_policy"]["assigned_compute_lane"] == "gpu"
     )
     assert all(row["compute_policy"]["assigned_compute_lane"] == "cpu" for row in logreg_rows)
-    assert all(row["compute_policy"]["assigned_backend_family"] == "sklearn_cpu" for row in logreg_rows)
+    assert all(
+        row["compute_policy"]["assigned_backend_family"] == "sklearn_cpu" for row in logreg_rows
+    )
     assert all(row["compute_policy"]["assigned_compute_lane"] == "cpu" for row in linearsvc_rows)
     assert all(
-        row["compute_policy"]["assigned_backend_family"] == "sklearn_cpu"
-        for row in linearsvc_rows
+        row["compute_policy"]["assigned_backend_family"] == "sklearn_cpu" for row in linearsvc_rows
     )
 
 

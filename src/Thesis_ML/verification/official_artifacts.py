@@ -1243,8 +1243,7 @@ def verify_official_artifacts(
             metrics_payload=metrics_payload,
             expected_protocol_feature_recipe_id=expected_protocol_feature_recipe_id,
             expected_manifest_feature_recipe_id=(
-                manifest_feature_recipe_by_run_id.get(run_id)
-                or expected_manifest_feature_recipe_id
+                manifest_feature_recipe_by_run_id.get(run_id) or expected_manifest_feature_recipe_id
             ),
             issues=issues,
             report_dir=report_dir,

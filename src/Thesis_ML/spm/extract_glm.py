@@ -219,9 +219,7 @@ def extract_glm_session(
     unknown_mask = mapping["regressor_type"].astype(str) == "unknown"
     unknown_labels = mapping.loc[unknown_mask, "raw_label"].astype(str).tolist()
     unknown_beta_indexes = (
-        mapping.loc[unknown_mask, "beta_index"].astype(int).tolist()
-        if unknown_mask.any()
-        else []
+        mapping.loc[unknown_mask, "beta_index"].astype(int).tolist() if unknown_mask.any() else []
     )
 
     out_dir.mkdir(parents=True, exist_ok=True)

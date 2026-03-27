@@ -168,9 +168,7 @@ def test_gpu_only_fails_for_unsupported_model_without_fallback() -> None:
     policy = _gpu_only_policy(allow_backend_fallback=False)
     with pytest.raises(ValueError, match="gpu_only scheduling requires GPU backend support"):
         plan_compute_schedule(
-            run_requests=[
-                ComputeRunRequest(order_index=0, run_id="run_0", model_name="linearsvc")
-            ],
+            run_requests=[ComputeRunRequest(order_index=0, run_id="run_0", model_name="linearsvc")],
             base_compute_policy=policy,
             max_parallel_runs=1,
             max_parallel_gpu_runs=1,

@@ -1,4 +1,4 @@
-﻿"""Dataset indexing across multiple BAS2 GLM sessions."""
+"""Dataset indexing across multiple BAS2 GLM sessions."""
 
 from __future__ import annotations
 
@@ -61,9 +61,7 @@ def _portable_relative(path: Path, base: Path) -> str:
     try:
         return resolved_path.relative_to(resolved_base).as_posix()
     except ValueError as exc:
-        raise ValueError(
-            f"Path '{resolved_path}' is outside data_root '{resolved_base}'."
-        ) from exc
+        raise ValueError(f"Path '{resolved_path}' is outside data_root '{resolved_base}'.") from exc
 
 
 def _default_cache_root(data_root: Path) -> Path:
@@ -140,7 +138,9 @@ def _validate_mapping_structure(
     for row_idx, row in emotion_rows.iterrows():
         run_value = row.get("run")
         if pd.isna(run_value):
-            raise ValueError(f"{mapping_path} has null run in emotion-condition row index={row_idx}.")
+            raise ValueError(
+                f"{mapping_path} has null run in emotion-condition row index={row_idx}."
+            )
         try:
             run_int = int(run_value)
         except Exception as exc:
@@ -203,9 +203,7 @@ def _normalize_unknown_summary(summary: dict[str, Any], *, summary_path: Path) -
     try:
         unknown_count = int(summary.get("n_unknown_regressors", 0))
     except Exception as exc:
-        raise ValueError(
-            f"Invalid n_unknown_regressors in summary '{summary_path}'."
-        ) from exc
+        raise ValueError(f"Invalid n_unknown_regressors in summary '{summary_path}'.") from exc
     if unknown_count < 0:
         raise ValueError(f"n_unknown_regressors must be >= 0 in summary '{summary_path}'.")
 
@@ -239,8 +237,7 @@ def _normalize_unknown_summary(summary: dict[str, Any], *, summary_path: Path) -
         )
     if unknown_count != len(labels) or unknown_count != len(indexes):
         raise ValueError(
-            "Unknown-regressor fields are inconsistent in extraction summary "
-            f"'{summary_path}'."
+            f"Unknown-regressor fields are inconsistent in extraction summary '{summary_path}'."
         )
 
     return {
@@ -318,7 +315,9 @@ def build_dataset_index(
             try:
                 mapping = pd.read_csv(mapping_path)
                 summary = _load_summary(summary_path)
-                _validate_mapping_structure(mapping=mapping, mapping_path=mapping_path, glm_dir=glm_dir)
+                _validate_mapping_structure(
+                    mapping=mapping, mapping_path=mapping_path, glm_dir=glm_dir
+                )
                 _normalize_unknown_summary(summary, summary_path=summary_path)
             except Exception:
                 LOGGER.info(
@@ -386,9 +385,7 @@ def build_dataset_index(
             )
 
     if not rows:
-        raise ValueError(
-            "No valid emotion-condition rows were found while indexing GLM sessions."
-        )
+        raise ValueError("No valid emotion-condition rows were found while indexing GLM sessions.")
 
     dataset = pd.DataFrame(rows)
     try:

@@ -13,16 +13,18 @@ from Thesis_ML.features.preprocessing import (
     resolve_feature_recipe_id,
 )
 
-MODEL_NAMES = ("logreg", "linearsvc", "ridge", "xgboost")
+# Official thesis-facing model taxonomy for this milestone.
+OFFICIAL_LINEAR_MODEL_NAMES = ("ridge", "logreg", "linearsvc")
 CONTROL_MODEL_NAMES = ("dummy",)
-ALL_MODEL_NAMES = MODEL_NAMES + CONTROL_MODEL_NAMES
-EXPLORATORY_ONLY_MODEL_NAMES = ("xgboost",)
-DEFAULT_BATCH_MODEL_NAMES = tuple(
-    name for name in MODEL_NAMES if name not in EXPLORATORY_ONLY_MODEL_NAMES
-)
-OFFICIAL_MODEL_NAMES = tuple(
-    name for name in ALL_MODEL_NAMES if name not in EXPLORATORY_ONLY_MODEL_NAMES
-)
+EXPLORATORY_EXTENSION_MODEL_NAMES = ("xgboost",)
+
+OFFICIAL_MODEL_NAMES = OFFICIAL_LINEAR_MODEL_NAMES + CONTROL_MODEL_NAMES
+ALL_MODEL_NAMES = OFFICIAL_MODEL_NAMES + EXPLORATORY_EXTENSION_MODEL_NAMES
+
+# Backward-compatible aliases.
+MODEL_NAMES = OFFICIAL_LINEAR_MODEL_NAMES + EXPLORATORY_EXTENSION_MODEL_NAMES
+EXPLORATORY_ONLY_MODEL_NAMES = EXPLORATORY_EXTENSION_MODEL_NAMES
+DEFAULT_BATCH_MODEL_NAMES = OFFICIAL_LINEAR_MODEL_NAMES
 
 SUPPORTED_FEATURE_RECIPE_IDS: tuple[str, ...] = FEATURE_RECIPE_IDS
 
@@ -60,14 +62,24 @@ def model_preprocess_kind(model_name: str) -> PreprocessKind:
     preprocess_kind = _MODEL_PREPROCESS_KINDS.get(normalized_model_name)
     if preprocess_kind is None:
         allowed = ", ".join(sorted(_MODEL_PREPROCESS_KINDS))
-        raise ValueError(
-            f"Unsupported model '{model_name}'. Allowed values: {allowed}."
-        )
+        raise ValueError(f"Unsupported model '{model_name}'. Allowed values: {allowed}.")
     return preprocess_kind
 
 
 def model_supports_linear_interpretability(model_name: str) -> bool:
-    return str(model_name).strip().lower() in {"logreg", "linearsvc", "ridge"}
+    return model_is_official_linear_family(model_name)
+
+
+def model_is_official_linear_family(model_name: str) -> bool:
+    return str(model_name).strip().lower() in set(OFFICIAL_LINEAR_MODEL_NAMES)
+
+
+def model_is_control_model(model_name: str) -> bool:
+    return str(model_name).strip().lower() in set(CONTROL_MODEL_NAMES)
+
+
+def model_is_exploratory_extension(model_name: str) -> bool:
+    return str(model_name).strip().lower() in set(EXPLORATORY_EXTENSION_MODEL_NAMES)
 
 
 def model_is_officially_admitted(model_name: str) -> bool:

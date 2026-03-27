@@ -36,8 +36,9 @@ from Thesis_ML.experiments.section_models import (
     SpatialValidationInput,
     SpatialValidationOutput,
 )
-from Thesis_ML.features.nifti_features import build_feature_cache
 from Thesis_ML.experiments.selection_manifest import apply_dataset_selection_filters
+from Thesis_ML.features.nifti_features import build_feature_cache
+
 
 def dataset_selection(section_input: DatasetSelectionInput) -> DatasetSelectionOutput:
     index_df = pd.read_csv(section_input.index_csv)
@@ -82,9 +83,7 @@ def dataset_selection(section_input: DatasetSelectionInput) -> DatasetSelectionO
         index_df,
         target_column=section_input.target_column,
     )
-    blocking_target_audit_df = blocking_target_derivation_audit_rows(
-        target_derivation_audit_df
-    )
+    blocking_target_audit_df = blocking_target_derivation_audit_rows(target_derivation_audit_df)
 
     if not blocking_target_audit_df.empty:
         summary = summarize_target_derivation_audit(blocking_target_audit_df)
@@ -141,6 +140,7 @@ def dataset_selection(section_input: DatasetSelectionInput) -> DatasetSelectionO
         selection_exclusion_manifest_df=selection_result.exclusion_manifest_df,
         selection_summary=selection_result.selection_summary,
     )
+
 
 def feature_cache_build(section_input: FeatureCacheBuildInput) -> FeatureCacheBuildOutput:
     manifest_path = build_feature_cache(

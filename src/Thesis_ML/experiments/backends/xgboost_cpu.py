@@ -94,7 +94,6 @@ else:
             )
 
 
-
 def make_xgboost_cpu_estimator(
     *,
     seed: int,

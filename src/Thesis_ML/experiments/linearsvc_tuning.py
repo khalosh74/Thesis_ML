@@ -55,7 +55,9 @@ def _resolve_pipeline_components(
     model = pipeline_template.named_steps.get("model")
     if not isinstance(scaler, StandardScaler):
         raise ValueError("preprocessor_not_plain_standard_scaler")
-    if not bool(getattr(scaler, "with_mean", False)) or not bool(getattr(scaler, "with_std", False)):
+    if not bool(getattr(scaler, "with_mean", False)) or not bool(
+        getattr(scaler, "with_std", False)
+    ):
         raise ValueError("preprocessor_not_plain_standard_scaler")
     if not isinstance(model, LinearSVC):
         raise ValueError(
@@ -134,9 +136,7 @@ def compute_standard_scaler_stats_from_group_summaries(
     for group_id in train_group_ids:
         stats = group_stats.get(str(group_id))
         if stats is None:
-            raise ValueError(
-                f"Missing group sufficient statistics for group_id '{group_id}'."
-            )
+            raise ValueError(f"Missing group sufficient statistics for group_id '{group_id}'.")
         total_n += int(stats.n_samples)
         total_sum += np.asarray(stats.feature_sum, dtype=np.float64)
         total_sum_squares += np.asarray(stats.feature_sum_squares, dtype=np.float64)
@@ -255,8 +255,12 @@ def run_specialized_linearsvc_grouped_nested_tuning(
         groups=groups_array,
     )
 
-    candidate_scores = np.empty((profiled_candidate_count, profiled_inner_fold_count), dtype=np.float64)
-    candidate_fit_times = np.empty((profiled_candidate_count, profiled_inner_fold_count), dtype=np.float64)
+    candidate_scores = np.empty(
+        (profiled_candidate_count, profiled_inner_fold_count), dtype=np.float64
+    )
+    candidate_fit_times = np.empty(
+        (profiled_candidate_count, profiled_inner_fold_count), dtype=np.float64
+    )
     candidate_score_times = np.empty(
         (profiled_candidate_count, profiled_inner_fold_count), dtype=np.float64
     )

@@ -59,9 +59,7 @@ def _validate_sample_qc_fields(
     sample_id: str,
 ) -> None:
     present_fields = {
-        field_name
-        for field_name in FEATURE_QC_SAMPLE_FIELDS
-        if field_name in metadata_record
+        field_name for field_name in FEATURE_QC_SAMPLE_FIELDS if field_name in metadata_record
     }
     if present_fields and present_fields != set(FEATURE_QC_SAMPLE_FIELDS):
         missing_fields = sorted(set(FEATURE_QC_SAMPLE_FIELDS) - present_fields)
@@ -92,8 +90,7 @@ def load_features_from_cache(
     missing_manifest_columns = sorted(required_manifest_columns - set(manifest.columns))
     if missing_manifest_columns:
         raise ValueError(
-            "Cache manifest is missing required columns: "
-            + ", ".join(missing_manifest_columns)
+            "Cache manifest is missing required columns: " + ", ".join(missing_manifest_columns)
         )
 
     duplicate_group_mask = manifest["group_id"].astype(str).duplicated(keep=False)

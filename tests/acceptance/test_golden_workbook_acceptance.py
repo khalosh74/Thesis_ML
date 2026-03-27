@@ -147,7 +147,9 @@ def test_canonical_designed_study_end_to_end_acceptance(
     assert len(study_reviews) == 1
     assert study_reviews[0].execution_disposition == "allowed"
     assert study_reviews[0].expected_design_cells == 4
-    generated_cells = [cell for cell in manifest.generated_design_matrix if cell.study_id == study_id]
+    generated_cells = [
+        cell for cell in manifest.generated_design_matrix if cell.study_id == study_id
+    ]
     assert len(generated_cells) == 4
 
     run_result = run_workbook_decision_support_campaign(
@@ -225,5 +227,7 @@ def test_canonical_designed_study_end_to_end_acceptance(
     )
     assert review_rows
     latest_review_row = review_rows[-1]
-    assert review_ws.cell(latest_review_row, review_cols["execution_disposition"]).value == "allowed"
+    assert (
+        review_ws.cell(latest_review_row, review_cols["execution_disposition"]).value == "allowed"
+    )
     assert int(review_ws.cell(latest_review_row, review_cols["error_count"]).value or 0) == 0

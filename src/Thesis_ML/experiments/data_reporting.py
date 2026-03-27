@@ -5,10 +5,9 @@ import json
 from pathlib import Path
 from typing import Any
 
-import pandas as pd
 import numpy as np
+import pandas as pd
 
-from Thesis_ML.experiments.cv_split_plan import build_cv_split_plan
 from Thesis_ML.config.framework_mode import FrameworkMode
 from Thesis_ML.config.methodology import DataPolicy
 from Thesis_ML.data.affect_labels import with_coarse_affect
@@ -17,6 +16,7 @@ from Thesis_ML.data.index_validation import (
     DatasetIndexValidationError,
     canonicalize_index_paths,
 )
+from Thesis_ML.experiments.cv_split_plan import build_cv_split_plan
 from Thesis_ML.features.preprocessing import BASELINE_STANDARD_SCALER_RECIPE_ID
 
 _BASE_REQUIRED_INDEX_COLUMNS = {
@@ -291,6 +291,7 @@ def _build_cv_split_manifest(
         "sha256": _stable_json_sha256(rows),
     }
 
+
 def evaluate_official_data_policy(
     *,
     framework_mode: FrameworkMode,
@@ -326,9 +327,7 @@ def evaluate_official_data_policy(
     if context_emit_feature_qc is None and isinstance(feature_engineering_context, dict):
         context_emit_feature_qc = feature_engineering_context.get("emit_feature_qc_artifacts")
     feature_engineering_summary = {
-        "feature_recipe_id": str(
-            context_feature_recipe or BASELINE_STANDARD_SCALER_RECIPE_ID
-        ),
+        "feature_recipe_id": str(context_feature_recipe or BASELINE_STANDARD_SCALER_RECIPE_ID),
         "emit_feature_qc_artifacts": bool(
             True if context_emit_feature_qc is None else context_emit_feature_qc
         ),
@@ -389,7 +388,10 @@ def evaluate_official_data_policy(
         "n_rows": int(len(target_derivation_audit_df)),
         "by_category": {},
     }
-    if not target_derivation_audit_df.empty and "drop_category" in target_derivation_audit_df.columns:
+    if (
+        not target_derivation_audit_df.empty
+        and "drop_category" in target_derivation_audit_df.columns
+    ):
         counts = (
             target_derivation_audit_df["drop_category"]
             .astype(str)
@@ -401,11 +403,17 @@ def evaluate_official_data_policy(
             str(key): int(value) for key, value in counts.items()
         }
 
-    intended_exclusion_count = int(
-        (
-            target_derivation_audit_df["drop_category"].astype(str) == "intended_target_exclusion"
-        ).sum()
-    ) if not target_derivation_audit_df.empty and "drop_category" in target_derivation_audit_df.columns else 0
+    intended_exclusion_count = (
+        int(
+            (
+                target_derivation_audit_df["drop_category"].astype(str)
+                == "intended_target_exclusion"
+            ).sum()
+        )
+        if not target_derivation_audit_df.empty
+        and "drop_category" in target_derivation_audit_df.columns
+        else 0
+    )
 
     if intended_exclusion_count > 0:
         warnings_list.append(
@@ -505,28 +513,36 @@ def evaluate_official_data_policy(
         "coarse_affect_mapping_versions": sorted(
             {
                 str(value).strip()
-                for value in selected_index_df.get("coarse_affect_mapping_version", pd.Series(dtype=object))
+                for value in selected_index_df.get(
+                    "coarse_affect_mapping_version", pd.Series(dtype=object)
+                )
                 if str(value).strip() and str(value).strip().lower() != "nan"
             }
         ),
         "coarse_affect_mapping_hashes": sorted(
             {
                 str(value).strip()
-                for value in selected_index_df.get("coarse_affect_mapping_sha256", pd.Series(dtype=object))
+                for value in selected_index_df.get(
+                    "coarse_affect_mapping_sha256", pd.Series(dtype=object)
+                )
                 if str(value).strip() and str(value).strip().lower() != "nan"
             }
         ),
         "binary_valence_mapping_versions": sorted(
             {
                 str(value).strip()
-                for value in selected_index_df.get("binary_valence_mapping_version", pd.Series(dtype=object))
+                for value in selected_index_df.get(
+                    "binary_valence_mapping_version", pd.Series(dtype=object)
+                )
                 if str(value).strip() and str(value).strip().lower() != "nan"
             }
         ),
         "binary_valence_mapping_hashes": sorted(
             {
                 str(value).strip()
-                for value in selected_index_df.get("binary_valence_mapping_sha256", pd.Series(dtype=object))
+                for value in selected_index_df.get(
+                    "binary_valence_mapping_sha256", pd.Series(dtype=object)
+                )
                 if str(value).strip() and str(value).strip().lower() != "nan"
             }
         ),
@@ -570,7 +586,9 @@ def evaluate_official_data_policy(
                 pd.to_numeric(
                     unknown_rows.get("glm_unknown_regressor_count", pd.Series(dtype=float)),
                     errors="coerce",
-                ).fillna(0).sum()
+                )
+                .fillna(0)
+                .sum()
             ),
             "sample_ids_head": unknown_rows.get("sample_id", pd.Series(dtype=object))
             .astype(str)
@@ -823,10 +841,10 @@ def evaluate_official_data_policy(
     missing_beta_hash_count = 0
     beta_hash_column = "beta_file_sha256"
     if beta_hash_column in selected_index_for_checks.columns:
-        beta_hashes = selected_index_for_checks[beta_hash_column].astype(str).str.strip().str.lower()
-        valid_hashes = beta_hashes[
-            beta_hashes.str.fullmatch(r"[0-9a-f]{64}", na=False)
-        ].copy()
+        beta_hashes = (
+            selected_index_for_checks[beta_hash_column].astype(str).str.strip().str.lower()
+        )
+        valid_hashes = beta_hashes[beta_hashes.str.fullmatch(r"[0-9a-f]{64}", na=False)].copy()
         duplicate_beta_hash_count = int(valid_hashes.duplicated().sum())
         missing_beta_hash_count = int(len(beta_hashes) - len(valid_hashes))
     else:
@@ -975,7 +993,8 @@ def evaluate_official_data_policy(
     )
     cv_split_manifest_status = (
         "fail"
-        if cv_split_manifest.get("status") == "fail" and data_policy.leakage.fail_on_cv_group_overlap
+        if cv_split_manifest.get("status") == "fail"
+        and data_policy.leakage.fail_on_cv_group_overlap
         else "pass"
     )
     leakage_checks.append(
@@ -1325,7 +1344,7 @@ def write_official_data_artifacts(
         missingness_csv_path,
         index=False,
     )
-    
+
     leakage_payload = dict(assessment.get("leakage_audit", {}))
     leakage_audit_path.write_text(f"{json.dumps(leakage_payload, indent=2)}\n", encoding="utf-8")
     selection_exclusion_summary = dict(assessment.get("selection_exclusion_summary", {}))
@@ -1394,13 +1413,9 @@ def write_official_data_artifacts(
     selected_beta_path_sha256 = assessment.get("selected_beta_path_sha256")
     cv_split_manifest_sha256 = assessment.get("cv_split_manifest_sha256")
     if selected_beta_path_sha256:
-        dataset_fingerprint_payload["selected_beta_path_sha256"] = str(
-            selected_beta_path_sha256
-        )
+        dataset_fingerprint_payload["selected_beta_path_sha256"] = str(selected_beta_path_sha256)
     if cv_split_manifest_sha256:
-        dataset_fingerprint_payload["cv_split_manifest_sha256"] = str(
-            cv_split_manifest_sha256
-        )
+        dataset_fingerprint_payload["cv_split_manifest_sha256"] = str(cv_split_manifest_sha256)
 
     dataset_card_payload = {
         "schema_version": "official-dataset-card-v1",
@@ -1417,17 +1432,9 @@ def write_official_data_artifacts(
             "label_policy": label_policy,
             "target_mapping_version": target_mapping_version,
             "target_mapping_hash": target_mapping_hash,
-            "mapping_integrity": assessment.get("dataset_summary", {})
-            .get("mapping_integrity", {}),
+            "mapping_integrity": assessment.get("dataset_summary", {}).get("mapping_integrity", {}),
         },
-        "selection_scope": {
-            "cv_mode": cv_mode,
-            "subject": subject,
-            "train_subject": train_subject,
-            "test_subject": test_subject,
-            "filter_task": filter_task,
-            "filter_modality": filter_modality,
-        },
+        
         "coverage": {
             "full_index": dataset_summary.get("full_index", {}),
             "selected_subset": dataset_summary.get("selected_subset", {}),
@@ -1439,9 +1446,7 @@ def write_official_data_artifacts(
                 "status": cv_split_payload.get("status"),
                 "n_folds": cv_split_payload.get("n_folds"),
                 "expected_n_folds": cv_split_payload.get("expected_n_folds"),
-                "missing_expected_test_rows": cv_split_payload.get(
-                    "missing_expected_test_rows"
-                ),
+                "missing_expected_test_rows": cv_split_payload.get("missing_expected_test_rows"),
                 "unexpected_test_rows": cv_split_payload.get("unexpected_test_rows"),
                 "duplicate_test_coverage_rows": cv_split_payload.get(
                     "duplicate_test_coverage_rows"

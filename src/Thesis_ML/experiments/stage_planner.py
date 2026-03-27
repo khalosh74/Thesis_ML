@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from dataclasses import dataclass
 
@@ -15,10 +15,10 @@ from Thesis_ML.experiments.stage_registry import (
     FEATURE_CACHE_BUILD_CPU_EXECUTOR_ID,
     FEATURE_MATRIX_LOAD_CPU_EXECUTOR_ID,
     MODEL_FIT_CPU_EXECUTOR_ID,
-    MODEL_FIT_XGBOOST_CPU_EXECUTOR_ID,
-    MODEL_FIT_XGBOOST_GPU_EXECUTOR_ID,
     MODEL_FIT_TORCH_LOGREG_EXECUTOR_ID,
     MODEL_FIT_TORCH_RIDGE_EXECUTOR_ID,
+    MODEL_FIT_XGBOOST_CPU_EXECUTOR_ID,
+    MODEL_FIT_XGBOOST_GPU_EXECUTOR_ID,
     PERMUTATION_REFERENCE_EXECUTOR_ID,
     PERMUTATION_RIDGE_GPU_PREFERRED_EXECUTOR_ID,
     PREPROCESS_CPU_EXECUTOR_ID,
@@ -104,13 +104,14 @@ def _resource_admissible(
         if compute_policy.gpu_device_total_memory_mb is not None
         else None
     )
-    if stage_soft_limit is not None and gpu_memory_mb is not None and gpu_memory_mb < stage_soft_limit:
+    if (
+        stage_soft_limit is not None
+        and gpu_memory_mb is not None
+        and gpu_memory_mb < stage_soft_limit
+    ):
         return (
             False,
-            (
-                "gpu_memory_below_stage_soft_limit:"
-                f"{gpu_memory_mb}mb<{int(stage_soft_limit)}mb"
-            ),
+            (f"gpu_memory_below_stage_soft_limit:{gpu_memory_mb}mb<{int(stage_soft_limit)}mb"),
         )
     return True, None
 

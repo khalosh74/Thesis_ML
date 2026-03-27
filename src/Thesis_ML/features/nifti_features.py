@@ -207,6 +207,7 @@ def _signature_manifest_fields(signature: dict[str, Any] | None) -> dict[str, ob
         "mask_sha256": str(signature["mask_sha256"]) if "mask_sha256" in signature else pd.NA,
     }
 
+
 def _cache_input_manifest_fields(signature: dict[str, Any] | None) -> dict[str, object]:
     if not signature:
         return {
@@ -240,9 +241,7 @@ def _group_qc_manifest_fields(summary: dict[str, Any] | None) -> dict[str, objec
     return {
         "feature_qc_n_samples": int(summary.get("n_samples", 0)),
         "feature_qc_n_features": int(summary.get("n_features", 0)),
-        "feature_qc_n_samples_with_any_repair": int(
-            summary.get("n_samples_with_any_repair", 0)
-        ),
+        "feature_qc_n_samples_with_any_repair": int(summary.get("n_samples_with_any_repair", 0)),
         "feature_qc_max_repair_fraction": float(summary.get("max_repair_fraction", 0.0)),
         "feature_qc_mean_repair_fraction": float(summary.get("mean_repair_fraction", 0.0)),
         "feature_qc_n_all_zero_vectors": int(summary.get("n_all_zero_vectors", 0)),
@@ -301,6 +300,7 @@ def _read_existing_cache_metadata(
             "group_qc_summary": None,
         }
 
+
 def _validate_existing_cache_against_current(
     *,
     existing_spatial_signature: dict[str, Any] | None,
@@ -347,7 +347,9 @@ def _resolve_single_group_mask_path(
     for raw_mask_path in group_rows[mask_path_column].tolist():
         mask_text = str(raw_mask_path).strip()
         if not mask_text:
-            raise ValueError(f"Feature cache group '{group_id}' contains a blank {mask_path_column}.")
+            raise ValueError(
+                f"Feature cache group '{group_id}' contains a blank {mask_path_column}."
+            )
         resolved_mask_paths.append(str(Path(mask_text).resolve()))
 
     unique_mask_paths = sorted(set(resolved_mask_paths))
@@ -360,6 +362,7 @@ def _resolve_single_group_mask_path(
         )
 
     return Path(unique_mask_paths[0])
+
 
 def _build_cache_input_signature(
     *,
@@ -378,9 +381,7 @@ def _build_cache_input_signature(
     for _, row in group_rows.iterrows():
         sample_id = str(row["sample_id"]).strip()
         if not sample_id:
-            raise ValueError(
-                f"Feature cache group '{group_id}' contains a blank sample_id."
-            )
+            raise ValueError(f"Feature cache group '{group_id}' contains a blank sample_id.")
         if sample_id in seen_sample_ids:
             raise ValueError(
                 f"Feature cache group '{group_id}' contains duplicate sample_id '{sample_id}'."
@@ -482,7 +483,9 @@ def build_feature_cache(
             require_integrity_columns=True,
         )
     except DatasetIndexValidationError as exc:
-        raise ValueError(f"Strict dataset index validation failed for feature cache build: {exc}") from exc
+        raise ValueError(
+            f"Strict dataset index validation failed for feature cache build: {exc}"
+        ) from exc
 
     def _normalize_unknown_flag(value: Any) -> bool:
         if isinstance(value, bool):
@@ -529,13 +532,13 @@ def build_feature_cache(
         group_rows = group_rows.reset_index(drop=True)
         target_path = _cache_path_for_group(cache_dir, group_rows)
         target_path.parent.mkdir(parents=True, exist_ok=True)
-        
+
         mask_path = _resolve_single_group_mask_path(
             group_rows=group_rows,
             data_root=data_root,
             group_id=group_id,
         )
-        
+
         mask_bool, spatial_signature = _load_mask_and_signature(mask_path)
         mask_affine = np.asarray(spatial_signature["affine"], dtype=np.float64)
 

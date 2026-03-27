@@ -121,6 +121,7 @@ from Thesis_ML.workbook.template_validation import validate_template_workbook
 
 OUT_XLSX = Path(DEFAULT_WORKBOOK_TEMPLATE)
 
+
 def fill_readme_sheet(ws) -> None:
     ws.merge_cells("A1:I1")
     ws["A1"] = "Thesis Experiment Program Workbook (v2)"
@@ -529,4 +530,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

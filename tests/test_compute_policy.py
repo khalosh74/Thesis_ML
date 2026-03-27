@@ -85,7 +85,10 @@ def test_gpu_only_resolves_to_torch_backend_when_capable() -> None:
     assert resolved.requested_backend_family == "torch_gpu"
     assert resolved.effective_backend_family == "torch_gpu"
     assert resolved.gpu_device_id == 1
-    assert resolved.backend_stack_id in {"torch_2.4.1__cuda_12.1", TORCH_GPU_BACKEND_STACK_ID_FALLBACK}
+    assert resolved.backend_stack_id in {
+        "torch_2.4.1__cuda_12.1",
+        TORCH_GPU_BACKEND_STACK_ID_FALLBACK,
+    }
     assert resolved.backend_fallback_used is False
     assert resolved.backend_fallback_reason is None
     assert resolved.deterministic_compute is True

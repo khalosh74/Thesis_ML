@@ -13,17 +13,17 @@ from Thesis_ML.experiments.backends.cpu_reference import (
     resolve_cpu_reference_class_weight,
     resolve_cpu_reference_constructor,
 )
-from Thesis_ML.experiments.backends.torch_ridge import (
-    TORCH_RIDGE_BACKEND_ID,
-    TorchRidgeClassifier,
-    make_torch_ridge_estimator,
-    resolve_torch_ridge_class_weight,
-)
 from Thesis_ML.experiments.backends.torch_logreg import (
     TORCH_LOGREG_BACKEND_ID,
     TorchLogisticRegression,
     make_torch_logreg_estimator,
     resolve_torch_logreg_class_weight,
+)
+from Thesis_ML.experiments.backends.torch_ridge import (
+    TORCH_RIDGE_BACKEND_ID,
+    TorchRidgeClassifier,
+    make_torch_ridge_estimator,
+    resolve_torch_ridge_class_weight,
 )
 from Thesis_ML.experiments.backends.xgboost_cpu import (
     XGBOOST_CPU_BACKEND_ID,

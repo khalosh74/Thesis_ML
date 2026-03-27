@@ -110,10 +110,14 @@ def test_confirmatory_ready_fails_when_controls_invalid(tmp_path: Path, monkeypa
     )
     summary = verify_confirmatory_ready(output_dir=output_dir)
     assert summary["passed"] is False
-    assert any(issue["code"] == "controls_not_valid_for_confirmatory" for issue in summary["issues"])
+    assert any(
+        issue["code"] == "controls_not_valid_for_confirmatory" for issue in summary["issues"]
+    )
 
 
-def test_confirmatory_ready_fails_when_dataset_fingerprint_incomplete(tmp_path: Path, monkeypatch) -> None:
+def test_confirmatory_ready_fails_when_dataset_fingerprint_incomplete(
+    tmp_path: Path, monkeypatch
+) -> None:
     output_dir = tmp_path / "protocol_runs" / "thesis-confirmatory__1.0.0"
     _write_minimal_confirmatory_summary(output_dir, dataset_fingerprint_complete=False)
     monkeypatch.setattr(
@@ -123,8 +127,7 @@ def test_confirmatory_ready_fails_when_dataset_fingerprint_incomplete(tmp_path: 
     summary = verify_confirmatory_ready(output_dir=output_dir)
     assert summary["passed"] is False
     assert any(
-        issue["code"] == "dataset_fingerprint_missing_or_incomplete"
-        for issue in summary["issues"]
+        issue["code"] == "dataset_fingerprint_missing_or_incomplete" for issue in summary["issues"]
     )
 
 
@@ -148,7 +151,9 @@ def test_confirmatory_ready_fails_when_repro_summary_failed(tmp_path: Path, monk
     assert any(issue["code"] == "reproducibility_summary_failed" for issue in summary["issues"])
 
 
-def test_confirmatory_ready_surfaces_official_verification_failure(tmp_path: Path, monkeypatch) -> None:
+def test_confirmatory_ready_surfaces_official_verification_failure(
+    tmp_path: Path, monkeypatch
+) -> None:
     output_dir = tmp_path / "protocol_runs" / "thesis-confirmatory__1.0.0"
     _write_minimal_confirmatory_summary(output_dir)
     monkeypatch.setattr(

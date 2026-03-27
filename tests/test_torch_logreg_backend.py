@@ -261,4 +261,3 @@ def test_torch_logreg_rejects_invalid_gpu_device_id(
 
     with pytest.raises(RuntimeError, match="outside visible CUDA range"):
         estimator.fit(x_matrix, labels)
-

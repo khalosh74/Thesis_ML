@@ -24,7 +24,7 @@ FEATURE_RECIPE_IDS: tuple[str, ...] = (
 
 
 class PerSampleMeanCenter(BaseEstimator, TransformerMixin):
-    def fit(self, x: Any, y: Any = None) -> "PerSampleMeanCenter":
+    def fit(self, x: Any, y: Any = None) -> PerSampleMeanCenter:
         _ = y
         x_array = np.asarray(x)
         if x_array.ndim != 2:
@@ -43,9 +43,7 @@ def resolve_feature_recipe_id(recipe_id: str | None) -> str:
     normalized = str(recipe_id or BASELINE_STANDARD_SCALER_RECIPE_ID).strip().lower()
     if normalized not in set(FEATURE_RECIPE_IDS):
         allowed = ", ".join(sorted(FEATURE_RECIPE_IDS))
-        raise ValueError(
-            f"Unsupported feature_recipe_id '{recipe_id}'. Allowed values: {allowed}."
-        )
+        raise ValueError(f"Unsupported feature_recipe_id '{recipe_id}'. Allowed values: {allowed}.")
     return normalized
 
 
