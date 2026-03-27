@@ -60,6 +60,7 @@ python scripts/replay_official_paths.py \
 ## Deterministic replay comparator
 
 The deterministic comparator remains available directly:
+for frozen confirmatory replay / hard-gate validation (`thesis_confirmatory_v1.json`).
 
 ```bash
 python scripts/verify_official_reproducibility.py \

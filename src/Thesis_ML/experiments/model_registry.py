@@ -421,7 +421,6 @@ def _build_registry() -> dict[str, ModelSpec]:
     }
 
     # Lightweight integrity checks to catch registry construction errors early.
-    backend_ids: set[str] = set()
     for name, spec in registry.items():
         # Ensure the dict key matches the declared logical name
         if spec.logical_name != name:
@@ -441,15 +440,29 @@ def _build_registry() -> dict[str, ModelSpec]:
                 f"is not present in backend_bindings compute_backend_family={sorted(compute_families)}."
             )
 
-        # Ensure backend IDs are present and unique across the registry
+        # Ensure backend bindings are valid and unique within each model spec.
+        model_compute_families: set[str] = set()
+        model_binding_tuples: set[tuple[str, str, str]] = set()
         for b in spec.backend_bindings:
+            # Every binding must have a non-empty backend_id
             if not str(b.backend_id).strip():
                 raise ValueError(f"Model '{name}' has a backend_binding with an empty backend_id.")
-            if b.backend_id in backend_ids:
+
+            # Per-model validation: reject duplicate `compute_backend_family`.
+            if b.compute_backend_family in model_compute_families:
                 raise ValueError(
-                    f"Duplicate backend_id '{b.backend_id}' found in model_registry for model '{name}'."
+                    f"Duplicate compute_backend_family '{b.compute_backend_family}' "
+                    f"found in backend_bindings for model '{name}'."
                 )
-            backend_ids.add(b.backend_id)
+            model_compute_families.add(b.compute_backend_family)
+
+            # Per-model validation: reject duplicate full binding tuples.
+            binding_tuple = (b.compute_backend_family, b.backend_family, b.backend_id)
+            if binding_tuple in model_binding_tuples:
+                raise ValueError(
+                    f"Duplicate backend binding tuple {binding_tuple} found for model '{name}'."
+                )
+            model_binding_tuples.add(binding_tuple)
 
     return registry
 

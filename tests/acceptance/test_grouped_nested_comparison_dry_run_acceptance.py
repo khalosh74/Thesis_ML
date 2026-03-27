@@ -23,7 +23,7 @@ def test_grouped_nested_comparison_cli_dry_run_acceptance(
     cache_dir = tmp_path / "cache"
     reports_root = tmp_path / "reports" / "comparisons"
     comparison_path = (
-        _repo_root() / "configs" / "comparisons" / "model_family_grouped_nested_comparison_v1.json"
+        _repo_root() / "configs" / "comparisons" / "model_family_grouped_nested_comparison_v2.json"
     )
 
     monkeypatch.setenv("THESIS_ML_INDEX_CSV", str(index_csv))
@@ -43,7 +43,7 @@ def test_grouped_nested_comparison_cli_dry_run_acceptance(
     )
     assert exit_code == 0
 
-    comparison_output_dir = reports_root / "comparison_runs" / "model-family-grouped-nested__1.0.0"
+    comparison_output_dir = reports_root / "comparison_runs" / "model-family-grouped-nested__2.0.0"
     assert (comparison_output_dir / "comparison.json").exists()
     assert (comparison_output_dir / "compiled_comparison_manifest.json").exists()
     assert (comparison_output_dir / "comparison_summary.json").exists()

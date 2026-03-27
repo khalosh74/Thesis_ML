@@ -272,7 +272,7 @@ Locked comparison dry-run:
 
 ```bash
 thesisml-run-comparison \
-  --comparison configs/comparisons/model_family_comparison_v1.json \
+  --comparison configs/comparisons/model_family_grouped_nested_comparison_v2.json \
   --all-variants \
   --reports-root outputs/reports/comparisons \
   --dry-run
@@ -282,7 +282,7 @@ Locked comparison execution:
 
 ```bash
 thesisml-run-comparison \
-  --comparison configs/comparisons/model_family_comparison_v1.json \
+  --comparison configs/comparisons/model_family_grouped_nested_comparison_v2.json \
   --all-variants \
   --reports-root outputs/reports/comparisons
 ```
@@ -291,29 +291,31 @@ Grouped nested comparison execution:
 
 ```bash
 thesisml-run-comparison \
-  --comparison configs/comparisons/model_family_grouped_nested_comparison_v1.json \
+  --comparison configs/comparisons/model_family_grouped_nested_comparison_v2.json \
   --variant ridge \
   --reports-root outputs/reports/comparisons
 ```
 
-Confirmatory frozen protocol run:
+Canonical nested protocol run:
 
 ```bash
 thesisml-run-protocol \
-  --protocol configs/protocols/thesis_confirmatory_v1.json \
+  --protocol configs/protocols/thesis_canonical_nested_v2.json \
   --all-suites \
   --reports-root outputs/reports/confirmatory
 ```
 
-Confirmatory dry-run validation/compilation:
+Canonical nested protocol dry-run validation/compilation:
 
 ```bash
 thesisml-run-protocol \
-  --protocol configs/protocols/thesis_confirmatory_v1.json \
+  --protocol configs/protocols/thesis_canonical_nested_v2.json \
   --all-suites \
   --reports-root outputs/reports/confirmatory \
   --dry-run
 ```
+
+Operator note: `thesis_canonical_nested_v2.json` is the current canonical modeling-layer protocol, while `thesis_confirmatory_v1.json` is retained for legacy frozen confirmatory replay and hard-gate validation.
 
 Policy note:
 - exploratory mode is flexible and not confirmatory evidence.

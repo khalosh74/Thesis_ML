@@ -409,8 +409,8 @@
             "cv": "within_subject_loso_session",
             "methodology_policy_name": "grouped_nested_tuning",
             "class_weight_policy": "none",
-            "tuning_search_space_id": "linear-grouped-nested-v1",
-            "tuning_search_space_version": "1.0.0",
+            "tuning_search_space_id": "official-linear-grouped-nested-v2",
+            "tuning_search_space_version": "2.0.0",
             "tuning_inner_cv_scheme": "grouped_leave_one_group_out",
             "tuning_inner_group_field": "session"
           },

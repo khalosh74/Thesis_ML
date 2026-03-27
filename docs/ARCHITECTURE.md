@@ -119,6 +119,8 @@ Core package root: `src/Thesis_ML/`
 - Validate mode-level + run-level official artifacts via `verification/official_artifacts.py` before success return.
 
 3. Confirmatory canonical thesis protocol run (`thesisml-run-protocol`)
+- Current canonical modeling-layer protocol: `configs/protocols/thesis_canonical_nested_v2.json`.
+- Legacy frozen confirmatory replay/hard-gate fixture remains available at `configs/protocols/thesis_confirmatory_v1.json`.
 - Load and validate canonical protocol JSON (`thesis-protocol-v1`).
 - Compile official suites into explicit concrete run specs.
 - Validate official compute controls before dispatch (centralized in model admission policy):

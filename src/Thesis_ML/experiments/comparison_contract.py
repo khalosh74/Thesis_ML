@@ -42,10 +42,11 @@ def _signature_payload(signature: ComparisonContractSignature) -> dict[str, Any]
         "control_policy": signature.control_policy,
         "class_weight_policy": signature.class_weight_policy,
         "deterministic_compute_requirements": signature.deterministic_compute_requirements,
+        "backend_parity_semantics": signature.backend_parity_semantics,
     }
 
 
-def _backend_parity_semantics(
+def _admitted_backend_families_for_model(
     *,
     framework_mode: FrameworkMode,
     model_name: str,
@@ -92,6 +93,43 @@ def _backend_parity_semantics(
     return tuple(sorted(admitted_backend_families))
 
 
+def _common_backend_parity_semantics(
+    framework_mode: FrameworkMode, model_names: list[str]
+) -> tuple[str, ...]:
+    if not model_names:
+        return ()
+
+    model_families_by_name: dict[str, set[str]] = {
+        name: set(
+            _admitted_backend_families_for_model(
+                framework_mode=framework_mode, model_name=name
+            )
+        )
+        for name in model_names
+    }
+
+    if not model_families_by_name:
+        return ()
+
+    # compute intersection
+    model_iterator = iter(model_families_by_name.values())
+    intersection = next(model_iterator).copy()
+    for next_model_families in model_iterator:
+        intersection.intersection_update(next_model_families)
+
+    if not intersection:
+        admitted_sets = "; ".join(
+            f"{name}={sorted(families)}"
+            for name, families in model_families_by_name.items()
+        )
+        raise ValueError(
+            f"Fairness violation: models {sorted(model_names)} have no common admitted backend "
+            f"families under framework mode '{framework_mode.value}'. Admitted sets: {admitted_sets}"
+        )
+
+    return tuple(sorted(intersection))
+
+
 def validate_contract_signature_parity(
     *,
     signatures_by_id: dict[str, ComparisonContractSignature],
@@ -125,6 +163,11 @@ def build_locked_comparison_signatures(
 ) -> dict[str, ComparisonContractSignature]:
     variants_by_id = {variant.variant_id: variant for variant in comparison.allowed_variants}
     signatures: dict[str, ComparisonContractSignature] = {}
+
+    selected_models = [str(variants_by_id[vid].model) for vid in selected_variant_ids]
+    common_backend_parity = _common_backend_parity_semantics(
+        framework_mode=FrameworkMode.LOCKED_COMPARISON, model_names=selected_models
+    )
 
     for variant_id in selected_variant_ids:
         variant = variants_by_id[variant_id]
@@ -193,10 +236,7 @@ def build_locked_comparison_signatures(
                     )
                 ),
             ),
-            backend_parity_semantics=_backend_parity_semantics(
-                framework_mode=FrameworkMode.LOCKED_COMPARISON,
-                model_name=str(variant.model),
-            ),
+            backend_parity_semantics=common_backend_parity,
         )
 
     return signatures
@@ -240,6 +280,10 @@ def validate_confirmatory_protocol_fairness_contract(
         suite = suites_by_id[suite_id]
         suite_models = _resolve_suite_models(protocol, suite)
         signatures: dict[str, ComparisonContractSignature] = {}
+
+        common_backend_parity = _common_backend_parity_semantics(
+            framework_mode=FrameworkMode.CONFIRMATORY, model_names=suite_models
+        )
 
         for model_name in suite_models:
             spec = get_model_spec(str(model_name))
@@ -307,10 +351,7 @@ def validate_confirmatory_protocol_fairness_contract(
                         )
                     ),
                 ),
-                backend_parity_semantics=_backend_parity_semantics(
-                    framework_mode=FrameworkMode.CONFIRMATORY,
-                    model_name=str(model_name),
-                ),
+                backend_parity_semantics=common_backend_parity,
             )
 
         validate_contract_signature_parity(

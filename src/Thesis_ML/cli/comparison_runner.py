@@ -46,6 +46,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--comparison",
         default=str(DEFAULT_COMPARISON_SPEC_PATH),
+        # Canonical modeling-layer default is grouped-nested v2.
         help="Path to comparison spec JSON.",
     )
     parser.add_argument(

@@ -265,8 +265,8 @@ def _write_e07_e08_registry(path: Path) -> None:
                             "cv": "within_subject_loso_session",
                             "methodology_policy_name": "grouped_nested_tuning",
                             "class_weight_policy": "none",
-                            "tuning_search_space_id": "linear-grouped-nested-v1",
-                            "tuning_search_space_version": "1.0.0",
+                            "tuning_search_space_id": "official-linear-grouped-nested-v2",
+                            "tuning_search_space_version": "2.0.0",
                             "tuning_inner_cv_scheme": "grouped_leave_one_group_out",
                             "tuning_inner_group_field": "session",
                         },
@@ -503,8 +503,8 @@ def test_campaign_forwards_methodology_kwargs_for_e07_e08(
     for row in grouped_calls:
         assert row["class_weight_policy"] == "none"
         assert row["tuning_enabled"] is True
-        assert row["tuning_search_space_id"] == "linear-grouped-nested-v1"
-        assert row["tuning_search_space_version"] == "1.0.0"
+        assert row["tuning_search_space_id"] == "official-linear-grouped-nested-v2"
+        assert row["tuning_search_space_version"] == "2.0.0"
         assert row["tuning_inner_cv_scheme"] == "grouped_leave_one_group_out"
         assert row["tuning_inner_group_field"] == "session"
 

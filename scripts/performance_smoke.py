@@ -135,7 +135,8 @@ def main() -> int:
 
     comparison_cmd = comparison_cmd_base + [
         "--comparison",
-        "configs/comparisons/model_family_comparison_v1.json",
+        # Canonical modeling-layer comparison workflow.
+        "configs/comparisons/model_family_grouped_nested_comparison_v2.json",
         "--all-variants",
         "--reports-root",
         str(reports_root / "comparisons"),
@@ -143,7 +144,8 @@ def main() -> int:
     ]
     protocol_cmd = protocol_cmd_base + [
         "--protocol",
-        "configs/protocols/thesis_confirmatory_v1.json",
+        # Canonical modeling-layer protocol workflow (legacy frozen confirmatory stays in replay/audit paths).
+        "configs/protocols/thesis_canonical_nested_v2.json",
         "--all-suites",
         "--reports-root",
         str(reports_root / "confirmatory"),

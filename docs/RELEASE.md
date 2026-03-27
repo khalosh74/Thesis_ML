@@ -118,7 +118,7 @@ Comparison example:
 ```bash
 python scripts/verify_official_reproducibility.py \
   --mode comparison \
-  --config configs/comparisons/model_family_comparison_v1.json \
+  --config configs/comparisons/model_family_grouped_nested_comparison_v2.json \
   --index-csv <dataset_index.csv> \
   --data-root <data_root> \
   --cache-dir <cache_dir> \
