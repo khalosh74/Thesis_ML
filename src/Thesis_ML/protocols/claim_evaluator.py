@@ -15,10 +15,6 @@ from Thesis_ML.protocols.models import (
     ThesisProtocol,
 )
 
-
-_PRIMARY_CONTROL_METRIC_TOLERANCE = 1e-6
-
-
 def _load_json(path_text: str | None) -> dict[str, Any] | None:
     if not path_text:
         return None
@@ -98,55 +94,26 @@ def _resolve_supporting_control_claims(
     ]
 
 
-def _resolve_permutation_pass(
-    *,
-    permutation_payload: Any,
-    alpha: float,
-) -> bool | None:
-    if not isinstance(permutation_payload, dict):
-        return None
-
-    passes_threshold_field = permutation_payload.get("passes_threshold")
-    has_passes_threshold = isinstance(passes_threshold_field, bool)
-    p_value = _safe_float(permutation_payload.get("p_value"))
-    p_value_pass = (p_value <= alpha) if p_value is not None else None
-
-    if p_value_pass is not None and has_passes_threshold and p_value_pass != passes_threshold_field:
-        return None
-
-    if has_passes_threshold:
-        return bool(passes_threshold_field)
-    if p_value_pass is not None:
-        return bool(p_value_pass)
-    return None
-
-
-def _control_evidence_summary(
+def _baseline_evidence_summary(
     *,
     supporting_control_claim_ids: list[str],
     supporting_control_run_ids: list[str],
-    matched_primary_run_count: int,
-    matched_control_run_count: int,
-    matched_dummy_run_count: int,
-    missing_primary_runs: list[str],
-    missing_control_runs: list[str],
-    missing_dummy_runs: list[str],
-    permutation_fail_run_ids: list[str],
+    compared_primary_run_ids: list[str],
+    matched_dummy_run_ids: list[str],
     baseline_fail_run_ids: list[str],
-    metric_mismatch_run_ids: list[str],
+    missing_primary_runs: list[str],
+    missing_dummy_runs: list[str],
+    duplicate_dummy_match_keys: list[str],
 ) -> dict[str, Any]:
     return {
         "supporting_control_claim_ids": supporting_control_claim_ids,
         "supporting_control_run_ids": supporting_control_run_ids,
-        "matched_primary_run_count": int(matched_primary_run_count),
-        "matched_control_run_count": int(matched_control_run_count),
-        "matched_dummy_run_count": int(matched_dummy_run_count),
-        "missing_primary_runs": sorted(set(missing_primary_runs)),
-        "missing_control_runs": sorted(set(missing_control_runs)),
-        "missing_dummy_runs": sorted(set(missing_dummy_runs)),
-        "permutation_fail_run_ids": sorted(set(permutation_fail_run_ids)),
+        "compared_primary_run_ids": sorted(set(compared_primary_run_ids)),
+        "matched_dummy_run_ids": sorted(set(matched_dummy_run_ids)),
         "baseline_fail_run_ids": sorted(set(baseline_fail_run_ids)),
-        "metric_mismatch_run_ids": sorted(set(metric_mismatch_run_ids)),
+        "missing_primary_runs": sorted(set(missing_primary_runs)),
+        "missing_dummy_runs": sorted(set(missing_dummy_runs)),
+        "duplicate_dummy_match_keys": sorted(set(duplicate_dummy_match_keys)),
     }
 
 
@@ -257,18 +224,68 @@ def _evaluate_primary_claim(
         return {
             "verdict": "inconclusive",
             "reason": "no_completed_primary_evidence_runs",
-            "control_evidence_summary": _control_evidence_summary(
+            "control_evidence_summary": _baseline_evidence_summary(
                 supporting_control_claim_ids=[],
                 supporting_control_run_ids=[],
-                matched_primary_run_count=0,
-                matched_control_run_count=0,
-                matched_dummy_run_count=0,
-                missing_primary_runs=missing_primary_runs,
-                missing_control_runs=[],
-                missing_dummy_runs=[],
-                permutation_fail_run_ids=[],
+                compared_primary_run_ids=[],
+                matched_dummy_run_ids=[],
                 baseline_fail_run_ids=[],
-                metric_mismatch_run_ids=[],
+                missing_primary_runs=missing_primary_runs,
+                missing_dummy_runs=[],
+                duplicate_dummy_match_keys=[],
+            ),
+        }
+
+    require_dummy = bool(protocol.success_criteria.require_dummy_baseline_outperformance)
+    require_complete = bool(protocol.success_criteria.require_complete_primary_suite_evidence)
+
+    if not require_dummy:
+        permutation_passes = 0
+        for primary_row in completed_primary_rows:
+            permutation_payload = primary_row["metrics"].get("permutation_test")
+            if isinstance(permutation_payload, dict) and bool(
+                permutation_payload.get("passes_threshold", False)
+            ):
+                permutation_passes += 1
+        if permutation_passes > 0:
+            return {
+                "verdict": "supported",
+                "reason": "completed_runs_with_permutation_pass",
+                "n_completed_runs": len(completed_primary_rows),
+                "n_permutation_pass_runs": permutation_passes,
+                "observed_metric_values": [
+                    float(primary_row["primary_metric_value"])
+                    for primary_row in completed_primary_rows
+                ],
+                "control_evidence_summary": _baseline_evidence_summary(
+                    supporting_control_claim_ids=[],
+                    supporting_control_run_ids=[],
+                    compared_primary_run_ids=[row["run_id"] for row in completed_primary_rows],
+                    matched_dummy_run_ids=[],
+                    baseline_fail_run_ids=[],
+                    missing_primary_runs=missing_primary_runs,
+                    missing_dummy_runs=[],
+                    duplicate_dummy_match_keys=[],
+                ),
+            }
+        return {
+            "verdict": "not_supported",
+            "reason": "completed_runs_without_permutation_pass",
+            "n_completed_runs": len(completed_primary_rows),
+            "n_permutation_pass_runs": 0,
+            "observed_metric_values": [
+                float(primary_row["primary_metric_value"])
+                for primary_row in completed_primary_rows
+            ],
+            "control_evidence_summary": _baseline_evidence_summary(
+                supporting_control_claim_ids=[],
+                supporting_control_run_ids=[],
+                compared_primary_run_ids=[row["run_id"] for row in completed_primary_rows],
+                matched_dummy_run_ids=[],
+                baseline_fail_run_ids=[],
+                missing_primary_runs=missing_primary_runs,
+                missing_dummy_runs=[],
+                duplicate_dummy_match_keys=[],
             ),
         }
 
@@ -285,45 +302,24 @@ def _evaluate_primary_claim(
         }
     )
 
-    matched_primary_run_count = len(completed_primary_rows)
-    matched_control_run_count = 0
-    matched_dummy_run_count = 0
-    missing_control_runs: list[str] = []
-    missing_dummy_runs: list[str] = []
-    permutation_fail_run_ids: list[str] = []
-    baseline_fail_run_ids: list[str] = []
-    metric_mismatch_run_ids: list[str] = []
-
-    require_dummy = bool(protocol.success_criteria.require_dummy_baseline_outperformance)
-    require_permutation = bool(protocol.success_criteria.require_permutation_pass)
-    require_complete = bool(protocol.success_criteria.require_complete_primary_suite_evidence)
-
-    if (require_dummy or require_permutation) and (
-        not supporting_control_claim_ids or not supporting_control_run_ids
-    ):
+    if not supporting_control_claim_ids or not supporting_control_run_ids:
         return {
             "verdict": "invalid",
-            "reason": "missing_supporting_control_claim_runs",
-            "control_evidence_summary": _control_evidence_summary(
+            "reason": "missing_supporting_dummy_control_evidence",
+            "control_evidence_summary": _baseline_evidence_summary(
                 supporting_control_claim_ids=supporting_control_claim_ids,
                 supporting_control_run_ids=supporting_control_run_ids,
-                matched_primary_run_count=matched_primary_run_count,
-                matched_control_run_count=matched_control_run_count,
-                matched_dummy_run_count=matched_dummy_run_count,
+                compared_primary_run_ids=[row["run_id"] for row in completed_primary_rows],
+                matched_dummy_run_ids=[],
+                baseline_fail_run_ids=[],
                 missing_primary_runs=missing_primary_runs,
-                missing_control_runs=[row["run_id"] for row in completed_primary_rows],
-                missing_dummy_runs=(
-                    [row["run_id"] for row in completed_primary_rows] if require_dummy else []
-                ),
-                permutation_fail_run_ids=permutation_fail_run_ids,
-                baseline_fail_run_ids=baseline_fail_run_ids,
-                metric_mismatch_run_ids=metric_mismatch_run_ids,
+                missing_dummy_runs=[row["run_id"] for row in completed_primary_rows],
+                duplicate_dummy_match_keys=[],
             ),
         }
 
-    non_dummy_control_by_key: dict[tuple[str, str, str, str, int, int, str], Any] = {}
     dummy_control_by_key: dict[tuple[str, str, str, str, int, int, str], Any] = {}
-
+    duplicate_dummy_match_keys: list[str] = []
     for run_id in supporting_control_run_ids:
         run_spec = run_specs_by_id.get(run_id)
         if run_spec is None:
@@ -333,100 +329,60 @@ def _evaluate_primary_claim(
             != EvidenceRunRole.PRIMARY.value
         ):
             continue
-        if _is_dummy_run_spec(run_spec):
-            dummy_control_by_key[_run_match_key(run_spec, include_model=False)] = run_spec
-        else:
-            non_dummy_control_by_key[_run_match_key(run_spec, include_model=True)] = run_spec
+        if not _is_dummy_run_spec(run_spec):
+            continue
+        match_key = _run_match_key(run_spec, include_model=False)
+        if match_key in dummy_control_by_key:
+            duplicate_dummy_match_keys.append("|".join(str(part) for part in match_key))
+            continue
+        dummy_control_by_key[match_key] = run_spec
+
+    compared_primary_run_ids: list[str] = []
+    matched_dummy_run_ids: list[str] = []
+    missing_dummy_runs: list[str] = []
+    baseline_fail_run_ids: list[str] = []
 
     for primary_row in completed_primary_rows:
         primary_run_id = str(primary_row["run_id"])
         primary_run_spec = primary_row["run_spec"]
         primary_metric_value = float(primary_row["primary_metric_value"])
-
-        matched_control_spec = non_dummy_control_by_key.get(
-            _run_match_key(primary_run_spec, include_model=True)
+        compared_primary_run_ids.append(primary_run_id)
+        matched_dummy_spec = dummy_control_by_key.get(
+            _run_match_key(primary_run_spec, include_model=False)
         )
-        if matched_control_spec is None:
-            missing_control_runs.append(primary_run_id)
-            if require_dummy:
-                missing_dummy_runs.append(primary_run_id)
+        if matched_dummy_spec is None:
+            missing_dummy_runs.append(primary_run_id)
             continue
 
-        control_result = run_results_by_id.get(str(matched_control_spec.run_id))
-        if control_result is None or not is_run_success_status(control_result.status):
-            missing_control_runs.append(primary_run_id)
-            if require_dummy:
-                missing_dummy_runs.append(primary_run_id)
+        dummy_run_id = str(matched_dummy_spec.run_id)
+        matched_dummy_run_ids.append(dummy_run_id)
+        dummy_result = run_results_by_id.get(dummy_run_id)
+        if dummy_result is None or not is_run_success_status(dummy_result.status):
+            missing_dummy_runs.append(primary_run_id)
             continue
 
-        control_metrics_payload = _load_json(control_result.metrics_path)
-        if not isinstance(control_metrics_payload, dict):
-            missing_control_runs.append(primary_run_id)
-            if require_dummy:
-                missing_dummy_runs.append(primary_run_id)
+        dummy_metrics_payload = _load_json(dummy_result.metrics_path)
+        if not isinstance(dummy_metrics_payload, dict):
+            missing_dummy_runs.append(primary_run_id)
             continue
 
-        control_metric_value = _safe_float(control_metrics_payload.get("primary_metric_value"))
-        if control_metric_value is None:
-            missing_control_runs.append(primary_run_id)
-            if require_dummy:
-                missing_dummy_runs.append(primary_run_id)
+        dummy_metric_value = _safe_float(dummy_metrics_payload.get("primary_metric_value"))
+        if dummy_metric_value is None:
+            missing_dummy_runs.append(primary_run_id)
             continue
 
-        matched_control_run_count += 1
+        if float(primary_metric_value) <= float(dummy_metric_value):
+            baseline_fail_run_ids.append(primary_run_id)
 
-        if abs(primary_metric_value - float(control_metric_value)) > _PRIMARY_CONTROL_METRIC_TOLERANCE:
-            metric_mismatch_run_ids.append(primary_run_id)
-
-        if require_permutation:
-            permutation_pass = _resolve_permutation_pass(
-                permutation_payload=control_metrics_payload.get("permutation_test"),
-                alpha=float(protocol.success_criteria.permutation_alpha),
-            )
-            if permutation_pass is None:
-                missing_control_runs.append(primary_run_id)
-            elif not permutation_pass:
-                permutation_fail_run_ids.append(primary_run_id)
-
-        if require_dummy:
-            matched_dummy_spec = dummy_control_by_key.get(
-                _run_match_key(primary_run_spec, include_model=False)
-            )
-            if matched_dummy_spec is None:
-                missing_dummy_runs.append(primary_run_id)
-                continue
-
-            dummy_result = run_results_by_id.get(str(matched_dummy_spec.run_id))
-            if dummy_result is None or not is_run_success_status(dummy_result.status):
-                missing_dummy_runs.append(primary_run_id)
-                continue
-
-            dummy_metrics_payload = _load_json(dummy_result.metrics_path)
-            if not isinstance(dummy_metrics_payload, dict):
-                missing_dummy_runs.append(primary_run_id)
-                continue
-
-            dummy_metric_value = _safe_float(dummy_metrics_payload.get("primary_metric_value"))
-            if dummy_metric_value is None:
-                missing_dummy_runs.append(primary_run_id)
-                continue
-
-            matched_dummy_run_count += 1
-            if float(control_metric_value) <= float(dummy_metric_value):
-                baseline_fail_run_ids.append(primary_run_id)
-
-    summary = _control_evidence_summary(
+    summary = _baseline_evidence_summary(
         supporting_control_claim_ids=supporting_control_claim_ids,
         supporting_control_run_ids=supporting_control_run_ids,
-        matched_primary_run_count=matched_primary_run_count,
-        matched_control_run_count=matched_control_run_count,
-        matched_dummy_run_count=matched_dummy_run_count,
-        missing_primary_runs=missing_primary_runs,
-        missing_control_runs=missing_control_runs,
-        missing_dummy_runs=missing_dummy_runs,
-        permutation_fail_run_ids=permutation_fail_run_ids,
+        compared_primary_run_ids=compared_primary_run_ids,
+        matched_dummy_run_ids=matched_dummy_run_ids,
         baseline_fail_run_ids=baseline_fail_run_ids,
-        metric_mismatch_run_ids=metric_mismatch_run_ids,
+        missing_primary_runs=missing_primary_runs,
+        missing_dummy_runs=missing_dummy_runs,
+        duplicate_dummy_match_keys=duplicate_dummy_match_keys,
     )
 
     observed_metric_values = [
@@ -442,37 +398,19 @@ def _evaluate_primary_claim(
             "control_evidence_summary": summary,
         }
 
-    if summary["missing_control_runs"]:
+    if summary["duplicate_dummy_match_keys"]:
         return {
             "verdict": "invalid",
-            "reason": "missing_or_incomplete_control_evidence",
+            "reason": "duplicate_dummy_baseline_matches",
             "n_completed_runs": len(completed_primary_rows),
             "observed_metric_values": observed_metric_values,
             "control_evidence_summary": summary,
         }
 
-    if require_dummy and summary["missing_dummy_runs"]:
+    if summary["missing_dummy_runs"]:
         return {
             "verdict": "invalid",
             "reason": "missing_or_incomplete_dummy_evidence",
-            "n_completed_runs": len(completed_primary_rows),
-            "observed_metric_values": observed_metric_values,
-            "control_evidence_summary": summary,
-        }
-
-    if summary["metric_mismatch_run_ids"]:
-        return {
-            "verdict": "invalid",
-            "reason": "primary_control_metric_mismatch",
-            "n_completed_runs": len(completed_primary_rows),
-            "observed_metric_values": observed_metric_values,
-            "control_evidence_summary": summary,
-        }
-
-    if summary["permutation_fail_run_ids"]:
-        return {
-            "verdict": "not_supported",
-            "reason": "permutation_control_failed",
             "n_completed_runs": len(completed_primary_rows),
             "observed_metric_values": observed_metric_values,
             "control_evidence_summary": summary,
@@ -489,7 +427,7 @@ def _evaluate_primary_claim(
 
     return {
         "verdict": "supported",
-        "reason": "all_required_primary_and_control_checks_passed",
+        "reason": "strictly_outperforms_dummy_baseline",
         "n_completed_runs": len(completed_primary_rows),
         "observed_metric_values": observed_metric_values,
         "control_evidence_summary": summary,

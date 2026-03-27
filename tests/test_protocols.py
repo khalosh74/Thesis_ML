@@ -417,22 +417,7 @@ def test_protocol_validation_requires_resolvable_supporting_control_evidence_cla
 
     with pytest.raises(
         ValueError,
-        match="supporting CONTROL_EVIDENCE claim matches the primary estimand_scope",
-    ):
-        load_protocol(protocol_path)
-
-
-def test_protocol_validation_rejects_unlinked_control_policy_suite_references(
-    tmp_path: Path,
-) -> None:
-    payload = json.loads(_canonical_nested_v2_protocol_path().read_text(encoding="utf-8"))
-    payload["control_policy"]["permutation"]["suites"] = ["secondary_cross_person_transfer"]
-    protocol_path = tmp_path / "invalid_unlinked_control_policy_suite.json"
-    protocol_path.write_text(f"{json.dumps(payload, indent=2)}\n", encoding="utf-8")
-
-    with pytest.raises(
-        ValueError,
-        match="control_policy.permutation.suites must be represented by supporting CONTROL_EVIDENCE claims",
+        match="require_dummy_baseline_outperformance=true requires a supporting CONTROL_EVIDENCE claim",
     ):
         load_protocol(protocol_path)
 
