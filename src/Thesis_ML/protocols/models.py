@@ -35,6 +35,11 @@ from Thesis_ML.experiments.model_factory import (
     OFFICIAL_MODEL_NAMES,
     model_is_officially_admitted,
 )
+from Thesis_ML.features.preprocessing import (
+    BASELINE_STANDARD_SCALER_RECIPE_ID,
+    FEATURE_RECIPE_IDS,
+    resolve_feature_recipe_id,
+)
 from Thesis_ML.experiments.run_states import (
     RUN_STATUS_COMPLETED_LEGACY,
     RUN_STATUS_FAILED,
@@ -83,6 +88,8 @@ REQUIRED_RUN_ARTIFACTS_BASELINE = (
     "tuning_summary.json",
     "best_params_per_fold.csv",
     "spatial_compatibility_report.json",
+    "feature_qc_summary.json",
+    "feature_qc_selected_samples.csv",
     "interpretability_summary.json",
     "calibration_summary.json",
     "calibration_table.csv",
@@ -342,6 +349,27 @@ class InterpretabilityPolicy(_ProtocolModel):
         return self
 
 
+class FeatureEngineeringPolicy(_ProtocolModel):
+    feature_recipe_id: str = BASELINE_STANDARD_SCALER_RECIPE_ID
+    emit_feature_qc_artifacts: bool = True
+
+    @model_validator(mode="after")
+    def _validate_feature_engineering_policy(self) -> "FeatureEngineeringPolicy":
+        self.feature_recipe_id = resolve_feature_recipe_id(self.feature_recipe_id)
+        if self.feature_recipe_id not in set(FEATURE_RECIPE_IDS):
+            allowed = ", ".join(sorted(FEATURE_RECIPE_IDS))
+            raise ValueError(
+                "feature_engineering_policy.feature_recipe_id is unsupported. "
+                f"Allowed values: {allowed}."
+            )
+        if not bool(self.emit_feature_qc_artifacts):
+            raise ValueError(
+                "feature_engineering_policy.emit_feature_qc_artifacts must be true "
+                "for official protocol runs."
+            )
+        return self
+
+
 class SensitivityPolicy(_ProtocolModel):
     role: SensitivityRole = SensitivityRole.EXPLORATORY_ONLY
     suites: list[str] = Field(default_factory=list)
@@ -361,6 +389,7 @@ class ArtifactContract(_ProtocolModel):
             "methodology_policy_name",
             "class_weight_policy",
             "tuning_enabled",
+            "feature_recipe_id",
             "model_cost_tier",
             "projected_runtime_seconds",
             "evidence_run_role",
@@ -404,6 +433,8 @@ class ArtifactContract(_ProtocolModel):
                 "leakage_audit.json",
                 "cv_split_manifest.json",
                 "cv_split_manifest.csv",
+                "feature_qc_summary.json",
+                "feature_qc_selected_samples.csv",
             )
             if name not in self.required_run_artifacts
         ]
@@ -420,6 +451,7 @@ class ArtifactContract(_ProtocolModel):
             "methodology_policy_name",
             "class_weight_policy",
             "tuning_enabled",
+            "feature_recipe_id",
             "model_cost_tier",
             "projected_runtime_seconds",
             "evidence_run_role",
@@ -632,6 +664,9 @@ class ThesisProtocol(_ProtocolModel):
     evidence_policy: EvidencePolicy
     control_policy: ControlPolicy
     interpretability_policy: InterpretabilityPolicy
+    feature_engineering_policy: FeatureEngineeringPolicy = Field(
+        default_factory=FeatureEngineeringPolicy
+    )
     sensitivity_policy: SensitivityPolicy
     artifact_contract: ArtifactContract
     official_run_suites: list[SuiteSpec] = Field(min_length=1)
@@ -659,6 +694,19 @@ class ThesisProtocol(_ProtocolModel):
         if self.model_policy.class_weight_policy != self.methodology_policy.class_weight_policy:
             raise ValueError(
                 "model_policy.class_weight_policy must match methodology_policy.class_weight_policy."
+            )
+        if (
+            str(self.feature_engineering_policy.feature_recipe_id)
+            != BASELINE_STANDARD_SCALER_RECIPE_ID
+        ):
+            raise ValueError(
+                "Confirmatory protocol runs require "
+                "feature_engineering_policy.feature_recipe_id='baseline_standard_scaler_v1'."
+            )
+        if not bool(self.feature_engineering_policy.emit_feature_qc_artifacts):
+            raise ValueError(
+                "Confirmatory protocol runs require "
+                "feature_engineering_policy.emit_feature_qc_artifacts=true."
             )
         if self.methodology_policy.policy_name == MethodologyPolicyName.FIXED_BASELINES_ONLY:
             if self.model_policy.selection_strategy != ModelSelectionStrategy.FIXED_BASELINES:
@@ -985,6 +1033,8 @@ class CompiledRunSpec(_ProtocolModel):
     interpretability_enabled: bool = False
     methodology_policy_name: MethodologyPolicyName = MethodologyPolicyName.FIXED_BASELINES_ONLY
     class_weight_policy: ClassWeightPolicy = ClassWeightPolicy.NONE
+    feature_recipe_id: str = BASELINE_STANDARD_SCALER_RECIPE_ID
+    emit_feature_qc_artifacts: bool = True
     tuning_enabled: bool = False
     tuning_search_space_id: str | None = None
     tuning_search_space_version: str | None = None
@@ -1071,6 +1121,18 @@ class CompiledRunSpec(_ProtocolModel):
                     f"CompiledRunSpec '{self.run_id}' requires controls.permutation_metric "
                     "to match primary_metric for confirmatory runs."
                 )
+        resolved_recipe_id = resolve_feature_recipe_id(self.feature_recipe_id)
+        if resolved_recipe_id != BASELINE_STANDARD_SCALER_RECIPE_ID:
+            raise ValueError(
+                f"CompiledRunSpec '{self.run_id}' requires feature_recipe_id="
+                f"'{BASELINE_STANDARD_SCALER_RECIPE_ID}' for confirmatory runs."
+            )
+        self.feature_recipe_id = resolved_recipe_id
+        if not bool(self.emit_feature_qc_artifacts):
+            raise ValueError(
+                f"CompiledRunSpec '{self.run_id}' requires emit_feature_qc_artifacts=true "
+                "for confirmatory runs."
+            )
         if self.evidence_run_role == EvidenceRunRole.UNTUNED_BASELINE:
             if self.methodology_policy_name != MethodologyPolicyName.GROUPED_NESTED_TUNING:
                 raise ValueError(
@@ -1136,6 +1198,7 @@ class CompiledProtocolManifest(_ProtocolModel):
     methodology_policy: MethodologyPolicy
     metric_policy: MetricPolicy
     subgroup_reporting_policy: SubgroupReportingPolicy
+    feature_engineering_policy: FeatureEngineeringPolicy
     data_policy: DataPolicy
     evidence_policy: EvidencePolicy
     suite_ids: list[str] = Field(min_length=1)
@@ -1154,6 +1217,7 @@ class CompiledProtocolManifest(_ProtocolModel):
             "methodology_policy_name",
             "class_weight_policy",
             "tuning_enabled",
+            "feature_recipe_id",
             "model_cost_tier",
             "projected_runtime_seconds",
             "evidence_run_role",
@@ -1191,6 +1255,7 @@ class CompiledProtocolManifest(_ProtocolModel):
         for key in (
             "framework_mode",
             "canonical_run",
+            "feature_recipe_id",
             "model_cost_tier",
             "projected_runtime_seconds",
             "data_policy_effective",

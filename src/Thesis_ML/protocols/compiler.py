@@ -228,6 +228,10 @@ def compile_protocol(
                 interpretability_enabled=_interpretability_enabled(protocol, suite, model_name),
                 methodology_policy_name=protocol.methodology_policy.policy_name,
                 class_weight_policy=protocol.methodology_policy.class_weight_policy,
+                feature_recipe_id=protocol.feature_engineering_policy.feature_recipe_id,
+                emit_feature_qc_artifacts=bool(
+                    protocol.feature_engineering_policy.emit_feature_qc_artifacts
+                ),
                 tuning_enabled=bool(protocol.methodology_policy.tuning_enabled),
                 tuning_search_space_id=protocol.methodology_policy.tuning_search_space_id,
                 tuning_search_space_version=protocol.methodology_policy.tuning_search_space_version,
@@ -369,6 +373,7 @@ def compile_protocol(
         methodology_policy=protocol.methodology_policy,
         metric_policy=protocol.metric_policy,
         subgroup_reporting_policy=protocol.subgroup_reporting_policy,
+        feature_engineering_policy=protocol.feature_engineering_policy,
         data_policy=protocol.data_policy,
         evidence_policy=protocol.evidence_policy,
         suite_ids=selected_suite_ids,

@@ -43,6 +43,7 @@ def _create_glm_session(
     labels: list[str],
     *,
     class_signal: bool,
+    session_offset: float = 0.0,
     shape: tuple[int, int, int] = (3, 3, 3),
 ) -> None:
     glm_dir.mkdir(parents=True, exist_ok=True)
@@ -52,7 +53,11 @@ def _create_glm_session(
     pd.Series(labels).to_csv(glm_dir / "regressor_labels.csv", index=False, header=False)
 
     for idx, label in enumerate(labels, start=1):
-        beta = np.full(shape, fill_value=float(idx), dtype=np.float32)
+        beta = np.full(
+            shape,
+            fill_value=float(idx) + float(session_offset),
+            dtype=np.float32,
+        )
         if class_signal:
             if "_anger_" in label:
                 beta[1:, 1:, 1:] += 5.0
@@ -68,12 +73,18 @@ def protocol_dataset(tmp_path: Path) -> dict[str, Path]:
         "run-1_passive_anger_audio",
         "run-1_passive_happiness_audio",
     ]
-    for subject in ("sub-001", "sub-002"):
-        for session in ("ses-01", "ses-02"):
+    subjects = ("sub-001", "sub-002")
+    sessions = ("ses-01", "ses-02")
+    for subject_index, subject in enumerate(subjects):
+        for session_index, session in enumerate(sessions):
+            session_offset = float(
+                ((subject_index * len(sessions)) + session_index + 1) / 10.0
+            )
             _create_glm_session(
                 glm_dir=data_root / subject / session / "BAS2",
                 labels=labels,
                 class_signal=True,
+                session_offset=session_offset,
             )
 
     index_csv = tmp_path / "dataset_index.csv"
@@ -129,6 +140,20 @@ def test_protocol_validation_rejects_exploratory_only_model_in_suite_override(
     protocol_path.write_text(f"{json.dumps(payload, indent=2)}\n", encoding="utf-8")
 
     with pytest.raises(ValueError, match="exploratory-only"):
+        load_protocol(protocol_path)
+
+
+def test_confirmatory_protocol_rejects_nonbaseline_feature_recipe_id(
+    tmp_path: Path,
+) -> None:
+    payload = json.loads(_canonical_protocol_path().read_text(encoding="utf-8"))
+    payload["feature_engineering_policy"]["feature_recipe_id"] = (
+        "sample_center_standard_scaler_v1"
+    )
+    protocol_path = tmp_path / "invalid_protocol_nonbaseline_feature_recipe.json"
+    protocol_path.write_text(f"{json.dumps(payload, indent=2)}\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="feature_engineering_policy.feature_recipe_id"):
         load_protocol(protocol_path)
 
 

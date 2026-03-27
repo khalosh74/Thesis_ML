@@ -456,6 +456,9 @@ def _suite_summary(
             "higher_is_better": bool(metric_policy_effective.higher_is_better),
         },
         "subgroup_reporting_enabled": bool(compiled_manifest.subgroup_reporting_policy.enabled),
+        "feature_engineering_policy": compiled_manifest.feature_engineering_policy.model_dump(
+            mode="json"
+        ),
         "data_policy_effective": compiled_manifest.data_policy.model_dump(mode="json"),
         "external_validation_status": {
             "enabled": bool(compiled_manifest.data_policy.external_validation.enabled),
@@ -616,6 +619,7 @@ def _report_index_rows(
                 "tuning_metric": metric_policy_effective["tuning_metric"],
                 "methodology_policy_name": spec.methodology_policy_name.value,
                 "class_weight_policy": spec.class_weight_policy.value,
+                "feature_recipe_id": str(spec.feature_recipe_id),
                 "tuning_enabled": bool(spec.tuning_enabled),
                 "permutation_enabled": bool(spec.controls.permutation_enabled),
                 "n_permutations": int(spec.controls.n_permutations),

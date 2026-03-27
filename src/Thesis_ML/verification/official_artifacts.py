@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from Thesis_ML.experiments.run_states import is_run_success_status
+from Thesis_ML.features.feature_qc import FEATURE_QC_SAMPLE_FIELDS
 
 FrameworkModeLiteral = Literal["confirmatory", "locked_comparison"]
 _REQUIRED_PROTOCOL_ARTIFACTS = (
@@ -45,6 +46,8 @@ _REQUIRED_DATA_RUN_ARTIFACTS = (
     "leakage_audit.json",
     "cv_split_manifest.json",
     "cv_split_manifest.csv",
+    "feature_qc_summary.json",
+    "feature_qc_selected_samples.csv",
     "external_dataset_card.json",
     "external_dataset_summary.json",
     "external_validation_compatibility.json",
@@ -470,6 +473,108 @@ def _verify_data_layer_artifacts(
                     },
                 )
 
+    feature_qc_summary = _load_json(
+        report_dir / "feature_qc_summary.json",
+        issues,
+        code_prefix="feature_qc_summary",
+    )
+    feature_qc_csv_path = report_dir / "feature_qc_selected_samples.csv"
+    feature_qc_csv_row_count = 0
+    feature_qc_csv_columns: list[str] = []
+    if feature_qc_csv_path.exists():
+        with feature_qc_csv_path.open("r", encoding="utf-8", newline="") as handle:
+            reader = csv.DictReader(handle)
+            feature_qc_csv_columns = list(reader.fieldnames or [])
+            for _ in reader:
+                feature_qc_csv_row_count += 1
+    required_qc_csv_columns = {"sample_id", *FEATURE_QC_SAMPLE_FIELDS}
+    if feature_qc_csv_path.exists() and not required_qc_csv_columns.issubset(
+        set(feature_qc_csv_columns)
+    ):
+        _add_issue(
+            issues,
+            code="feature_qc_selected_samples_columns_missing",
+            message="feature_qc_selected_samples.csv is missing required columns.",
+            path=feature_qc_csv_path,
+            details={
+                "missing_columns": sorted(required_qc_csv_columns - set(feature_qc_csv_columns))
+            },
+        )
+
+    if isinstance(feature_qc_summary, dict):
+        for key in (
+            "feature_recipe_id",
+            "n_selected_samples",
+            "n_samples_with_any_repair",
+            "max_repair_fraction",
+            "mean_repair_fraction",
+            "n_all_zero_vectors",
+            "n_constant_vectors",
+            "mean_vector_std_after_repair",
+            "min_vector_std_after_repair",
+        ):
+            if key not in feature_qc_summary:
+                _add_issue(
+                    issues,
+                    code="feature_qc_summary_field_missing",
+                    message=f"feature_qc_summary.json is missing required field '{key}'.",
+                    path=report_dir / "feature_qc_summary.json",
+                )
+        recorded_feature_recipe_id = feature_qc_summary.get("feature_recipe_id")
+        config_feature_recipe_id = config_payload.get("feature_recipe_id")
+        metrics_feature_recipe_id = metrics_payload.get("feature_recipe_id")
+        if (
+            isinstance(recorded_feature_recipe_id, str)
+            and isinstance(config_feature_recipe_id, str)
+            and recorded_feature_recipe_id.strip() != config_feature_recipe_id.strip()
+        ):
+            _add_issue(
+                issues,
+                code="feature_recipe_id_mismatch_qc_summary_config",
+                message="feature_qc_summary.feature_recipe_id does not match config.feature_recipe_id.",
+                path=report_dir / "feature_qc_summary.json",
+                details={
+                    "feature_qc_summary": recorded_feature_recipe_id,
+                    "config": config_feature_recipe_id,
+                },
+            )
+        if (
+            isinstance(recorded_feature_recipe_id, str)
+            and isinstance(metrics_feature_recipe_id, str)
+            and recorded_feature_recipe_id.strip() != metrics_feature_recipe_id.strip()
+        ):
+            _add_issue(
+                issues,
+                code="feature_recipe_id_mismatch_qc_summary_metrics",
+                message="feature_qc_summary.feature_recipe_id does not match metrics.feature_recipe_id.",
+                path=report_dir / "feature_qc_summary.json",
+                details={
+                    "feature_qc_summary": recorded_feature_recipe_id,
+                    "metrics": metrics_feature_recipe_id,
+                },
+            )
+        expected_selected_samples = feature_qc_summary.get("n_selected_samples")
+        if isinstance(expected_selected_samples, int):
+            if expected_selected_samples > 0 and feature_qc_csv_row_count == 0:
+                _add_issue(
+                    issues,
+                    code="feature_qc_selected_samples_empty_unexpected",
+                    message="feature_qc_selected_samples.csv is empty despite non-empty selected samples.",
+                    path=feature_qc_csv_path,
+                    details={"n_selected_samples": int(expected_selected_samples)},
+                )
+            if feature_qc_csv_row_count != int(expected_selected_samples):
+                _add_issue(
+                    issues,
+                    code="feature_qc_selected_samples_row_count_mismatch",
+                    message="feature_qc_selected_samples.csv row count does not match feature_qc_summary.n_selected_samples.",
+                    path=feature_qc_csv_path,
+                    details={
+                        "summary_n_selected_samples": int(expected_selected_samples),
+                        "csv_rows": int(feature_qc_csv_row_count),
+                    },
+                )
+
 
 def _verify_official_max_both_metadata(
     *,
@@ -589,6 +694,82 @@ def _verify_official_max_both_metadata(
             code="official_max_both_cpu_backend_invalid",
             message="Official max_both CPU lane requires assigned_backend_family='sklearn_cpu'.",
             path=report_dir,
+        )
+
+
+def _verify_feature_recipe_consistency(
+    *,
+    run_id: str,
+    config_payload: dict[str, Any],
+    metrics_payload: dict[str, Any],
+    expected_protocol_feature_recipe_id: str | None,
+    expected_manifest_feature_recipe_id: str | None,
+    issues: list[dict[str, Any]],
+    report_dir: Path,
+) -> None:
+    config_feature_recipe_id = config_payload.get("feature_recipe_id")
+    metrics_feature_recipe_id = metrics_payload.get("feature_recipe_id")
+    if not isinstance(config_feature_recipe_id, str) or not config_feature_recipe_id.strip():
+        _add_issue(
+            issues,
+            code="feature_recipe_id_missing_config",
+            message="Run config.json must include non-empty feature_recipe_id.",
+            path=report_dir / "config.json",
+            details={"run_id": run_id},
+        )
+        return
+    if not isinstance(metrics_feature_recipe_id, str) or not metrics_feature_recipe_id.strip():
+        _add_issue(
+            issues,
+            code="feature_recipe_id_missing_metrics",
+            message="Run metrics.json must include non-empty feature_recipe_id.",
+            path=report_dir / "metrics.json",
+            details={"run_id": run_id},
+        )
+        return
+    if config_feature_recipe_id.strip() != metrics_feature_recipe_id.strip():
+        _add_issue(
+            issues,
+            code="feature_recipe_id_drift",
+            message="feature_recipe_id differs between config.json and metrics.json.",
+            path=report_dir,
+            details={
+                "run_id": run_id,
+                "config_feature_recipe_id": config_feature_recipe_id,
+                "metrics_feature_recipe_id": metrics_feature_recipe_id,
+            },
+        )
+    if (
+        isinstance(expected_protocol_feature_recipe_id, str)
+        and expected_protocol_feature_recipe_id.strip()
+        and config_feature_recipe_id.strip() != expected_protocol_feature_recipe_id.strip()
+    ):
+        _add_issue(
+            issues,
+            code="feature_recipe_id_protocol_mismatch",
+            message="Run feature_recipe_id does not match protocol feature_engineering_policy.",
+            path=report_dir,
+            details={
+                "run_id": run_id,
+                "expected_protocol_feature_recipe_id": expected_protocol_feature_recipe_id,
+                "config_feature_recipe_id": config_feature_recipe_id,
+            },
+        )
+    if (
+        isinstance(expected_manifest_feature_recipe_id, str)
+        and expected_manifest_feature_recipe_id.strip()
+        and config_feature_recipe_id.strip() != expected_manifest_feature_recipe_id.strip()
+    ):
+        _add_issue(
+            issues,
+            code="feature_recipe_id_manifest_mismatch",
+            message="Run feature_recipe_id does not match compiled run specification.",
+            path=report_dir,
+            details={
+                "run_id": run_id,
+                "expected_manifest_feature_recipe_id": expected_manifest_feature_recipe_id,
+                "config_feature_recipe_id": config_feature_recipe_id,
+            },
         )
 
 
@@ -920,6 +1101,9 @@ def verify_official_artifacts(
 
     required_run_artifacts: list[str] = ["config.json", "metrics.json"]
     required_run_metadata_fields: list[str] = ["framework_mode", "canonical_run"]
+    expected_protocol_feature_recipe_id: str | None = None
+    expected_manifest_feature_recipe_id: str | None = None
+    manifest_feature_recipe_by_run_id: dict[str, str] = {}
 
     if isinstance(compiled_manifest, dict):
         raw_artifacts = compiled_manifest.get("required_run_artifacts")
@@ -928,6 +1112,25 @@ def verify_official_artifacts(
         raw_metadata = compiled_manifest.get("required_run_metadata_fields")
         if isinstance(raw_metadata, list) and raw_metadata:
             required_run_metadata_fields = [str(value) for value in raw_metadata]
+        manifest_feature_engineering = compiled_manifest.get("feature_engineering_policy")
+        if isinstance(manifest_feature_engineering, dict):
+            candidate_recipe_id = manifest_feature_engineering.get("feature_recipe_id")
+            if isinstance(candidate_recipe_id, str) and candidate_recipe_id.strip():
+                expected_manifest_feature_recipe_id = candidate_recipe_id.strip()
+        raw_runs = compiled_manifest.get("runs")
+        if isinstance(raw_runs, list):
+            for run_payload in raw_runs:
+                if not isinstance(run_payload, dict):
+                    continue
+                run_id = run_payload.get("run_id")
+                recipe_id = run_payload.get("feature_recipe_id")
+                if (
+                    isinstance(run_id, str)
+                    and run_id.strip()
+                    and isinstance(recipe_id, str)
+                    and recipe_id.strip()
+                ):
+                    manifest_feature_recipe_by_run_id[run_id.strip()] = recipe_id.strip()
 
     if isinstance(source_contract, dict):
         artifact_contract = source_contract.get("artifact_contract")
@@ -935,6 +1138,11 @@ def verify_official_artifacts(
             raw_metadata = artifact_contract.get("required_run_metadata_fields")
             if isinstance(raw_metadata, list) and raw_metadata:
                 required_run_metadata_fields = [str(value) for value in raw_metadata]
+        feature_engineering_policy = source_contract.get("feature_engineering_policy")
+        if isinstance(feature_engineering_policy, dict):
+            candidate_recipe_id = feature_engineering_policy.get("feature_recipe_id")
+            if isinstance(candidate_recipe_id, str) and candidate_recipe_id.strip():
+                expected_protocol_feature_recipe_id = candidate_recipe_id.strip()
 
     if framework_mode == "confirmatory":
         _verify_confirmatory_reporting_contract(
@@ -1027,6 +1235,20 @@ def verify_official_artifacts(
         metrics_payload = _load_json(report_dir / "metrics.json", issues, code_prefix="run_metrics")
         if config_payload is None or metrics_payload is None:
             continue
+
+        run_id = str(row.get("run_id", "")).strip()
+        _verify_feature_recipe_consistency(
+            run_id=run_id,
+            config_payload=config_payload,
+            metrics_payload=metrics_payload,
+            expected_protocol_feature_recipe_id=expected_protocol_feature_recipe_id,
+            expected_manifest_feature_recipe_id=(
+                manifest_feature_recipe_by_run_id.get(run_id)
+                or expected_manifest_feature_recipe_id
+            ),
+            issues=issues,
+            report_dir=report_dir,
+        )
 
         for key in required_run_metadata_fields:
             if key not in config_payload or key not in metrics_payload:

@@ -28,6 +28,7 @@ CONFIRMATORY_PROTOCOL_CONTEXT_REQUIRED_KEYS: tuple[str, ...] = (
     "methodology_policy_name",
     "class_weight_policy",
     "tuning_enabled",
+    "feature_recipe_id",
     "subgroup_reporting_enabled",
     "subgroup_dimensions",
     "subgroup_min_samples_per_group",

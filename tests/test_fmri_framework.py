@@ -26,6 +26,7 @@ from Thesis_ML.data.index_validation import file_sha256
 from Thesis_ML.experiments.cache_loading import load_features_from_cache
 from Thesis_ML.data.index_dataset import build_dataset_index
 from Thesis_ML.experiments.run_experiment import _build_parser, _make_model, run_experiment
+from Thesis_ML.features.feature_qc import FEATURE_QC_SAMPLE_FIELDS
 from Thesis_ML.features.nifti_features import build_feature_cache
 from Thesis_ML.spm.extract_glm import extract_glm_session, parse_regressor_label
 
@@ -243,13 +244,18 @@ def test_feature_cache(tmp_path: Path) -> None:
         y = npz["y"]
         metadata = json.loads(str(npz["metadata_json"].item()))
         spatial_signature = json.loads(str(npz["spatial_signature_json"].item()))
+        group_qc_summary = json.loads(str(npz["group_qc_summary_json"].item()))
 
     assert x_matrix.dtype == np.float32
     assert x_matrix.shape[0] == len(y) == len(metadata)
     assert x_matrix.shape[1] == 8
     assert {"emotion", "coarse_affect"} <= set(metadata[0])
+    assert set(FEATURE_QC_SAMPLE_FIELDS) <= set(metadata[0])
     for row in metadata:
         assert row["coarse_affect"] == derive_coarse_affect(row["emotion"])
+    assert group_qc_summary["group_id"] == "sub-001_ses-01_BAS2"
+    assert group_qc_summary["n_samples"] == 2
+    assert group_qc_summary["n_features"] == 8
     assert spatial_signature["image_shape"] == [3, 3, 3]
     assert spatial_signature["mask_voxel_count"] == 8
     assert spatial_signature["feature_count"] == 8
@@ -263,7 +269,19 @@ def test_feature_cache(tmp_path: Path) -> None:
         "mask_voxel_count",
         "feature_count",
         "mask_sha256",
+        "feature_qc_n_samples",
+        "feature_qc_n_features",
+        "feature_qc_n_samples_with_any_repair",
+        "feature_qc_max_repair_fraction",
     } <= set(manifest.columns)
+
+    loaded_x, loaded_metadata_df, _ = load_features_from_cache(
+        index_df=pd.read_csv(out_csv),
+        cache_manifest_path=manifest_path,
+    )
+    assert loaded_x.shape == x_matrix.shape
+    assert loaded_metadata_df.shape[0] == 2
+    assert set(FEATURE_QC_SAMPLE_FIELDS) <= set(loaded_metadata_df.columns)
 
 
 def test_feature_cache_passes_with_matching_non_identity_affine(tmp_path: Path) -> None:
@@ -402,13 +420,22 @@ def test_experiment_runner_smoke(tmp_path: Path) -> None:
     assert (report_dir / "fold_metrics.csv").exists()
     assert (report_dir / "predictions.csv").exists()
     assert (report_dir / "spatial_compatibility_report.json").exists()
+    assert (report_dir / "feature_qc_summary.json").exists()
+    assert (report_dir / "feature_qc_selected_samples.csv").exists()
 
     metrics = json.loads((report_dir / "metrics.json").read_text(encoding="utf-8"))
+    config = json.loads((report_dir / "config.json").read_text(encoding="utf-8"))
+    feature_qc_summary = json.loads(
+        (report_dir / "feature_qc_summary.json").read_text(encoding="utf-8")
+    )
     assert {"accuracy", "balanced_accuracy", "macro_f1", "confusion_matrix"} <= set(metrics)
     assert metrics["n_folds"] >= 2
     assert "permutation_test" in metrics
     assert metrics["spatial_compatibility"]["passed"] is True
     assert metrics["spatial_compatibility"]["n_groups_checked"] >= 2
+    assert config["feature_recipe_id"] == "baseline_standard_scaler_v1"
+    assert metrics["feature_recipe_id"] == "baseline_standard_scaler_v1"
+    assert feature_qc_summary["feature_recipe_id"] == "baseline_standard_scaler_v1"
 
     predictions = pd.read_csv(report_dir / "predictions.csv")
     assert len(predictions) > 0

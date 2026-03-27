@@ -302,6 +302,12 @@ def test_run_experiment_registers_section_boundary_artifacts(tmp_path: Path) -> 
     metrics_id = artifact_ids[ARTIFACT_TYPE_METRICS_BUNDLE]
     interpretability_id = artifact_ids[ARTIFACT_TYPE_INTERPRETABILITY_BUNDLE]
     report_id = artifact_ids[ARTIFACT_TYPE_EXPERIMENT_REPORT]
+    report_dir = Path(result["report_dir"])
+    config_payload = json.loads((report_dir / "config.json").read_text(encoding="utf-8"))
+    metrics_payload = json.loads((report_dir / "metrics.json").read_text(encoding="utf-8"))
+    feature_qc_summary_payload = json.loads(
+        (report_dir / "feature_qc_summary.json").read_text(encoding="utf-8")
+    )
 
     metrics_record = get_artifact(registry_path=registry_path, artifact_id=metrics_id)
     interpretability_record = get_artifact(
@@ -315,6 +321,10 @@ def test_run_experiment_registers_section_boundary_artifacts(tmp_path: Path) -> 
     assert metrics_record.upstream_artifact_ids == [feature_matrix_id]
     assert interpretability_record.upstream_artifact_ids == [feature_matrix_id]
     assert set(report_record.upstream_artifact_ids) == {metrics_id, interpretability_id}
+    assert config_payload["feature_recipe_id"] == "baseline_standard_scaler_v1"
+    assert metrics_payload["feature_recipe_id"] == "baseline_standard_scaler_v1"
+    assert feature_qc_summary_payload["feature_recipe_id"] == "baseline_standard_scaler_v1"
+    assert (report_dir / "feature_qc_selected_samples.csv").exists()
 
 
 def test_extracted_sections_model_fit_interpretability_evaluation(tmp_path: Path) -> None:

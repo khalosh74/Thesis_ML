@@ -7,6 +7,10 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
 from Thesis_ML.config.metric_policy import metric_scorer
+from Thesis_ML.features.preprocessing import (
+    SAMPLE_CENTER_STANDARD_SCALER_RECIPE_ID,
+    build_feature_preprocessing_recipe,
+)
 from Thesis_ML.experiments.logreg_tuning import (
     SPECIALIZED_LOGREG_TUNING_EXECUTOR_ID,
     is_specialized_logreg_grouped_nested_supported,
@@ -19,6 +23,26 @@ def _logreg_pipeline() -> Pipeline:
     return Pipeline(
         steps=[
             ("scaler", StandardScaler(with_mean=True, with_std=True)),
+            (
+                "model",
+                LogisticRegression(
+                    solver="saga",
+                    penalty="l2",
+                    max_iter=5000,
+                    random_state=19,
+                ),
+            ),
+        ]
+    )
+
+
+def _logreg_pipeline_with_nonbaseline_preprocessor() -> Pipeline:
+    return Pipeline(
+        steps=[
+            (
+                "scaler",
+                build_feature_preprocessing_recipe(SAMPLE_CENTER_STANDARD_SCALER_RECIPE_ID),
+            ),
             (
                 "model",
                 LogisticRegression(
@@ -103,6 +127,16 @@ def test_specialized_logreg_rejects_unsupported_param_grid() -> None:
     )
     assert supported is False
     assert isinstance(reason, str)
+
+
+def test_specialized_logreg_rejects_nonbaseline_preprocessor() -> None:
+    supported, reason = is_specialized_logreg_grouped_nested_supported(
+        model_name="logreg",
+        pipeline_template=_logreg_pipeline_with_nonbaseline_preprocessor(),
+        param_grid={"model__C": [0.1, 1.0], "model__penalty": ["l2"]},
+    )
+    assert supported is False
+    assert reason == "preprocessor_not_plain_standard_scaler"
 
 
 def test_specialized_logreg_matches_gridsearchcv_parity() -> None:

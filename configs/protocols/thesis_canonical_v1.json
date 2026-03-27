@@ -65,6 +65,10 @@
     ],
     "min_samples_per_group": 1
   },
+  "feature_engineering_policy": {
+    "feature_recipe_id": "baseline_standard_scaler_v1",
+    "emit_feature_qc_artifacts": true
+  },
   "data_policy": {
     "class_balance": {
       "enabled": true,
@@ -203,11 +207,15 @@
       "fold_metrics.csv",
       "fold_splits.csv",
       "predictions.csv",
+      "cv_split_manifest.json",
+      "cv_split_manifest.csv",
       "subgroup_metrics.json",
       "subgroup_metrics.csv",
       "tuning_summary.json",
       "best_params_per_fold.csv",
       "spatial_compatibility_report.json",
+      "feature_qc_summary.json",
+      "feature_qc_selected_samples.csv",
       "interpretability_summary.json",
       "calibration_summary.json",
       "calibration_table.csv"
@@ -231,6 +239,7 @@
       "methodology_policy_name",
       "class_weight_policy",
       "tuning_enabled",
+      "feature_recipe_id",
       "model_cost_tier",
       "projected_runtime_seconds",
       "evidence_run_role",

@@ -118,9 +118,12 @@ def stamp_metrics_artifact(
     model_cost_tier: str,
     projected_runtime_seconds: int,
     preprocessing_kind: str | None,
+    feature_recipe_id: str,
     tuning_summary_path: Path,
     tuning_best_params_path: Path,
     fit_timing_summary_path: Path,
+    feature_qc_summary_path: Path,
+    feature_qc_selected_samples_path: Path,
     subgroup_metrics_json_path: Path,
     subgroup_metrics_csv_path: Path,
     metric_policy_effective: EffectiveMetricPolicy,
@@ -162,12 +165,21 @@ def stamp_metrics_artifact(
     persisted_metrics["preprocessing_kind"] = (
         str(preprocessing_kind) if preprocessing_kind is not None else None
     )
+    persisted_metrics["feature_recipe_id"] = str(feature_recipe_id)
     persisted_metrics["tuning_summary_path"] = str(tuning_summary_path.resolve())
     persisted_metrics["tuning_summary_path_relative"] = _relative_path(tuning_summary_path)
     persisted_metrics["tuning_best_params_path"] = str(tuning_best_params_path.resolve())
     persisted_metrics["tuning_best_params_path_relative"] = _relative_path(tuning_best_params_path)
     persisted_metrics["fit_timing_summary_path"] = str(fit_timing_summary_path.resolve())
     persisted_metrics["fit_timing_summary_path_relative"] = _relative_path(fit_timing_summary_path)
+    persisted_metrics["feature_qc_summary_path"] = str(feature_qc_summary_path.resolve())
+    persisted_metrics["feature_qc_summary_path_relative"] = _relative_path(feature_qc_summary_path)
+    persisted_metrics["feature_qc_selected_samples_path"] = str(
+        feature_qc_selected_samples_path.resolve()
+    )
+    persisted_metrics["feature_qc_selected_samples_path_relative"] = _relative_path(
+        feature_qc_selected_samples_path
+    )
     persisted_metrics["subgroup_metrics_json_path"] = str(subgroup_metrics_json_path.resolve())
     persisted_metrics["subgroup_metrics_json_path_relative"] = _relative_path(
         subgroup_metrics_json_path
@@ -254,6 +266,7 @@ def build_run_config_payload(
     model_cost_tier: str,
     projected_runtime_seconds: int,
     preprocessing_kind: str | None,
+    feature_recipe_id: str,
     tuning_search_space_id: str | None,
     tuning_search_space_version: str | None,
     tuning_inner_cv_scheme: str | None,
@@ -261,6 +274,8 @@ def build_run_config_payload(
     tuning_summary_path: Path,
     tuning_best_params_path: Path,
     fit_timing_summary_path: Path,
+    feature_qc_summary_path: Path,
+    feature_qc_selected_samples_path: Path,
     calibration_summary_path: Path,
     calibration_table_path: Path,
     subgroup_reporting_enabled: bool,
@@ -365,6 +380,7 @@ def build_run_config_payload(
         "preprocessing_kind": (
             str(preprocessing_kind) if preprocessing_kind is not None else None
         ),
+        "feature_recipe_id": str(feature_recipe_id),
         "tuning_search_space_id": tuning_search_space_id,
         "tuning_search_space_version": tuning_search_space_version,
         "tuning_inner_cv_scheme": tuning_inner_cv_scheme,
@@ -375,6 +391,12 @@ def build_run_config_payload(
         "tuning_best_params_path_relative": _relative_path(tuning_best_params_path),
         "fit_timing_summary_path": str(fit_timing_summary_path.resolve()),
         "fit_timing_summary_path_relative": _relative_path(fit_timing_summary_path),
+        "feature_qc_summary_path": str(feature_qc_summary_path.resolve()),
+        "feature_qc_summary_path_relative": _relative_path(feature_qc_summary_path),
+        "feature_qc_selected_samples_path": str(feature_qc_selected_samples_path.resolve()),
+        "feature_qc_selected_samples_path_relative": _relative_path(
+            feature_qc_selected_samples_path
+        ),
         "calibration_summary_path": str(calibration_summary_path.resolve()),
         "calibration_summary_path_relative": _relative_path(calibration_summary_path),
         "calibration_table_path": str(calibration_table_path.resolve()),
@@ -517,6 +539,8 @@ def build_run_result_payload(
     tuning_summary_path: Path,
     tuning_best_params_path: Path,
     fit_timing_summary_path: Path,
+    feature_qc_summary_path: Path,
+    feature_qc_selected_samples_path: Path,
     calibration_summary_path: Path,
     calibration_table_path: Path,
     fold_metrics_path: Path,
@@ -546,6 +570,7 @@ def build_run_result_payload(
     tuning_enabled: bool,
     model_cost_tier: str,
     projected_runtime_seconds: int,
+    feature_recipe_id: str,
     protocol_context: dict[str, Any],
     comparison_context: dict[str, Any],
     stage_timings_seconds: dict[str, float] | None = None,
@@ -602,6 +627,12 @@ def build_run_result_payload(
         "tuning_best_params_path_relative": _relative_path(tuning_best_params_path),
         "fit_timing_summary_path": str(fit_timing_summary_path.resolve()),
         "fit_timing_summary_path_relative": _relative_path(fit_timing_summary_path),
+        "feature_qc_summary_path": str(feature_qc_summary_path.resolve()),
+        "feature_qc_summary_path_relative": _relative_path(feature_qc_summary_path),
+        "feature_qc_selected_samples_path": str(feature_qc_selected_samples_path.resolve()),
+        "feature_qc_selected_samples_path_relative": _relative_path(
+            feature_qc_selected_samples_path
+        ),
         "calibration_summary_path": str(calibration_summary_path.resolve()),
         "calibration_summary_path_relative": _relative_path(calibration_summary_path),
         "calibration_table_path": str(calibration_table_path.resolve()),
@@ -646,6 +677,7 @@ def build_run_result_payload(
         "tuning_enabled": bool(tuning_enabled),
         "model_cost_tier": str(model_cost_tier),
         "projected_runtime_seconds": int(projected_runtime_seconds),
+        "feature_recipe_id": str(feature_recipe_id),
         "protocol_context": protocol_context if protocol_context else None,
         "comparison_context": comparison_context if comparison_context else None,
         "stage_timings_seconds": (

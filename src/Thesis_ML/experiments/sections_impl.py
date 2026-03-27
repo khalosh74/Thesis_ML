@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import json
 from pathlib import Path
 from time import perf_counter
@@ -11,6 +12,7 @@ from sklearn.base import clone
 from sklearn.metrics import confusion_matrix
 from sklearn.model_selection import LeaveOneGroupOut, ParameterGrid, StratifiedKFold
 
+from Thesis_ML.config.methodology import FeatureQualityPolicy
 from Thesis_ML.config.metric_policy import metric_bundle
 from Thesis_ML.experiments.evidence_statistics import build_calibration_outputs
 from Thesis_ML.experiments.metrics import classification_metric_score
@@ -30,6 +32,11 @@ from Thesis_ML.experiments.stage_registry import (
 )
 from Thesis_ML.experiments.model_factory import model_supports_linear_interpretability
 from Thesis_ML.experiments.tuning_search_spaces import get_search_space
+from Thesis_ML.features.feature_qc import (
+    FEATURE_QC_SAMPLE_FIELDS,
+    compute_sample_feature_qc,
+    summarize_group_feature_qc,
+)
 
 if TYPE_CHECKING:
     from Thesis_ML.experiments.section_models import (
@@ -116,6 +123,35 @@ def _assignment_executor_id(
     return str(default_executor_id)
 
 
+def _build_pipeline_template(
+    *,
+    build_pipeline_fn: Any,
+    model_name: str,
+    seed: int,
+    feature_recipe_id: str,
+) -> Any:
+    try:
+        signature = inspect.signature(build_pipeline_fn)
+    except (TypeError, ValueError):
+        signature = None
+
+    if signature is not None:
+        accepts_kwargs = any(
+            parameter.kind == inspect.Parameter.VAR_KEYWORD
+            for parameter in signature.parameters.values()
+        )
+        if "feature_recipe_id" in signature.parameters or accepts_kwargs:
+            return build_pipeline_fn(
+                model_name=model_name,
+                seed=seed,
+                feature_recipe_id=feature_recipe_id,
+            )
+    return build_pipeline_fn(
+        model_name=model_name,
+        seed=seed,
+    )
+
+
 def execute_model_fit(section_input: ModelFitInput) -> dict[str, Any]:
     y = section_input.metadata_df[section_input.target_column].astype(str).to_numpy()
 
@@ -141,9 +177,11 @@ def execute_model_fit(section_input: ModelFitInput) -> dict[str, Any]:
         if planned_outer_folds > resolved_max_outer_folds:
             splits = splits[:resolved_max_outer_folds]
 
-    pipeline_template = section_input.build_pipeline_fn(
+    pipeline_template = _build_pipeline_template(
+        build_pipeline_fn=section_input.build_pipeline_fn,
         model_name=section_input.model,
         seed=section_input.seed,
+        feature_recipe_id=section_input.feature_recipe_id,
     )
     tuning_summary_path = (
         section_input.tuning_summary_path
@@ -1343,6 +1381,140 @@ def _compute_subgroup_metrics(
     return subgroup_rows
 
 
+def _fallback_feature_qc_rows_from_matrix(x_matrix: np.ndarray) -> list[dict[str, Any]]:
+    matrix = np.asarray(x_matrix, dtype=np.float64)
+    if matrix.ndim != 2:
+        raise ValueError("x_matrix must be a 2D matrix for feature QC fallback.")
+    rows: list[dict[str, Any]] = []
+    for row_index in range(int(matrix.shape[0])):
+        vector = np.asarray(matrix[row_index], dtype=np.float64)
+        qc_payload = compute_sample_feature_qc(
+            vector_before_repair=vector,
+            vector_after_repair=vector,
+        )
+        rows.append(
+            {
+                "group_id": "selected_subset",
+                "sample_id": f"selected_{row_index:06d}",
+                **qc_payload,
+            }
+        )
+    return rows
+
+
+def _selected_feature_qc_rows(
+    metadata_df: pd.DataFrame,
+    *,
+    x_matrix: np.ndarray,
+) -> list[dict[str, Any]]:
+    if metadata_df.empty:
+        return _fallback_feature_qc_rows_from_matrix(x_matrix)
+    missing_columns = [
+        field_name for field_name in FEATURE_QC_SAMPLE_FIELDS if field_name not in metadata_df.columns
+    ]
+    if missing_columns:
+        raise ValueError(
+            "Selected metadata is missing required feature QC columns: "
+            + ", ".join(sorted(missing_columns))
+        )
+    rows: list[dict[str, Any]] = []
+    for _, row in metadata_df.iterrows():
+        sample_id = str(row.get("sample_id", "")).strip()
+        if not sample_id:
+            raise ValueError("Selected metadata contains blank sample_id while building feature QC.")
+        payload: dict[str, Any] = {
+            "group_id": "selected_subset",
+            "sample_id": sample_id,
+        }
+        for field_name in FEATURE_QC_SAMPLE_FIELDS:
+            payload[field_name] = row[field_name]
+        rows.append(payload)
+    if not rows:
+        raise ValueError("Selected metadata is empty while building feature QC summary.")
+    return rows
+
+
+def _build_feature_qc_summary(
+    *,
+    metadata_df: pd.DataFrame,
+    x_matrix: np.ndarray,
+    feature_recipe_id: str,
+) -> dict[str, Any]:
+    summary = summarize_group_feature_qc(
+        _selected_feature_qc_rows(
+            metadata_df,
+            x_matrix=x_matrix,
+        )
+    )
+    return {
+        "feature_recipe_id": str(feature_recipe_id),
+        "n_selected_samples": int(summary.get("n_samples", 0)),
+        "n_samples_with_any_repair": int(summary.get("n_samples_with_any_repair", 0)),
+        "max_repair_fraction": float(summary.get("max_repair_fraction", 0.0)),
+        "mean_repair_fraction": float(summary.get("mean_repair_fraction", 0.0)),
+        "n_all_zero_vectors": int(summary.get("n_all_zero_vectors", 0)),
+        "n_constant_vectors": int(summary.get("n_constant_vectors", 0)),
+        "mean_vector_std_after_repair": float(
+            summary.get("mean_vector_std_after_repair", 0.0)
+        ),
+        "min_vector_std_after_repair": float(summary.get("min_vector_std_after_repair", 0.0)),
+    }
+
+
+def _evaluate_feature_quality_policy(
+    *,
+    summary: dict[str, Any],
+    policy: FeatureQualityPolicy,
+) -> dict[str, Any]:
+    warnings: list[dict[str, Any]] = []
+    blocking: list[dict[str, Any]] = []
+
+    n_samples_with_any_repair = int(summary.get("n_samples_with_any_repair", 0))
+    n_all_zero_vectors = int(summary.get("n_all_zero_vectors", 0))
+    n_constant_vectors = int(summary.get("n_constant_vectors", 0))
+
+    if policy.warn_on_any_nonfinite_repair and n_samples_with_any_repair > 0:
+        warnings.append(
+            {
+                "code": "feature_qc_nonfinite_repair_detected",
+                "count": int(n_samples_with_any_repair),
+            }
+        )
+    if policy.warn_on_any_all_zero_vector and n_all_zero_vectors > 0:
+        warnings.append(
+            {
+                "code": "feature_qc_all_zero_vectors_detected",
+                "count": int(n_all_zero_vectors),
+            }
+        )
+    if policy.warn_on_any_constant_vector and n_constant_vectors > 0:
+        warnings.append(
+            {
+                "code": "feature_qc_constant_vectors_detected",
+                "count": int(n_constant_vectors),
+            }
+        )
+    if policy.fail_on_any_all_zero_vector and n_all_zero_vectors > 0:
+        blocking.append(
+            {
+                "code": "feature_qc_all_zero_vectors_blocking",
+                "count": int(n_all_zero_vectors),
+            }
+        )
+    if policy.fail_on_any_constant_vector and n_constant_vectors > 0:
+        blocking.append(
+            {
+                "code": "feature_qc_constant_vectors_blocking",
+                "count": int(n_constant_vectors),
+            }
+        )
+    return {
+        "status": ("fail" if blocking else "warning" if warnings else "pass"),
+        "warnings": warnings,
+        "blocking_issues": blocking,
+    }
+
+
 def execute_evaluation(section_input: EvaluationInput) -> dict[str, Any]:
     report_dir = section_input.metrics_path.parent
     subgroup_metrics_json_path = (
@@ -1375,6 +1547,62 @@ def execute_evaluation(section_input: EvaluationInput) -> dict[str, Any]:
         if section_input.calibration_table_path is not None
         else report_dir / "calibration_table.csv"
     )
+    feature_qc_summary_path = (
+        section_input.feature_qc_summary_path
+        if section_input.feature_qc_summary_path is not None
+        else report_dir / "feature_qc_summary.json"
+    )
+    feature_qc_selected_samples_path = (
+        section_input.feature_qc_selected_samples_path
+        if section_input.feature_qc_selected_samples_path is not None
+        else report_dir / "feature_qc_selected_samples.csv"
+    )
+    feature_qc_summary = _build_feature_qc_summary(
+        metadata_df=section_input.metadata_df,
+        x_matrix=section_input.x_matrix,
+        feature_recipe_id=section_input.feature_recipe_id,
+    )
+    feature_quality_policy = FeatureQualityPolicy.model_validate(
+        section_input.feature_quality_policy or {}
+    )
+    feature_quality_status = _evaluate_feature_quality_policy(
+        summary=feature_qc_summary,
+        policy=feature_quality_policy,
+    )
+    if bool(section_input.emit_feature_qc_artifacts):
+        feature_qc_summary_path.write_text(
+            f"{json.dumps(feature_qc_summary, indent=2)}\n",
+            encoding="utf-8",
+        )
+        if section_input.metadata_df.empty:
+            fallback_rows = _fallback_feature_qc_rows_from_matrix(section_input.x_matrix)
+            pd.DataFrame.from_records(fallback_rows).loc[
+                :,
+                ["sample_id", *FEATURE_QC_SAMPLE_FIELDS],
+            ].to_csv(feature_qc_selected_samples_path, index=False)
+        else:
+            selected_qc_columns = [
+                column_name
+                for column_name in (
+                    "sample_id",
+                    "subject",
+                    "session",
+                    "bas",
+                    "task",
+                    "modality",
+                    *FEATURE_QC_SAMPLE_FIELDS,
+                )
+                if column_name in section_input.metadata_df.columns
+            ]
+            section_input.metadata_df.loc[:, selected_qc_columns].to_csv(
+                feature_qc_selected_samples_path,
+                index=False,
+            )
+    if feature_quality_status["status"] == "fail":
+        raise ValueError(
+            "Feature quality policy blocking violations detected. "
+            f"blocking_issues={feature_quality_status['blocking_issues']}"
+        )
     metric_values = metric_bundle(
         section_input.y_true_all,
         section_input.y_pred_all,
@@ -1405,6 +1633,7 @@ def execute_evaluation(section_input: EvaluationInput) -> dict[str, Any]:
     metrics: dict[str, Any] = {
         "model": section_input.model,
         "target": section_input.target_column,
+        "feature_recipe_id": str(section_input.feature_recipe_id),
         "cv": section_input.cv_mode,
         "experiment_mode": section_input.cv_mode,
         "subject": (
@@ -1451,6 +1680,14 @@ def execute_evaluation(section_input: EvaluationInput) -> dict[str, Any]:
             "reference_group_id": section_input.spatial_compatibility["reference_group_id"],
             "affine_atol": float(section_input.spatial_compatibility["affine_atol"]),
             "report_path": str(section_input.spatial_report_path.resolve()),
+        },
+        "feature_engineering": {
+            "feature_recipe_id": str(section_input.feature_recipe_id),
+            "feature_qc_summary_path": str(feature_qc_summary_path.resolve()),
+            "feature_qc_selected_samples_path": str(feature_qc_selected_samples_path.resolve()),
+            "feature_qc_summary": feature_qc_summary,
+            "feature_quality_policy": feature_quality_policy.model_dump(mode="json"),
+            "feature_quality_status": feature_quality_status,
         },
     }
 

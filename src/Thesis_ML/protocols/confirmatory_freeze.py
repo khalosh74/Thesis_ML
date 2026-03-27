@@ -17,6 +17,7 @@ from Thesis_ML.protocols.models import (
     ProtocolStatus,
     ThesisProtocol,
 )
+from Thesis_ML.features.preprocessing import BASELINE_STANDARD_SCALER_RECIPE_ID
 
 CONFIRMATORY_FREEZE_PROTOCOL_ID = "thesis_confirmatory_v1"
 
@@ -236,6 +237,9 @@ def build_confirmatory_lock_context(
         "model_family": str(primary_analysis.get("model_family")),
         "hyperparameter_policy": str(primary_analysis.get("hyperparameter_policy")),
         "class_weight_policy": str(primary_analysis.get("class_weight_policy")),
+        "feature_recipe_id": str(
+            primary_analysis.get("feature_recipe_id", BASELINE_STANDARD_SCALER_RECIPE_ID)
+        ),
         "dataset_fingerprint_required": bool(
             dataset_contract.get("dataset_fingerprint_required", True)
         ),
@@ -307,6 +311,14 @@ def adapt_confirmatory_freeze_to_thesis_protocol(
     model_family = str(primary_analysis.get("model_family", "ridge"))
     hyperparameter_policy = str(primary_analysis.get("hyperparameter_policy", "fixed"))
     class_weight_policy = str(primary_analysis.get("class_weight_policy", "none"))
+    feature_recipe_id = str(
+        primary_analysis.get("feature_recipe_id", BASELINE_STANDARD_SCALER_RECIPE_ID)
+    ).strip()
+    if feature_recipe_id != BASELINE_STANDARD_SCALER_RECIPE_ID:
+        raise ValueError(
+            "Confirmatory freeze requires primary_analysis.feature_recipe_id="
+            f"'{BASELINE_STANDARD_SCALER_RECIPE_ID}'."
+        )
     seed = int(primary_analysis.get("seed", 42))
 
     methodology_policy_name = (
@@ -406,6 +418,10 @@ def adapt_confirmatory_freeze_to_thesis_protocol(
                 for value in list(subgroups.get("allowed", ["subject", "task", "modality"]))
             ],
             "min_samples_per_group": int(subgroups.get("min_samples_per_group", 20)),
+        },
+        "feature_engineering_policy": {
+            "feature_recipe_id": str(feature_recipe_id),
+            "emit_feature_qc_artifacts": True,
         },
         "data_policy": {
             "class_balance": {

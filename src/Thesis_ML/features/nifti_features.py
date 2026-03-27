@@ -25,6 +25,11 @@ from Thesis_ML.data.index_validation import (
     DatasetIndexValidationError,
     validate_dataset_index_strict,
 )
+from Thesis_ML.features.feature_qc import (
+    compute_sample_feature_qc,
+    merge_qc_into_metadata_records,
+    summarize_group_feature_qc,
+)
 
 LOGGER = logging.getLogger(__name__)
 _SPATIAL_SIGNATURE_VERSION = 1
@@ -51,8 +56,10 @@ def _mask_sha256(mask_bool: np.ndarray) -> str:
     mask_bytes = np.ascontiguousarray(mask_bool.astype(np.uint8, copy=False)).tobytes()
     return hashlib.sha256(mask_bytes).hexdigest()
 
+
 def _canonical_json(value: Any) -> str:
     return json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False)
+
 
 def _build_spatial_signature(
     mask_img: nib.spatialimages.SpatialImage, mask_bool: np.ndarray
@@ -121,6 +128,23 @@ def extract_masked_vector(
     mask_affine: np.ndarray,
 ) -> np.ndarray:
     """Extract a float32 voxel vector from a beta map using a pre-loaded mask."""
+    _, repaired_vector = _extract_masked_vectors(
+        beta_path=beta_path,
+        mask_bool=mask_bool,
+        mask_path=mask_path,
+        mask_affine=mask_affine,
+    )
+    return repaired_vector
+
+
+def _extract_masked_vectors(
+    beta_path: Path,
+    mask_bool: np.ndarray,
+    *,
+    mask_path: Path,
+    mask_affine: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Extract a raw and repaired float32 voxel vector from a beta map."""
     beta_path = Path(beta_path)
     if not beta_path.exists():
         raise FileNotFoundError(f"Beta file does not exist: {beta_path}")
@@ -137,8 +161,14 @@ def extract_masked_vector(
         mask_affine=np.asarray(mask_affine, dtype=np.float64),
     )
 
-    vector = beta_data[mask_bool]
-    return np.nan_to_num(vector, nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32, copy=False)
+    raw_vector = np.asarray(beta_data[mask_bool], dtype=np.float32)
+    repaired_vector = np.nan_to_num(
+        raw_vector,
+        nan=0.0,
+        posinf=0.0,
+        neginf=0.0,
+    ).astype(np.float32, copy=False)
+    return raw_vector, repaired_vector
 
 
 def _cache_path_for_group(cache_dir: Path, group_rows: pd.DataFrame) -> Path:
@@ -193,6 +223,39 @@ def _cache_input_manifest_fields(signature: dict[str, Any] | None) -> dict[str, 
         "cache_input_signature_sha256": str(signature.get("sha256", "")),
     }
 
+
+def _group_qc_manifest_fields(summary: dict[str, Any] | None) -> dict[str, object]:
+    if not summary:
+        return {
+            "feature_qc_n_samples": pd.NA,
+            "feature_qc_n_features": pd.NA,
+            "feature_qc_n_samples_with_any_repair": pd.NA,
+            "feature_qc_max_repair_fraction": pd.NA,
+            "feature_qc_mean_repair_fraction": pd.NA,
+            "feature_qc_n_all_zero_vectors": pd.NA,
+            "feature_qc_n_constant_vectors": pd.NA,
+            "feature_qc_mean_vector_std_after_repair": pd.NA,
+            "feature_qc_min_vector_std_after_repair": pd.NA,
+        }
+    return {
+        "feature_qc_n_samples": int(summary.get("n_samples", 0)),
+        "feature_qc_n_features": int(summary.get("n_features", 0)),
+        "feature_qc_n_samples_with_any_repair": int(
+            summary.get("n_samples_with_any_repair", 0)
+        ),
+        "feature_qc_max_repair_fraction": float(summary.get("max_repair_fraction", 0.0)),
+        "feature_qc_mean_repair_fraction": float(summary.get("mean_repair_fraction", 0.0)),
+        "feature_qc_n_all_zero_vectors": int(summary.get("n_all_zero_vectors", 0)),
+        "feature_qc_n_constant_vectors": int(summary.get("n_constant_vectors", 0)),
+        "feature_qc_mean_vector_std_after_repair": float(
+            summary.get("mean_vector_std_after_repair", 0.0)
+        ),
+        "feature_qc_min_vector_std_after_repair": float(
+            summary.get("min_vector_std_after_repair", 0.0)
+        ),
+    }
+
+
 def _read_existing_cache_metadata(
     cache_path: Path,
 ) -> dict[str, dict[str, Any] | None]:
@@ -218,21 +281,31 @@ def _read_existing_cache_metadata(
                 if isinstance(parsed, dict):
                     cache_input_signature = parsed
 
+            group_qc_summary: dict[str, Any] | None = None
+            if "group_qc_summary_json" in npz.files:
+                raw = str(npz["group_qc_summary_json"].item())
+                parsed = json.loads(raw)
+                if isinstance(parsed, dict):
+                    group_qc_summary = parsed
+
             return {
                 "spatial_signature": spatial_signature,
                 "cache_input_signature": cache_input_signature,
+                "group_qc_summary": group_qc_summary,
             }
     except Exception as exc:
         LOGGER.warning("Failed to read existing cache metadata from %s: %s", cache_path, exc)
         return {
             "spatial_signature": None,
             "cache_input_signature": None,
+            "group_qc_summary": None,
         }
 
 def _validate_existing_cache_against_current(
     *,
     existing_spatial_signature: dict[str, Any] | None,
     existing_cache_input_signature: dict[str, Any] | None,
+    existing_group_qc_summary: dict[str, Any] | None,
     current_spatial_signature: dict[str, Any],
     current_cache_input_signature: dict[str, Any],
 ) -> tuple[bool, str]:
@@ -250,7 +323,11 @@ def _validate_existing_cache_against_current(
     if existing_sha != current_sha:
         return False, "cache_input_signature_mismatch"
 
+    if existing_group_qc_summary is None:
+        return False, "missing_group_qc_summary"
+
     return True, "matched_current_signature"
+
 
 def _resolve_single_group_mask_path(
     *,
@@ -276,9 +353,9 @@ def _resolve_single_group_mask_path(
     unique_mask_paths = sorted(set(resolved_mask_paths))
     if len(unique_mask_paths) != 1:
         raise ValueError(
+            "subject_session_bas group must map to exactly one canonical mask path. "
             "Feature cache group "
-            f"'{group_id}' contains multiple resolved mask paths; "
-            "expected exactly one mask per cache group. "
+            f"'{group_id}' contains multiple resolved mask paths. "
             f"Found {len(unique_mask_paths)}: {unique_mask_paths}"
         )
 
@@ -358,6 +435,7 @@ def _build_cache_input_signature(
         "sha256": hashlib.sha256(canonical_payload.encode("utf-8")).hexdigest(),
         "payload": payload,
     }
+
 
 def build_feature_cache(
     index_csv: Path,
@@ -476,10 +554,12 @@ def build_feature_cache(
             existing_metadata = _read_existing_cache_metadata(target_path)
             existing_spatial_signature = existing_metadata["spatial_signature"]
             existing_cache_input_signature = existing_metadata["cache_input_signature"]
+            existing_group_qc_summary = existing_metadata["group_qc_summary"]
 
             cache_matches, validation_reason = _validate_existing_cache_against_current(
                 existing_spatial_signature=existing_spatial_signature,
                 existing_cache_input_signature=existing_cache_input_signature,
+                existing_group_qc_summary=existing_group_qc_summary,
                 current_spatial_signature=spatial_signature,
                 current_cache_input_signature=current_cache_input_signature,
             )
@@ -496,6 +576,7 @@ def build_feature_cache(
                         "cache_rebuild_reason": pd.NA,
                         **_signature_manifest_fields(existing_spatial_signature),
                         **_cache_input_manifest_fields(existing_cache_input_signature),
+                        **_group_qc_manifest_fields(existing_group_qc_summary),
                     }
                 )
                 continue
@@ -508,6 +589,7 @@ def build_feature_cache(
             cache_rebuild_reason = "force_rebuild"
 
         vectors: list[np.ndarray] = []
+        sample_qc_rows: list[dict[str, Any]] = []
         for _, row in group_rows.iterrows():
             beta_path_column = (
                 CANONICAL_BETA_PATH_COLUMN
@@ -515,13 +597,22 @@ def build_feature_cache(
                 else "beta_path"
             )
             beta_path = Path(str(row[beta_path_column])).resolve()
-            vectors.append(
-                extract_masked_vector(
-                    beta_path=beta_path,
-                    mask_bool=mask_bool,
-                    mask_path=mask_path,
-                    mask_affine=mask_affine,
-                )
+            raw_vector, repaired_vector = _extract_masked_vectors(
+                beta_path=beta_path,
+                mask_bool=mask_bool,
+                mask_path=mask_path,
+                mask_affine=mask_affine,
+            )
+            vectors.append(repaired_vector)
+            sample_qc_rows.append(
+                {
+                    "group_id": str(group_id),
+                    "sample_id": str(row["sample_id"]),
+                    **compute_sample_feature_qc(
+                        vector_before_repair=raw_vector,
+                        vector_after_repair=repaired_vector,
+                    ),
+                }
             )
 
         x_matrix = np.vstack(vectors).astype(np.float32, copy=False)
@@ -538,7 +629,21 @@ def build_feature_cache(
             .astype(str)
             .to_numpy(dtype=np.str_)
         )
-        metadata_json = json.dumps(group_rows.to_dict(orient="records"))
+        if len(sample_qc_rows) != int(len(group_rows)):
+            raise ValueError(
+                f"Feature QC row count mismatch for group '{group_id}': "
+                f"{len(sample_qc_rows)} != {len(group_rows)}"
+            )
+        metadata_records = merge_qc_into_metadata_records(
+            metadata_records=group_rows.to_dict(orient="records"),
+            sample_qc_rows=sample_qc_rows,
+        )
+        group_qc_summary = summarize_group_feature_qc(sample_qc_rows)
+        if str(group_qc_summary.get("group_id", "")) != str(group_id):
+            raise ValueError(
+                f"Feature QC summary group_id mismatch: {group_qc_summary.get('group_id')!r} != {group_id!r}"
+            )
+        metadata_json = json.dumps(metadata_records)
 
         np.savez_compressed(
             target_path,
@@ -548,6 +653,7 @@ def build_feature_cache(
             group_id=np.array(str(group_id)),
             spatial_signature_json=np.array(_canonical_json(spatial_signature)),
             cache_input_signature_json=np.array(_canonical_json(current_cache_input_signature)),
+            group_qc_summary_json=np.array(_canonical_json(group_qc_summary)),
         )
 
         manifest_rows.append(
@@ -561,6 +667,7 @@ def build_feature_cache(
                 "cache_rebuild_reason": cache_rebuild_reason,
                 **_signature_manifest_fields(spatial_signature),
                 **_cache_input_manifest_fields(current_cache_input_signature),
+                **_group_qc_manifest_fields(group_qc_summary),
             }
         )
 

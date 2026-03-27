@@ -43,6 +43,7 @@ from Thesis_ML.protocols.models import (
     ProtocolStatus,
     ThesisProtocol,
 )
+from Thesis_ML.features.preprocessing import BASELINE_STANDARD_SCALER_RECIPE_ID
 from Thesis_ML.verification.official_artifacts import verify_official_artifacts
 
 _OFFICIAL_CONFIRMATORY_GPU_ALLOWLIST: frozenset[tuple[str, str]] = frozenset(
@@ -86,6 +87,8 @@ def _protocol_context_payload(
         "methodology_policy_name": spec.methodology_policy_name.value,
         "class_weight_policy": spec.class_weight_policy.value,
         "tuning_enabled": bool(spec.tuning_enabled),
+        "feature_recipe_id": str(spec.feature_recipe_id),
+        "emit_feature_qc_artifacts": bool(spec.emit_feature_qc_artifacts),
         "model_cost_tier": spec.model_cost_tier.value,
         "projected_runtime_seconds": int(spec.projected_runtime_seconds),
         "tuning_search_space_id": spec.tuning_search_space_id,
@@ -116,6 +119,10 @@ def _protocol_context_payload(
         },
         "controls": spec.controls.model_dump(mode="json"),
         "interpretability_enabled": bool(spec.interpretability_enabled),
+        "feature_engineering": {
+            "feature_recipe_id": str(spec.feature_recipe_id),
+            "emit_feature_qc_artifacts": bool(spec.emit_feature_qc_artifacts),
+        },
     }
     if isinstance(confirmatory_lock, dict):
         payload["confirmatory_lock"] = dict(confirmatory_lock)
@@ -169,6 +176,18 @@ def _validate_confirmatory_lock_controls(
                 f"with n_permutations >= {minimum_permutations}. "
                 "Invalid run(s): " + ", ".join(sorted(invalid_runs))
             )
+
+    invalid_feature_recipe_runs = [
+        run_spec.run_id
+        for run_spec in compiled_manifest.runs
+        if str(run_spec.feature_recipe_id) != BASELINE_STANDARD_SCALER_RECIPE_ID
+    ]
+    if invalid_feature_recipe_runs:
+        raise ValueError(
+            "Confirmatory freeze hard-gate failed: feature_recipe_id must be "
+            f"'{BASELINE_STANDARD_SCALER_RECIPE_ID}'. "
+            "Invalid run(s): " + ", ".join(sorted(invalid_feature_recipe_runs))
+        )
 
 
 def _validate_official_protocol_gpu_admission(
@@ -729,6 +748,8 @@ def execute_compiled_protocol(
                 "permutation_metric_name": spec.controls.permutation_metric,
                 "methodology_policy_name": spec.methodology_policy_name.value,
                 "class_weight_policy": spec.class_weight_policy.value,
+                "feature_recipe_id": str(spec.feature_recipe_id),
+                "emit_feature_qc_artifacts": bool(spec.emit_feature_qc_artifacts),
                 "tuning_enabled": bool(spec.tuning_enabled),
                 "model_cost_tier": spec.model_cost_tier.value,
                 "projected_runtime_seconds": int(spec.projected_runtime_seconds),

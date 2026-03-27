@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from Thesis_ML.experiments.compute_policy import ResolvedComputePolicy
 from Thesis_ML.experiments.progress import ProgressCallback
 from Thesis_ML.experiments.stage_execution import StageAssignment
+from Thesis_ML.features.preprocessing import BASELINE_STANDARD_SCALER_RECIPE_ID
 
 
 class _SectionModel(BaseModel):
@@ -119,6 +120,7 @@ class ModelFitInput(_SectionModel):
     primary_metric_name: str = "balanced_accuracy"
     methodology_policy_name: str = "fixed_baselines_only"
     class_weight_policy: str = "none"
+    feature_recipe_id: str = BASELINE_STANDARD_SCALER_RECIPE_ID
     tuning_enabled: bool = False
     tuning_search_space_id: str | None = None
     tuning_search_space_version: str | None = None
@@ -191,6 +193,7 @@ class InterpretabilityOutput(_SectionModel):
 
 class EvaluationInput(_SectionModel):
     x_matrix: np.ndarray
+    metadata_df: pd.DataFrame = Field(default_factory=pd.DataFrame)
     y: np.ndarray
     splits: list[tuple[np.ndarray, np.ndarray]]
     fold_rows: list[dict[str, Any]]
@@ -203,6 +206,11 @@ class EvaluationInput(_SectionModel):
     test_subject: str | None = None
     n_permutations: int = 0
     primary_metric_name: str = "balanced_accuracy"
+    feature_recipe_id: str = BASELINE_STANDARD_SCALER_RECIPE_ID
+    emit_feature_qc_artifacts: bool = True
+    feature_qc_summary_path: Path | None = None
+    feature_qc_selected_samples_path: Path | None = None
+    feature_quality_policy: dict[str, Any] | None = None
     permutation_metric_name: str | None = None
     permutation_alpha: float = 0.05
     permutation_minimum_required: int = 0

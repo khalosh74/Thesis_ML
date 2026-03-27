@@ -13,6 +13,7 @@ from Thesis_ML.experiments.spatial_validation import (
     build_spatial_compatibility_report,
     raise_spatial_compatibility_error,
 )
+from Thesis_ML.features.feature_qc import FEATURE_QC_SAMPLE_FIELDS
 
 LOGGER = logging.getLogger(__name__)
 
@@ -30,6 +31,52 @@ def _resolve_metadata_beta_path(metadata: dict[str, Any]) -> str:
         if text:
             return text
     return ""
+
+
+_GROUP_QC_MANIFEST_COLUMNS: tuple[str, ...] = (
+    "feature_qc_n_samples",
+    "feature_qc_n_features",
+    "feature_qc_n_samples_with_any_repair",
+    "feature_qc_max_repair_fraction",
+    "feature_qc_mean_repair_fraction",
+    "feature_qc_n_all_zero_vectors",
+    "feature_qc_n_constant_vectors",
+    "feature_qc_mean_vector_std_after_repair",
+    "feature_qc_min_vector_std_after_repair",
+)
+
+
+def _manifest_row_expects_feature_qc(row: pd.Series) -> bool:
+    return any(column_name in row.index for column_name in _GROUP_QC_MANIFEST_COLUMNS)
+
+
+def _validate_sample_qc_fields(
+    *,
+    metadata_record: dict[str, Any],
+    require_qc: bool,
+    cache_path: Path,
+    group_id: str,
+    sample_id: str,
+) -> None:
+    present_fields = {
+        field_name
+        for field_name in FEATURE_QC_SAMPLE_FIELDS
+        if field_name in metadata_record
+    }
+    if present_fields and present_fields != set(FEATURE_QC_SAMPLE_FIELDS):
+        missing_fields = sorted(set(FEATURE_QC_SAMPLE_FIELDS) - present_fields)
+        raise ValueError(
+            "Cache metadata row contains partial feature QC fields, which is not allowed. "
+            f"group_id='{group_id}', sample_id='{sample_id}', cache_path='{cache_path}', "
+            f"missing_fields={missing_fields}."
+        )
+    if require_qc and present_fields != set(FEATURE_QC_SAMPLE_FIELDS):
+        missing_fields = sorted(set(FEATURE_QC_SAMPLE_FIELDS) - present_fields)
+        raise ValueError(
+            "Upgraded cache metadata row is missing required feature QC fields. "
+            f"group_id='{group_id}', sample_id='{sample_id}', cache_path='{cache_path}', "
+            f"missing_fields={missing_fields}."
+        )
 
 
 def load_features_from_cache(
@@ -91,10 +138,21 @@ def load_features_from_cache(
             raw_signature = None
             if "spatial_signature_json" in npz.files:
                 raw_signature = json.loads(str(npz["spatial_signature_json"].item()))
+            group_qc_summary = None
+            if "group_qc_summary_json" in npz.files:
+                group_qc_summary = json.loads(str(npz["group_qc_summary_json"].item()))
             group_id = (
                 str(npz["group_id"].item())
                 if "group_id" in npz.files
                 else str(row.get("group_id", cache_path.name))
+            )
+
+        requires_qc_fields = _manifest_row_expects_feature_qc(row)
+        if requires_qc_fields and group_qc_summary is None:
+            raise ValueError(
+                "Cache manifest indicates upgraded feature QC fields, but cache group is missing "
+                "group_qc_summary_json. "
+                f"group_id='{group_id}', cache_path='{cache_path}'."
             )
 
         if x_block.shape[0] != len(metadata_records):
@@ -113,6 +171,13 @@ def load_features_from_cache(
                         f"group_id='{group_id}', sample_id='{sample_id}', cache_path='{cache_path}'."
                     )
                 seen_in_group.add(sample_id)
+                _validate_sample_qc_fields(
+                    metadata_record=metadata,
+                    require_qc=requires_qc_fields,
+                    cache_path=cache_path,
+                    group_id=str(group_id),
+                    sample_id=sample_id,
+                )
             if sample_id and sample_id in selected_ids:
                 current_vector = np.asarray(x_block[row_idx], dtype=np.float32)
                 metadata_payload = dict(metadata)
@@ -169,6 +234,7 @@ def load_features_from_cache(
                     "n_selected_samples": int(selected_in_group),
                     "n_features": int(x_block.shape[1]),
                     "raw_signature": raw_signature,
+                    "group_qc_summary": group_qc_summary,
                 }
             )
 

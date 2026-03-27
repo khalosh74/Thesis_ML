@@ -53,13 +53,9 @@ def _resolve_pipeline_components(
     scaler = pipeline_template.named_steps.get("scaler")
     model = pipeline_template.named_steps.get("model")
     if not isinstance(scaler, StandardScaler):
-        raise ValueError(
-            "Specialized logreg tuning requires pipeline step 'scaler' to be StandardScaler."
-        )
+        raise ValueError("preprocessor_not_plain_standard_scaler")
     if not bool(getattr(scaler, "with_mean", False)) or not bool(getattr(scaler, "with_std", False)):
-        raise ValueError(
-            "Specialized logreg tuning requires StandardScaler(with_mean=True, with_std=True)."
-        )
+        raise ValueError("preprocessor_not_plain_standard_scaler")
     if not isinstance(model, LogisticRegression):
         raise ValueError(
             "Specialized logreg tuning requires pipeline step 'model' to be LogisticRegression."

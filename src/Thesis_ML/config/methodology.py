@@ -28,6 +28,14 @@ class ClassWeightPolicy(StrEnum):
     BALANCED = "balanced"
 
 
+class FeatureQualityPolicy(_MethodologyModel):
+    warn_on_any_nonfinite_repair: bool = True
+    warn_on_any_all_zero_vector: bool = True
+    warn_on_any_constant_vector: bool = True
+    fail_on_any_all_zero_vector: bool = True
+    fail_on_any_constant_vector: bool = False
+
+
 class MethodologyPolicy(_MethodologyModel):
     policy_name: MethodologyPolicyName
     class_weight_policy: ClassWeightPolicy = ClassWeightPolicy.NONE
@@ -36,6 +44,7 @@ class MethodologyPolicy(_MethodologyModel):
     inner_group_field: str | None = None
     tuning_search_space_id: str | None = None
     tuning_search_space_version: str | None = None
+    feature_quality: FeatureQualityPolicy = Field(default_factory=FeatureQualityPolicy)
     notes: str | None = None
 
     @model_validator(mode="after")

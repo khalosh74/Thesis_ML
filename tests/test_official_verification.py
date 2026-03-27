@@ -75,6 +75,7 @@ def _write_confirmatory_output(root: Path) -> Path:
         "canonical_run": True,
         "methodology_policy_name": "fixed_baselines_only",
         "class_weight_policy": "none",
+        "feature_recipe_id": "baseline_standard_scaler_v1",
         "tuning_enabled": False,
         "model_cost_tier": "official_fast",
         "projected_runtime_seconds": 1200,
@@ -137,6 +138,10 @@ def _write_confirmatory_output(root: Path) -> Path:
             "cv_split_manifest_json": str((run_dir / "cv_split_manifest.json").resolve()),
             "cv_split_manifest_csv": str((run_dir / "cv_split_manifest.csv").resolve()),
             "cv_split_manifest_sha256": cv_split_manifest_sha256,
+            "feature_qc_summary_json": str((run_dir / "feature_qc_summary.json").resolve()),
+            "feature_qc_selected_samples_csv": str(
+                (run_dir / "feature_qc_selected_samples.csv").resolve()
+            ),
         },
         "evidence_policy_effective": {
             "repeat_evaluation": {"repeat_count": 1, "seed_stride": 1000},
@@ -279,6 +284,30 @@ def _write_confirmatory_output(root: Path) -> Path:
         "0,test,s2,/tmp/beta_0002.nii,sub-001,ses-02,BAS2,passive,audio,positive\n",
         encoding="utf-8",
     )
+    (run_dir / "feature_qc_summary.json").write_text(
+        json.dumps(
+            {
+                "feature_recipe_id": "baseline_standard_scaler_v1",
+                "n_selected_samples": 2,
+                "n_samples_with_any_repair": 0,
+                "max_repair_fraction": 0.0,
+                "mean_repair_fraction": 0.0,
+                "n_all_zero_vectors": 0,
+                "n_constant_vectors": 0,
+                "mean_vector_std_after_repair": 1.0,
+                "min_vector_std_after_repair": 1.0,
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (run_dir / "feature_qc_selected_samples.csv").write_text(
+        "sample_id,n_features,n_nan_before_repair,n_posinf_before_repair,n_neginf_before_repair,n_nonfinite_before_repair,repair_fraction,n_zero_after_repair,all_zero_vector,constant_vector,mean_after_repair,std_after_repair,l2_norm_after_repair,max_abs_after_repair\n"
+        "s1,8,0,0,0,0,0.0,0,False,False,0.0,1.0,2.828427,1.0\n"
+        "s2,8,0,0,0,0,0.0,0,False,False,0.0,1.0,2.828427,1.0\n",
+        encoding="utf-8",
+    )
     (run_dir / "external_dataset_card.json").write_text(
         json.dumps({"enabled": False, "datasets": []}, indent=2) + "\n",
         encoding="utf-8",
@@ -304,11 +333,16 @@ def _write_confirmatory_output(root: Path) -> Path:
     (root / "protocol.json").write_text(
         json.dumps(
             {
+                "feature_engineering_policy": {
+                    "feature_recipe_id": "baseline_standard_scaler_v1",
+                    "emit_feature_qc_artifacts": True,
+                },
                 "artifact_contract": {
                     "required_run_metadata_fields": [
                         "framework_mode",
                         "canonical_run",
                         "methodology_policy_name",
+                        "feature_recipe_id",
                         "model_cost_tier",
                         "projected_runtime_seconds",
                         "protocol_id",
@@ -326,6 +360,10 @@ def _write_confirmatory_output(root: Path) -> Path:
     (root / "compiled_protocol_manifest.json").write_text(
         json.dumps(
             {
+                "feature_engineering_policy": {
+                    "feature_recipe_id": "baseline_standard_scaler_v1",
+                    "emit_feature_qc_artifacts": True,
+                },
                 "required_run_artifacts": [
                     "config.json",
                     "metrics.json",
@@ -339,6 +377,8 @@ def _write_confirmatory_output(root: Path) -> Path:
                     "leakage_audit.json",
                     "cv_split_manifest.json",
                     "cv_split_manifest.csv",
+                    "feature_qc_summary.json",
+                    "feature_qc_selected_samples.csv",
                     "external_dataset_card.json",
                     "external_dataset_summary.json",
                     "external_validation_compatibility.json",
@@ -349,6 +389,7 @@ def _write_confirmatory_output(root: Path) -> Path:
                     "framework_mode",
                     "canonical_run",
                     "methodology_policy_name",
+                    "feature_recipe_id",
                     "model_cost_tier",
                     "projected_runtime_seconds",
                     "data_policy_effective",

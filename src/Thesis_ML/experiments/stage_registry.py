@@ -18,10 +18,12 @@ from Thesis_ML.experiments.backends.xgboost_gpu import XGBOOST_GPU_BACKEND_ID
 from Thesis_ML.experiments.compute_policy import ResolvedComputePolicy
 from Thesis_ML.experiments.linearsvc_tuning import (
     SPECIALIZED_LINEARSVC_TUNING_EXECUTOR_ID,
+    is_specialized_linearsvc_grouped_nested_supported,
     run_specialized_linearsvc_grouped_nested_tuning,
 )
 from Thesis_ML.experiments.logreg_tuning import (
     SPECIALIZED_LOGREG_TUNING_EXECUTOR_ID,
+    is_specialized_logreg_grouped_nested_supported,
     run_specialized_logreg_grouped_nested_tuning,
 )
 from Thesis_ML.experiments.stage_execution import (
@@ -308,6 +310,14 @@ def _execute_tuning_linearsvc_specialized_entrypoint(
     primary_metric_name: str,
     **_: Any,
 ) -> dict[str, Any]:
+    supported, reason = is_specialized_linearsvc_grouped_nested_supported(
+        model_name="linearsvc",
+        pipeline_template=pipeline_template,
+        param_grid=param_grid,
+    )
+    if not supported:
+        raise ValueError(str(reason or "specialized_linearsvc_not_supported"))
+
     specialized_result = run_specialized_linearsvc_grouped_nested_tuning(
         pipeline_template=clone(pipeline_template),
         x_train=x_outer_train,
@@ -395,6 +405,14 @@ def _execute_tuning_logreg_specialized_entrypoint(
     progress_metadata: dict[str, Any] | None = None,
     **_: Any,
 ) -> dict[str, Any]:
+    supported, reason = is_specialized_logreg_grouped_nested_supported(
+        model_name="logreg",
+        pipeline_template=pipeline_template,
+        param_grid=param_grid,
+    )
+    if not supported:
+        raise ValueError(str(reason or "specialized_logreg_not_supported"))
+
     specialized_result = run_specialized_logreg_grouped_nested_tuning(
         pipeline_template=clone(pipeline_template),
         x_train=x_outer_train,

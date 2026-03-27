@@ -17,6 +17,7 @@ from Thesis_ML.data.index_validation import (
     DatasetIndexValidationError,
     canonicalize_index_paths,
 )
+from Thesis_ML.features.preprocessing import BASELINE_STANDARD_SCALER_RECIPE_ID
 
 _BASE_REQUIRED_INDEX_COLUMNS = {
     "sample_id",
@@ -317,6 +318,22 @@ def evaluate_official_data_policy(
         data_policy = DataPolicy()
     policy_effective = data_policy.model_dump(mode="json")
 
+    feature_engineering_context = official_context.get("feature_engineering")
+    context_feature_recipe = official_context.get("feature_recipe_id")
+    if context_feature_recipe is None and isinstance(feature_engineering_context, dict):
+        context_feature_recipe = feature_engineering_context.get("feature_recipe_id")
+    context_emit_feature_qc = official_context.get("emit_feature_qc_artifacts")
+    if context_emit_feature_qc is None and isinstance(feature_engineering_context, dict):
+        context_emit_feature_qc = feature_engineering_context.get("emit_feature_qc_artifacts")
+    feature_engineering_summary = {
+        "feature_recipe_id": str(
+            context_feature_recipe or BASELINE_STANDARD_SCALER_RECIPE_ID
+        ),
+        "emit_feature_qc_artifacts": bool(
+            True if context_emit_feature_qc is None else context_emit_feature_qc
+        ),
+    }
+
     warnings_list: list[dict[str, Any]] = []
     blocking_list: list[dict[str, Any]] = []
 
@@ -590,6 +607,7 @@ def evaluate_official_data_policy(
         "mapping_integrity": mapping_integrity_summary,
         "glm_unknown_regressor_summary": glm_unknown_regressor_summary,
         "derived_label_inconsistency_summary": derived_label_inconsistency_summary,
+        "feature_engineering": feature_engineering_summary,
     }
     dataset_summary_rows = [
         {
@@ -1175,6 +1193,7 @@ def evaluate_official_data_policy(
         "mapping_integrity": mapping_integrity_summary,
         "glm_unknown_regressor_summary": glm_unknown_regressor_summary,
         "cv_split_manifest_sha256": cv_split_manifest.get("sha256"),
+        "feature_engineering": feature_engineering_summary,
     }
 
     return {
@@ -1203,6 +1222,7 @@ def evaluate_official_data_policy(
         "selected_beta_path_sha256": selected_beta_path_sha256,
         "selection_exclusion_summary": selection_exclusion_summary,
         "selection_exclusion_rows": selection_exclusion_rows,
+        "feature_engineering": feature_engineering_summary,
     }
 
 
@@ -1212,6 +1232,7 @@ def _dataset_card_markdown(payload: dict[str, Any]) -> str:
         "",
         f"- Framework mode: `{payload.get('framework_mode')}`",
         f"- Target: `{payload.get('target_definition', {}).get('target_column')}`",
+        f"- Feature recipe: `{payload.get('feature_engineering', {}).get('feature_recipe_id')}`",
         f"- Unit of analysis: `{payload.get('unit_of_analysis')}`",
         f"- Dataset fingerprint present: `{bool(payload.get('dataset_identity', {}).get('dataset_fingerprint'))}`",
         "",
@@ -1435,6 +1456,7 @@ def write_official_data_artifacts(
         "derived_label_inconsistency_summary": assessment.get(
             "derived_label_inconsistency_summary", {}
         ),
+        "feature_engineering": assessment.get("feature_engineering", {}),
         "external_validation": external_compatibility,
         "intended_use": data_policy_effective.get("intended_use"),
         "not_intended_use": data_policy_effective.get("not_intended_use", []),

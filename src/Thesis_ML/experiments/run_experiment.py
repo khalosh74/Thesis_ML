@@ -66,9 +66,11 @@ from Thesis_ML.experiments.model_catalog import (
 from Thesis_ML.experiments.model_factory import (
     DEFAULT_BATCH_MODEL_NAMES,
     MODEL_NAMES,
+    SUPPORTED_FEATURE_RECIPE_IDS,
     build_pipeline as build_model_pipeline,
     make_model,
     model_preprocess_kind,
+    resolve_preprocessing_recipe,
 )
 from Thesis_ML.experiments.official_contracts import (
     validate_official_preflight,
@@ -109,6 +111,7 @@ from Thesis_ML.experiments.tuning_search_spaces import (
     LINEAR_GROUPED_NESTED_SEARCH_SPACE_ID,
     LINEAR_GROUPED_NESTED_SEARCH_SPACE_VERSION,
 )
+from Thesis_ML.features.preprocessing import BASELINE_STANDARD_SCALER_RECIPE_ID
 
 LOGGER = logging.getLogger(__name__)
 
@@ -198,12 +201,14 @@ def _build_pipeline(
     seed: int,
     class_weight_policy: str = "none",
     compute_policy=None,
+    feature_recipe_id: str = BASELINE_STANDARD_SCALER_RECIPE_ID,
 ):
     return build_model_pipeline(
         model_name=model_name,
         seed=seed,
         class_weight_policy=class_weight_policy,
         compute_policy=compute_policy,
+        feature_recipe_id=feature_recipe_id,
     )
 
 
@@ -354,6 +359,8 @@ def run_experiment(
     tuning_search_space_version: str | None = None,
     tuning_inner_cv_scheme: str | None = None,
     tuning_inner_group_field: str | None = None,
+    feature_recipe_id: str = BASELINE_STANDARD_SCALER_RECIPE_ID,
+    emit_feature_qc_artifacts: bool = True,
     subgroup_reporting_enabled: bool = True,
     subgroup_dimensions: list[str] | None = None,
     subgroup_min_samples_per_group: int = 1,
@@ -470,6 +477,10 @@ def run_experiment(
 
     target_column = _resolve_target_column(target)
     resolved_preprocessing_kind = model_preprocess_kind(model)
+    resolved_feature_recipe_id = resolve_preprocessing_recipe(
+        recipe_id=feature_recipe_id,
+        model_name=model,
+    )
     context_start = perf_counter()
     (
         resolved_framework_mode,
@@ -486,6 +497,32 @@ def run_experiment(
         official_context = dict(resolved_protocol_context)
     if resolved_framework_mode == FrameworkMode.LOCKED_COMPARISON:
         official_context = dict(resolved_comparison_context)
+    context_feature_recipe_id = official_context.get("feature_recipe_id")
+    if context_feature_recipe_id is not None:
+        context_recipe_id = resolve_preprocessing_recipe(
+            recipe_id=str(context_feature_recipe_id),
+            model_name=model,
+        )
+        if context_recipe_id != resolved_feature_recipe_id:
+            raise ValueError(
+                "Illegal override for official run key 'feature_recipe_id'. "
+                "Use protocol/comparison spec values only."
+            )
+        resolved_feature_recipe_id = context_recipe_id
+    context_emit_feature_qc_artifacts = official_context.get("emit_feature_qc_artifacts")
+    if (
+        context_emit_feature_qc_artifacts is not None
+        and bool(context_emit_feature_qc_artifacts) != bool(emit_feature_qc_artifacts)
+    ):
+        raise ValueError(
+            "Illegal override for official run key 'emit_feature_qc_artifacts'. "
+            "Use protocol/comparison spec values only."
+        )
+    resolved_emit_feature_qc_artifacts = bool(
+        context_emit_feature_qc_artifacts
+        if context_emit_feature_qc_artifacts is not None
+        else emit_feature_qc_artifacts
+    )
     confirmatory_lock_candidate = official_context.get("confirmatory_lock")
     confirmatory_lock_payload = (
         dict(confirmatory_lock_candidate) if isinstance(confirmatory_lock_candidate, dict) else {}
@@ -640,6 +677,12 @@ def run_experiment(
         comparison_context=resolved_comparison_context,
     )
     stage_timings["methodology_resolution"] = float(perf_counter() - methodology_start)
+    methodology_policy_payload = methodology_policy.model_dump(mode="json")
+    feature_quality_policy_payload = (
+        dict(methodology_policy_payload.get("feature_quality"))
+        if isinstance(methodology_policy_payload.get("feature_quality"), dict)
+        else None
+    )
 
     compute_policy_start = perf_counter()
     resolved_compute_policy = resolve_compute_policy(
@@ -873,6 +916,8 @@ def run_experiment(
     spatial_compatibility_report_path = report_dir / "spatial_compatibility_report.json"
     calibration_summary_path = report_dir / "calibration_summary.json"
     calibration_table_path = report_dir / "calibration_table.csv"
+    feature_qc_summary_path = report_dir / "feature_qc_summary.json"
+    feature_qc_selected_samples_path = report_dir / "feature_qc_selected_samples.csv"
     interpretability_summary_path = report_dir / "interpretability_summary.json"
     interpretability_fold_artifacts_path = report_dir / "interpretability_fold_explanations.csv"
 
@@ -1042,6 +1087,10 @@ def run_experiment(
                         spatial_report_path=spatial_compatibility_report_path,
                         calibration_summary_path=calibration_summary_path,
                         calibration_table_path=calibration_table_path,
+                        feature_qc_summary_path=feature_qc_summary_path,
+                        feature_qc_selected_samples_path=feature_qc_selected_samples_path,
+                        feature_quality_policy=feature_quality_policy_payload,
+                        emit_feature_qc_artifacts=resolved_emit_feature_qc_artifacts,
                         interpretability_summary_path=interpretability_summary_path,
                         interpretability_fold_artifacts_path=interpretability_fold_artifacts_path,
                         start_section=start_section,
@@ -1049,11 +1098,17 @@ def run_experiment(
                         base_artifact_id=base_artifact_id,
                         reuse_policy=reuse_policy,
                         reuse_completed_artifacts=should_reuse_completed_artifacts,
-                        build_pipeline_fn=lambda model_name, seed: _build_pipeline(
+                        feature_recipe_id=resolved_feature_recipe_id,
+                        build_pipeline_fn=lambda model_name, seed, feature_recipe_id=None: _build_pipeline(
                             model_name=model_name,
                             seed=seed,
                             class_weight_policy=methodology_policy.class_weight_policy.value,
                             compute_policy=resolved_compute_policy,
+                            feature_recipe_id=(
+                                feature_recipe_id
+                                if feature_recipe_id is not None
+                                else resolved_feature_recipe_id
+                            ),
                         ),
                         progress_callback=progress_callback,
                         load_features_from_cache_fn=(
@@ -1173,11 +1228,14 @@ def run_experiment(
             model_cost_tier=str(resolved_model_cost_tier),
             projected_runtime_seconds=int(resolved_projected_runtime_seconds),
             preprocessing_kind=resolved_preprocessing_kind,
+            feature_recipe_id=resolved_feature_recipe_id,
             tuning_summary_path=tuning_summary_path,
             tuning_best_params_path=tuning_best_params_path,
             fit_timing_summary_path=fit_timing_summary_path,
             subgroup_metrics_json_path=subgroup_metrics_json_path,
             subgroup_metrics_csv_path=subgroup_metrics_csv_path,
+            feature_qc_summary_path=feature_qc_summary_path,
+            feature_qc_selected_samples_path=feature_qc_selected_samples_path,
             metric_policy_effective=metric_policy_effective,
             data_policy_effective=(
                 data_policy_effective
@@ -1282,6 +1340,7 @@ def run_experiment(
             model_cost_tier=str(resolved_model_cost_tier),
             projected_runtime_seconds=int(resolved_projected_runtime_seconds),
             preprocessing_kind=resolved_preprocessing_kind,
+            feature_recipe_id=resolved_feature_recipe_id,
             tuning_search_space_id=effective_tuning_space_id,
             tuning_search_space_version=effective_tuning_space_version,
             tuning_inner_cv_scheme=effective_tuning_inner_cv_scheme,
@@ -1291,6 +1350,8 @@ def run_experiment(
             fit_timing_summary_path=fit_timing_summary_path,
             calibration_summary_path=calibration_summary_path,
             calibration_table_path=calibration_table_path,
+            feature_qc_summary_path=feature_qc_summary_path,
+            feature_qc_selected_samples_path=feature_qc_selected_samples_path,
             subgroup_reporting_enabled=bool(subgroup_policy.enabled),
             subgroup_dimensions=list(subgroup_policy.subgroup_dimensions),
             subgroup_min_samples_per_group=int(subgroup_policy.min_samples_per_group),
@@ -1524,6 +1585,8 @@ def run_experiment(
         fit_timing_summary_path=fit_timing_summary_path,
         calibration_summary_path=calibration_summary_path,
         calibration_table_path=calibration_table_path,
+        feature_qc_summary_path=feature_qc_summary_path,
+        feature_qc_selected_samples_path=feature_qc_selected_samples_path,
         fold_metrics_path=fold_metrics_path,
         fold_splits_path=fold_splits_path,
         predictions_path=predictions_path,
@@ -1557,6 +1620,7 @@ def run_experiment(
         methodology_policy_name=methodology_policy.policy_name.value,
         class_weight_policy=methodology_policy.class_weight_policy.value,
         tuning_enabled=bool(methodology_policy.tuning_enabled),
+        feature_recipe_id=resolved_feature_recipe_id,
         model_cost_tier=str(resolved_model_cost_tier),
         projected_runtime_seconds=int(resolved_projected_runtime_seconds),
         protocol_context=resolved_protocol_context,
@@ -1649,6 +1713,15 @@ def _build_parser() -> argparse.ArgumentParser:
         default="none",
         choices=["none", "balanced"],
         help="Class-weight policy for exploratory runs.",
+    )
+    parser.add_argument(
+        "--feature-recipe",
+        default=BASELINE_STANDARD_SCALER_RECIPE_ID,
+        choices=list(SUPPORTED_FEATURE_RECIPE_IDS),
+        help=(
+            "Fold-local feature preprocessing recipe. "
+            "Official confirmatory runs are locked to baseline_standard_scaler_v1."
+        ),
     )
     parser.add_argument(
         "--tuning-search-space-id",
@@ -1853,6 +1926,7 @@ def main(argv: list[str] | None = None) -> int:
             n_permutations=args.n_permutations,
             methodology_policy_name=args.methodology_policy,
             class_weight_policy=args.class_weight_policy,
+            feature_recipe_id=args.feature_recipe,
             tuning_enabled=(
                 str(args.methodology_policy) == MethodologyPolicyName.GROUPED_NESTED_TUNING.value
             ),

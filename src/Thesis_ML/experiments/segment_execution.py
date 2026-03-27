@@ -48,6 +48,7 @@ from Thesis_ML.experiments.segment_execution_helpers import (
     resolve_base_artifact,
 )
 from Thesis_ML.experiments.stage_execution import StageAssignment, StageKey
+from Thesis_ML.features.preprocessing import BASELINE_STANDARD_SCALER_RECIPE_ID
 from Thesis_ML.orchestration.contracts import ReusePolicy, SectionName
 
 
@@ -98,6 +99,11 @@ class SegmentExecutionRequest:
     base_run_id: str | None = None
     evidence_policy_effective: dict[str, Any] | None = None
     class_weight_policy: str = "none"
+    feature_recipe_id: str = BASELINE_STANDARD_SCALER_RECIPE_ID
+    emit_feature_qc_artifacts: bool = True
+    feature_qc_summary_path: Path | None = None
+    feature_qc_selected_samples_path: Path | None = None
+    feature_quality_policy: dict[str, Any] | None = None
     tuning_enabled: bool = False
     tuning_search_space_id: str | None = None
     tuning_search_space_version: str | None = None
@@ -471,6 +477,7 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
                     primary_metric_name=request.primary_metric_name,
                     methodology_policy_name=request.methodology_policy_name,
                     class_weight_policy=request.class_weight_policy,
+                    feature_recipe_id=request.feature_recipe_id,
                     tuning_enabled=request.tuning_enabled,
                     tuning_search_space_id=request.tuning_search_space_id,
                     tuning_search_space_version=request.tuning_search_space_version,
@@ -621,6 +628,7 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
             evaluation_output = evaluation(
                 EvaluationInput(
                     x_matrix=x_matrix,
+                    metadata_df=metadata_df,
                     y=fit_output.y,
                     splits=fit_output.splits,
                     fold_rows=fit_output.fold_rows,
@@ -633,6 +641,15 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
                     test_subject=request.test_subject,
                     n_permutations=request.n_permutations,
                     primary_metric_name=request.primary_metric_name,
+                    feature_recipe_id=request.feature_recipe_id,
+                    emit_feature_qc_artifacts=bool(request.emit_feature_qc_artifacts),
+                    feature_qc_summary_path=request.feature_qc_summary_path,
+                    feature_qc_selected_samples_path=request.feature_qc_selected_samples_path,
+                    feature_quality_policy=(
+                        dict(request.feature_quality_policy)
+                        if isinstance(request.feature_quality_policy, dict)
+                        else None
+                    ),
                     permutation_metric_name=request.permutation_metric_name,
                     permutation_alpha=float(request.permutation_alpha),
                     permutation_minimum_required=int(request.permutation_minimum_required),
