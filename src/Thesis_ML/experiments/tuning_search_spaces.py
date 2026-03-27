@@ -1,18 +1,16 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from typing import Any
 
-# Official grouped-nested tuning surface for the current thesis-facing milestone.
-OFFICIAL_LINEAR_GROUPED_NESTED_SEARCH_SPACE_ID = "official-linear-grouped-nested-v2"
-OFFICIAL_LINEAR_GROUPED_NESTED_SEARCH_SPACE_VERSION = "2.0.0"
-
-# Legacy grouped-nested space kept loadable for reproducibility/backward compatibility.
-LINEAR_GROUPED_NESTED_SEARCH_SPACE_ID = "linear-grouped-nested-v1"
-LINEAR_GROUPED_NESTED_SEARCH_SPACE_VERSION = "1.0.0"
-
-# Exploratory-only extension surface for non-linear model family.
-EXPLORATORY_XGBOOST_GROUPED_NESTED_SEARCH_SPACE_ID = "exploratory-xgboost-grouped-nested-v1"
-EXPLORATORY_XGBOOST_GROUPED_NESTED_SEARCH_SPACE_VERSION = "1.0.0"
+from Thesis_ML.experiments.model_registry import (
+    EXPLORATORY_XGBOOST_GROUPED_NESTED_SEARCH_SPACE_ID,
+    EXPLORATORY_XGBOOST_GROUPED_NESTED_SEARCH_SPACE_VERSION,
+    LINEAR_GROUPED_NESTED_SEARCH_SPACE_ID,
+    LINEAR_GROUPED_NESTED_SEARCH_SPACE_VERSION,
+    OFFICIAL_LINEAR_GROUPED_NESTED_SEARCH_SPACE_ID,
+    OFFICIAL_LINEAR_GROUPED_NESTED_SEARCH_SPACE_VERSION,
+    get_model_spec,
+)
 
 OFFICIAL_TUNING_SEARCH_SPACE_IDS: tuple[str, ...] = (
     OFFICIAL_LINEAR_GROUPED_NESTED_SEARCH_SPACE_ID,
@@ -101,5 +99,74 @@ def search_space_is_official(
     return str(search_space.get("search_space_version")) == str(search_space_version)
 
 
+def search_space_allowed_for_model(
+    *,
+    model_name: str,
+    search_space_id: str,
+) -> bool:
+    spec = get_model_spec(model_name)
+    return str(search_space_id) in set(spec.tuning_policy.allowed_search_space_ids)
+
+
+def resolve_tuning_search_space_for_model(
+    *,
+    model_name: str,
+    search_space_id: str | None,
+    search_space_version: str | None,
+) -> tuple[str, str, dict[str, list[Any]]]:
+    spec = get_model_spec(model_name)
+    if not bool(spec.tuning_policy.supports_tuning):
+        raise ValueError(f"Model '{spec.logical_name}' does not support grouped nested tuning.")
+
+    resolved_search_space_id = (
+        str(search_space_id)
+        if search_space_id is not None and str(search_space_id).strip()
+        else spec.tuning_policy.default_search_space_id
+    )
+    if not resolved_search_space_id:
+        raise ValueError(
+            f"grouped_nested_tuning requires tuning_search_space_id for model '{spec.logical_name}'."
+        )
+
+    allowed_search_spaces = set(spec.tuning_policy.allowed_search_space_ids)
+    if resolved_search_space_id not in allowed_search_spaces:
+        allowed = ", ".join(sorted(allowed_search_spaces))
+        raise ValueError(
+            f"Model '{spec.logical_name}' does not allow tuning_search_space_id "
+            f"'{resolved_search_space_id}'. Allowed values: {allowed}."
+        )
+
+    resolved_search_space_version, param_grid = get_search_space(
+        resolved_search_space_id,
+        spec.logical_name,
+    )
+    if (
+        search_space_version is not None
+        and str(search_space_version).strip()
+        and str(search_space_version) != str(resolved_search_space_version)
+    ):
+        raise ValueError(
+            "Declared tuning_search_space_version does not match search-space registry version."
+        )
+
+    return resolved_search_space_id, resolved_search_space_version, dict(param_grid)
+
+
 def known_search_space_ids() -> list[str]:
     return sorted(_SEARCH_SPACES)
+
+
+__all__ = [
+    "EXPLORATORY_XGBOOST_GROUPED_NESTED_SEARCH_SPACE_ID",
+    "EXPLORATORY_XGBOOST_GROUPED_NESTED_SEARCH_SPACE_VERSION",
+    "LINEAR_GROUPED_NESTED_SEARCH_SPACE_ID",
+    "LINEAR_GROUPED_NESTED_SEARCH_SPACE_VERSION",
+    "OFFICIAL_LINEAR_GROUPED_NESTED_SEARCH_SPACE_ID",
+    "OFFICIAL_LINEAR_GROUPED_NESTED_SEARCH_SPACE_VERSION",
+    "OFFICIAL_TUNING_SEARCH_SPACE_IDS",
+    "get_search_space",
+    "known_search_space_ids",
+    "resolve_tuning_search_space_for_model",
+    "search_space_allowed_for_model",
+    "search_space_is_official",
+]

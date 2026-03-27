@@ -72,3 +72,25 @@ print(json.dumps({
     )
     assert probe["sections_loaded"] is False
     assert probe["section_models_loaded"] is False
+
+
+def test_model_layer_imports_do_not_require_nibabel() -> None:
+    probe = _run_import_probe(
+        """
+import importlib
+import json
+import sys
+
+importlib.import_module("Thesis_ML.experiments.model_registry")
+importlib.import_module("Thesis_ML.experiments.model_admission")
+importlib.import_module("Thesis_ML.experiments.model_factory")
+importlib.import_module("Thesis_ML.experiments.official_contracts")
+importlib.import_module("Thesis_ML.comparisons.models")
+importlib.import_module("Thesis_ML.protocols.models")
+
+print(json.dumps({
+    "nibabel_loaded": "nibabel" in sys.modules,
+}))
+"""
+    )
+    assert probe["nibabel_loaded"] is False

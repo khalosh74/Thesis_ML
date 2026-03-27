@@ -33,6 +33,8 @@ Core package root: `src/Thesis_ML/`
   - indexing, cache extraction, SPM utilities
 - `experiments/`
   - full pipeline wrapper (`run_experiment.py`)
+  - central model registry + admission policy (`model_registry.py`, `model_admission.py`)
+  - fairness/evaluation contract validation (`comparison_contract.py`)
   - backend registry (`backend_registry.py`)
   - backend implementations (`backends/`)
   - compute capability probing (`compute_capabilities.py`)
@@ -104,10 +106,10 @@ Core package root: `src/Thesis_ML/`
 2. Locked comparison run (`thesisml-run-comparison`)
 - Load and validate registered comparison JSON (`comparison-spec-v1`).
 - Compile declared variants into explicit concrete run specs.
-- Validate official compute controls before dispatch:
+- Validate official compute controls before dispatch (centralized in model admission policy):
   - `cpu_only` remains default.
-  - `gpu_only` is admitted only for explicit locked-comparison allowlist entries (PR 6: `ridge` on `torch_gpu`) with `deterministic_compute=true`.
-  - `max_both` is admitted conservatively in locked comparison (PR 8) with deterministic-only execution, no fallback, explicit run-level lane assignment, and GPU lanes restricted to the approved official allowlist (currently `ridge` on `torch_gpu`).
+  - `gpu_only` is admitted only for approved locked-comparison model/backend pairs (currently `ridge` on `torch_gpu`) with `deterministic_compute=true`.
+  - `max_both` is admitted conservatively in locked comparison with deterministic-only execution, no fallback, explicit run-level lane assignment, and GPU lanes restricted to approved pairs (currently `ridge` on `torch_gpu`).
   - `allow_backend_fallback=true` remains rejected for official runs.
 - Execute each run spec through existing `run_experiment(...)`.
 - Stamp `framework_mode=locked_comparison` and comparison identity metadata.
@@ -119,9 +121,9 @@ Core package root: `src/Thesis_ML/`
 3. Confirmatory canonical thesis protocol run (`thesisml-run-protocol`)
 - Load and validate canonical protocol JSON (`thesis-protocol-v1`).
 - Compile official suites into explicit concrete run specs.
-- Validate official compute controls before dispatch:
+- Validate official compute controls before dispatch (centralized in model admission policy):
   - `cpu_only` remains default.
-  - `gpu_only` is admitted only for explicit confirmatory allowlist entries (PR 7: `ridge` on `torch_gpu`) with `deterministic_compute=true`.
+  - `gpu_only` is admitted only for approved confirmatory model/backend pairs (currently `ridge` on `torch_gpu`) with `deterministic_compute=true`.
   - `max_both` remains rejected for official runs.
   - `allow_backend_fallback=true` remains rejected for official runs.
 - Execute each run spec through existing `run_experiment(...)`.
@@ -169,6 +171,7 @@ Framework guardrails:
 - run artifacts also persist additive compute-policy metadata (`hardware_mode_*`, backend selection/fallback metadata, GPU device metadata when available); exploratory `ridge`/`logreg` may execute through `torch_gpu` lanes, PR 6 allows selectively gated locked-comparison `gpu_only` execution (`ridge`/`torch_gpu`), PR 7 allows the same conservative gate in confirmatory (`ridge`/`torch_gpu`), and PR 8 admits locked-comparison `max_both` with run-level lane stamping while confirmatory `max_both` remains disabled.
 - run artifacts also persist additive scheduling metadata (`assigned_compute_lane`, `assigned_backend_family`, `lane_assignment_reason`, `scheduler_mode_effective`) for exploratory scheduling auditability and for officially admitted locked-comparison `max_both` runs (PR 8).
 - run artifacts also persist additive stage-execution metadata (`stage_execution.policy`, `stage_execution.assignments`, `stage_execution.telemetry`) through the stage planner/registry layer (`experiments/stage_planner.py`, `experiments/stage_registry.py`) and `experiments/stage_execution.py`; Phase 2 routes `model_fit`, `tuning`, and `permutation` through typed stage assignments while preserving scientific behavior and existing workflow contracts, and Phase 3 adds a specialized exact-CPU grouped-nested `logreg` tuning executor with conservative planner-side resource/admissibility downgrades and explicit fallback reasons.
+- run artifacts persist model governance metadata from the central registry/admission layer (`logical_model_name`, `model_family`, backend family/id, feature recipe, tuning search-space id/version, official admission summary, deterministic/scheduler metadata, and `model_registry_version`) so official-path model decisions are auditable from `config.json` and `metrics.json`.
 - official comparison/confirmatory runs persist `data_policy_effective` and standardized data-layer artifacts
   (`dataset_card.*`, `dataset_summary.*`, `data_quality_report.json`, class/missingness reports, `leakage_audit.json`,
   and external compatibility artifacts when configured).

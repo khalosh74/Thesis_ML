@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 import json
 from dataclasses import dataclass
 from pathlib import Path
@@ -10,6 +11,8 @@ from Thesis_ML.experiments.compute_policy import (
     ResolvedComputePolicy,
     stamp_compute_policy_metadata,
 )
+from Thesis_ML.experiments.model_admission import official_admission_summary
+from Thesis_ML.experiments.model_registry import MODEL_REGISTRY_VERSION, get_model_spec
 from Thesis_ML.experiments.segment_execution import SegmentExecutionResult
 from Thesis_ML.experiments.stage_execution import (
     StageExecutionResult as StageExecutionMetadata,
@@ -93,6 +96,129 @@ def metric_policy_effective_payload(
         "tuning_metric": metric_policy_effective.tuning_metric,
         "permutation_metric": metric_policy_effective.permutation_metric,
         "higher_is_better": bool(metric_policy_effective.higher_is_better),
+    }
+
+
+def _normalized_backend_family_from_compute_policy(
+    compute_policy: ResolvedComputePolicy | dict[str, Any] | None,
+) -> str | None:
+    if isinstance(compute_policy, ResolvedComputePolicy):
+        candidate = compute_policy.assigned_backend_family or compute_policy.effective_backend_family
+        return str(candidate).strip().lower()
+    if isinstance(compute_policy, dict):
+        candidate = compute_policy.get("assigned_backend_family") or compute_policy.get(
+            "effective_backend_family"
+        )
+        if isinstance(candidate, str) and candidate.strip():
+            return candidate.strip().lower()
+    return None
+
+
+def _compute_backend_family_for_model_binding(backend_family: str | None) -> str | None:
+    normalized = str(backend_family).strip().lower() if backend_family is not None else None
+    if normalized in {"sklearn_cpu", "xgboost_cpu"}:
+        return "sklearn_cpu"
+    if normalized in {"torch_gpu", "xgboost_gpu"}:
+        return "torch_gpu"
+    return None
+
+
+def _resolve_best_params_payload(tuning_best_params_path: Path) -> list[dict[str, Any]] | None:
+    if not tuning_best_params_path.exists() or not tuning_best_params_path.is_file():
+        return None
+    resolved_rows: list[dict[str, Any]] = []
+    with tuning_best_params_path.open("r", encoding="utf-8", newline="") as handle:
+        reader = csv.DictReader(handle)
+        for row in reader:
+            best_params_json = str(row.get("best_params_json", "")).strip()
+            if not best_params_json or best_params_json == "{}":
+                continue
+            fold_value = row.get("fold")
+            resolved_rows.append(
+                {
+                    "fold": int(fold_value) if str(fold_value).strip().isdigit() else fold_value,
+                    "best_params_json": best_params_json,
+                }
+            )
+    return resolved_rows if resolved_rows else None
+
+
+def _model_governance_payload(
+    *,
+    model_name: str,
+    framework_mode: str,
+    feature_recipe_id: str,
+    tuning_search_space_id: str | None,
+    tuning_search_space_version: str | None,
+    compute_policy: ResolvedComputePolicy | dict[str, Any] | None,
+    compute_runtime_metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    spec = get_model_spec(model_name)
+    backend_family = _normalized_backend_family_from_compute_policy(compute_policy)
+    runtime_backend_family = (
+        str(compute_runtime_metadata.get("actual_estimator_backend_family")).strip().lower()
+        if isinstance(compute_runtime_metadata, dict)
+        and isinstance(compute_runtime_metadata.get("actual_estimator_backend_family"), str)
+        and str(compute_runtime_metadata.get("actual_estimator_backend_family")).strip()
+        else None
+    )
+    resolved_backend_family = runtime_backend_family or backend_family
+    compute_backend_family = _compute_backend_family_for_model_binding(resolved_backend_family)
+    binding = (
+        spec.backend_binding_for_compute_family(compute_backend_family)
+        if compute_backend_family is not None
+        else None
+    )
+    backend_id = (
+        str(compute_runtime_metadata.get("actual_estimator_backend_id"))
+        if isinstance(compute_runtime_metadata, dict)
+        and compute_runtime_metadata.get("actual_estimator_backend_id") is not None
+        else None
+    )
+    if backend_id is None and binding is not None:
+        backend_id = str(binding.backend_id)
+    if backend_id is None and isinstance(compute_runtime_metadata, dict):
+        runtime_backend_id = compute_runtime_metadata.get("backend_id")
+        if runtime_backend_id is not None:
+            backend_id = str(runtime_backend_id)
+
+    hardware_mode = "cpu_only"
+    deterministic_compute = False
+    allow_backend_fallback = False
+    scheduler_lane_assignment = None
+    if isinstance(compute_policy, ResolvedComputePolicy):
+        hardware_mode = str(compute_policy.hardware_mode_requested)
+        deterministic_compute = bool(compute_policy.deterministic_compute)
+        allow_backend_fallback = bool(compute_policy.allow_backend_fallback)
+        scheduler_lane_assignment = compute_policy.assigned_compute_lane
+    elif isinstance(compute_policy, dict):
+        if compute_policy.get("hardware_mode_requested") is not None:
+            hardware_mode = str(compute_policy.get("hardware_mode_requested"))
+        deterministic_compute = bool(compute_policy.get("deterministic_compute", False))
+        allow_backend_fallback = bool(compute_policy.get("allow_backend_fallback", False))
+        scheduler_lane_assignment = compute_policy.get("assigned_compute_lane")
+
+    admission = official_admission_summary(
+        framework_mode=framework_mode,
+        model_name=spec.logical_name,
+        backend_family=resolved_backend_family,
+        hardware_mode=hardware_mode,
+    )
+
+    return {
+        "logical_model_name": spec.logical_name,
+        "model_family": spec.model_family,
+        "backend_family": resolved_backend_family,
+        "backend_id": backend_id,
+        "feature_recipe_id": str(feature_recipe_id),
+        "tuning_search_space_id": tuning_search_space_id,
+        "tuning_search_space_version": tuning_search_space_version,
+        "official_admission_summary": admission,
+        "deterministic_compute_required": bool(admission.get("deterministic_compute_required")),
+        "deterministic_compute": bool(deterministic_compute),
+        "allow_backend_fallback": bool(allow_backend_fallback),
+        "scheduler_lane_assignment": scheduler_lane_assignment,
+        "model_registry_version": MODEL_REGISTRY_VERSION,
     }
 
 
@@ -208,6 +334,34 @@ def stamp_metrics_artifact(
     persisted_metrics["comparison_id"] = identity.comparison_id
     persisted_metrics["comparison_version"] = identity.comparison_version
     persisted_metrics["comparison_variant_id"] = identity.comparison_variant_id
+    resolved_model_name = (
+        str(persisted_metrics.get("model")).strip().lower()
+        if persisted_metrics.get("model") is not None
+        else None
+    )
+    if resolved_model_name:
+        governance_payload = _model_governance_payload(
+            model_name=resolved_model_name,
+            framework_mode=str(framework_mode),
+            feature_recipe_id=str(feature_recipe_id),
+            tuning_search_space_id=(
+                str(persisted_metrics.get("tuning_search_space_id"))
+                if persisted_metrics.get("tuning_search_space_id") is not None
+                else None
+            ),
+            tuning_search_space_version=(
+                str(persisted_metrics.get("tuning_search_space_version"))
+                if persisted_metrics.get("tuning_search_space_version") is not None
+                else None
+            ),
+            compute_policy=compute_policy,
+            compute_runtime_metadata=compute_runtime_metadata,
+        )
+        persisted_metrics["model_governance"] = dict(governance_payload)
+        persisted_metrics.update(governance_payload)
+    resolved_best_params = _resolve_best_params_payload(tuning_best_params_path)
+    if resolved_best_params is not None:
+        persisted_metrics["resolved_best_params"] = resolved_best_params
     if dataset_fingerprint is not None:
         persisted_metrics["dataset_fingerprint"] = dict(dataset_fingerprint)
     if git_provenance is not None:
@@ -504,6 +658,17 @@ def build_run_config_payload(
             else False
         ),
     }
+    governance_payload = _model_governance_payload(
+        model_name=str(model),
+        framework_mode=str(framework_mode),
+        feature_recipe_id=str(feature_recipe_id),
+        tuning_search_space_id=tuning_search_space_id,
+        tuning_search_space_version=tuning_search_space_version,
+        compute_policy=compute_policy,
+        compute_runtime_metadata=compute_runtime_metadata,
+    )
+    payload["model_governance"] = dict(governance_payload)
+    payload.update(governance_payload)
     stage_execution_data = _stage_execution_payload(stage_execution)
     if stage_execution_data is not None:
         payload["stage_execution"] = stage_execution_data

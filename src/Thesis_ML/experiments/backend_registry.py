@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from Thesis_ML.experiments.backends.common import (
     BackendResolution,
@@ -29,6 +29,10 @@ from Thesis_ML.experiments.backends.xgboost_gpu import (
     xgboost_gpu_support_status,
 )
 from Thesis_ML.experiments.compute_policy import ResolvedComputePolicy
+from Thesis_ML.experiments.model_registry import (
+    get_model_spec,
+    models_supporting_compute_backend_family,
+)
 
 
 def _unsupported_backend_message(
@@ -46,10 +50,22 @@ def _unsupported_backend_message(
 
 
 def _unsupported_torch_gpu_model_message(model_name: str) -> str:
+    supported_models = ", ".join(models_supporting_compute_backend_family("torch_gpu"))
     return (
         "Unsupported torch_gpu backend request: "
-        f"model='{model_name}'. Supported models: ridge, logreg, xgboost."
+        f"model='{model_name}'. Supported models: {supported_models}."
     )
+
+
+def _compute_backend_family_for_effective_backend_family(
+    effective_backend_family: str,
+) -> str | None:
+    normalized = str(effective_backend_family).strip().lower()
+    if normalized == "sklearn_cpu":
+        return "sklearn_cpu"
+    if normalized == "torch_gpu":
+        return "torch_gpu"
+    return None
 
 
 def resolve_backend_support(
@@ -58,78 +74,76 @@ def resolve_backend_support(
 ) -> BackendSupport:
     normalized_model_name = normalize_model_name(model_name)
     effective_backend_family = effective_backend_family_for_resolution(compute_policy)
-
-    if effective_backend_family == "sklearn_cpu":
-        if normalized_model_name == "xgboost":
-            supported, reason = xgboost_cpu_support_status()
-            return BackendSupport(
-                model_name=normalized_model_name,
-                effective_backend_family=effective_backend_family,
-                supported=bool(supported),
-                backend_id=(XGBOOST_CPU_BACKEND_ID if supported else None),
-                reason=(None if supported else str(reason or "xgboost_cpu_backend_unavailable")),
-            )
-        try:
-            resolve_cpu_reference_constructor(normalized_model_name)
-        except ValueError as exc:
-            return BackendSupport(
-                model_name=normalized_model_name,
-                effective_backend_family=effective_backend_family,
-                supported=False,
-                backend_id=None,
-                reason=str(exc),
-            )
-
+    compute_backend_family = _compute_backend_family_for_effective_backend_family(
+        effective_backend_family
+    )
+    if compute_backend_family is None:
         return BackendSupport(
             model_name=normalized_model_name,
             effective_backend_family=effective_backend_family,
-            supported=True,
-            backend_id=CPU_REFERENCE_BACKEND_ID,
-            reason=None,
+            supported=False,
+            backend_id=None,
+            reason=_unsupported_backend_message(
+                model_name=normalized_model_name,
+                effective_backend_family=effective_backend_family,
+            ),
         )
 
-    if effective_backend_family == "torch_gpu":
-        if normalized_model_name == "xgboost":
-            gpu_device_id = (
-                int(compute_policy.gpu_device_id)
-                if compute_policy is not None and compute_policy.gpu_device_id is not None
-                else None
+    spec = get_model_spec(normalized_model_name)
+    binding = spec.backend_binding_for_compute_family(compute_backend_family)
+    if binding is None:
+        if effective_backend_family == "torch_gpu":
+            reason = _unsupported_torch_gpu_model_message(normalized_model_name)
+        else:
+            supported_families = ", ".join(
+                sorted({str(value.compute_backend_family) for value in spec.backend_bindings})
             )
-            supported, reason = xgboost_gpu_support_status(gpu_device_id=gpu_device_id)
-            return BackendSupport(
-                model_name=normalized_model_name,
-                effective_backend_family=effective_backend_family,
-                supported=bool(supported),
-                backend_id=(XGBOOST_GPU_BACKEND_ID if supported else None),
-                reason=(None if supported else str(reason or "xgboost_gpu_backend_unavailable")),
+            reason = (
+                "Unsupported backend resolution for model: "
+                f"model='{normalized_model_name}', "
+                f"effective_backend_family='{effective_backend_family}'. "
+                f"Supported compute backend families for model are: {supported_families}."
             )
-        if normalized_model_name not in {"ridge", "logreg"}:
-            return BackendSupport(
-                model_name=normalized_model_name,
-                effective_backend_family=effective_backend_family,
-                supported=False,
-                backend_id=None,
-                reason=_unsupported_torch_gpu_model_message(normalized_model_name),
-            )
-        backend_id = (
-            TORCH_RIDGE_BACKEND_ID if normalized_model_name == "ridge" else TORCH_LOGREG_BACKEND_ID
-        )
         return BackendSupport(
             model_name=normalized_model_name,
             effective_backend_family=effective_backend_family,
-            supported=True,
-            backend_id=backend_id,
-            reason=None,
+            supported=False,
+            backend_id=None,
+            reason=reason,
         )
+
+    backend_id = str(binding.backend_id)
+    if backend_id == XGBOOST_CPU_BACKEND_ID:
+        supported, reason = xgboost_cpu_support_status()
+        return BackendSupport(
+            model_name=normalized_model_name,
+            effective_backend_family=effective_backend_family,
+            supported=bool(supported),
+            backend_id=(XGBOOST_CPU_BACKEND_ID if supported else None),
+            reason=(None if supported else str(reason or "xgboost_cpu_backend_unavailable")),
+        )
+
+    if backend_id == XGBOOST_GPU_BACKEND_ID:
+        gpu_device_id = (
+            int(compute_policy.gpu_device_id)
+            if compute_policy is not None and compute_policy.gpu_device_id is not None
+            else None
+        )
+        supported, reason = xgboost_gpu_support_status(gpu_device_id=gpu_device_id)
+        return BackendSupport(
+            model_name=normalized_model_name,
+            effective_backend_family=effective_backend_family,
+            supported=bool(supported),
+            backend_id=(XGBOOST_GPU_BACKEND_ID if supported else None),
+            reason=(None if supported else str(reason or "xgboost_gpu_backend_unavailable")),
+        )
+
     return BackendSupport(
         model_name=normalized_model_name,
         effective_backend_family=effective_backend_family,
-        supported=False,
-        backend_id=None,
-        reason=_unsupported_backend_message(
-            model_name=normalized_model_name,
-            effective_backend_family=effective_backend_family,
-        ),
+        supported=True,
+        backend_id=backend_id,
+        reason=None,
     )
 
 

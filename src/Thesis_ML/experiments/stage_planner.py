@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 from Thesis_ML.config.framework_mode import FrameworkMode, coerce_framework_mode
 from Thesis_ML.experiments.compute_policy import ResolvedComputePolicy
+from Thesis_ML.experiments.model_registry import get_model_spec
 from Thesis_ML.experiments.stage_execution import (
     StageAssignment,
     StageBackendFamily,
@@ -32,6 +33,24 @@ from Thesis_ML.experiments.stage_registry import (
     get_stage_executor,
     stage_executor_support_status,
 )
+
+_MODEL_FIT_EXECUTOR_BY_ROUTE: dict[str, str] = {
+    "cpu_reference": MODEL_FIT_CPU_EXECUTOR_ID,
+    "torch_ridge": MODEL_FIT_TORCH_RIDGE_EXECUTOR_ID,
+    "torch_logreg": MODEL_FIT_TORCH_LOGREG_EXECUTOR_ID,
+    "xgboost_cpu": MODEL_FIT_XGBOOST_CPU_EXECUTOR_ID,
+    "xgboost_gpu": MODEL_FIT_XGBOOST_GPU_EXECUTOR_ID,
+}
+_TUNING_EXECUTOR_BY_ROUTE: dict[str, str] = {
+    "generic": TUNING_GENERIC_EXECUTOR_ID,
+    "control_skip": TUNING_SKIPPED_CONTROL_EXECUTOR_ID,
+    "linearsvc_specialized": SPECIALIZED_LINEARSVC_TUNING_EXECUTOR_ID,
+    "logreg_specialized": SPECIALIZED_LOGREG_TUNING_EXECUTOR_ID,
+}
+_PERMUTATION_EXECUTOR_BY_ROUTE: dict[str, str] = {
+    "reference": PERMUTATION_REFERENCE_EXECUTOR_ID,
+    "ridge_gpu_preferred": PERMUTATION_RIDGE_GPU_PREFERRED_EXECUTOR_ID,
+}
 
 
 @dataclass(frozen=True)
@@ -244,46 +263,50 @@ def _resolve_executor_for_stage(
     )
 
 
+def _executor_candidates_from_route_tokens(
+    *,
+    route_tokens: tuple[str, ...],
+    route_map: dict[str, str],
+    fallback_executor_id: str,
+) -> tuple[str, ...]:
+    executor_ids: list[str] = []
+    for route_token in route_tokens:
+        executor_id = route_map.get(str(route_token))
+        if executor_id is None:
+            continue
+        if executor_id in executor_ids:
+            continue
+        executor_ids.append(executor_id)
+    if not executor_ids:
+        executor_ids.append(fallback_executor_id)
+    return tuple(executor_ids)
+
+
 def _model_fit_executor_candidates(model_name: str) -> tuple[str, ...]:
-    normalized = str(model_name).strip().lower()
-    if normalized == "dummy":
-        return (MODEL_FIT_CPU_EXECUTOR_ID,)
-    if normalized == "linearsvc":
-        return (MODEL_FIT_CPU_EXECUTOR_ID,)
-    if normalized == "logreg":
-        return (MODEL_FIT_CPU_EXECUTOR_ID, MODEL_FIT_TORCH_LOGREG_EXECUTOR_ID)
-    if normalized == "ridge":
-        return (MODEL_FIT_TORCH_RIDGE_EXECUTOR_ID, MODEL_FIT_CPU_EXECUTOR_ID)
-    if normalized == "xgboost":
-        return (MODEL_FIT_XGBOOST_GPU_EXECUTOR_ID, MODEL_FIT_XGBOOST_CPU_EXECUTOR_ID)
-    return (MODEL_FIT_CPU_EXECUTOR_ID,)
+    spec = get_model_spec(model_name)
+    return _executor_candidates_from_route_tokens(
+        route_tokens=tuple(spec.model_fit_route),
+        route_map=_MODEL_FIT_EXECUTOR_BY_ROUTE,
+        fallback_executor_id=MODEL_FIT_CPU_EXECUTOR_ID,
+    )
 
 
 def _tuning_executor_candidates(model_name: str) -> tuple[str, ...]:
-    normalized = str(model_name).strip().lower()
-    if normalized == "dummy":
-        return (TUNING_SKIPPED_CONTROL_EXECUTOR_ID,)
-    if normalized == "linearsvc":
-        return (SPECIALIZED_LINEARSVC_TUNING_EXECUTOR_ID, TUNING_GENERIC_EXECUTOR_ID)
-    if normalized == "logreg":
-        return (SPECIALIZED_LOGREG_TUNING_EXECUTOR_ID, TUNING_GENERIC_EXECUTOR_ID)
-    if normalized == "ridge":
-        return (TUNING_GENERIC_EXECUTOR_ID,)
-    if normalized == "xgboost":
-        return (TUNING_GENERIC_EXECUTOR_ID,)
-    return (TUNING_GENERIC_EXECUTOR_ID,)
+    spec = get_model_spec(model_name)
+    return _executor_candidates_from_route_tokens(
+        route_tokens=tuple(spec.tuning_route),
+        route_map=_TUNING_EXECUTOR_BY_ROUTE,
+        fallback_executor_id=TUNING_GENERIC_EXECUTOR_ID,
+    )
 
 
 def _permutation_executor_candidates(model_name: str) -> tuple[str, ...]:
-    normalized = str(model_name).strip().lower()
-    if normalized == "ridge":
-        return (
-            PERMUTATION_RIDGE_GPU_PREFERRED_EXECUTOR_ID,
-            PERMUTATION_REFERENCE_EXECUTOR_ID,
-        )
-    if normalized == "xgboost":
-        return (PERMUTATION_REFERENCE_EXECUTOR_ID,)
-    return (PERMUTATION_REFERENCE_EXECUTOR_ID,)
+    spec = get_model_spec(model_name)
+    return _executor_candidates_from_route_tokens(
+        route_tokens=tuple(spec.permutation_route),
+        route_map=_PERMUTATION_EXECUTOR_BY_ROUTE,
+        fallback_executor_id=PERMUTATION_REFERENCE_EXECUTOR_ID,
+    )
 
 
 def _plan_stage_assignments_map(

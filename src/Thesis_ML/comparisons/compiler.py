@@ -17,6 +17,9 @@ from Thesis_ML.comparisons.models import (
 )
 from Thesis_ML.config.framework_mode import FrameworkMode
 from Thesis_ML.config.methodology import EvidenceRunRole, MethodologyPolicyName
+from Thesis_ML.experiments.comparison_contract import (
+    validate_locked_comparison_fairness_contract,
+)
 from Thesis_ML.experiments.model_catalog import (
     get_model_cost_entry,
     projected_runtime_seconds,
@@ -124,6 +127,10 @@ def compile_comparison(
             selected_variant_ids.append(variant_id)
     if not selected_variant_ids:
         raise ValueError("No comparison variants selected for compilation.")
+    validate_locked_comparison_fairness_contract(
+        comparison=comparison,
+        selected_variant_ids=selected_variant_ids,
+    )
 
     contract = comparison.scientific_contract
     control_policy = comparison.control_policy

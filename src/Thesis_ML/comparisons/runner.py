@@ -29,6 +29,12 @@ from Thesis_ML.experiments.compute_policy import (
 from Thesis_ML.experiments.compute_scheduler import ComputeRunRequest, plan_compute_schedule
 from Thesis_ML.experiments.errors import exception_failure_payload
 from Thesis_ML.experiments.execution_policy import read_run_status
+from Thesis_ML.experiments.model_admission import (
+    official_gpu_only_backend_pairs,
+    official_gpu_only_model_backend_allowed,
+    official_max_both_gpu_lane_backend_pairs,
+    official_max_both_gpu_lane_eligible,
+)
 from Thesis_ML.experiments.parallel_execution import (
     OfficialRunJob,
     execute_official_run_jobs,
@@ -48,25 +54,35 @@ from Thesis_ML.experiments.runtime_policies import (
 from Thesis_ML.experiments.timeout_watchdog import execute_run_with_timeout_watchdog
 from Thesis_ML.verification.official_artifacts import verify_official_artifacts
 
-_OFFICIAL_LOCKED_COMPARISON_GPU_ALLOWLIST: frozenset[tuple[str, str]] = frozenset(
-    {
-        ("ridge", "torch_gpu"),
-    }
-)
-_OFFICIAL_LOCKED_COMPARISON_MAX_BOTH_GPU_LANE_ALLOWLIST: frozenset[tuple[str, str]] = frozenset(
-    {
-        ("ridge", "torch_gpu"),
-    }
-)
 _OFFICIAL_LOCKED_COMPARISON_MAX_PARALLEL_GPU_RUNS = 1
 
 
+def _official_locked_comparison_gpu_allowlist() -> frozenset[tuple[str, str]]:
+    return frozenset(
+        official_gpu_only_backend_pairs(framework_mode=FrameworkMode.LOCKED_COMPARISON)
+    )
+
+
+def _official_locked_comparison_max_both_gpu_lane_allowlist() -> frozenset[tuple[str, str]]:
+    return frozenset(
+        official_max_both_gpu_lane_backend_pairs(framework_mode=FrameworkMode.LOCKED_COMPARISON)
+    )
+
+
 def _official_locked_comparison_max_both_gpu_models() -> set[str]:
-    return {
-        str(model_name).strip().lower()
-        for model_name, backend_family in _OFFICIAL_LOCKED_COMPARISON_MAX_BOTH_GPU_LANE_ALLOWLIST
-        if str(backend_family).strip().lower() == "torch_gpu"
-    }
+    approved_models: set[str] = set()
+    for model_name, backend_family in _official_locked_comparison_max_both_gpu_lane_allowlist():
+        normalized_model = str(model_name).strip().lower()
+        normalized_backend = str(backend_family).strip().lower()
+        if not official_max_both_gpu_lane_eligible(
+            framework_mode=FrameworkMode.LOCKED_COMPARISON,
+            model_name=normalized_model,
+            backend_family=normalized_backend,
+        ):
+            continue
+        if normalized_backend == "torch_gpu":
+            approved_models.add(normalized_model)
+    return approved_models
 
 
 def _resolve_official_comparison_schedule_assignments(
@@ -187,11 +203,16 @@ def _validate_official_comparison_gpu_admission(
         return
 
     backend_family = str(compute_policy.effective_backend_family)
+    allowlist = _official_locked_comparison_gpu_allowlist()
     disallowed_runs: list[str] = []
     unsupported_runs: list[str] = []
     for run_spec in compiled_manifest.runs:
         model_name = str(run_spec.model).strip().lower()
-        if (model_name, backend_family) not in _OFFICIAL_LOCKED_COMPARISON_GPU_ALLOWLIST:
+        if not official_gpu_only_model_backend_allowed(
+            framework_mode=FrameworkMode.LOCKED_COMPARISON,
+            model_name=model_name,
+            backend_family=backend_family,
+        ):
             disallowed_runs.append(f"{run_spec.run_id}:{model_name}")
             continue
         backend_support = resolve_backend_support(model_name, compute_policy)
@@ -202,7 +223,7 @@ def _validate_official_comparison_gpu_admission(
     if disallowed_runs or unsupported_runs:
         allowed_combinations = ", ".join(
             f"{model_name}/{family}"
-            for model_name, family in sorted(_OFFICIAL_LOCKED_COMPARISON_GPU_ALLOWLIST)
+            for model_name, family in sorted(allowlist)
         )
         detail_parts = []
         if disallowed_runs:

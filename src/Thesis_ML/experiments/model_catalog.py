@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
@@ -6,7 +6,7 @@ from typing import Any
 
 from Thesis_ML.config.framework_mode import FrameworkMode, coerce_framework_mode
 from Thesis_ML.config.methodology import MethodologyPolicyName
-from Thesis_ML.experiments.model_factory import ALL_MODEL_NAMES
+from Thesis_ML.experiments.model_registry import iter_model_specs, registered_model_names
 
 
 class ModelCostTier(StrEnum):
@@ -53,86 +53,26 @@ def _validate_runtime_map(
 
 
 def _build_catalog() -> dict[str, ModelCostEntry]:
-    entries = [
-        ModelCostEntry(
-            model_name="ridge",
-            cost_tier=ModelCostTier.OFFICIAL_FAST,
+    catalog: dict[str, ModelCostEntry] = {}
+    for spec in iter_model_specs():
+        catalog[spec.logical_name] = ModelCostEntry(
+            model_name=spec.logical_name,
+            cost_tier=ModelCostTier(spec.cost_tier),
             projected_runtime_seconds_by_mode=_validate_runtime_map(
-                "ridge",
-                {
-                    FrameworkMode.EXPLORATORY.value: 15 * 60,
-                    FrameworkMode.LOCKED_COMPARISON.value: 25 * 60,
-                    FrameworkMode.CONFIRMATORY.value: 20 * 60,
-                },
+                spec.logical_name,
+                dict(spec.projected_runtime_seconds_by_mode),
             ),
-            grouped_nested_runtime_multiplier=1.25,
-            notes="Linear baseline with stable runtime envelope.",
-        ),
-        ModelCostEntry(
-            model_name="linearsvc",
-            cost_tier=ModelCostTier.OFFICIAL_ALLOWED,
-            projected_runtime_seconds_by_mode=_validate_runtime_map(
-                "linearsvc",
-                {
-                    FrameworkMode.EXPLORATORY.value: 20 * 60,
-                    FrameworkMode.LOCKED_COMPARISON.value: 35 * 60,
-                    FrameworkMode.CONFIRMATORY.value: 30 * 60,
-                },
+            grouped_nested_runtime_multiplier=float(spec.grouped_nested_runtime_multiplier),
+            timeout_override_seconds=(
+                int(spec.timeout_override_seconds)
+                if spec.timeout_override_seconds is not None
+                else None
             ),
-            grouped_nested_runtime_multiplier=1.25,
-            notes="Allowed official model with moderate runtime.",
-        ),
-        ModelCostEntry(
-            model_name="logreg",
-            cost_tier=ModelCostTier.BENCHMARK_EXPENSIVE,
-            projected_runtime_seconds_by_mode=_validate_runtime_map(
-                "logreg",
-                {
-                    FrameworkMode.EXPLORATORY.value: 35 * 60,
-                    FrameworkMode.LOCKED_COMPARISON.value: 70 * 60,
-                    FrameworkMode.CONFIRMATORY.value: 55 * 60,
-                },
-            ),
-            grouped_nested_runtime_multiplier=1.25,
-            timeout_override_seconds=120 * 60,
-            requires_explicit_comparison_spec=True,
-            notes="Expensive benchmark model that must be explicitly declared in comparison specs.",
-        ),
-        ModelCostEntry(
-            model_name="dummy",
-            cost_tier=ModelCostTier.OFFICIAL_FAST,
-            projected_runtime_seconds_by_mode=_validate_runtime_map(
-                "dummy",
-                {
-                    FrameworkMode.EXPLORATORY.value: 60,
-                    FrameworkMode.LOCKED_COMPARISON.value: 90,
-                    FrameworkMode.CONFIRMATORY.value: 90,
-                },
-            ),
-            grouped_nested_runtime_multiplier=1.0,
-            notes="Control baseline with negligible runtime.",
-        ),
-        ModelCostEntry(
-            model_name="xgboost",
-            cost_tier=ModelCostTier.EXPLORATORY_ONLY,
-            projected_runtime_seconds_by_mode=_validate_runtime_map(
-                "xgboost",
-                {
-                    FrameworkMode.EXPLORATORY.value: 45 * 60,
-                    FrameworkMode.LOCKED_COMPARISON.value: 90 * 60,
-                    FrameworkMode.CONFIRMATORY.value: 90 * 60,
-                },
-            ),
-            grouped_nested_runtime_multiplier=1.25,
-            notes=(
-                "Exploratory-only gradient boosting family. "
-                "Not admitted on locked-comparison or confirmatory official paths."
-            ),
-        ),
-    ]
+            requires_explicit_comparison_spec=bool(spec.requires_explicit_comparison_spec),
+            notes=spec.notes,
+        )
 
-    catalog = {entry.model_name: entry for entry in entries}
-    unsupported = sorted(set(ALL_MODEL_NAMES) - set(catalog.keys()))
+    unsupported = sorted(set(registered_model_names()) - set(catalog.keys()))
     if unsupported:
         raise ValueError(
             "Model cost catalog is missing supported models: " + ", ".join(unsupported)

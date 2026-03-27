@@ -31,6 +31,7 @@ from Thesis_ML.experiments.stage_execution import (
     StageExecutorEquivalence,
     StageKey,
 )
+from Thesis_ML.experiments.model_registry import iter_model_specs
 
 StageExecutorSupportPredicate = Callable[
     ["StageExecutorSelectionContext"],
@@ -86,6 +87,20 @@ class StageExecutorSpec:
     official_admitted: bool
     support_predicate: StageExecutorSupportPredicate
     execute: StageExecutorEntrypoint
+
+
+def _models_for_route(
+    *,
+    route_field: str,
+    route_token: str,
+) -> tuple[str, ...]:
+    resolved: list[str] = []
+    for spec in iter_model_specs():
+        route_values = tuple(getattr(spec, route_field))
+        if str(route_token) not in route_values:
+            continue
+        resolved.append(str(spec.logical_name))
+    return tuple(resolved)
 
 
 def _support_always(_: StageExecutorSelectionContext) -> tuple[bool, str | None]:
@@ -598,7 +613,10 @@ def _build_registry() -> tuple[StageExecutorSpec, ...]:
             executor_id=MODEL_FIT_CPU_EXECUTOR_ID,
             stage_key=StageKey.MODEL_FIT,
             backend_family=StageBackendFamily.SKLEARN_CPU,
-            supported_model_names=("dummy", "linearsvc", "logreg", "ridge"),
+            supported_model_names=_models_for_route(
+                route_field="model_fit_route",
+                route_token="cpu_reference",
+            ),
             equivalence_class="exact_reference_equivalent",
             official_admitted=True,
             support_predicate=_support_always,
@@ -608,7 +626,10 @@ def _build_registry() -> tuple[StageExecutorSpec, ...]:
             executor_id=MODEL_FIT_TORCH_RIDGE_EXECUTOR_ID,
             stage_key=StageKey.MODEL_FIT,
             backend_family=StageBackendFamily.TORCH_GPU,
-            supported_model_names=("ridge",),
+            supported_model_names=_models_for_route(
+                route_field="model_fit_route",
+                route_token="torch_ridge",
+            ),
             equivalence_class="validated_variant",
             official_admitted=True,
             support_predicate=_support_torch_backend,
@@ -618,7 +639,10 @@ def _build_registry() -> tuple[StageExecutorSpec, ...]:
             executor_id=MODEL_FIT_TORCH_LOGREG_EXECUTOR_ID,
             stage_key=StageKey.MODEL_FIT,
             backend_family=StageBackendFamily.TORCH_GPU,
-            supported_model_names=("logreg",),
+            supported_model_names=_models_for_route(
+                route_field="model_fit_route",
+                route_token="torch_logreg",
+            ),
             equivalence_class="validated_variant",
             official_admitted=False,
             support_predicate=_support_torch_backend,
@@ -628,7 +652,10 @@ def _build_registry() -> tuple[StageExecutorSpec, ...]:
             executor_id=MODEL_FIT_XGBOOST_CPU_EXECUTOR_ID,
             stage_key=StageKey.MODEL_FIT,
             backend_family=StageBackendFamily.XGBOOST_CPU,
-            supported_model_names=("xgboost",),
+            supported_model_names=_models_for_route(
+                route_field="model_fit_route",
+                route_token="xgboost_cpu",
+            ),
             equivalence_class="validated_variant",
             official_admitted=False,
             support_predicate=_support_xgboost_cpu,
@@ -638,7 +665,10 @@ def _build_registry() -> tuple[StageExecutorSpec, ...]:
             executor_id=MODEL_FIT_XGBOOST_GPU_EXECUTOR_ID,
             stage_key=StageKey.MODEL_FIT,
             backend_family=StageBackendFamily.XGBOOST_GPU,
-            supported_model_names=("xgboost",),
+            supported_model_names=_models_for_route(
+                route_field="model_fit_route",
+                route_token="xgboost_gpu",
+            ),
             equivalence_class="validated_variant",
             official_admitted=False,
             support_predicate=_support_xgboost_gpu,
@@ -648,7 +678,10 @@ def _build_registry() -> tuple[StageExecutorSpec, ...]:
             executor_id=TUNING_GENERIC_EXECUTOR_ID,
             stage_key=StageKey.TUNING,
             backend_family=StageBackendFamily.AUTO_MIXED,
-            supported_model_names=("linearsvc", "logreg", "ridge", "xgboost"),
+            supported_model_names=_models_for_route(
+                route_field="tuning_route",
+                route_token="generic",
+            ),
             equivalence_class="exact_reference_equivalent",
             official_admitted=True,
             support_predicate=_support_always,
@@ -658,7 +691,10 @@ def _build_registry() -> tuple[StageExecutorSpec, ...]:
             executor_id=SPECIALIZED_LINEARSVC_TUNING_EXECUTOR_ID,
             stage_key=StageKey.TUNING,
             backend_family=StageBackendFamily.SKLEARN_CPU,
-            supported_model_names=("linearsvc",),
+            supported_model_names=_models_for_route(
+                route_field="tuning_route",
+                route_token="linearsvc_specialized",
+            ),
             equivalence_class="exact_reference_equivalent",
             official_admitted=True,
             support_predicate=_support_always,
@@ -668,7 +704,10 @@ def _build_registry() -> tuple[StageExecutorSpec, ...]:
             executor_id=SPECIALIZED_LOGREG_TUNING_EXECUTOR_ID,
             stage_key=StageKey.TUNING,
             backend_family=StageBackendFamily.SKLEARN_CPU,
-            supported_model_names=("logreg",),
+            supported_model_names=_models_for_route(
+                route_field="tuning_route",
+                route_token="logreg_specialized",
+            ),
             equivalence_class="exact_reference_equivalent",
             official_admitted=True,
             support_predicate=_support_logreg_specialized_cpu,
@@ -678,7 +717,10 @@ def _build_registry() -> tuple[StageExecutorSpec, ...]:
             executor_id=TUNING_SKIPPED_CONTROL_EXECUTOR_ID,
             stage_key=StageKey.TUNING,
             backend_family=StageBackendFamily.SKLEARN_CPU,
-            supported_model_names=("dummy",),
+            supported_model_names=_models_for_route(
+                route_field="tuning_route",
+                route_token="control_skip",
+            ),
             equivalence_class="exact_reference_equivalent",
             official_admitted=True,
             support_predicate=_support_always,
@@ -688,7 +730,10 @@ def _build_registry() -> tuple[StageExecutorSpec, ...]:
             executor_id=PERMUTATION_REFERENCE_EXECUTOR_ID,
             stage_key=StageKey.PERMUTATION,
             backend_family=StageBackendFamily.AUTO_MIXED,
-            supported_model_names=("dummy", "linearsvc", "logreg", "ridge", "xgboost"),
+            supported_model_names=_models_for_route(
+                route_field="permutation_route",
+                route_token="reference",
+            ),
             equivalence_class="exact_reference_equivalent",
             official_admitted=True,
             support_predicate=_support_always,
@@ -698,7 +743,10 @@ def _build_registry() -> tuple[StageExecutorSpec, ...]:
             executor_id=PERMUTATION_RIDGE_GPU_PREFERRED_EXECUTOR_ID,
             stage_key=StageKey.PERMUTATION,
             backend_family=StageBackendFamily.TORCH_GPU,
-            supported_model_names=("ridge",),
+            supported_model_names=_models_for_route(
+                route_field="permutation_route",
+                route_token="ridge_gpu_preferred",
+            ),
             equivalence_class="validated_variant",
             official_admitted=True,
             support_predicate=_support_torch_backend,

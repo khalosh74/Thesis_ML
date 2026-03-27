@@ -30,11 +30,11 @@ from Thesis_ML.experiments.model_catalog import (
     projected_runtime_seconds,
     supported_model_cost_tiers,
 )
-from Thesis_ML.experiments.model_factory import (
-    ALL_MODEL_NAMES,
-    OFFICIAL_MODEL_NAMES,
-    model_is_officially_admitted,
+from Thesis_ML.experiments.model_admission import (
+    admitted_models_for_framework,
+    model_allowed_in_confirmatory,
 )
+from Thesis_ML.experiments.model_registry import get_model_spec, registered_model_names
 from Thesis_ML.experiments.run_states import (
     RUN_STATUS_COMPLETED_LEGACY,
     RUN_STATUS_FAILED,
@@ -94,13 +94,15 @@ REQUIRED_RUN_ARTIFACTS_BASELINE = (
     "calibration_summary.json",
     "calibration_table.csv",
 )
+ALL_MODEL_NAMES = registered_model_names()
+_OFFICIAL_CONFIRMATORY_MODEL_NAMES = admitted_models_for_framework(FrameworkMode.CONFIRMATORY)
 
 
 def _reject_exploratory_only_official_model(*, model_name: str, field_name: str) -> None:
     normalized_model = str(model_name).strip().lower()
-    if model_is_officially_admitted(normalized_model):
+    if model_allowed_in_confirmatory(normalized_model):
         return
-    allowed = ", ".join(sorted(OFFICIAL_MODEL_NAMES))
+    allowed = ", ".join(sorted(_OFFICIAL_CONFIRMATORY_MODEL_NAMES))
     raise ValueError(
         f"{field_name} model '{model_name}' is exploratory-only and not admitted for "
         f"confirmatory protocol execution. Allowed official models: {allowed}."
@@ -237,6 +239,15 @@ class ModelPolicy(_ProtocolModel):
                 model_name=model_name,
                 field_name="model_policy.models",
             )
+            model_spec = get_model_spec(model_name)
+            if str(self.class_weight_policy.value) not in set(
+                model_spec.supported_class_weight_policies
+            ):
+                allowed = ", ".join(model_spec.supported_class_weight_policies)
+                raise ValueError(
+                    f"model_policy.class_weight_policy='{self.class_weight_policy.value}' is not "
+                    f"supported by model '{model_name}'. Allowed values: {allowed}."
+                )
         if (
             self.selection_strategy == ModelSelectionStrategy.FIXED_BASELINES
             and self.tuning_enabled
@@ -1069,6 +1080,13 @@ class CompiledRunSpec(_ProtocolModel):
             model_name=self.model,
             field_name="CompiledRunSpec",
         )
+        model_spec = get_model_spec(self.model)
+        if str(self.class_weight_policy.value) not in set(model_spec.supported_class_weight_policies):
+            allowed = ", ".join(model_spec.supported_class_weight_policies)
+            raise ValueError(
+                f"CompiledRunSpec '{self.run_id}' class_weight_policy='{self.class_weight_policy.value}' "
+                f"is not supported by model '{self.model}'. Allowed values: {allowed}."
+            )
         catalog_entry = get_model_cost_entry(self.model)
         if self.model_cost_tier != catalog_entry.cost_tier:
             raise ValueError(

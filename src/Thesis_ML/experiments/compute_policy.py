@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any, Literal, cast
@@ -7,6 +7,11 @@ from Thesis_ML.config.framework_mode import FrameworkMode, coerce_framework_mode
 from Thesis_ML.experiments.compute_capabilities import (
     ComputeCapabilitySnapshot,
     detect_compute_capabilities,
+)
+from Thesis_ML.experiments.model_admission import (
+    official_backend_fallback_allowed,
+    official_deterministic_compute_required,
+    official_hardware_mode_allowed,
 )
 
 HardwareMode = Literal["cpu_only", "gpu_only", "max_both"]
@@ -21,24 +26,20 @@ CPU_REFERENCE_BACKEND_STACK_ID = "sklearn_cpu_reference_v1"
 GPU_BACKEND_NOT_IMPLEMENTED_REASON = "gpu_backend_not_implemented_pr1"
 TORCH_GPU_BACKEND_STACK_ID_FALLBACK = "torch_gpu_reference_v1"
 OFFICIAL_LOCKED_COMPARISON_GPU_ONLY_NOT_ADMITTED_REASON = (
-    "Official locked comparison compute controls are CPU-only for this milestone and "
-    "do not admit hardware_mode='gpu_only'."
+    "Official locked comparison gpu_only execution requires deterministic_compute=true."
 )
 OFFICIAL_LOCKED_COMPARISON_MAX_BOTH_NOT_ADMITTED_REASON = (
-    "Official locked comparison compute controls are CPU-only for this milestone and "
-    "do not admit hardware_mode='max_both'."
+    "Official locked comparison max_both execution requires deterministic_compute=true."
 )
 OFFICIAL_CONFIRMATORY_GPU_ONLY_NOT_ADMITTED_REASON = (
-    "Official confirmatory compute controls are CPU-only for this milestone and "
-    "do not admit hardware_mode='gpu_only'."
+    "Official confirmatory gpu_only execution requires deterministic_compute=true."
 )
 OFFICIAL_CONFIRMATORY_MAX_BOTH_NOT_ADMITTED_REASON = (
-    "Official confirmatory compute controls are CPU-only for this milestone and "
-    "do not admit hardware_mode='max_both'."
+    "Official confirmatory compute controls do not admit hardware_mode='max_both'."
 )
 
 # Backward-compatible exported symbols retained for callers/tests that still import
-# the old determinism-gate names.
+# historical determinism-gate names.
 LOCKED_COMPARISON_GPU_DETERMINISM_REQUIRED_REASON = (
     OFFICIAL_LOCKED_COMPARISON_GPU_ONLY_NOT_ADMITTED_REASON
 )
@@ -167,15 +168,66 @@ def _compatibility_error_message(
     )
 
 
-def _resolve_locked_comparison_compute_policy(
+def _resolve_gpu_policy(
     *,
+    requested_mode: HardwareMode,
+    deterministic_compute: bool,
+    allow_backend_fallback: bool,
+    snapshot: ComputeCapabilitySnapshot,
+) -> ResolvedComputePolicy:
+    return ResolvedComputePolicy(
+        hardware_mode_requested=requested_mode,
+        hardware_mode_effective=requested_mode,
+        requested_backend_family=requested_backend_family_for_mode(requested_mode),
+        effective_backend_family=("torch_gpu" if requested_mode == GPU_ONLY else "sklearn_cpu"),
+        gpu_device_id=snapshot.device_id,
+        gpu_device_name=snapshot.device_name,
+        gpu_device_total_memory_mb=snapshot.device_total_memory_mb,
+        deterministic_compute=bool(deterministic_compute),
+        allow_backend_fallback=bool(allow_backend_fallback),
+        backend_stack_id=(
+            str(snapshot.tested_stack_id).strip() or TORCH_GPU_BACKEND_STACK_ID_FALLBACK
+        ),
+        backend_fallback_used=False,
+        backend_fallback_reason=None,
+    )
+
+
+def _resolve_official_compute_policy(
+    *,
+    framework_mode: FrameworkMode,
     requested_mode: HardwareMode,
     gpu_device_id: int | None,
     deterministic_compute: bool,
     allow_backend_fallback: bool,
     capability_snapshot: ComputeCapabilitySnapshot | None,
 ) -> ResolvedComputePolicy:
-    if allow_backend_fallback:
+    if not official_hardware_mode_allowed(
+        framework_mode=framework_mode,
+        hardware_mode=requested_mode,
+    ):
+        if framework_mode == FrameworkMode.CONFIRMATORY and requested_mode == MAX_BOTH:
+            raise ValueError(OFFICIAL_CONFIRMATORY_MAX_BOTH_NOT_ADMITTED_REASON)
+        raise ValueError(
+            "Official compute controls do not admit "
+            f"hardware_mode='{requested_mode}' for framework_mode='{framework_mode.value}'."
+        )
+
+    requires_deterministic = official_deterministic_compute_required(
+        framework_mode=framework_mode,
+        hardware_mode=requested_mode,
+    )
+    if requires_deterministic and not bool(deterministic_compute):
+        raise ValueError(
+            f"framework_mode='{framework_mode.value}' {requested_mode} execution requires "
+            "deterministic_compute=true."
+        )
+
+    fallback_allowed = official_backend_fallback_allowed(
+        framework_mode=framework_mode,
+        hardware_mode=requested_mode,
+    )
+    if allow_backend_fallback and not fallback_allowed:
         raise ValueError(
             "allow_backend_fallback is exploratory-only in the current rollout and is not "
             "allowed for official runs."
@@ -184,43 +236,48 @@ def _resolve_locked_comparison_compute_policy(
     if requested_mode == CPU_ONLY:
         return _cpu_reference_policy(
             requested_mode=requested_mode,
-            deterministic_compute=deterministic_compute,
+            deterministic_compute=bool(deterministic_compute),
             allow_backend_fallback=False,
         )
 
-    if requested_mode == GPU_ONLY:
-        raise ValueError(OFFICIAL_LOCKED_COMPARISON_GPU_ONLY_NOT_ADMITTED_REASON)
-    if requested_mode == MAX_BOTH:
-        raise ValueError(OFFICIAL_LOCKED_COMPARISON_MAX_BOTH_NOT_ADMITTED_REASON)
-    raise ValueError(f"Unsupported locked comparison hardware_mode '{requested_mode}'.")
-
-
-def _resolve_confirmatory_compute_policy(
-    *,
-    requested_mode: HardwareMode,
-    gpu_device_id: int | None,
-    deterministic_compute: bool,
-    allow_backend_fallback: bool,
-    capability_snapshot: ComputeCapabilitySnapshot | None,
-) -> ResolvedComputePolicy:
-    if allow_backend_fallback:
+    snapshot = capability_snapshot or detect_compute_capabilities(requested_device_id=gpu_device_id)
+    if snapshot.requested_device_visible is False:
         raise ValueError(
-            "allow_backend_fallback is exploratory-only in the current rollout and is not "
-            "allowed for official runs."
+            _compatibility_error_message(
+                hardware_mode=requested_mode,
+                snapshot=snapshot,
+            )
         )
-
-    if requested_mode == CPU_ONLY:
-        return _cpu_reference_policy(
-            requested_mode=requested_mode,
-            deterministic_compute=deterministic_compute,
-            allow_backend_fallback=False,
+    if not _gpu_compatible(snapshot):
+        raise ValueError(
+            _compatibility_error_message(
+                hardware_mode=requested_mode,
+                snapshot=snapshot,
+            )
         )
 
     if requested_mode == GPU_ONLY:
-        raise ValueError(OFFICIAL_CONFIRMATORY_GPU_ONLY_NOT_ADMITTED_REASON)
-    if requested_mode == MAX_BOTH:
-        raise ValueError(OFFICIAL_CONFIRMATORY_MAX_BOTH_NOT_ADMITTED_REASON)
-    raise ValueError(f"Unsupported confirmatory hardware_mode '{requested_mode}'.")
+        return _resolve_gpu_policy(
+            requested_mode=requested_mode,
+            deterministic_compute=bool(deterministic_compute),
+            allow_backend_fallback=False,
+            snapshot=snapshot,
+        )
+
+    return ResolvedComputePolicy(
+        hardware_mode_requested=requested_mode,
+        hardware_mode_effective=MAX_BOTH,
+        requested_backend_family="auto_mixed",
+        effective_backend_family="sklearn_cpu",
+        gpu_device_id=snapshot.device_id,
+        gpu_device_name=snapshot.device_name,
+        gpu_device_total_memory_mb=snapshot.device_total_memory_mb,
+        deterministic_compute=bool(deterministic_compute),
+        allow_backend_fallback=False,
+        backend_stack_id=CPU_REFERENCE_BACKEND_STACK_ID,
+        backend_fallback_used=False,
+        backend_fallback_reason=None,
+    )
 
 
 def resolve_compute_policy(
@@ -241,29 +298,24 @@ def resolve_compute_policy(
             "GPU device selection is valid only for gpu_only or max_both."
         )
 
-    if resolved_framework_mode == FrameworkMode.CONFIRMATORY:
-        return _resolve_confirmatory_compute_policy(
+    if resolved_framework_mode in {
+        FrameworkMode.CONFIRMATORY,
+        FrameworkMode.LOCKED_COMPARISON,
+    }:
+        return _resolve_official_compute_policy(
+            framework_mode=resolved_framework_mode,
             requested_mode=requested_mode,
             gpu_device_id=gpu_device_id,
-            deterministic_compute=deterministic_compute,
-            allow_backend_fallback=allow_backend_fallback,
-            capability_snapshot=capability_snapshot,
-        )
-
-    if resolved_framework_mode == FrameworkMode.LOCKED_COMPARISON:
-        return _resolve_locked_comparison_compute_policy(
-            requested_mode=requested_mode,
-            gpu_device_id=gpu_device_id,
-            deterministic_compute=deterministic_compute,
-            allow_backend_fallback=allow_backend_fallback,
+            deterministic_compute=bool(deterministic_compute),
+            allow_backend_fallback=bool(allow_backend_fallback),
             capability_snapshot=capability_snapshot,
         )
 
     if requested_mode == CPU_ONLY:
         return _cpu_reference_policy(
             requested_mode=requested_mode,
-            deterministic_compute=deterministic_compute,
-            allow_backend_fallback=allow_backend_fallback,
+            deterministic_compute=bool(deterministic_compute),
+            allow_backend_fallback=bool(allow_backend_fallback),
         )
 
     snapshot = capability_snapshot or detect_compute_capabilities(requested_device_id=gpu_device_id)

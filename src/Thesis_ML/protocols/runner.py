@@ -17,6 +17,10 @@ from Thesis_ML.experiments.compute_policy import (
 )
 from Thesis_ML.experiments.errors import exception_failure_payload
 from Thesis_ML.experiments.execution_policy import read_run_status
+from Thesis_ML.experiments.model_admission import (
+    official_gpu_only_backend_pairs,
+    official_gpu_only_model_backend_allowed,
+)
 from Thesis_ML.experiments.parallel_execution import (
     OfficialRunJob,
     execute_official_run_jobs,
@@ -46,11 +50,9 @@ from Thesis_ML.protocols.models import (
 )
 from Thesis_ML.verification.official_artifacts import verify_official_artifacts
 
-_OFFICIAL_CONFIRMATORY_GPU_ALLOWLIST: frozenset[tuple[str, str]] = frozenset(
-    {
-        ("ridge", "torch_gpu"),
-    }
-)
+
+def _official_confirmatory_gpu_allowlist() -> frozenset[tuple[str, str]]:
+    return frozenset(official_gpu_only_backend_pairs(framework_mode=FrameworkMode.CONFIRMATORY))
 
 
 def _protocol_output_dir(protocol: ThesisProtocol, reports_root: Path | str) -> Path:
@@ -199,11 +201,16 @@ def _validate_official_protocol_gpu_admission(
         return
 
     backend_family = str(compute_policy.effective_backend_family)
+    allowlist = _official_confirmatory_gpu_allowlist()
     disallowed_runs: list[str] = []
     unsupported_runs: list[str] = []
     for run_spec in compiled_manifest.runs:
         model_name = str(run_spec.model).strip().lower()
-        if (model_name, backend_family) not in _OFFICIAL_CONFIRMATORY_GPU_ALLOWLIST:
+        if not official_gpu_only_model_backend_allowed(
+            framework_mode=FrameworkMode.CONFIRMATORY,
+            model_name=model_name,
+            backend_family=backend_family,
+        ):
             disallowed_runs.append(f"{run_spec.run_id}:{model_name}")
             continue
         backend_support = resolve_backend_support(model_name, compute_policy)
@@ -214,7 +221,7 @@ def _validate_official_protocol_gpu_admission(
     if disallowed_runs or unsupported_runs:
         allowed_combinations = ", ".join(
             f"{model_name}/{family}"
-            for model_name, family in sorted(_OFFICIAL_CONFIRMATORY_GPU_ALLOWLIST)
+            for model_name, family in sorted(allowlist)
         )
         detail_parts: list[str] = []
         if disallowed_runs:

@@ -216,6 +216,65 @@ def _verify_metric_policy(
                 )
 
 
+def _verify_model_governance(
+    *,
+    config_payload: dict[str, Any],
+    metrics_payload: dict[str, Any],
+    issues: list[dict[str, Any]],
+    report_dir: Path,
+) -> None:
+    config_governance = config_payload.get("model_governance")
+    metrics_governance = metrics_payload.get("model_governance")
+    if not isinstance(config_governance, dict) or not isinstance(metrics_governance, dict):
+        _add_issue(
+            issues,
+            code="model_governance_missing",
+            message="Run config/metrics must include model_governance.",
+            path=report_dir,
+        )
+        return
+
+    required_governance_fields = {
+        "logical_model_name",
+        "model_family",
+        "feature_recipe_id",
+        "model_registry_version",
+        "official_admission_summary",
+    }
+    missing_fields = sorted(
+        field_name
+        for field_name in required_governance_fields
+        if field_name not in config_governance or field_name not in metrics_governance
+    )
+    if missing_fields:
+        _add_issue(
+            issues,
+            code="model_governance_field_missing",
+            message="model_governance is missing required fields.",
+            path=report_dir,
+            details={"missing_fields": missing_fields},
+        )
+        return
+
+    for key in (
+        "logical_model_name",
+        "model_family",
+        "feature_recipe_id",
+        "model_registry_version",
+    ):
+        if config_governance.get(key) != metrics_governance.get(key):
+            _add_issue(
+                issues,
+                code="model_governance_drift",
+                message=f"model_governance.{key} differs between config and metrics payloads.",
+                path=report_dir,
+                details={
+                    "config_value": config_governance.get(key),
+                    "metrics_value": metrics_governance.get(key),
+                },
+            )
+
+
 def _verify_data_layer_artifacts(
     *,
     config_payload: dict[str, Any],
@@ -1308,6 +1367,12 @@ def verify_official_artifacts(
                 )
 
         _verify_metric_policy(
+            config_payload=config_payload,
+            metrics_payload=metrics_payload,
+            issues=issues,
+            report_dir=report_dir,
+        )
+        _verify_model_governance(
             config_payload=config_payload,
             metrics_payload=metrics_payload,
             issues=issues,

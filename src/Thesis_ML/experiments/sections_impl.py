@@ -31,7 +31,7 @@ from Thesis_ML.experiments.stage_registry import (
     run_permutation_executor,
     run_tuning_executor,
 )
-from Thesis_ML.experiments.tuning_search_spaces import get_search_space
+from Thesis_ML.experiments.tuning_search_spaces import resolve_tuning_search_space_for_model
 from Thesis_ML.features.feature_qc import (
     FEATURE_QC_SAMPLE_FIELDS,
     compute_sample_feature_qc,
@@ -242,6 +242,23 @@ def execute_model_fit(section_input: ModelFitInput) -> dict[str, Any]:
             else None
         )
     )
+    resolved_tuning_search_space_id = section_input.tuning_search_space_id
+    resolved_tuning_search_space_version = section_input.tuning_search_space_version
+    resolved_param_grid: dict[str, list[Any]] | None = None
+    if (
+        tuning_enabled
+        and methodology_policy_name == "grouped_nested_tuning"
+        and str(section_input.model).strip().lower() != "dummy"
+    ):
+        (
+            resolved_tuning_search_space_id,
+            resolved_tuning_search_space_version,
+            resolved_param_grid,
+        ) = resolve_tuning_search_space_for_model(
+            model_name=section_input.model,
+            search_space_id=section_input.tuning_search_space_id,
+            search_space_version=section_input.tuning_search_space_version,
+        )
 
     supports_linear_interpretability = model_supports_linear_interpretability(section_input.model)
     if section_input.interpretability_enabled is None:
@@ -419,8 +436,8 @@ def execute_model_fit(section_input: ModelFitInput) -> dict[str, Any]:
                         "best_score": pd.NA,
                         "best_params_json": "{}",
                         "n_candidates": 0,
-                        "search_space_id": section_input.tuning_search_space_id,
-                        "search_space_version": section_input.tuning_search_space_version,
+                        "search_space_id": resolved_tuning_search_space_id,
+                        "search_space_version": resolved_tuning_search_space_version,
                         "primary_metric_name": section_input.primary_metric_name,
                         "inner_group_field": section_input.tuning_inner_group_field,
                         "estimator_fit_elapsed_seconds": estimator_fit_elapsed_seconds,
@@ -460,12 +477,11 @@ def execute_model_fit(section_input: ModelFitInput) -> dict[str, Any]:
                     }
                 )
             else:
-                if section_input.tuning_search_space_id is None:
-                    raise ValueError("grouped_nested_tuning requires tuning_search_space_id.")
-                resolved_space_version, param_grid = get_search_space(
-                    section_input.tuning_search_space_id,
-                    section_input.model,
-                )
+                if resolved_param_grid is None:
+                    raise ValueError(
+                        "grouped_nested_tuning requires a resolved tuning search-space param grid."
+                    )
+                param_grid = dict(resolved_param_grid)
                 candidate_params = list(ParameterGrid(param_grid))
                 candidate_count = int(len(candidate_params))
                 x_outer_train = section_input.x_matrix[train_idx]
@@ -518,11 +534,6 @@ def execute_model_fit(section_input: ModelFitInput) -> dict[str, Any]:
                         "profiled_inner_fold_count": int(profiled_inner_fold_count),
                     },
                 )
-                declared_space_version = section_input.tuning_search_space_version
-                if declared_space_version and declared_space_version != resolved_space_version:
-                    raise ValueError(
-                        "Declared tuning_search_space_version does not match search-space registry version."
-                    )
                 tuning_result = run_tuning_executor(
                     executor_id=tuning_executor_id,
                     fallback_executor_id=tuning_fallback_executor_id,
@@ -686,8 +697,8 @@ def execute_model_fit(section_input: ModelFitInput) -> dict[str, Any]:
                         "tuning_candidate_fit_seconds": tuning_candidate_fit_seconds,
                         "tuning_candidate_predict_seconds": tuning_candidate_predict_seconds,
                         "tuning_refit_elapsed_seconds": tuning_refit_elapsed_seconds,
-                        "search_space_id": section_input.tuning_search_space_id,
-                        "search_space_version": resolved_space_version,
+                        "search_space_id": resolved_tuning_search_space_id,
+                        "search_space_version": resolved_tuning_search_space_version,
                         "primary_metric_name": section_input.primary_metric_name,
                         "inner_group_field": section_input.tuning_inner_group_field,
                         "estimator_fit_elapsed_seconds": pd.NA,
@@ -918,8 +929,8 @@ def execute_model_fit(section_input: ModelFitInput) -> dict[str, Any]:
             else "disabled"
         ),
         "primary_metric_name": section_input.primary_metric_name,
-        "search_space_id": section_input.tuning_search_space_id,
-        "search_space_version": section_input.tuning_search_space_version,
+        "search_space_id": resolved_tuning_search_space_id,
+        "search_space_version": resolved_tuning_search_space_version,
         "inner_cv_scheme": section_input.tuning_inner_cv_scheme,
         "inner_group_field": section_input.tuning_inner_group_field,
         "total_outer_folds": int(len(splits)),

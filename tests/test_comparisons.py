@@ -396,6 +396,12 @@ def test_comparison_runner_real_run_stamps_metadata(
     assert config["backend_fallback_reason"] is None
     assert isinstance(config["compute_policy"], dict)
     assert config["compute_policy"]["hardware_mode_effective"] == "cpu_only"
+    assert isinstance(config["model_governance"], dict)
+    assert config["model_governance"]["logical_model_name"] == "ridge"
+    assert config["model_governance"]["model_family"] == "linear"
+    assert config["model_governance"]["feature_recipe_id"] == "baseline_standard_scaler_v1"
+    assert isinstance(config["model_governance"]["official_admission_summary"], dict)
+    assert isinstance(config["model_governance"]["model_registry_version"], str)
 
     assert metrics["framework_mode"] == "locked_comparison"
     assert metrics["canonical_run"] is False
@@ -428,6 +434,12 @@ def test_comparison_runner_real_run_stamps_metadata(
     assert metrics["backend_fallback_reason"] is None
     assert isinstance(metrics["compute_policy"], dict)
     assert metrics["compute_policy"]["hardware_mode_effective"] == "cpu_only"
+    assert isinstance(metrics["model_governance"], dict)
+    assert metrics["model_governance"]["logical_model_name"] == "ridge"
+    assert metrics["model_governance"]["model_family"] == "linear"
+    assert metrics["model_governance"]["feature_recipe_id"] == "baseline_standard_scaler_v1"
+    assert isinstance(metrics["model_governance"]["official_admission_summary"], dict)
+    assert isinstance(metrics["model_governance"]["model_registry_version"], str)
     assert metrics["calibration"]["policy_status"] in {
         "required_if_probabilities_available",
         "probabilities_required_for_validity",

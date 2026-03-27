@@ -27,10 +27,8 @@ from Thesis_ML.experiments.errors import (
     OfficialArtifactContractError,
     OfficialContractValidationError,
 )
-from Thesis_ML.experiments.model_factory import (
-    OFFICIAL_MODEL_NAMES,
-    model_is_officially_admitted,
-)
+from Thesis_ML.experiments.model_admission import model_is_official
+from Thesis_ML.experiments.model_registry import get_model_spec, official_model_names
 from Thesis_ML.experiments.selection_manifest import apply_dataset_selection_filters
 
 _REQUIRED_INDEX_COLUMNS = {
@@ -150,12 +148,26 @@ def validate_official_preflight(
             f"validate_official_preflight called with non-official framework_mode='{framework_mode.value}'.",
             details={"framework_mode": framework_mode.value},
         )
-    if not model_is_officially_admitted(model):
+    if not model_is_official(model):
         raise OfficialContractValidationError(
             f"Model '{model}' is exploratory-only and not admitted for official runs.",
             details={
                 "model": str(model),
-                "allowed_official_models": sorted(OFFICIAL_MODEL_NAMES),
+                "allowed_official_models": sorted(official_model_names()),
+            },
+        )
+    model_spec = get_model_spec(model)
+    normalized_class_weight_policy = str(class_weight_policy).strip().lower()
+    if normalized_class_weight_policy not in set(model_spec.supported_class_weight_policies):
+        raise OfficialContractValidationError(
+            f"Model '{model_spec.logical_name}' does not support class_weight_policy="
+            f"'{class_weight_policy}' on official paths.",
+            details={
+                "model": model_spec.logical_name,
+                "class_weight_policy": normalized_class_weight_policy,
+                "supported_class_weight_policies": list(
+                    model_spec.supported_class_weight_policies
+                ),
             },
         )
 

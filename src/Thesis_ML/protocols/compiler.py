@@ -8,6 +8,9 @@ import pandas as pd
 
 from Thesis_ML.config.framework_mode import FrameworkMode
 from Thesis_ML.config.methodology import EvidenceRunRole, MethodologyPolicyName
+from Thesis_ML.experiments.comparison_contract import (
+    validate_confirmatory_protocol_fairness_contract,
+)
 from Thesis_ML.experiments.model_catalog import (
     get_model_cost_entry,
     projected_runtime_seconds,
@@ -168,6 +171,10 @@ def compile_protocol(
 
     if not selected_suite_ids:
         raise ValueError("No enabled suites were selected for protocol compilation.")
+    validate_confirmatory_protocol_fairness_contract(
+        protocol=protocol,
+        selected_suite_ids=selected_suite_ids,
+    )
 
     runs: list[CompiledRunSpec] = []
     claim_to_run_map: dict[str, list[str]] = {}

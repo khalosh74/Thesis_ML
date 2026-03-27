@@ -23,11 +23,11 @@ from Thesis_ML.experiments.model_catalog import (
     get_model_cost_entry,
     projected_runtime_seconds,
 )
-from Thesis_ML.experiments.model_factory import (
-    ALL_MODEL_NAMES,
-    OFFICIAL_MODEL_NAMES,
-    model_is_officially_admitted,
+from Thesis_ML.experiments.model_admission import (
+    admitted_models_for_framework,
+    model_allowed_in_locked_comparison,
 )
+from Thesis_ML.experiments.model_registry import get_model_spec, registered_model_names
 from Thesis_ML.experiments.run_states import (
     RUN_STATUS_COMPLETED_LEGACY,
     RUN_STATUS_FAILED,
@@ -81,13 +81,17 @@ REQUIRED_COMPARISON_RUN_ARTIFACTS = (
     "calibration_table.csv",
 )
 SUPPORTED_PRIMARY_METRICS = SUPPORTED_CLASSIFICATION_METRICS
+ALL_MODEL_NAMES = registered_model_names()
+_OFFICIAL_LOCKED_COMPARISON_MODEL_NAMES = admitted_models_for_framework(
+    FrameworkMode.LOCKED_COMPARISON
+)
 
 
 def _reject_exploratory_only_official_model(*, model_name: str, field_name: str) -> None:
     normalized_model = str(model_name).strip().lower()
-    if model_is_officially_admitted(normalized_model):
+    if model_allowed_in_locked_comparison(normalized_model):
         return
-    allowed = ", ".join(sorted(OFFICIAL_MODEL_NAMES))
+    allowed = ", ".join(sorted(_OFFICIAL_LOCKED_COMPARISON_MODEL_NAMES))
     raise ValueError(
         f"{field_name} model '{model_name}' is exploratory-only and not admitted for "
         f"locked-comparison official execution. Allowed official models: {allowed}."
@@ -458,6 +462,16 @@ class ComparisonSpec(_ComparisonModel):
         explicitly_allowed_expensive = set(self.cost_policy.explicit_benchmark_expensive_models)
         max_runtime = int(self.cost_policy.max_projected_runtime_seconds_per_run)
         for variant in self.allowed_variants:
+            model_spec = get_model_spec(variant.model)
+            if (
+                str(self.methodology_policy.class_weight_policy.value)
+                not in set(model_spec.supported_class_weight_policies)
+            ):
+                allowed_class_weight = ", ".join(model_spec.supported_class_weight_policies)
+                raise ValueError(
+                    f"comparison methodology class_weight_policy='{self.methodology_policy.class_weight_policy.value}' "
+                    f"is not supported by model '{variant.model}'. Allowed values: {allowed_class_weight}."
+                )
             catalog_entry = get_model_cost_entry(variant.model)
             expensive_model_requires_explicit_allow = bool(
                 catalog_entry.cost_tier == ModelCostTier.BENCHMARK_EXPENSIVE
@@ -557,6 +571,14 @@ class CompiledComparisonRunSpec(_ComparisonModel):
             model_name=self.model,
             field_name="CompiledComparisonRunSpec",
         )
+        model_spec = get_model_spec(self.model)
+        if str(self.class_weight_policy.value) not in set(model_spec.supported_class_weight_policies):
+            allowed = ", ".join(model_spec.supported_class_weight_policies)
+            raise ValueError(
+                f"CompiledComparisonRunSpec '{self.run_id}' class_weight_policy="
+                f"'{self.class_weight_policy.value}' is not supported by model "
+                f"'{self.model}'. Allowed values: {allowed}."
+            )
         catalog_entry = get_model_cost_entry(self.model)
         if self.model_cost_tier != catalog_entry.cost_tier:
             raise ValueError(

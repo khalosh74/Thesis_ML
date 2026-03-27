@@ -4,6 +4,48 @@ This guide covers two common extension tasks:
 
 - adding a new execution section
 - adding a new workbook sheet safely
+- adding a new model family safely
+
+## Add a model family safely
+
+Treat model additions as policy + contract changes, not just estimator wiring.
+
+1. Add model metadata in the registry
+- File: `src/Thesis_ML/experiments/model_registry.py`
+- Define logical name, family, cost tier, supported class-weight policies, allowed feature recipes, backend bindings, tuning policy, and official admission metadata.
+
+2. Update centralized admission policy if official behavior changes
+- File: `src/Thesis_ML/experiments/model_admission.py`
+- Keep locked-comparison and confirmatory admissions explicit for `gpu_only` and `max_both`.
+
+3. Wire backend constructors
+- File: `src/Thesis_ML/experiments/backend_registry.py`
+- Ensure every declared backend binding resolves to a concrete constructor/support check.
+
+4. Ensure stage routing tokens are covered
+- Files:
+  - `src/Thesis_ML/experiments/stage_planner.py`
+  - `src/Thesis_ML/experiments/stage_registry.py`
+- Add executor mapping only where needed; preserve conservative official-path admission.
+
+5. Keep tuning policy explicit
+- File: `src/Thesis_ML/experiments/tuning_search_spaces.py`
+- Register search-space ids/versions and validate model-specific allowed ids.
+- For official grouped-nested updates, add new versioned config files under:
+  - `configs/comparisons/`
+  - `configs/protocols/`
+  without mutating historical files in place.
+
+6. Preserve fairness/contract validation
+- File: `src/Thesis_ML/experiments/comparison_contract.py`
+- Ensure compared variants in the same evaluation scope share target/split/metric/methodology/tuning/control/class-weight contract semantics.
+
+7. Stamp auditable governance metadata
+- File: `src/Thesis_ML/experiments/run_artifacts.py`
+- Ensure outputs include logical model identity, backend family/id, feature recipe, tuning search-space id/version, admission summary, deterministic/scheduler metadata, and registry version.
+
+8. Add tests
+- Cover registry authority, admission behavior, backend routing, grouped-nested config compatibility, and fairness-contract rejection paths.
 
 ## Add a new execution section
 
@@ -74,4 +116,3 @@ Keep changes incremental and contract-first.
 - workbook generation validation
 - compile path for new sheet semantics
 - write-back checks if machine-owned
-

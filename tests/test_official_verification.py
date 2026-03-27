@@ -5,6 +5,7 @@ import hashlib
 import json
 from pathlib import Path
 
+from Thesis_ML.experiments.model_registry import MODEL_REGISTRY_VERSION
 from Thesis_ML.verification.official_artifacts import verify_official_artifacts
 from Thesis_ML.verification.reproducibility import compare_official_outputs
 
@@ -76,6 +77,17 @@ def _write_confirmatory_output(root: Path) -> Path:
         "methodology_policy_name": "fixed_baselines_only",
         "class_weight_policy": "none",
         "feature_recipe_id": "baseline_standard_scaler_v1",
+        "model_governance": {
+            "logical_model_name": "ridge",
+            "model_family": "linear",
+            "feature_recipe_id": "baseline_standard_scaler_v1",
+            "model_registry_version": MODEL_REGISTRY_VERSION,
+            "official_admission_summary": {
+                "framework_mode": "confirmatory",
+                "model": "ridge",
+                "model_admitted_for_framework": True,
+            },
+        },
         "tuning_enabled": False,
         "model_cost_tier": "official_fast",
         "projected_runtime_seconds": 1200,

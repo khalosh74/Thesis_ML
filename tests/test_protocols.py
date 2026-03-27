@@ -627,6 +627,12 @@ def test_protocol_run_records_metadata_in_run_artifacts(
     assert config["backend_fallback_reason"] is None
     assert isinstance(config["compute_policy"], dict)
     assert config["compute_policy"]["hardware_mode_effective"] == "cpu_only"
+    assert isinstance(config["model_governance"], dict)
+    assert config["model_governance"]["logical_model_name"] == "ridge"
+    assert config["model_governance"]["model_family"] == "linear"
+    assert config["model_governance"]["feature_recipe_id"] == "baseline_standard_scaler_v1"
+    assert isinstance(config["model_governance"]["official_admission_summary"], dict)
+    assert isinstance(config["model_governance"]["model_registry_version"], str)
     assert config["evidence_run_role"] == "primary"
     assert config["repeat_id"] == 1
     assert config["repeat_count"] == int(protocol.evidence_policy.repeat_evaluation.repeat_count)
@@ -668,6 +674,12 @@ def test_protocol_run_records_metadata_in_run_artifacts(
     assert metrics["backend_fallback_reason"] is None
     assert isinstance(metrics["compute_policy"], dict)
     assert metrics["compute_policy"]["hardware_mode_effective"] == "cpu_only"
+    assert isinstance(metrics["model_governance"], dict)
+    assert metrics["model_governance"]["logical_model_name"] == "ridge"
+    assert metrics["model_governance"]["model_family"] == "linear"
+    assert metrics["model_governance"]["feature_recipe_id"] == "baseline_standard_scaler_v1"
+    assert isinstance(metrics["model_governance"]["official_admission_summary"], dict)
+    assert isinstance(metrics["model_governance"]["model_registry_version"], str)
     assert metrics["evidence_run_role"] == "primary"
     assert metrics["repeat_id"] == 1
     assert metrics["repeat_count"] == int(protocol.evidence_policy.repeat_evaluation.repeat_count)
