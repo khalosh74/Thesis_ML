@@ -210,7 +210,7 @@ def _exploratory_only_admission() -> ModelOfficialAdmission:
 
 def _build_registry() -> dict[str, ModelSpec]:
     all_feature_recipes = tuple(FEATURE_RECIPE_IDS)
-    return {
+    registry = {
         "ridge": ModelSpec(
             logical_name="ridge",
             model_family="linear",
@@ -419,6 +419,39 @@ def _build_registry() -> dict[str, ModelSpec]:
             notes="Exploratory-only gradient boosting family.",
         ),
     }
+
+    # Lightweight integrity checks to catch registry construction errors early.
+    backend_ids: set[str] = set()
+    for name, spec in registry.items():
+        # Ensure the dict key matches the declared logical name
+        if spec.logical_name != name:
+            raise ValueError(
+                f"Model registry key '{name}' does not match spec.logical_name '{spec.logical_name}'."
+            )
+
+        # Ensure at least one backend binding exists
+        if not spec.backend_bindings:
+            raise ValueError(f"Model '{name}' has no backend_bindings defined.")
+
+        # Ensure default compute backend preference exists among bindings
+        compute_families = {str(b.compute_backend_family).strip() for b in spec.backend_bindings}
+        if spec.default_compute_backend_preference not in compute_families:
+            raise ValueError(
+                f"Model '{name}' default_compute_backend_preference='{spec.default_compute_backend_preference}' "
+                f"is not present in backend_bindings compute_backend_family={sorted(compute_families)}."
+            )
+
+        # Ensure backend IDs are present and unique across the registry
+        for b in spec.backend_bindings:
+            if not str(b.backend_id).strip():
+                raise ValueError(f"Model '{name}' has a backend_binding with an empty backend_id.")
+            if b.backend_id in backend_ids:
+                raise ValueError(
+                    f"Duplicate backend_id '{b.backend_id}' found in model_registry for model '{name}'."
+                )
+            backend_ids.add(b.backend_id)
+
+    return registry
 
 
 MODEL_REGISTRY: dict[str, ModelSpec] = _build_registry()
