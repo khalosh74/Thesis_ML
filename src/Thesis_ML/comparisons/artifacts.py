@@ -124,6 +124,25 @@ def _execution_status_payload(
         payload["stage_timings_seconds"] = {
             key: round(float(value), 6) for key, value in stage_timings.items()
         }
+    # compute run-status counts and expose summary fields
+    status_counts = initialized_run_status_counts()
+    for result in run_results:
+        increment_run_status_count(status_counts, result.status)
+    status_counts["completed"] = int(status_counts.get("success", 0))
+
+    payload.update(
+        {
+            "n_runs": int(len(run_results)),
+            "n_planned": int(status_counts.get("planned", 0)),
+            "n_success": int(status_counts.get("success", 0)),
+            "n_failed": int(status_counts.get("failed", 0)),
+            "n_timed_out": int(status_counts.get("timed_out", 0)),
+            "n_skipped_due_to_policy": int(status_counts.get("skipped_due_to_policy", 0)),
+            "n_completed": int(status_counts.get("success", 0)),
+            "run_status_counts": status_counts,
+        }
+    )
+
     return payload
 
 
