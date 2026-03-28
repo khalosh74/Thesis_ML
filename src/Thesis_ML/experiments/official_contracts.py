@@ -244,14 +244,14 @@ def validate_official_preflight(
         emotion_column="emotion",
         coarse_column="coarse_affect",
         strict_recompute=True,
-        attach_mapping_metadata=True,
+        attach_mapping_metadata=False,
     )
     frame = with_binary_valence_like(
         frame,
         coarse_column="coarse_affect",
         binary_column="binary_valence_like",
         strict_recompute=True,
-        attach_mapping_metadata=True,
+        attach_mapping_metadata=False,
     )
 
     unknown_column = "glm_has_unknown_regressors"
@@ -443,6 +443,78 @@ def validate_official_preflight(
                         "actual_target_mapping_version": context_mapping_version,
                     },
                 )
+            expected_mapping_hash = str(confirmatory_lock.get("target_mapping_hash", "")).strip().lower()
+            if str(target_column).strip() == "coarse_affect":
+                required_mapping_columns = [
+                    "coarse_affect_mapping_version",
+                    "coarse_affect_mapping_sha256",
+                ]
+                missing_mapping_columns = [
+                    column_name
+                    for column_name in required_mapping_columns
+                    if column_name not in selected.columns
+                ]
+                if missing_mapping_columns:
+                    raise OfficialContractValidationError(
+                        "Confirmatory coarse_affect selected rows are missing mapping metadata columns.",
+                        details={"missing_mapping_columns": missing_mapping_columns},
+                    )
+
+                version_series = selected["coarse_affect_mapping_version"].map(
+                    lambda value: str(value).strip() if not pd.isna(value) else ""
+                )
+                hash_series = selected["coarse_affect_mapping_sha256"].map(
+                    lambda value: str(value).strip().lower() if not pd.isna(value) else ""
+                )
+                if bool((version_series == "").any()):
+                    raise OfficialContractValidationError(
+                        "Confirmatory coarse_affect selected rows must provide coarse_affect_mapping_version.",
+                        details={
+                            "missing_version_rows": int((version_series == "").sum()),
+                        },
+                    )
+                if bool((hash_series == "").any()):
+                    raise OfficialContractValidationError(
+                        "Confirmatory coarse_affect selected rows must provide coarse_affect_mapping_sha256.",
+                        details={
+                            "missing_hash_rows": int((hash_series == "").sum()),
+                        },
+                    )
+
+                selected_versions = sorted(set(version_series.tolist()))
+                selected_hashes = sorted(set(hash_series.tolist()))
+                if len(selected_versions) != 1:
+                    raise OfficialContractValidationError(
+                        "Confirmatory coarse_affect selected rows must have exactly one unique mapping version.",
+                        details={"selected_mapping_versions": selected_versions},
+                    )
+                if len(selected_hashes) != 1:
+                    raise OfficialContractValidationError(
+                        "Confirmatory coarse_affect selected rows must have exactly one unique mapping hash.",
+                        details={"selected_mapping_hashes": selected_hashes},
+                    )
+
+                selected_mapping_version = selected_versions[0]
+                selected_mapping_hash = selected_hashes[0]
+                if (
+                    expected_mapping_version
+                    and selected_mapping_version != expected_mapping_version
+                ):
+                    raise OfficialContractValidationError(
+                        "Confirmatory coarse_affect selected mapping version differs from locked protocol mapping version.",
+                        details={
+                            "expected_target_mapping_version": expected_mapping_version,
+                            "selected_target_mapping_version": selected_mapping_version,
+                        },
+                    )
+                if expected_mapping_hash and selected_mapping_hash != expected_mapping_hash:
+                    raise OfficialContractValidationError(
+                        "Confirmatory coarse_affect selected mapping hash differs from locked protocol mapping hash.",
+                        details={
+                            "expected_target_mapping_hash": expected_mapping_hash,
+                            "selected_target_mapping_hash": selected_mapping_hash,
+                        },
+                    )
 
             expected_split = str(confirmatory_lock.get("split", "")).strip()
             if expected_split and expected_split != str(cv_mode):

@@ -225,8 +225,11 @@ def test_confirmatory_freeze_protocol_dry_run_executes_with_locked_gates(
     assert deviation_log["deviations"][0]["status"] == "no_deviation"
     contract = suite_summary["confirmatory_reporting_contract"]
     assert contract["protocol_id"] == "thesis_confirmatory_v1"
-    assert contract["target_mapping_version"] == "affect_mapping_v1"
-    assert isinstance(contract["target_mapping_hash"], str) and contract["target_mapping_hash"]
+    assert contract["target_mapping_version"] == "affect_mapping_v2"
+    assert (
+        contract["target_mapping_hash"]
+        == "3bbc30d6949e868f8d9d2ad64b7b10d1d14c93fff3d406d3321d76efee011ad3"
+    )
     assert contract["primary_split"] == "within_subject_loso_session"
     assert contract["primary_metric"] == "balanced_accuracy"
     assert contract["model_family"] == "ridge"

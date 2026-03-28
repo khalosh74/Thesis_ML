@@ -7,8 +7,8 @@ Locked confirmatory plan
 
 ## Version
 - Plan version: `v1.0`
-- Protocol version: `v1.0`
-- Target mapping version: `affect_mapping_v1`
+- Protocol version: `v1.1`
+- Target mapping version: `affect_mapping_v2`
 - Split implementation version: `split_contract_v1`
 
 ---
@@ -43,7 +43,8 @@ This study does **not** support:
 ## 2.1 Primary target
 - Target name: `coarse_affect`
 - Source column: `emotion`
-- Mapping version: `affect_mapping_v1`
+- Mapping version: `affect_mapping_v2`
+- Mapping source: locked versioned target asset `configs/targets/affect_mapping_v2.json`
 - Allowed classes:
   - `positive`
   - `neutral`
@@ -52,14 +53,15 @@ This study does **not** support:
 ## 2.2 Mapping table
 | Emotion | Coarse affect |
 |---|---|
-| joy | positive |
-| amusement | positive |
-| calm | neutral |
-| sadness | negative |
-| fear | negative |
 | anger | negative |
-
-Replace this table with the exact locked mapping used in code.
+| anxiety | negative |
+| disgust | negative |
+| happiness | positive |
+| interest | positive |
+| neutral | neutral |
+| pride | positive |
+| relief | positive |
+| sadness | negative |
 
 ## 2.3 Unknown and invalid labels
 - Unknown labels are excluded before modeling.

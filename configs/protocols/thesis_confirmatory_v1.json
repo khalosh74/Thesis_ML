@@ -1,7 +1,7 @@
 {
   "protocol_id": "thesis_confirmatory_v1",
   "analysis_status": "locked",
-  "protocol_version": "v1.0",
+  "protocol_version": "v1.1",
   "sample_unit": "beta_event",
   "dataset_contract": {
     "dataset_role": "confirmatory_internal_dataset",
@@ -26,8 +26,8 @@
   "target": {
     "name": "coarse_affect",
     "source_column": "emotion",
-    "mapping_version": "affect_mapping_v1",
-    "mapping_hash": "c0b60ce129e9711bcae0d62e0920506ca80249d9899b8a4d1f621ede1df09e18",
+    "mapping_version": "affect_mapping_v2",
+    "mapping_hash": "3bbc30d6949e868f8d9d2ad64b7b10d1d14c93fff3d406d3321d76efee011ad3",
     "classes": ["positive", "neutral", "negative"],
     "drop_unknown": true
   },

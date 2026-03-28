@@ -9,7 +9,7 @@
   "scientific_contract": {
     "sample_unit": "beta_event",
     "target": "coarse_affect",
-    "label_policy": "coarse_affect is derived from emotion using the fixed mapping in Thesis_ML.data.affect_labels.",
+    "label_policy": "coarse_affect is derived from emotion using locked target mapping asset configs/targets/affect_mapping_v2.json.",
     "primary_metric": "balanced_accuracy",
     "primary_metric_aggregation": "mean_fold_scores",
     "secondary_metrics": [

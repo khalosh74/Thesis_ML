@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import json
 import re
 from pathlib import Path
@@ -12,6 +11,7 @@ from Thesis_ML.config.paths import (
     DEFAULT_TARGET_CONFIGS_DIR,
 )
 from Thesis_ML.config.schema_versions import THESIS_PROTOCOL_SCHEMA_VERSION
+from Thesis_ML.data.target_mapping_registry import load_target_mapping
 from Thesis_ML.features.preprocessing import BASELINE_STANDARD_SCALER_RECIPE_ID
 from Thesis_ML.protocols.models import (
     ArtifactContract,
@@ -32,13 +32,6 @@ def _load_json_object(path: Path) -> dict[str, Any]:
     return payload
 
 
-def _file_sha256(path: Path) -> str:
-    # Normalize line endings before hashing so protocol mapping locks are stable
-    # across LF/CRLF checkouts on different operating systems.
-    payload = path.read_bytes().replace(b"\r\n", b"\n").replace(b"\r", b"\n")
-    return hashlib.sha256(payload).hexdigest()
-
-
 def _require_locked_analysis_status(payload: dict[str, Any], protocol_path: Path) -> None:
     analysis_status = str(payload.get("analysis_status", "")).strip().lower()
     if analysis_status != "locked":
@@ -46,11 +39,6 @@ def _require_locked_analysis_status(payload: dict[str, Any], protocol_path: Path
             "Confirmatory protocol preflight failed: analysis_status must be 'locked' "
             f"for '{protocol_path}'."
         )
-
-
-def _resolve_target_mapping_path(mapping_version: str) -> Path:
-    mapping_filename = f"{mapping_version}.json"
-    return DEFAULT_TARGET_CONFIGS_DIR / mapping_filename
 
 
 def _require_target_mapping_hash_match(
@@ -69,21 +57,30 @@ def _require_target_mapping_hash_match(
             "Confirmatory protocol preflight failed: target.mapping_version must be present "
             f"in '{protocol_path}'."
         )
-    mapping_path = _resolve_target_mapping_path(mapping_version)
-    if not mapping_path.exists():
+    try:
+        mapping_entry = load_target_mapping(
+            mapping_version,
+            target_configs_dir=DEFAULT_TARGET_CONFIGS_DIR,
+        )
+    except FileNotFoundError as exc:
         raise ValueError(
             "Confirmatory protocol preflight failed: target mapping file was not found: "
-            f"{mapping_path}"
-        )
-    actual_hash = _file_sha256(mapping_path)
+            f"{DEFAULT_TARGET_CONFIGS_DIR / f'{mapping_version}.json'}"
+        ) from exc
+    except ValueError as exc:
+        raise ValueError(
+            "Confirmatory protocol preflight failed: target mapping asset is invalid. "
+            f"version='{mapping_version}', error={exc}"
+        ) from exc
+    actual_hash = mapping_entry.mapping_hash
     if actual_hash != expected_hash:
         raise ValueError(
             "Confirmatory protocol preflight failed: target.mapping_hash mismatch. "
-            f"expected={expected_hash}, actual={actual_hash}, mapping_file='{mapping_path}'."
+            f"expected={expected_hash}, actual={actual_hash}, mapping_file='{mapping_entry.path}'."
         )
     return {
-        "mapping_version": mapping_version,
-        "mapping_file": str(mapping_path.resolve()),
+        "mapping_version": mapping_entry.version,
+        "mapping_file": str(mapping_entry.path),
         "mapping_hash": actual_hash,
     }
 

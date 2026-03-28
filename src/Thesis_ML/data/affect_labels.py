@@ -8,24 +8,14 @@ from typing import Any
 
 import pandas as pd
 
-COARSE_AFFECT_BY_EMOTION = {
-    "happiness": "positive",
-    "pride": "positive",
-    "relief": "positive",
-    "interest": "positive",
-    "neutral": "neutral",
-    "anger": "negative",
-    "anxiety": "negative",
-    "disgust": "negative",
-    "sadness": "negative",
-}
+from Thesis_ML.data.target_mapping_registry import load_target_mapping
 
 _BINARY_VALENCE_BY_COARSE = {
     "positive": "positive",
     "negative": "negative",
 }
 
-COARSE_AFFECT_MAPPING_VERSION = "affect_mapping_v1"
+COARSE_AFFECT_MAPPING_VERSION = "affect_mapping_v2"
 BINARY_VALENCE_MAPPING_VERSION = "binary_valence_mapping_v1"
 
 
@@ -34,7 +24,9 @@ def _stable_sha256(payload: Any) -> str:
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
-COARSE_AFFECT_MAPPING_SHA256 = _stable_sha256(COARSE_AFFECT_BY_EMOTION)
+_COARSE_AFFECT_MAPPING_ENTRY = load_target_mapping(COARSE_AFFECT_MAPPING_VERSION)
+COARSE_AFFECT_BY_EMOTION = dict(_COARSE_AFFECT_MAPPING_ENTRY.mapping)
+COARSE_AFFECT_MAPPING_SHA256 = _COARSE_AFFECT_MAPPING_ENTRY.mapping_hash
 BINARY_VALENCE_MAPPING_SHA256 = _stable_sha256(_BINARY_VALENCE_BY_COARSE)
 
 COARSE_AFFECT_MAPPING_VERSION_COLUMN = "coarse_affect_mapping_version"

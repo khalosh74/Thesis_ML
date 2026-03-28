@@ -41,7 +41,8 @@ def _official_context() -> dict[str, object]:
 
 def _confirmatory_lock_context() -> dict[str, object]:
     context = _official_context()
-    context["target_mapping_version"] = "affect_mapping_v1"
+    context["target_mapping_version"] = COARSE_AFFECT_MAPPING_VERSION
+    context["target_mapping_hash"] = COARSE_AFFECT_MAPPING_SHA256
     context["controls"] = {
         "dummy_baseline_run": False,
     }
@@ -50,7 +51,8 @@ def _confirmatory_lock_context() -> dict[str, object]:
         "analysis_status": "locked",
         "target_name": "coarse_affect",
         "target_source_column": "emotion",
-        "target_mapping_version": "affect_mapping_v1",
+        "target_mapping_version": COARSE_AFFECT_MAPPING_VERSION,
+        "target_mapping_hash": COARSE_AFFECT_MAPPING_SHA256,
         "split": "within_subject_loso_session",
         "primary_metric": "balanced_accuracy",
         "model_family": "ridge",
@@ -125,6 +127,33 @@ def _write_index(path: Path, rows: list[dict[str, object]]) -> None:
         enriched_rows.append(row)
 
     pd.DataFrame(enriched_rows).to_csv(path, index=False)
+
+
+def _base_confirmatory_rows() -> list[dict[str, object]]:
+    return [
+        {
+            "sample_id": "s1",
+            "subject": "sub-001",
+            "session": "ses-01",
+            "task": "passive",
+            "modality": "audio",
+            "beta_path": "b1.nii",
+            "mask_path": "m1.nii",
+            "regressor_label": "run-1_passive_anger_audio",
+            "emotion": "anger",
+        },
+        {
+            "sample_id": "s2",
+            "subject": "sub-001",
+            "session": "ses-02",
+            "task": "passive",
+            "modality": "audio",
+            "beta_path": "b2.nii",
+            "mask_path": "m1.nii",
+            "regressor_label": "run-1_passive_happiness_audio",
+            "emotion": "happiness",
+        },
+    ]
 
 
 def test_official_preflight_rejects_missing_required_dataset_columns(tmp_path: Path) -> None:
@@ -373,6 +402,140 @@ def test_confirmatory_preflight_rejects_invalid_subgroup_policy_override(
             subgroup_min_samples_per_group=20,
             subgroup_min_classes_per_group=2,
             subgroup_report_small_groups=True,
+            official_context=_confirmatory_lock_context(),
+        )
+
+
+def test_confirmatory_preflight_rejects_mismatched_selected_mapping_hash(
+    tmp_path: Path,
+) -> None:
+    index_csv = tmp_path / "dataset_index.csv"
+    rows = _base_confirmatory_rows()
+    for row in rows:
+        row["coarse_affect_mapping_version"] = COARSE_AFFECT_MAPPING_VERSION
+        row["coarse_affect_mapping_sha256"] = "a" * 64
+    _write_index(index_csv, rows)
+
+    with pytest.raises(OfficialContractValidationError, match="selected mapping hash differs"):
+        validate_official_preflight(
+            framework_mode=FrameworkMode.CONFIRMATORY,
+            index_csv=index_csv,
+            data_root=tmp_path,
+            cache_dir=tmp_path / "cache",
+            target_column="coarse_affect",
+            cv_mode="within_subject_loso_session",
+            subject="sub-001",
+            train_subject=None,
+            test_subject=None,
+            filter_task=None,
+            filter_modality=None,
+            n_permutations=10,
+            primary_metric_name="balanced_accuracy",
+            permutation_metric_name="balanced_accuracy",
+            methodology_policy_name="fixed_baselines_only",
+            class_weight_policy="none",
+            model="ridge",
+            tuning_enabled=False,
+            tuning_search_space_id=None,
+            tuning_search_space_version=None,
+            tuning_inner_group_field=None,
+            subgroup_reporting_enabled=False,
+            subgroup_dimensions=[],
+            subgroup_min_samples_per_group=1,
+            subgroup_min_classes_per_group=1,
+            subgroup_report_small_groups=False,
+            official_context=_confirmatory_lock_context(),
+        )
+
+
+def test_confirmatory_preflight_rejects_mixed_selected_mapping_versions(
+    tmp_path: Path,
+) -> None:
+    index_csv = tmp_path / "dataset_index.csv"
+    rows = _base_confirmatory_rows()
+    rows[0]["coarse_affect_mapping_version"] = COARSE_AFFECT_MAPPING_VERSION
+    rows[1]["coarse_affect_mapping_version"] = "affect_mapping_v1"
+    rows[0]["coarse_affect_mapping_sha256"] = COARSE_AFFECT_MAPPING_SHA256
+    rows[1]["coarse_affect_mapping_sha256"] = COARSE_AFFECT_MAPPING_SHA256
+    _write_index(index_csv, rows)
+
+    with pytest.raises(
+        OfficialContractValidationError,
+        match="exactly one unique mapping version",
+    ):
+        validate_official_preflight(
+            framework_mode=FrameworkMode.CONFIRMATORY,
+            index_csv=index_csv,
+            data_root=tmp_path,
+            cache_dir=tmp_path / "cache",
+            target_column="coarse_affect",
+            cv_mode="within_subject_loso_session",
+            subject="sub-001",
+            train_subject=None,
+            test_subject=None,
+            filter_task=None,
+            filter_modality=None,
+            n_permutations=10,
+            primary_metric_name="balanced_accuracy",
+            permutation_metric_name="balanced_accuracy",
+            methodology_policy_name="fixed_baselines_only",
+            class_weight_policy="none",
+            model="ridge",
+            tuning_enabled=False,
+            tuning_search_space_id=None,
+            tuning_search_space_version=None,
+            tuning_inner_group_field=None,
+            subgroup_reporting_enabled=False,
+            subgroup_dimensions=[],
+            subgroup_min_samples_per_group=1,
+            subgroup_min_classes_per_group=1,
+            subgroup_report_small_groups=False,
+            official_context=_confirmatory_lock_context(),
+        )
+
+
+def test_confirmatory_preflight_rejects_mixed_selected_mapping_hashes(
+    tmp_path: Path,
+) -> None:
+    index_csv = tmp_path / "dataset_index.csv"
+    rows = _base_confirmatory_rows()
+    rows[0]["coarse_affect_mapping_version"] = COARSE_AFFECT_MAPPING_VERSION
+    rows[1]["coarse_affect_mapping_version"] = COARSE_AFFECT_MAPPING_VERSION
+    rows[0]["coarse_affect_mapping_sha256"] = COARSE_AFFECT_MAPPING_SHA256
+    rows[1]["coarse_affect_mapping_sha256"] = "a" * 64
+    _write_index(index_csv, rows)
+
+    with pytest.raises(
+        OfficialContractValidationError,
+        match="exactly one unique mapping hash",
+    ):
+        validate_official_preflight(
+            framework_mode=FrameworkMode.CONFIRMATORY,
+            index_csv=index_csv,
+            data_root=tmp_path,
+            cache_dir=tmp_path / "cache",
+            target_column="coarse_affect",
+            cv_mode="within_subject_loso_session",
+            subject="sub-001",
+            train_subject=None,
+            test_subject=None,
+            filter_task=None,
+            filter_modality=None,
+            n_permutations=10,
+            primary_metric_name="balanced_accuracy",
+            permutation_metric_name="balanced_accuracy",
+            methodology_policy_name="fixed_baselines_only",
+            class_weight_policy="none",
+            model="ridge",
+            tuning_enabled=False,
+            tuning_search_space_id=None,
+            tuning_search_space_version=None,
+            tuning_inner_group_field=None,
+            subgroup_reporting_enabled=False,
+            subgroup_dimensions=[],
+            subgroup_min_samples_per_group=1,
+            subgroup_min_classes_per_group=1,
+            subgroup_report_small_groups=False,
             official_context=_confirmatory_lock_context(),
         )
 
