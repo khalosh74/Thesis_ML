@@ -6,6 +6,7 @@ from typing import Any
 from Thesis_ML.protocols.claim_evaluator import evaluate_claim_outcomes
 from Thesis_ML.protocols.loader import load_protocol
 from Thesis_ML.protocols.models import ClaimCategory, ClaimRole, ProtocolRunResult
+from tests._config_refs import canonical_default_protocol_path
 
 _PRIMARY_METRIC = "balanced_accuracy"
 _GROUPED_NESTED = "grouped_nested_tuning"
@@ -67,7 +68,7 @@ def _reporting_contract(
 
 
 def _load_protocol_and_claims() -> tuple[object, object, object]:
-    protocol = load_protocol(Path("configs/protocols/thesis_canonical_nested_v2.json"))
+    protocol = load_protocol(canonical_default_protocol_path())
     primary_claim = next(
         claim
         for claim in protocol.claims

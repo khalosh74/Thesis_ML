@@ -1,0 +1,131 @@
+{
+  "schema_version": "config-registry-v1",
+  "description": "central lifecycle registry for versioned configs in configs/targets, configs/protocols, configs/comparisons, and decision-support registry assets",
+  "lifecycle_statuses": [
+    "active_default",
+    "active_variant",
+    "frozen_confirmatory",
+    "compatibility",
+    "archived_deprecated"
+  ],
+  "aliases": {
+    "target.coarse_affect_default": "target.affect_mapping_v2",
+    "protocol.thesis_canonical_default": "protocol.thesis_canonical_nested_v2",
+    "protocol.thesis_confirmatory_frozen": "protocol.thesis_confirmatory_v1",
+    "comparison.grouped_nested_default": "comparison.model_family_grouped_nested_comparison_v2",
+    "comparison.fixed_linear_baseline": "comparison.model_family_comparison_v1",
+    "registry.decision_support_default": "registry.decision_support_registry"
+  },
+  "configs": [
+    {
+      "config_id": "target.affect_mapping_v1",
+      "kind": "target",
+      "family": "coarse_affect_mapping",
+      "version": "affect_mapping_v1",
+      "path": "configs/targets/affect_mapping_v1.json",
+      "lifecycle": "archived_deprecated",
+      "replay_allowed": true,
+      "superseded_by": "target.affect_mapping_v2",
+      "notes": "legacy six-label mapping retained only for traceability/replay; not for new work"
+    },
+    {
+      "config_id": "target.affect_mapping_v2",
+      "kind": "target",
+      "family": "coarse_affect_mapping",
+      "version": "affect_mapping_v2",
+      "path": "configs/targets/affect_mapping_v2.json",
+      "lifecycle": "active_default",
+      "replay_allowed": true,
+      "superseded_by": null,
+      "notes": "current locked coarse-affect mapping default"
+    },
+    {
+      "config_id": "protocol.thesis_canonical_v1",
+      "kind": "protocol",
+      "family": "thesis_canonical",
+      "version": "1.0.0",
+      "path": "configs/protocols/thesis_canonical_v1.json",
+      "lifecycle": "active_variant",
+      "replay_allowed": true,
+      "superseded_by": null,
+      "notes": "fixed-baseline official protocol variant retained as supported non-default"
+    },
+    {
+      "config_id": "protocol.thesis_canonical_nested_v1",
+      "kind": "protocol",
+      "family": "thesis_canonical_nested",
+      "version": "1.0.0",
+      "path": "configs/protocols/thesis_canonical_nested_v1.json",
+      "lifecycle": "compatibility",
+      "replay_allowed": true,
+      "superseded_by": "protocol.thesis_canonical_nested_v2",
+      "notes": "retained for backward compatibility and reproducibility replay"
+    },
+    {
+      "config_id": "protocol.thesis_canonical_nested_v2",
+      "kind": "protocol",
+      "family": "thesis_canonical_nested",
+      "version": "2.0.0",
+      "path": "configs/protocols/thesis_canonical_nested_v2.json",
+      "lifecycle": "active_default",
+      "replay_allowed": true,
+      "superseded_by": null,
+      "notes": "current canonical modeling-layer protocol default"
+    },
+    {
+      "config_id": "protocol.thesis_confirmatory_v1",
+      "kind": "protocol",
+      "family": "thesis_confirmatory",
+      "version": "v1.1",
+      "path": "configs/protocols/thesis_confirmatory_v1.json",
+      "lifecycle": "frozen_confirmatory",
+      "replay_allowed": true,
+      "superseded_by": null,
+      "notes": "frozen confirmatory replay / hard-gate contract; intentionally retained under v1 filename"
+    },
+    {
+      "config_id": "comparison.model_family_comparison_v1",
+      "kind": "comparison",
+      "family": "model_family_comparison",
+      "version": "1.0.0",
+      "path": "configs/comparisons/model_family_comparison_v1.json",
+      "lifecycle": "active_variant",
+      "replay_allowed": true,
+      "superseded_by": null,
+      "notes": "fixed-baseline linear comparison retained as supported non-default"
+    },
+    {
+      "config_id": "comparison.model_family_grouped_nested_comparison_v1",
+      "kind": "comparison",
+      "family": "model_family_grouped_nested_comparison",
+      "version": "1.0.0",
+      "path": "configs/comparisons/model_family_grouped_nested_comparison_v1.json",
+      "lifecycle": "compatibility",
+      "replay_allowed": true,
+      "superseded_by": "comparison.model_family_grouped_nested_comparison_v2",
+      "notes": "retained for backward compatibility and reproducibility replay"
+    },
+    {
+      "config_id": "comparison.model_family_grouped_nested_comparison_v2",
+      "kind": "comparison",
+      "family": "model_family_grouped_nested_comparison",
+      "version": "2.0.0",
+      "path": "configs/comparisons/model_family_grouped_nested_comparison_v2.json",
+      "lifecycle": "active_default",
+      "replay_allowed": true,
+      "superseded_by": null,
+      "notes": "current grouped-nested comparison default"
+    },
+    {
+      "config_id": "registry.decision_support_registry",
+      "kind": "registry",
+      "family": "decision_support_registry",
+      "version": "1.0",
+      "path": "configs/decision_support_registry.json",
+      "lifecycle": "active_default",
+      "replay_allowed": true,
+      "superseded_by": null,
+      "notes": "current decision-support registry asset"
+    }
+  ]
+}

@@ -1,0 +1,49 @@
+# Config Governance (Phase 1)
+
+## Purpose
+This document defines the governance layer for versioned JSON configs under `configs/`.
+It introduces a central lifecycle registry (`configs/config_registry.json`) for:
+- `configs/targets`
+- `configs/protocols`
+- `configs/comparisons`
+- `configs/decision_support_registry.json`
+
+Phase 1 is governance-only and does not change runtime behavior.
+
+## Lifecycle Definitions
+- `active_default`: current recommended default for new official work.
+- `active_variant`: actively supported non-default variant.
+- `frozen_confirmatory`: frozen confirmatory replay/hard-gate contract.
+- `compatibility`: retained for backward compatibility and reproducibility replay.
+- `archived_deprecated`: retained for traceability/replay, not for new work.
+
+## Rules
+- Versioned configs used for official runs or thesis claims are immutable.
+- New defaults are introduced by adding a new config and updating the registry.
+- Frozen confirmatory configs are retained for replay/hard-gate compatibility.
+- Deprecated configs are not deleted until references and replay needs are retired.
+- Future phases will route runtime config resolution through registry aliases.
+- Phase 1 does not change runtime behavior yet.
+
+## Current Defaults
+| Alias | Resolved path |
+|---|---|
+| coarse affect target default | `configs/targets/affect_mapping_v2.json` |
+| canonical thesis protocol default | `configs/protocols/thesis_canonical_nested_v2.json` |
+| frozen confirmatory protocol | `configs/protocols/thesis_confirmatory_v1.json` |
+| grouped-nested comparison default | `configs/comparisons/model_family_grouped_nested_comparison_v2.json` |
+| decision-support registry default | `configs/decision_support_registry.json` |
+
+## Current Lifecycle Table (All Current JSON Files in `configs/`)
+| config_id | path | lifecycle | replay_allowed | superseded_by |
+|---|---|---|---|---|
+| `target.affect_mapping_v1` | `configs/targets/affect_mapping_v1.json` | `archived_deprecated` | `true` | `target.affect_mapping_v2` |
+| `target.affect_mapping_v2` | `configs/targets/affect_mapping_v2.json` | `active_default` | `true` | `null` |
+| `protocol.thesis_canonical_v1` | `configs/protocols/thesis_canonical_v1.json` | `active_variant` | `true` | `null` |
+| `protocol.thesis_canonical_nested_v1` | `configs/protocols/thesis_canonical_nested_v1.json` | `compatibility` | `true` | `protocol.thesis_canonical_nested_v2` |
+| `protocol.thesis_canonical_nested_v2` | `configs/protocols/thesis_canonical_nested_v2.json` | `active_default` | `true` | `null` |
+| `protocol.thesis_confirmatory_v1` | `configs/protocols/thesis_confirmatory_v1.json` | `frozen_confirmatory` | `true` | `null` |
+| `comparison.model_family_comparison_v1` | `configs/comparisons/model_family_comparison_v1.json` | `active_variant` | `true` | `null` |
+| `comparison.model_family_grouped_nested_comparison_v1` | `configs/comparisons/model_family_grouped_nested_comparison_v1.json` | `compatibility` | `true` | `comparison.model_family_grouped_nested_comparison_v2` |
+| `comparison.model_family_grouped_nested_comparison_v2` | `configs/comparisons/model_family_grouped_nested_comparison_v2.json` | `active_default` | `true` | `null` |
+| `registry.decision_support_registry` | `configs/decision_support_registry.json` | `active_default` | `true` | `null` |

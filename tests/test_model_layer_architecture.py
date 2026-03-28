@@ -25,6 +25,12 @@ from Thesis_ML.experiments.model_factory import ALL_MODEL_NAMES
 from Thesis_ML.experiments.model_registry import get_model_spec, registered_model_names
 from Thesis_ML.protocols.compiler import compile_protocol
 from Thesis_ML.protocols.loader import load_protocol
+from tests._config_refs import (
+    canonical_default_protocol_path,
+    canonical_nested_v1_protocol_compat_path,
+    grouped_nested_default_comparison_path,
+    grouped_nested_v1_comparison_compat_path,
+)
 
 
 def _repo_root() -> Path:
@@ -35,24 +41,10 @@ def _demo_index_csv() -> Path:
     return _repo_root() / "demo_data" / "synthetic_v1" / "dataset_index.csv"
 
 
-def _comparison_grouped_nested_v1_path() -> Path:
-    return (
-        _repo_root() / "configs" / "comparisons" / "model_family_grouped_nested_comparison_v1.json"
-    )
-
-
-def _comparison_grouped_nested_v2_path() -> Path:
-    return (
-        _repo_root() / "configs" / "comparisons" / "model_family_grouped_nested_comparison_v2.json"
-    )
-
-
-def _protocol_grouped_nested_v1_path() -> Path:
-    return _repo_root() / "configs" / "protocols" / "thesis_canonical_nested_v1.json"
-
-
-def _protocol_grouped_nested_v2_path() -> Path:
-    return _repo_root() / "configs" / "protocols" / "thesis_canonical_nested_v2.json"
+_comparison_grouped_nested_v1_path = grouped_nested_v1_comparison_compat_path
+_comparison_grouped_nested_v2_path = grouped_nested_default_comparison_path
+_protocol_grouped_nested_v1_path = canonical_nested_v1_protocol_compat_path
+_protocol_grouped_nested_v2_path = canonical_default_protocol_path
 
 
 def _cpu_policy() -> ResolvedComputePolicy:

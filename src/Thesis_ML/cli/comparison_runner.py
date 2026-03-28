@@ -12,6 +12,7 @@ from Thesis_ML.config.paths import (
     DEFAULT_COMPARISON_SPEC_PATH,
     PROJECT_ROOT,
 )
+from Thesis_ML.config.runtime_selection import resolve_runtime_config_path
 from Thesis_ML.experiments.compute_policy import HARDWARE_MODE_CHOICES
 
 
@@ -45,9 +46,14 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--comparison",
-        default=str(DEFAULT_COMPARISON_SPEC_PATH),
+        default=None,
         # Canonical modeling-layer default is grouped-nested v2.
         help="Path to comparison spec JSON.",
+    )
+    parser.add_argument(
+        "--comparison-alias",
+        default=None,
+        help="Registry alias for comparison selection when --comparison is not provided.",
     )
     parser.add_argument(
         "--variant",
@@ -121,7 +127,13 @@ def main(argv: list[str] | None = None) -> int:
     if args.all_variants and args.variant:
         parser.error("Use either --variant (one or more) or --all-variants, not both.")
 
-    comparison = load_comparison_spec(Path(args.comparison))
+    comparison_path = resolve_runtime_config_path(
+        args.comparison,
+        args.comparison_alias,
+        default_alias="comparison.grouped_nested_default",
+        fallback_path=DEFAULT_COMPARISON_SPEC_PATH,
+    )
+    comparison = load_comparison_spec(comparison_path)
     requested_variants = list(args.variant) if args.variant else None
 
     result = compile_and_run_comparison(

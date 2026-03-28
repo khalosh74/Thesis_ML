@@ -14,14 +14,14 @@ from Thesis_ML.protocols.runner import (
     _validate_official_protocol_gpu_admission,
     compile_and_run_protocol,
 )
+from tests._config_refs import canonical_v1_protocol_variant_path
 
 
 def _repo_root() -> Path:
     return Path(__file__).resolve().parents[1]
 
 
-def _canonical_protocol_path() -> Path:
-    return _repo_root() / "configs" / "protocols" / "thesis_canonical_v1.json"
+_canonical_protocol_path = canonical_v1_protocol_variant_path
 
 
 def _demo_dataset_paths() -> dict[str, Path]:

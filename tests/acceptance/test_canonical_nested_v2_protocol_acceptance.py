@@ -8,10 +8,6 @@ import pandas as pd
 from Thesis_ML.cli.protocol_runner import main as protocol_main
 
 
-def _repo_root() -> Path:
-    return Path(__file__).resolve().parents[2]
-
-
 def test_canonical_nested_v2_protocol_cli_dry_run_acceptance(
     tmp_path: Path,
     monkeypatch,
@@ -27,7 +23,6 @@ def test_canonical_nested_v2_protocol_cli_dry_run_acceptance(
     data_root = tmp_path / "Data"
     cache_dir = tmp_path / "cache"
     reports_root = tmp_path / "reports" / "experiments"
-    protocol_path = _repo_root() / "configs" / "protocols" / "thesis_canonical_nested_v2.json"
 
     monkeypatch.setenv("THESIS_ML_INDEX_CSV", str(index_csv))
     monkeypatch.setenv("THESIS_ML_DATA_ROOT", str(data_root))
@@ -35,8 +30,8 @@ def test_canonical_nested_v2_protocol_cli_dry_run_acceptance(
 
     exit_code = protocol_main(
         [
-            "--protocol",
-            str(protocol_path),
+            "--protocol-alias",
+            "protocol.thesis_canonical_default",
             "--all-suites",
             "--reports-root",
             str(reports_root),

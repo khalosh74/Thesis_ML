@@ -19,6 +19,11 @@ from Thesis_ML.experiments.tuning_search_spaces import (
     LINEAR_GROUPED_NESTED_SEARCH_SPACE_ID,
     LINEAR_GROUPED_NESTED_SEARCH_SPACE_VERSION,
 )
+from tests._config_refs import (
+    canonical_v1_protocol_variant_path,
+    grouped_nested_v1_comparison_compat_path,
+    model_family_v1_comparison_variant_path,
+)
 
 
 def _repo_root() -> Path:
@@ -30,13 +35,13 @@ def _demo_index_csv() -> Path:
 
 
 def _confirmatory_protocol() -> Path:
-    return _repo_root() / "configs" / "protocols" / "thesis_canonical_v1.json"
+    return canonical_v1_protocol_variant_path()
 
 
 def _comparison_specs() -> list[Path]:
     return [
-        _repo_root() / "configs" / "comparisons" / "model_family_comparison_v1.json",
-        _repo_root() / "configs" / "comparisons" / "model_family_grouped_nested_comparison_v1.json",
+        model_family_v1_comparison_variant_path(),
+        grouped_nested_v1_comparison_compat_path(),
     ]
 
 
@@ -521,9 +526,7 @@ def test_grouped_nested_cohort_selects_valid_representative_when_available(
 
     pd.DataFrame(index_rows).to_csv(index_csv, index=False)
 
-    comparison = runtime_profile.load_comparison_spec(
-        _repo_root() / "configs" / "comparisons" / "model_family_grouped_nested_comparison_v1.json"
-    )
+    comparison = runtime_profile.load_comparison_spec(grouped_nested_v1_comparison_compat_path())
     manifest = runtime_profile.compile_comparison(comparison, index_csv=index_csv)
     candidate_runs = [
         run

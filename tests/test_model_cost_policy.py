@@ -11,6 +11,11 @@ from Thesis_ML.experiments.model_catalog import projected_runtime_seconds
 from Thesis_ML.protocols.compiler import compile_protocol
 from Thesis_ML.protocols.loader import load_protocol
 from Thesis_ML.verification.model_cost_policy import verify_model_cost_policy_precheck
+from tests._config_refs import (
+    canonical_v1_protocol_variant_path,
+    grouped_nested_v1_comparison_compat_path,
+    model_family_v1_comparison_variant_path,
+)
 
 
 def _repo_root() -> Path:
@@ -21,18 +26,9 @@ def _demo_index_csv() -> Path:
     return _repo_root() / "demo_data" / "synthetic_v1" / "dataset_index.csv"
 
 
-def _canonical_protocol_path() -> Path:
-    return _repo_root() / "configs" / "protocols" / "thesis_canonical_v1.json"
-
-
-def _comparison_path() -> Path:
-    return _repo_root() / "configs" / "comparisons" / "model_family_comparison_v1.json"
-
-
-def _nested_comparison_path() -> Path:
-    return (
-        _repo_root() / "configs" / "comparisons" / "model_family_grouped_nested_comparison_v1.json"
-    )
+_canonical_protocol_path = canonical_v1_protocol_variant_path
+_comparison_path = model_family_v1_comparison_variant_path
+_nested_comparison_path = grouped_nested_v1_comparison_compat_path
 
 
 def test_confirmatory_protocol_rejects_disallowed_cost_tier(tmp_path: Path) -> None:

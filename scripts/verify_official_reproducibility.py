@@ -13,6 +13,7 @@ from Thesis_ML.config.paths import (
     DEFAULT_COMPARISON_SPEC_PATH,
     DEFAULT_THESIS_CONFIRMATORY_PROTOCOL_PATH,
 )
+from Thesis_ML.config.runtime_selection import resolve_runtime_config_path
 from Thesis_ML.protocols.loader import load_protocol
 from Thesis_ML.protocols.runner import compile_and_run_protocol
 from Thesis_ML.verification.reproducibility import compare_official_outputs
@@ -37,6 +38,11 @@ def _build_parser() -> argparse.ArgumentParser:
             "Protocol/comparison spec path. Defaults: protocol->"
             f"{DEFAULT_THESIS_CONFIRMATORY_PROTOCOL_PATH}, comparison->{DEFAULT_COMPARISON_SPEC_PATH}."
         ),
+    )
+    parser.add_argument(
+        "--config-alias",
+        default="",
+        help="Optional registry alias for protocol/comparison config selection.",
     )
     parser.add_argument("--index-csv", required=True, help="Dataset index CSV path.")
     parser.add_argument("--data-root", required=True, help="Data root path.")
@@ -131,13 +137,19 @@ def main(argv: list[str] | None = None) -> int:
     if args.mode == "comparison" and args.all_variants and args.variant:
         parser.error("Use either --variant or --all-variants for comparison mode.")
 
-    config_text = str(args.config).strip()
-    config_path = Path(config_text) if config_text else Path()
-    if not config_text:
-        config_path = (
-            Path(DEFAULT_THESIS_CONFIRMATORY_PROTOCOL_PATH)
-            if args.mode == "protocol"
-            else Path(DEFAULT_COMPARISON_SPEC_PATH)
+    if args.mode == "protocol":
+        config_path = resolve_runtime_config_path(
+            args.config,
+            args.config_alias,
+            default_alias="protocol.thesis_confirmatory_frozen",
+            fallback_path=DEFAULT_THESIS_CONFIRMATORY_PROTOCOL_PATH,
+        )
+    else:
+        config_path = resolve_runtime_config_path(
+            args.config,
+            args.config_alias,
+            default_alias="comparison.grouped_nested_default",
+            fallback_path=DEFAULT_COMPARISON_SPEC_PATH,
         )
     if not config_path.exists():
         parser.error(f"Config path does not exist: {config_path}")

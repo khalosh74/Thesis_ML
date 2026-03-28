@@ -5,6 +5,11 @@ from contextlib import ExitStack
 from importlib import resources
 from pathlib import Path
 
+from Thesis_ML.config.config_registry import (
+    resolve_config_alias,
+    resolve_config_registry_path,
+)
+
 
 def _looks_like_repo_root(path: Path) -> bool:
     return (path / "pyproject.toml").exists() and (path / "src" / "Thesis_ML").exists()
@@ -64,8 +69,17 @@ def _resolve_shipped_workbook_template(source_repo_root: Path | None) -> Path:
 SOURCE_REPO_ROOT = _resolve_source_repo_root()
 PROJECT_ROOT = _resolve_project_root(SOURCE_REPO_ROOT)
 OUTPUTS_ROOT = PROJECT_ROOT / "outputs"
+DEFAULT_CONFIG_REGISTRY_PATH = resolve_config_registry_path(
+    source_repo_root=SOURCE_REPO_ROOT,
+    project_root=PROJECT_ROOT,
+)
 
-DEFAULT_DECISION_SUPPORT_REGISTRY = _resolve_default_registry(SOURCE_REPO_ROOT)
+DEFAULT_DECISION_SUPPORT_REGISTRY = resolve_config_alias(
+    "registry.decision_support_default",
+    source_repo_root=SOURCE_REPO_ROOT,
+    project_root=PROJECT_ROOT,
+    fallback=_resolve_default_registry(SOURCE_REPO_ROOT),
+)
 SHIPPED_WORKBOOK_TEMPLATE = _resolve_shipped_workbook_template(SOURCE_REPO_ROOT)
 
 # Writable default output location used by workbook-generation CLIs.
@@ -80,15 +94,41 @@ DEFAULT_CONFIRMATORY_REPORTS_ROOT = DEFAULT_REPORTS_ROOT / "confirmatory"
 DEFAULT_EXPERIMENT_REPORTS_ROOT = DEFAULT_EXPLORATORY_REPORTS_ROOT
 DEFAULT_PROTOCOL_REPORTS_ROOT = DEFAULT_CONFIRMATORY_REPORTS_ROOT
 DEFAULT_COMPARISON_SPEC_DIR = PROJECT_ROOT / "configs" / "comparisons"
-DEFAULT_COMPARISON_SPEC_PATH = DEFAULT_COMPARISON_SPEC_DIR / "model_family_grouped_nested_comparison_v2.json"
 DEFAULT_PROTOCOLS_DIR = PROJECT_ROOT / "configs" / "protocols"
 DEFAULT_TARGET_CONFIGS_DIR = PROJECT_ROOT / "configs" / "targets"
 
 # thesis_canonical_nested_v2.json is the canonical nested-tuning workflow
 # thesis_confirmatory_v1.json is the legacy frozen confirmatory path retained for hard-gate validation
-DEFAULT_THESIS_PROTOCOL_PATH = DEFAULT_PROTOCOLS_DIR / "thesis_canonical_nested_v2.json"
-DEFAULT_THESIS_CONFIRMATORY_PROTOCOL_PATH = DEFAULT_PROTOCOLS_DIR / "thesis_confirmatory_v1.json"
-DEFAULT_THESIS_NESTED_PROTOCOL_PATH = DEFAULT_PROTOCOLS_DIR / "thesis_canonical_nested_v2.json"
+DEFAULT_THESIS_PROTOCOL_PATH = resolve_config_alias(
+    "protocol.thesis_canonical_default",
+    source_repo_root=SOURCE_REPO_ROOT,
+    project_root=PROJECT_ROOT,
+    fallback=(DEFAULT_PROTOCOLS_DIR / "thesis_canonical_nested_v2.json"),
+)
+DEFAULT_THESIS_CONFIRMATORY_PROTOCOL_PATH = resolve_config_alias(
+    "protocol.thesis_confirmatory_frozen",
+    source_repo_root=SOURCE_REPO_ROOT,
+    project_root=PROJECT_ROOT,
+    fallback=(DEFAULT_PROTOCOLS_DIR / "thesis_confirmatory_v1.json"),
+)
+DEFAULT_THESIS_NESTED_PROTOCOL_PATH = resolve_config_alias(
+    "protocol.thesis_canonical_default",
+    source_repo_root=SOURCE_REPO_ROOT,
+    project_root=PROJECT_ROOT,
+    fallback=(DEFAULT_PROTOCOLS_DIR / "thesis_canonical_nested_v2.json"),
+)
+DEFAULT_COMPARISON_SPEC_PATH = resolve_config_alias(
+    "comparison.grouped_nested_default",
+    source_repo_root=SOURCE_REPO_ROOT,
+    project_root=PROJECT_ROOT,
+    fallback=(DEFAULT_COMPARISON_SPEC_DIR / "model_family_grouped_nested_comparison_v2.json"),
+)
+DEFAULT_COARSE_AFFECT_TARGET_MAPPING_PATH = resolve_config_alias(
+    "target.coarse_affect_default",
+    source_repo_root=SOURCE_REPO_ROOT,
+    project_root=PROJECT_ROOT,
+    fallback=(DEFAULT_TARGET_CONFIGS_DIR / "affect_mapping_v2.json"),
+)
 DEFAULT_CONFIRMATORY_PROTOCOL_SCHEMA_PATH = (
     PROJECT_ROOT / "schemas" / "confirmatory_protocol.schema.json"
 )

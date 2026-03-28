@@ -8,6 +8,7 @@ from typing import Any
 
 import pandas as pd
 
+from Thesis_ML.config.paths import DEFAULT_COARSE_AFFECT_TARGET_MAPPING_PATH
 from Thesis_ML.data.target_mapping_registry import load_target_mapping
 
 _BINARY_VALENCE_BY_COARSE = {
@@ -15,7 +16,7 @@ _BINARY_VALENCE_BY_COARSE = {
     "negative": "negative",
 }
 
-COARSE_AFFECT_MAPPING_VERSION = "affect_mapping_v2"
+COARSE_AFFECT_MAPPING_VERSION = DEFAULT_COARSE_AFFECT_TARGET_MAPPING_PATH.stem
 BINARY_VALENCE_MAPPING_VERSION = "binary_valence_mapping_v1"
 
 

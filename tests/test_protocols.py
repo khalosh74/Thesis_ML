@@ -9,31 +9,24 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from Thesis_ML.cli.protocol_runner import main as protocol_runner_main
+from Thesis_ML.config.paths import DEFAULT_THESIS_PROTOCOL_PATH
 from Thesis_ML.data.index_dataset import build_dataset_index
 from Thesis_ML.experiments.errors import OfficialContractValidationError
 from Thesis_ML.protocols.compiler import compile_protocol
 from Thesis_ML.protocols.loader import load_protocol
 from Thesis_ML.protocols.runner import compile_and_run_protocol
+from tests._config_refs import (
+    canonical_default_protocol_path,
+    canonical_nested_v1_protocol_compat_path,
+    canonical_v1_protocol_variant_path,
+    frozen_confirmatory_protocol_path,
+)
 
-
-def _repo_root() -> Path:
-    return Path(__file__).resolve().parents[1]
-
-
-def _canonical_protocol_path() -> Path:
-    return _repo_root() / "configs" / "protocols" / "thesis_canonical_v1.json"
-
-
-def _nested_protocol_path() -> Path:
-    return _repo_root() / "configs" / "protocols" / "thesis_canonical_nested_v1.json"
-
-
-def _canonical_nested_v2_protocol_path() -> Path:
-    return _repo_root() / "configs" / "protocols" / "thesis_canonical_nested_v2.json"
-
-
-def _confirmatory_freeze_protocol_path() -> Path:
-    return _repo_root() / "configs" / "protocols" / "thesis_confirmatory_v1.json"
+_canonical_protocol_path = canonical_v1_protocol_variant_path
+_nested_protocol_path = canonical_nested_v1_protocol_compat_path
+_canonical_nested_v2_protocol_path = canonical_default_protocol_path
+_confirmatory_freeze_protocol_path = frozen_confirmatory_protocol_path
 
 
 def _write_nifti(path: Path, data: np.ndarray) -> None:
@@ -120,6 +113,48 @@ def test_load_canonical_protocol_validates() -> None:
         "secondary_cross_person_transfer",
         "primary_controls",
     }
+
+
+def test_protocol_runner_cli_accepts_protocol_alias_and_resolves_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Path] = {}
+
+    def _capture_load_protocol(path: Path):
+        captured["protocol_path"] = Path(path)
+        return object()
+
+    monkeypatch.setattr("Thesis_ML.cli.protocol_runner.load_protocol", _capture_load_protocol)
+    monkeypatch.setattr(
+        "Thesis_ML.cli.protocol_runner.compile_and_run_protocol",
+        lambda **_: {
+            "protocol_id": "thesis-canonical-nested",
+            "protocol_version": "2.0.0",
+            "protocol_output_dir": str(tmp_path / "protocol_output"),
+            "n_success": 0,
+            "n_completed": 0,
+            "n_failed": 0,
+            "n_timed_out": 0,
+            "n_skipped_due_to_policy": 0,
+            "n_planned": 0,
+            "max_parallel_runs_effective": 1,
+            "artifact_paths": {},
+        },
+    )
+
+    exit_code = protocol_runner_main(
+        [
+            "--protocol-alias",
+            "protocol.thesis_canonical_default",
+            "--all-suites",
+            "--reports-root",
+            str(tmp_path / "reports"),
+            "--dry-run",
+        ]
+    )
+    assert exit_code == 0
+    assert captured["protocol_path"].resolve() == DEFAULT_THESIS_PROTOCOL_PATH.resolve()
 
 
 def test_protocol_validation_rejects_exploratory_only_model_in_model_policy(

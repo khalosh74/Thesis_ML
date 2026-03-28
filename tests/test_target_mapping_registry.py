@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from Thesis_ML.config.paths import DEFAULT_TARGET_CONFIGS_DIR
+from Thesis_ML.config.paths import DEFAULT_COARSE_AFFECT_TARGET_MAPPING_PATH
 from Thesis_ML.data.target_mapping_registry import (
     canonical_mapping_object_hash,
     load_target_mapping,
@@ -28,7 +28,7 @@ _GROUND_TRUTH_HASH = "3bbc30d6949e868f8d9d2ad64b7b10d1d14c93fff3d406d3321d76efee
 def test_affect_mapping_v2_loads_from_registry() -> None:
     entry = load_target_mapping("affect_mapping_v2")
     assert entry.version == "affect_mapping_v2"
-    assert entry.path == (DEFAULT_TARGET_CONFIGS_DIR / "affect_mapping_v2.json").resolve()
+    assert entry.path == DEFAULT_COARSE_AFFECT_TARGET_MAPPING_PATH.resolve()
     assert dict(entry.mapping) == _GROUND_TRUTH_MAPPING
 
 

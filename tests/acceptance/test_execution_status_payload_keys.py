@@ -8,10 +8,6 @@ import pandas as pd
 from Thesis_ML.cli.protocol_runner import main as protocol_main
 
 
-def _repo_root() -> Path:
-    return Path(__file__).resolve().parents[2]
-
-
 def test_execution_status_payload_contains_counts(tmp_path: Path, monkeypatch) -> None:
     index_csv = tmp_path / "dataset_index.csv"
     pd.DataFrame(
@@ -24,7 +20,6 @@ def test_execution_status_payload_contains_counts(tmp_path: Path, monkeypatch) -
     data_root = tmp_path / "Data"
     cache_dir = tmp_path / "cache"
     reports_root = tmp_path / "reports" / "experiments"
-    protocol_path = _repo_root() / "configs" / "protocols" / "thesis_canonical_nested_v2.json"
 
     monkeypatch.setenv("THESIS_ML_INDEX_CSV", str(index_csv))
     monkeypatch.setenv("THESIS_ML_DATA_ROOT", str(data_root))
@@ -32,8 +27,8 @@ def test_execution_status_payload_contains_counts(tmp_path: Path, monkeypatch) -
 
     exit_code = protocol_main(
         [
-            "--protocol",
-            str(protocol_path),
+            "--protocol-alias",
+            "protocol.thesis_canonical_default",
             "--all-suites",
             "--reports-root",
             str(reports_root),

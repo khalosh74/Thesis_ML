@@ -20,6 +20,7 @@ from Thesis_ML.protocols.compiler import compile_protocol
 from Thesis_ML.protocols.loader import load_protocol
 from Thesis_ML.verification.official_artifacts import verify_official_artifacts
 from Thesis_ML.verification.reproducibility import compare_official_outputs
+from tests._config_refs import canonical_default_protocol_path
 
 
 def _write_report_index(path: Path, report_dir: Path) -> None:
@@ -41,9 +42,7 @@ def _repo_root() -> Path:
 
 
 def _strict_gate_protocol_artifacts(tmp_path: Path) -> Path:
-    protocol = load_protocol(
-        _repo_root() / "configs" / "protocols" / "thesis_canonical_nested_v2.json"
-    )
+    protocol = load_protocol(canonical_default_protocol_path())
     compiled_manifest = compile_protocol(
         protocol,
         index_csv=_repo_root() / "demo_data" / "synthetic_v1" / "dataset_index.csv",

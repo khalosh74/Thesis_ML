@@ -16,18 +16,18 @@ from Thesis_ML.experiments.compute_scheduler import (
 )
 from Thesis_ML.protocols.loader import load_protocol
 from Thesis_ML.protocols.runner import compile_and_run_protocol
+from tests._config_refs import (
+    canonical_v1_protocol_variant_path,
+    model_family_v1_comparison_variant_path,
+)
 
 
 def _repo_root() -> Path:
     return Path(__file__).resolve().parents[1]
 
 
-def _comparison_spec_path() -> Path:
-    return _repo_root() / "configs" / "comparisons" / "model_family_comparison_v1.json"
-
-
-def _protocol_path() -> Path:
-    return _repo_root() / "configs" / "protocols" / "thesis_canonical_v1.json"
+_comparison_spec_path = model_family_v1_comparison_variant_path
+_protocol_path = canonical_v1_protocol_variant_path
 
 
 def _demo_dataset_paths() -> dict[str, Path]:

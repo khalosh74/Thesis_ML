@@ -119,3 +119,27 @@ def test_verify_publishable_bundle_fails_on_hash_mismatch(tmp_path: Path) -> Non
 
     verify_exit = verify_module.main(["--bundle-dir", str(bundle_dir)])
     assert verify_exit == 1
+
+
+def test_build_publishable_bundle_supports_alias_spec_flags(tmp_path: Path) -> None:
+    build_module = _load_script_module("build_publishable_bundle.py")
+
+    confirmatory_output = tmp_path / "protocol_runs" / "thesis-canonical__1.0.0"
+    _write_confirmatory_output_fixture(confirmatory_output)
+
+    bundle_dir = tmp_path / "bundle_alias_flags"
+    build_exit = build_module.main(
+        [
+            "--output-dir",
+            str(bundle_dir),
+            "--confirmatory-output",
+            str(confirmatory_output),
+            "--comparison-spec-alias",
+            "comparison.grouped_nested_default",
+            "--protocol-spec-alias",
+            "protocol.thesis_confirmatory_frozen",
+        ]
+    )
+    assert build_exit == 0
+    assert (bundle_dir / "specs" / "model_family_grouped_nested_comparison_v2.json").exists()
+    assert (bundle_dir / "specs" / "thesis_confirmatory_v1.json").exists()

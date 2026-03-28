@@ -1,5 +1,12 @@
 """Central configuration helpers for paths and defaults."""
 
+from .config_registry import (
+    load_config_registry,
+    resolve_config_alias,
+    resolve_config_id,
+    resolve_config_registry_path,
+)
+from .runtime_selection import resolve_runtime_config_path
 from .framework_mode import FrameworkMode, coerce_framework_mode
 from .methodology import (
     ALLOWED_DATA_BALANCE_AXES,
@@ -45,8 +52,10 @@ from .paths import (
     DEFAULT_COMPARISON_REPORTS_ROOT,
     DEFAULT_COMPARISON_SPEC_DIR,
     DEFAULT_COMPARISON_SPEC_PATH,
+    DEFAULT_CONFIG_REGISTRY_PATH,
     DEFAULT_CONFIRMATORY_PROTOCOL_SCHEMA_PATH,
     DEFAULT_CONFIRMATORY_REPORTS_ROOT,
+    DEFAULT_COARSE_AFFECT_TARGET_MAPPING_PATH,
     DEFAULT_DECISION_SUPPORT_OUTPUT_ROOT,
     DEFAULT_DECISION_SUPPORT_REGISTRY,
     DEFAULT_EXPERIMENT_REPORTS_ROOT,
@@ -103,7 +112,9 @@ __all__ = [
     "DEFAULT_EXPERIMENT_REPORTS_ROOT",
     "DEFAULT_COMPARISON_SPEC_DIR",
     "DEFAULT_COMPARISON_SPEC_PATH",
+    "DEFAULT_CONFIG_REGISTRY_PATH",
     "DEFAULT_THESIS_CONFIRMATORY_PROTOCOL_PATH",
+    "DEFAULT_COARSE_AFFECT_TARGET_MAPPING_PATH",
     "DEFAULT_TARGET_CONFIGS_DIR",
     "DEFAULT_BASELINE_REPORTS_DIR",
     "DEFAULT_BASELINE_MODELS_DIR",
@@ -129,6 +140,11 @@ __all__ = [
     "WORKBOOK_SCHEMA_METADATA_HEADER_KEY",
     "WORKBOOK_SCHEMA_METADATA_HEADER_VALUE",
     "WORKBOOK_SCHEMA_METADATA_ROWS",
+    "load_config_registry",
+    "resolve_config_registry_path",
+    "resolve_config_id",
+    "resolve_config_alias",
+    "resolve_runtime_config_path",
     "FrameworkMode",
     "coerce_framework_mode",
     "MethodologyPolicyName",

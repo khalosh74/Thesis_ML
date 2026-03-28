@@ -6,10 +6,7 @@ from pathlib import Path
 import pandas as pd
 
 from Thesis_ML.cli.comparison_runner import main as comparison_main
-
-
-def _repo_root() -> Path:
-    return Path(__file__).resolve().parents[2]
+from tests._config_refs import model_family_v1_comparison_variant_path
 
 
 def test_comparison_cli_dry_run_acceptance(
@@ -22,7 +19,7 @@ def test_comparison_cli_dry_run_acceptance(
     data_root = tmp_path / "Data"
     cache_dir = tmp_path / "cache"
     reports_root = tmp_path / "reports" / "comparisons"
-    comparison_path = _repo_root() / "configs" / "comparisons" / "model_family_comparison_v1.json"
+    comparison_path = model_family_v1_comparison_variant_path()
 
     monkeypatch.setenv("THESIS_ML_INDEX_CSV", str(index_csv))
     monkeypatch.setenv("THESIS_ML_DATA_ROOT", str(data_root))

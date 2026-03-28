@@ -14,6 +14,7 @@ from Thesis_ML.config.paths import (
     DEFAULT_THESIS_CONFIRMATORY_PROTOCOL_PATH,
     PROJECT_ROOT,
 )
+from Thesis_ML.config.runtime_selection import resolve_runtime_config_path
 from Thesis_ML.protocols.loader import load_protocol
 from Thesis_ML.protocols.runner import compile_and_run_protocol
 from Thesis_ML.verification.confirmatory_ready import verify_confirmatory_ready
@@ -51,14 +52,24 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--comparison",
         type=Path,
-        default=Path(DEFAULT_COMPARISON_SPEC_PATH),
+        default=None,
         help="Comparison spec path.",
+    )
+    parser.add_argument(
+        "--comparison-alias",
+        default=None,
+        help="Registry alias for comparison spec selection when --comparison is not provided.",
     )
     parser.add_argument(
         "--protocol",
         type=Path,
-        default=Path(DEFAULT_THESIS_CONFIRMATORY_PROTOCOL_PATH),
+        default=None,
         help="Confirmatory protocol path.",
+    )
+    parser.add_argument(
+        "--protocol-alias",
+        default=None,
+        help="Registry alias for protocol selection when --protocol is not provided.",
     )
     parser.add_argument(
         "--variant",
@@ -179,21 +190,23 @@ def _resolve_dataset_paths(args: argparse.Namespace) -> tuple[Path, Path, Path]:
     return (index_csv, data_root, cache_dir)
 
 
-def _resolve_comparison_variants(args: argparse.Namespace) -> list[str] | None:
+def _resolve_comparison_variants(
+    args: argparse.Namespace, comparison_path: Path
+) -> list[str] | None:
     if bool(args.all_variants):
         return None
     if args.variant:
         return [str(value) for value in list(args.variant)]
-    comparison = load_comparison_spec(Path(args.comparison))
+    comparison = load_comparison_spec(comparison_path)
     return [str(comparison.allowed_variants[0].variant_id)]
 
 
-def _resolve_protocol_suites(args: argparse.Namespace) -> list[str] | None:
+def _resolve_protocol_suites(args: argparse.Namespace, protocol_path: Path) -> list[str] | None:
     if bool(args.all_suites):
         return None
     if args.suite:
         return [str(value) for value in list(args.suite)]
-    protocol = load_protocol(Path(args.protocol))
+    protocol = load_protocol(protocol_path)
     enabled = [suite.suite_id for suite in protocol.official_run_suites if suite.enabled]
     if not enabled:
         raise ValueError("Selected protocol has no enabled suites.")
@@ -250,6 +263,8 @@ def _determinism_for_mode(
     *,
     mode: str,
     args: argparse.Namespace,
+    comparison_path: Path,
+    protocol_path: Path,
     index_csv: Path,
     data_root: Path,
     cache_dir: Path,
@@ -267,7 +282,7 @@ def _determinism_for_mode(
 
     if mode == "comparison":
         result_a = _run_comparison(
-            comparison_path=Path(args.comparison),
+            comparison_path=comparison_path,
             reports_root=run_a_root,
             index_csv=index_csv,
             data_root=data_root,
@@ -275,7 +290,7 @@ def _determinism_for_mode(
             variant_ids=variant_ids,
         )
         result_b = _run_comparison(
-            comparison_path=Path(args.comparison),
+            comparison_path=comparison_path,
             reports_root=run_b_root,
             index_csv=index_csv,
             data_root=data_root,
@@ -286,7 +301,7 @@ def _determinism_for_mode(
         output_b = Path(str(result_b["comparison_output_dir"]))
     else:
         result_a = _run_confirmatory(
-            protocol_path=Path(args.protocol),
+            protocol_path=protocol_path,
             reports_root=run_a_root,
             index_csv=index_csv,
             data_root=data_root,
@@ -294,7 +309,7 @@ def _determinism_for_mode(
             suite_ids=suite_ids,
         )
         result_b = _run_confirmatory(
-            protocol_path=Path(args.protocol),
+            protocol_path=protocol_path,
             reports_root=run_b_root,
             index_csv=index_csv,
             data_root=data_root,
@@ -351,6 +366,18 @@ def main(argv: list[str] | None = None) -> int:
     mode = str(args.mode)
     run_comparison_mode = mode in {"comparison", "both"}
     run_confirmatory_mode = mode in {"confirmatory", "both"}
+    comparison_path = resolve_runtime_config_path(
+        args.comparison,
+        args.comparison_alias,
+        default_alias="comparison.grouped_nested_default",
+        fallback_path=DEFAULT_COMPARISON_SPEC_PATH,
+    )
+    protocol_path = resolve_runtime_config_path(
+        args.protocol,
+        args.protocol_alias,
+        default_alias="protocol.thesis_confirmatory_frozen",
+        fallback_path=DEFAULT_THESIS_CONFIRMATORY_PROTOCOL_PATH,
+    )
 
     index_csv, data_root, cache_dir = _resolve_dataset_paths(args)
     reports_root = Path(args.reports_root).resolve()
@@ -372,8 +399,10 @@ def main(argv: list[str] | None = None) -> int:
         else reports_root / "reproducibility_manifest.json"
     )
 
-    variant_ids = _resolve_comparison_variants(args) if run_comparison_mode else None
-    suite_ids = _resolve_protocol_suites(args) if run_confirmatory_mode else None
+    variant_ids = (
+        _resolve_comparison_variants(args, comparison_path) if run_comparison_mode else None
+    )
+    suite_ids = _resolve_protocol_suites(args, protocol_path) if run_confirmatory_mode else None
 
     mode_results: dict[str, Any] = {}
     output_dirs_by_mode: dict[str, Path] = {}
@@ -381,7 +410,7 @@ def main(argv: list[str] | None = None) -> int:
     if run_comparison_mode:
         comparison_reports_root = reports_root / "comparison"
         comparison_result = _run_comparison(
-            comparison_path=Path(args.comparison),
+            comparison_path=comparison_path,
             reports_root=comparison_reports_root,
             index_csv=index_csv,
             data_root=data_root,
@@ -403,7 +432,7 @@ def main(argv: list[str] | None = None) -> int:
     if run_confirmatory_mode:
         confirmatory_reports_root = reports_root / "confirmatory"
         confirmatory_result = _run_confirmatory(
-            protocol_path=Path(args.protocol),
+            protocol_path=protocol_path,
             reports_root=confirmatory_reports_root,
             index_csv=index_csv,
             data_root=data_root,
@@ -438,6 +467,8 @@ def main(argv: list[str] | None = None) -> int:
             result = _determinism_for_mode(
                 mode="comparison",
                 args=args,
+                comparison_path=comparison_path,
+                protocol_path=protocol_path,
                 index_csv=index_csv,
                 data_root=data_root,
                 cache_dir=cache_dir,
@@ -450,6 +481,8 @@ def main(argv: list[str] | None = None) -> int:
             result = _determinism_for_mode(
                 mode="confirmatory",
                 args=args,
+                comparison_path=comparison_path,
+                protocol_path=protocol_path,
                 index_csv=index_csv,
                 data_root=data_root,
                 cache_dir=cache_dir,
@@ -470,8 +503,8 @@ def main(argv: list[str] | None = None) -> int:
         "index_csv": str(index_csv.resolve()),
         "data_root": str(data_root.resolve()),
         "cache_dir": str(cache_dir.resolve()),
-        "comparison_spec": (str(Path(args.comparison).resolve()) if run_comparison_mode else None),
-        "protocol_spec": (str(Path(args.protocol).resolve()) if run_confirmatory_mode else None),
+        "comparison_spec": (str(comparison_path.resolve()) if run_comparison_mode else None),
+        "protocol_spec": (str(protocol_path.resolve()) if run_confirmatory_mode else None),
         "results": mode_results,
         "determinism": determinism_summary,
     }
@@ -516,8 +549,8 @@ def main(argv: list[str] | None = None) -> int:
         index_csv=index_csv,
         data_root=data_root,
         cache_dir=cache_dir,
-        comparison_spec_path=(Path(args.comparison) if run_comparison_mode else None),
-        protocol_path=(Path(args.protocol) if run_confirmatory_mode else None),
+        comparison_spec_path=(comparison_path if run_comparison_mode else None),
+        protocol_path=(protocol_path if run_confirmatory_mode else None),
         replay_summary=replay_summary,
         replay_verification_summary=replay_verification_summary,
         bundle_dir=None,

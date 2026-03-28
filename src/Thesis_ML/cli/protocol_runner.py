@@ -10,6 +10,7 @@ from Thesis_ML.config.paths import (
     DEFAULT_THESIS_CONFIRMATORY_PROTOCOL_PATH,
     PROJECT_ROOT,
 )
+from Thesis_ML.config.runtime_selection import resolve_runtime_config_path
 from Thesis_ML.experiments.compute_policy import HARDWARE_MODE_CHOICES
 from Thesis_ML.protocols.loader import load_protocol
 from Thesis_ML.protocols.runner import compile_and_run_protocol
@@ -45,11 +46,16 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--protocol",
-        default=str(DEFAULT_THESIS_CONFIRMATORY_PROTOCOL_PATH),
+        default=None,
         help=(
             "Path to confirmatory protocol JSON. Defaults to the frozen "
             "confirmatory protocol for final science-freeze runs."
         ),
+    )
+    parser.add_argument(
+        "--protocol-alias",
+        default=None,
+        help="Registry alias for protocol selection when --protocol is not provided.",
     )
     parser.add_argument(
         "--suite",
@@ -123,7 +129,13 @@ def main(argv: list[str] | None = None) -> int:
     if args.all_suites and args.suite:
         parser.error("Use either --suite (one or more) or --all-suites, not both.")
 
-    protocol = load_protocol(Path(args.protocol))
+    protocol_path = resolve_runtime_config_path(
+        args.protocol,
+        args.protocol_alias,
+        default_alias="protocol.thesis_confirmatory_frozen",
+        fallback_path=DEFAULT_THESIS_CONFIRMATORY_PROTOCOL_PATH,
+    )
+    protocol = load_protocol(protocol_path)
     requested_suites = list(args.suite) if args.suite else None
 
     result = compile_and_run_protocol(

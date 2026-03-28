@@ -6,10 +6,7 @@ from pathlib import Path
 import pandas as pd
 
 from Thesis_ML.cli.protocol_runner import main as protocol_main
-
-
-def _repo_root() -> Path:
-    return Path(__file__).resolve().parents[2]
+from tests._config_refs import canonical_v1_protocol_variant_path
 
 
 def test_canonical_protocol_cli_dry_run_acceptance(
@@ -27,7 +24,7 @@ def test_canonical_protocol_cli_dry_run_acceptance(
     data_root = tmp_path / "Data"
     cache_dir = tmp_path / "cache"
     reports_root = tmp_path / "reports" / "experiments"
-    protocol_path = _repo_root() / "configs" / "protocols" / "thesis_canonical_v1.json"
+    protocol_path = canonical_v1_protocol_variant_path()
 
     monkeypatch.setenv("THESIS_ML_INDEX_CSV", str(index_csv))
     monkeypatch.setenv("THESIS_ML_DATA_ROOT", str(data_root))

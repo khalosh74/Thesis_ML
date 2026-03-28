@@ -71,6 +71,56 @@ def test_verify_repro_uses_default_protocol_config_when_omitted(
     assert captured["config_path"] == Path(module.DEFAULT_THESIS_CONFIRMATORY_PROTOCOL_PATH)
 
 
+def test_verify_repro_protocol_mode_resolves_config_alias(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    module = _load_verify_repro_module()
+    captured: dict[str, Path] = {}
+
+    def _stub_run_protocol_once(**kwargs):
+        captured["config_path"] = Path(kwargs["protocol_path"])
+        return {
+            "n_failed": 0,
+            "protocol_output_dir": str(
+                tmp_path / "protocol_runs" / "thesis-canonical-nested__2.0.0"
+            ),
+        }
+
+    monkeypatch.setattr(module, "_run_protocol_once", _stub_run_protocol_once)
+    monkeypatch.setattr(
+        module,
+        "compare_official_outputs",
+        lambda **_: {
+            "passed": True,
+            "left": {},
+            "right": {},
+            "mismatches": [],
+        },
+    )
+
+    exit_code = module.main(
+        [
+            "--mode",
+            "protocol",
+            "--config-alias",
+            "protocol.thesis_confirmatory_frozen",
+            "--index-csv",
+            "dummy_index.csv",
+            "--data-root",
+            "dummy_data_root",
+            "--cache-dir",
+            "dummy_cache",
+            "--suite",
+            "primary_controls",
+            "--reports-root",
+            str(tmp_path / "reports"),
+        ]
+    )
+    assert exit_code == 0
+    assert captured["config_path"] == Path(module.DEFAULT_THESIS_CONFIRMATORY_PROTOCOL_PATH)
+
+
 def test_verify_repro_uses_default_comparison_config_when_omitted(
     tmp_path: Path,
     monkeypatch,

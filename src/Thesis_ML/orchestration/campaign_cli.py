@@ -11,6 +11,7 @@ from Thesis_ML.config.paths import (
     DEFAULT_DECISION_SUPPORT_REGISTRY,
     DEFAULT_WORKBOOK_OUTPUT_DIR,
 )
+from Thesis_ML.config.runtime_selection import resolve_runtime_config_path
 from Thesis_ML.orchestration.contracts import CompiledStudyManifest
 from Thesis_ML.orchestration.execution_bridge import command_to_text as _command_to_text
 from Thesis_ML.orchestration.experiment_selection import (
@@ -33,8 +34,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--registry",
-        default=str(DEFAULT_DECISION_SUPPORT_REGISTRY),
+        default=None,
         help="Path to decision-support experiment registry JSON.",
+    )
+    parser.add_argument(
+        "--registry-alias",
+        default=None,
+        help="Registry alias for decision-support registry selection when --registry is not provided.",
     )
     parser.add_argument(
         "--workbook",
@@ -181,7 +187,10 @@ def print_stage1_commands(args: argparse.Namespace) -> None:
     if args.workbook:
         base.extend(["--workbook", str(args.workbook)])
     else:
-        base.extend(["--registry", str(args.registry)])
+        if args.registry:
+            base.extend(["--registry", str(args.registry)])
+        elif args.registry_alias:
+            base.extend(["--registry-alias", str(args.registry_alias)])
     if args.n_permutations > 0:
         base.extend(["--n-permutations", str(args.n_permutations)])
     if args.max_runs_per_experiment:
@@ -213,8 +222,17 @@ def main(
     parser = build_parser()
     args = parser.parse_args(argv)
 
-    registry_path = Path(args.registry)
     workbook_path = Path(args.workbook) if args.workbook else None
+    registry_path = (
+        resolve_runtime_config_path(
+            args.registry,
+            args.registry_alias,
+            default_alias="registry.decision_support_default",
+            fallback_path=DEFAULT_DECISION_SUPPORT_REGISTRY,
+        )
+        if workbook_path is None
+        else None
+    )
     index_csv = Path(args.index_csv)
     data_root = Path(args.data_root)
     cache_dir = Path(args.cache_dir)
@@ -222,7 +240,7 @@ def main(
     workbook_output_dir = Path(args.workbook_output_dir) if args.workbook_output_dir else None
 
     registry = (
-        read_registry_manifest_fn(registry_path)
+        read_registry_manifest_fn(Path(registry_path))
         if workbook_path is None
         else read_workbook_manifest_fn(workbook_path)
     )
@@ -253,7 +271,7 @@ def main(
             )
         else:
             result = run_decision_support_campaign_fn(
-                registry_path=registry_path,
+                registry_path=Path(registry_path),
                 index_csv=index_csv,
                 data_root=data_root,
                 cache_dir=cache_dir,

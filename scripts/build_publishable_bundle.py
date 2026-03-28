@@ -14,6 +14,7 @@ from Thesis_ML.config.paths import (
     DEFAULT_THESIS_CONFIRMATORY_PROTOCOL_PATH,
     PROJECT_ROOT,
 )
+from Thesis_ML.config.runtime_selection import resolve_runtime_config_path
 
 BUNDLE_SCHEMA_VERSION = "publishable-bundle-v1"
 
@@ -149,14 +150,24 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--comparison-spec",
         type=Path,
-        default=Path(DEFAULT_COMPARISON_SPEC_PATH),
+        default=None,
         help="Comparison spec snapshot path.",
+    )
+    parser.add_argument(
+        "--comparison-spec-alias",
+        default=None,
+        help="Registry alias for comparison spec snapshot selection when --comparison-spec is not provided.",
     )
     parser.add_argument(
         "--protocol-spec",
         type=Path,
-        default=Path(DEFAULT_THESIS_CONFIRMATORY_PROTOCOL_PATH),
+        default=None,
         help="Confirmatory protocol snapshot path.",
+    )
+    parser.add_argument(
+        "--protocol-spec-alias",
+        default=None,
+        help="Registry alias for protocol spec snapshot selection when --protocol-spec is not provided.",
     )
     return parser
 
@@ -181,6 +192,18 @@ def main(argv: list[str] | None = None) -> int:
     verification_root.mkdir(parents=True, exist_ok=True)
     specs_root.mkdir(parents=True, exist_ok=True)
     governance_root.mkdir(parents=True, exist_ok=True)
+    comparison_spec_path = resolve_runtime_config_path(
+        args.comparison_spec,
+        args.comparison_spec_alias,
+        default_alias="comparison.grouped_nested_default",
+        fallback_path=DEFAULT_COMPARISON_SPEC_PATH,
+    )
+    protocol_spec_path = resolve_runtime_config_path(
+        args.protocol_spec,
+        args.protocol_spec_alias,
+        default_alias="protocol.thesis_confirmatory_frozen",
+        fallback_path=DEFAULT_THESIS_CONFIRMATORY_PROTOCOL_PATH,
+    )
 
     official_outputs: dict[str, Any] = {}
     if args.comparison_output is not None:
@@ -215,8 +238,8 @@ def main(argv: list[str] | None = None) -> int:
 
     spec_files: dict[str, str] = {}
     for key, candidate in (
-        ("comparison_spec", args.comparison_spec),
-        ("confirmatory_protocol", args.protocol_spec),
+        ("comparison_spec", comparison_spec_path),
+        ("confirmatory_protocol", protocol_spec_path),
     ):
         source = Path(candidate).resolve()
         if not source.exists() or not source.is_file():

@@ -8,26 +8,21 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from Thesis_ML.cli.comparison_runner import main as comparison_runner_main
 from Thesis_ML.comparisons.compiler import compile_comparison
 from Thesis_ML.comparisons.loader import load_comparison_spec
 from Thesis_ML.comparisons.models import ComparisonStatus
 from Thesis_ML.comparisons.runner import compile_and_run_comparison
+from Thesis_ML.config.paths import DEFAULT_COMPARISON_SPEC_PATH
 from Thesis_ML.data.index_dataset import build_dataset_index
 from Thesis_ML.experiments.errors import OfficialContractValidationError
+from tests._config_refs import (
+    grouped_nested_v1_comparison_compat_path,
+    model_family_v1_comparison_variant_path,
+)
 
-
-def _repo_root() -> Path:
-    return Path(__file__).resolve().parents[1]
-
-
-def _comparison_spec_path() -> Path:
-    return _repo_root() / "configs" / "comparisons" / "model_family_comparison_v1.json"
-
-
-def _nested_comparison_spec_path() -> Path:
-    return (
-        _repo_root() / "configs" / "comparisons" / "model_family_grouped_nested_comparison_v1.json"
-    )
+_comparison_spec_path = model_family_v1_comparison_variant_path
+_nested_comparison_spec_path = grouped_nested_v1_comparison_compat_path
 
 
 def _write_nifti(path: Path, data: np.ndarray) -> None:
@@ -110,6 +105,50 @@ def test_load_comparison_spec_validates() -> None:
     assert bool(spec.evidence_policy.paired_comparisons.require_significant_win) is True
     assert "logreg" in set(spec.cost_policy.explicit_benchmark_expensive_models)
     assert int(spec.cost_policy.max_projected_runtime_seconds_per_run) > 0
+
+
+def test_comparison_runner_cli_accepts_comparison_alias_and_resolves_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Path] = {}
+
+    def _capture_load_comparison(path: Path):
+        captured["comparison_path"] = Path(path)
+        return object()
+
+    monkeypatch.setattr(
+        "Thesis_ML.cli.comparison_runner.load_comparison_spec", _capture_load_comparison
+    )
+    monkeypatch.setattr(
+        "Thesis_ML.cli.comparison_runner.compile_and_run_comparison",
+        lambda **_: {
+            "comparison_id": "model-family-grouped-nested",
+            "comparison_version": "2.0.0",
+            "comparison_output_dir": str(tmp_path / "comparison_output"),
+            "n_success": 0,
+            "n_completed": 0,
+            "n_failed": 0,
+            "n_timed_out": 0,
+            "n_skipped_due_to_policy": 0,
+            "n_planned": 0,
+            "max_parallel_runs_effective": 1,
+            "artifact_paths": {},
+        },
+    )
+
+    exit_code = comparison_runner_main(
+        [
+            "--comparison-alias",
+            "comparison.grouped_nested_default",
+            "--all-variants",
+            "--reports-root",
+            str(tmp_path / "reports"),
+            "--dry-run",
+        ]
+    )
+    assert exit_code == 0
+    assert captured["comparison_path"].resolve() == DEFAULT_COMPARISON_SPEC_PATH.resolve()
 
 
 def test_comparison_validation_rejects_exploratory_only_variant_model(

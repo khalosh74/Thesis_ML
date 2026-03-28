@@ -14,14 +14,14 @@ from Thesis_ML.comparisons.runner import (
 from Thesis_ML.config.framework_mode import FrameworkMode
 from Thesis_ML.experiments.compute_capabilities import ComputeCapabilitySnapshot
 from Thesis_ML.experiments.compute_policy import resolve_compute_policy
+from tests._config_refs import model_family_v1_comparison_variant_path
 
 
 def _repo_root() -> Path:
     return Path(__file__).resolve().parents[1]
 
 
-def _comparison_spec_path() -> Path:
-    return _repo_root() / "configs" / "comparisons" / "model_family_comparison_v1.json"
+_comparison_spec_path = model_family_v1_comparison_variant_path
 
 
 def _demo_dataset_paths() -> dict[str, Path]:
