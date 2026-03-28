@@ -26,6 +26,7 @@ PermutationExecutionMode = Literal[
     "cached_scaled_hybrid_gpu",
     "ridge_gpu_batched_dual",
 ]
+PRIMARY_METRIC_AGGREGATIONS = frozenset({"mean_fold_scores", "pooled_held_out_predictions"})
 
 
 @dataclass(frozen=True)
@@ -220,6 +221,7 @@ def _execute_cached_scaled_permutations(
     rng: np.random.Generator,
     n_permutations: int,
     metric_name: str,
+    primary_metric_aggregation: str,
     progress_callback: ProgressCallback | None,
     progress_base: dict[str, Any],
 ) -> list[float]:
@@ -244,21 +246,37 @@ def _execute_cached_scaled_permutations(
             },
         )
         y_pred_all: list[str] = []
+        fold_scores: list[float] = []
         for fold_cache in fold_caches:
             y_train_permuted = fold_cache.y_train.copy()
             rng.shuffle(y_train_permuted)
             estimator = clone(final_estimator_template)
             estimator.fit(fold_cache.x_train_scaled, y_train_permuted)
             pred = np.asarray(estimator.predict(fold_cache.x_test_scaled))
-            y_pred_all.extend(pred.tolist())
+            predicted_labels = pred.tolist()
+            if primary_metric_aggregation == "mean_fold_scores":
+                fold_scores.append(
+                    float(
+                        classification_metric_score(
+                            y_true=fold_cache.y_test,
+                            y_pred=predicted_labels,
+                            metric_name=metric_name,
+                        )
+                    )
+                )
+            else:
+                y_pred_all.extend(predicted_labels)
 
-        permutation_scores.append(
-            classification_metric_score(
-                y_true=y_true_all_constant,
-                y_pred=y_pred_all,
-                metric_name=metric_name,
+        if primary_metric_aggregation == "mean_fold_scores":
+            permutation_scores.append(float(np.mean(fold_scores)))
+        else:
+            permutation_scores.append(
+                classification_metric_score(
+                    y_true=y_true_all_constant,
+                    y_pred=y_pred_all,
+                    metric_name=metric_name,
+                )
             )
-        )
         emit_progress(
             progress_callback,
             stage="permutation",
@@ -281,6 +299,7 @@ def _execute_ridge_gpu_batched_dual_permutations(
     rng: np.random.Generator,
     n_permutations: int,
     metric_name: str,
+    primary_metric_aggregation: str,
     progress_callback: ProgressCallback | None,
     progress_base: dict[str, Any],
 ) -> tuple[list[float], dict[str, Any]]:
@@ -342,23 +361,39 @@ def _execute_ridge_gpu_batched_dual_permutations(
         batch_scores: list[float] = []
         for local_perm_index in range(int(current_batch_size)):
             y_pred_all: list[str] = []
+            per_fold_scores: list[float] = []
             for fold_index, fold_state in enumerate(fold_states):
-                fold_scores = np.asarray(fold_score_batches[fold_index], dtype=np.float64)
-                fold_scores_column = fold_scores[:, local_perm_index]
+                fold_score_matrix = np.asarray(fold_score_batches[fold_index], dtype=np.float64)
+                fold_scores_column = fold_score_matrix[:, local_perm_index]
                 classes = np.asarray(fold_state.classes).astype(str, copy=False)
                 predictions = np.where(
                     fold_scores_column >= 0.0,
                     str(classes[1]),
                     str(classes[0]),
                 )
-                y_pred_all.extend(predictions.tolist())
-            batch_scores.append(
-                classification_metric_score(
-                    y_true=y_true_all_constant,
-                    y_pred=y_pred_all,
-                    metric_name=metric_name,
+                predicted_labels = predictions.tolist()
+                if primary_metric_aggregation == "mean_fold_scores":
+                    per_fold_scores.append(
+                        float(
+                            classification_metric_score(
+                                y_true=fold_state.y_test,
+                                y_pred=predicted_labels,
+                                metric_name=metric_name,
+                            )
+                        )
+                    )
+                else:
+                    y_pred_all.extend(predicted_labels)
+            if primary_metric_aggregation == "mean_fold_scores":
+                batch_scores.append(float(np.mean(per_fold_scores)))
+            else:
+                batch_scores.append(
+                    classification_metric_score(
+                        y_true=y_true_all_constant,
+                        y_pred=y_pred_all,
+                        metric_name=metric_name,
+                    )
                 )
-            )
 
         for local_perm_index, score in enumerate(batch_scores):
             absolute_permutation_index = permutation_index + local_perm_index
@@ -406,6 +441,7 @@ def _build_permutation_payload(
     n_permutations: int,
     metric_name: str,
     observed_metric: float,
+    primary_metric_aggregation: str,
     seed: int,
     execution_plan: PermutationExecutionPlan,
     n_folds: int,
@@ -419,6 +455,7 @@ def _build_permutation_payload(
         "n_permutations": int(n_permutations),
         "metric_name": metric_name,
         "observed_score": float(observed_metric),
+        "primary_metric_aggregation": str(primary_metric_aggregation),
         "permutation_seed": int(seed),
         "p_value": float(p_value),
         "null_summary": {
@@ -474,11 +511,18 @@ def evaluate_permutations(
     n_permutations: int,
     metric_name: str,
     observed_metric: float,
+    primary_metric_aggregation: str = "pooled_held_out_predictions",
     progress_callback: ProgressCallback | None = None,
     progress_metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     if int(n_permutations) <= 0:
         raise ValueError("evaluate_permutations requires n_permutations > 0.")
+    resolved_aggregation = str(primary_metric_aggregation).strip()
+    if resolved_aggregation not in PRIMARY_METRIC_AGGREGATIONS:
+        raise ValueError(
+            "evaluate_permutations requires primary_metric_aggregation to be "
+            "'mean_fold_scores' or 'pooled_held_out_predictions'."
+        )
 
     execution_plan = _resolve_permutation_execution_plan(
         pipeline_template,
@@ -544,6 +588,7 @@ def evaluate_permutations(
             rng=rng,
             n_permutations=int(n_permutations),
             metric_name=metric_name,
+            primary_metric_aggregation=resolved_aggregation,
             progress_callback=progress_callback,
             progress_base=progress_base,
         )
@@ -565,6 +610,7 @@ def evaluate_permutations(
                 rng=rng,
                 n_permutations=int(n_permutations),
                 metric_name=metric_name,
+                primary_metric_aggregation=resolved_aggregation,
                 progress_callback=progress_callback,
                 progress_base=progress_base,
             )
@@ -583,6 +629,7 @@ def evaluate_permutations(
                 rng=rng,
                 n_permutations=int(n_permutations),
                 metric_name=metric_name,
+                primary_metric_aggregation=resolved_aggregation,
                 progress_callback=progress_callback,
                 progress_base=progress_base,
             )
@@ -597,6 +644,7 @@ def evaluate_permutations(
         n_permutations=int(n_permutations),
         metric_name=metric_name,
         observed_metric=float(observed_metric),
+        primary_metric_aggregation=resolved_aggregation,
         seed=int(seed),
         execution_plan=execution_plan,
         n_folds=int(len(splits)),

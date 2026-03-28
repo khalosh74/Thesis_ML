@@ -676,7 +676,10 @@ def _report_index_rows(
                 "macro_f1": metrics.get("macro_f1"),
                 "accuracy": metrics.get("accuracy"),
                 "primary_metric_name": metrics.get("primary_metric_name"),
+                "primary_metric_aggregation": metrics.get("primary_metric_aggregation"),
                 "primary_metric_value": metrics.get("primary_metric_value"),
+                "primary_metric_value_mean_fold": metrics.get("primary_metric_value_mean_fold"),
+                "primary_metric_value_pooled": metrics.get("primary_metric_value_pooled"),
             }
         )
     return rows

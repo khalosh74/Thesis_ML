@@ -105,6 +105,7 @@ def test_load_canonical_protocol_validates() -> None:
     assert protocol.framework_mode == "confirmatory"
     assert protocol.scientific_contract.target == "coarse_affect"
     assert protocol.scientific_contract.primary_metric == "balanced_accuracy"
+    assert protocol.scientific_contract.primary_metric_aggregation == "mean_fold_scores"
     assert protocol.methodology_policy.policy_name.value == "fixed_baselines_only"
     assert protocol.metric_policy.primary_metric == "balanced_accuracy"
     assert int(protocol.evidence_policy.repeat_evaluation.repeat_count) == 3
@@ -165,6 +166,7 @@ def test_load_confirmatory_freeze_protocol_validates_and_adapts() -> None:
     assert protocol.status.value == "locked"
     assert protocol.scientific_contract.target == "coarse_affect"
     assert protocol.scientific_contract.primary_metric == "balanced_accuracy"
+    assert protocol.scientific_contract.primary_metric_aggregation == "mean_fold_scores"
     assert protocol.control_policy.dummy_baseline.enabled is True
     assert protocol.control_policy.permutation.enabled is True
     assert int(protocol.evidence_policy.repeat_evaluation.repeat_count) == 3
@@ -830,6 +832,10 @@ def test_permutation_control_uses_primary_metric(
     for run_row in successful:
         metrics_path = Path(str(run_row["metrics_path"]))
         metrics = json.loads(metrics_path.read_text(encoding="utf-8"))
+        assert metrics["primary_metric_aggregation"] == "mean_fold_scores"
+        assert metrics["primary_metric_value"] == pytest.approx(
+            metrics["primary_metric_value_mean_fold"]
+        )
         permutation = metrics["permutation_test"]
         assert permutation["metric_name"] == "balanced_accuracy"
         assert permutation["observed_metric"] == metrics["primary_metric_value"]
@@ -913,6 +919,7 @@ def test_nested_protocol_supports_grouped_nested_methodology(
     assert protocol.methodology_policy.policy_name.value == "grouped_nested_tuning"
     assert protocol.model_policy.selection_strategy.value == "nested_tuned"
     assert protocol.model_policy.tuning_enabled is True
+    assert protocol.scientific_contract.primary_metric_aggregation == "mean_fold_scores"
     assert {model for model in protocol.model_policy.models} == {"ridge", "linearsvc"}
     assert int(protocol.evidence_policy.repeat_evaluation.repeat_count) == 3
 
@@ -927,6 +934,25 @@ def test_nested_protocol_supports_grouped_nested_methodology(
     )
     assert result["n_failed"] == 0
     assert result["n_planned"] > 0
+
+
+def test_primary_metric_aggregation_is_explicit_and_compiled_into_runs(
+    protocol_dataset: dict[str, Path],
+) -> None:
+    for protocol_path in (
+        _canonical_protocol_path(),
+        _nested_protocol_path(),
+        _canonical_nested_v2_protocol_path(),
+    ):
+        protocol = load_protocol(protocol_path)
+        assert protocol.scientific_contract.primary_metric_aggregation == "mean_fold_scores"
+        manifest = compile_protocol(
+            protocol,
+            index_csv=protocol_dataset["index_csv"],
+            suite_ids=["primary_within_subject"],
+        )
+        assert "primary_metric_aggregation" in manifest.required_run_metadata_fields
+        assert all(run.primary_metric_aggregation == "mean_fold_scores" for run in manifest.runs)
 
 
 def test_nested_protocol_compiler_expands_repeats_and_untuned_ablation(

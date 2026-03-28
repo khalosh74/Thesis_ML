@@ -255,6 +255,7 @@ def _evaluate_permutations(
     n_permutations: int,
     metric_name: str,
     observed_metric: float,
+    primary_metric_aggregation: str = "pooled_held_out_predictions",
     progress_callback=None,
     progress_metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
@@ -267,6 +268,7 @@ def _evaluate_permutations(
         n_permutations=n_permutations,
         metric_name=metric_name,
         observed_metric=observed_metric,
+        primary_metric_aggregation=primary_metric_aggregation,
         progress_callback=progress_callback,
         progress_metadata=progress_metadata,
     )
@@ -348,6 +350,7 @@ def run_experiment(
     filter_modality: str | None = None,
     n_permutations: int = 0,
     primary_metric_name: str = "balanced_accuracy",
+    primary_metric_aggregation: str = "mean_fold_scores",
     permutation_metric_name: str | None = None,
     repeat_id: int = 1,
     repeat_count: int = 1,
@@ -525,6 +528,27 @@ def run_experiment(
         if context_emit_feature_qc_artifacts is not None
         else emit_feature_qc_artifacts
     )
+    context_primary_metric_aggregation = official_context.get("primary_metric_aggregation")
+    if context_primary_metric_aggregation is not None and str(
+        context_primary_metric_aggregation
+    ).strip() != str(primary_metric_aggregation).strip():
+        raise ValueError(
+            "Illegal override for official run key 'primary_metric_aggregation'. "
+            "Use protocol/comparison spec values only."
+        )
+    resolved_primary_metric_aggregation = str(
+        context_primary_metric_aggregation
+        if context_primary_metric_aggregation is not None
+        else primary_metric_aggregation
+    ).strip()
+    if resolved_primary_metric_aggregation not in {
+        "mean_fold_scores",
+        "pooled_held_out_predictions",
+    }:
+        raise ValueError(
+            "primary_metric_aggregation must be 'mean_fold_scores' or "
+            "'pooled_held_out_predictions'."
+        )
     confirmatory_lock_candidate = official_context.get("confirmatory_lock")
     confirmatory_lock_payload = (
         dict(confirmatory_lock_candidate) if isinstance(confirmatory_lock_candidate, dict) else {}
@@ -1030,6 +1054,7 @@ def run_experiment(
                         seed=seed,
                         n_permutations=n_permutations,
                         primary_metric_name=resolved_primary_metric_name,
+                        primary_metric_aggregation=resolved_primary_metric_aggregation,
                         permutation_metric_name=resolved_permutation_metric_name,
                         permutation_alpha=float(evidence_policy_model.permutation.alpha),
                         permutation_minimum_required=int(
@@ -1233,6 +1258,7 @@ def run_experiment(
             projected_runtime_seconds=int(resolved_projected_runtime_seconds),
             preprocessing_kind=resolved_preprocessing_kind,
             feature_recipe_id=resolved_feature_recipe_id,
+            primary_metric_aggregation=resolved_primary_metric_aggregation,
             tuning_summary_path=tuning_summary_path,
             tuning_best_params_path=tuning_best_params_path,
             fit_timing_summary_path=fit_timing_summary_path,
@@ -1336,6 +1362,7 @@ def run_experiment(
                 else dict(data_artifact_info.get("data_policy_effective", {}))
             ),
             primary_metric_name=resolved_primary_metric_name,
+            primary_metric_aggregation=resolved_primary_metric_aggregation,
             permutation_metric_name=resolved_permutation_metric_name,
             metric_policy_effective=metric_policy_effective,
             methodology_policy_name=methodology_policy.policy_name.value,

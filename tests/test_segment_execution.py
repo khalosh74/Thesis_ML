@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from Thesis_ML.experiments import segment_execution as segment_execution_module
 from Thesis_ML.artifacts.registry import (
     ARTIFACT_TYPE_FEATURE_CACHE,
     ARTIFACT_TYPE_FEATURE_MATRIX_BUNDLE,
@@ -239,9 +240,60 @@ def test_linearsvc_tuning_and_permutation_dispatch_through_stage_planner(
     permutation_payload = result["metrics"].get("permutation_test")
     assert isinstance(permutation_payload, dict)
     assert permutation_payload.get("permutation_executor_id") == PERMUTATION_REFERENCE_EXECUTOR_ID
+    assert permutation_payload.get("execution_mode") == "grouped_nested_tuning_reference"
+    assert permutation_payload.get("tuning_reapplied_under_null") is True
+    assert permutation_payload.get("null_matches_confirmatory_setup") is True
+    assert permutation_payload.get("null_tuning_search_space_id") == LINEAR_GROUPED_NESTED_SEARCH_SPACE_ID
+    assert (
+        permutation_payload.get("null_tuning_search_space_version")
+        == LINEAR_GROUPED_NESTED_SEARCH_SPACE_VERSION
+    )
+    assert permutation_payload.get("null_inner_cv_scheme") == "grouped_leave_one_group_out"
+    assert permutation_payload.get("null_inner_group_field") == "session"
 
     tuning_summary = json.loads(Path(result["tuning_summary_path"]).read_text(encoding="utf-8"))
     assert SPECIALIZED_LINEARSVC_TUNING_EXECUTOR_ID in tuning_summary["tuning_executor_ids"]
+
+
+def test_segment_execution_threads_tuning_metadata_into_evaluation_input(
+    prepared_dataset: dict[str, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+    original_evaluation = segment_execution_module.evaluation
+
+    def _capture_evaluation(section_input: object) -> object:
+        captured["section_input"] = section_input
+        return original_evaluation(section_input)
+
+    monkeypatch.setattr(segment_execution_module, "evaluation", _capture_evaluation)
+    run_kwargs = _base_run_kwargs(prepared_dataset)
+    run_kwargs["model"] = "linearsvc"
+    run_experiment(
+        **run_kwargs,
+        run_id="stage_planner_capture_evaluation_input",
+        methodology_policy_name="grouped_nested_tuning",
+        tuning_enabled=True,
+        tuning_search_space_id=LINEAR_GROUPED_NESTED_SEARCH_SPACE_ID,
+        tuning_search_space_version=LINEAR_GROUPED_NESTED_SEARCH_SPACE_VERSION,
+        tuning_inner_cv_scheme="grouped_leave_one_group_out",
+        tuning_inner_group_field="session",
+        n_permutations=0,
+    )
+
+    section_input = captured.get("section_input")
+    assert section_input is not None
+    assert getattr(section_input, "tuning_enabled") is True
+    assert getattr(section_input, "tuning_search_space_id") == LINEAR_GROUPED_NESTED_SEARCH_SPACE_ID
+    assert (
+        getattr(section_input, "tuning_search_space_version")
+        == LINEAR_GROUPED_NESTED_SEARCH_SPACE_VERSION
+    )
+    assert getattr(section_input, "tuning_inner_cv_scheme") == "grouped_leave_one_group_out"
+    assert getattr(section_input, "tuning_inner_group_field") == "session"
+    tuning_assignment = getattr(section_input, "tuning_assignment")
+    assert tuning_assignment is not None
+    assert tuning_assignment.executor_id == SPECIALIZED_LINEARSVC_TUNING_EXECUTOR_ID
 
 
 def test_logreg_tuning_dispatch_through_stage_planner_with_progress_telemetry(

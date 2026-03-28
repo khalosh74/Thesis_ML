@@ -1525,6 +1525,292 @@ def _evaluate_feature_quality_policy(
     }
 
 
+def _resolve_grouped_nested_tuning_executor(
+    section_input: EvaluationInput,
+) -> tuple[str, str | None]:
+    model_name = str(section_input.model).strip().lower()
+    default_tuning_executor_id = (
+        TUNING_SKIPPED_CONTROL_EXECUTOR_ID if model_name == "dummy" else TUNING_GENERIC_EXECUTOR_ID
+    )
+    if model_name == "linearsvc":
+        default_tuning_executor_id = SPECIALIZED_LINEARSVC_TUNING_EXECUTOR_ID
+    tuning_executor_id = _assignment_executor_id(
+        section_input.tuning_assignment,
+        default_executor_id=default_tuning_executor_id,
+    )
+    fallback_executor_id = (
+        str(section_input.tuning_fallback_executor_id).strip()
+        if isinstance(section_input.tuning_fallback_executor_id, str)
+        and str(section_input.tuning_fallback_executor_id).strip()
+        else (
+            TUNING_GENERIC_EXECUTOR_ID
+            if tuning_executor_id
+            in {
+                SPECIALIZED_LINEARSVC_TUNING_EXECUTOR_ID,
+                SPECIALIZED_LOGREG_TUNING_EXECUTOR_ID,
+            }
+            else None
+        )
+    )
+    return tuning_executor_id, fallback_executor_id
+
+
+def _resolve_primary_metric_aggregation(aggregation: str) -> str:
+    resolved = str(aggregation).strip()
+    if resolved not in {"mean_fold_scores", "pooled_held_out_predictions"}:
+        raise ValueError(
+            "primary_metric_aggregation must be 'mean_fold_scores' or "
+            "'pooled_held_out_predictions'."
+        )
+    return resolved
+
+
+def _mean_fold_metric_value(
+    *,
+    fold_rows: list[dict[str, Any]],
+    metric_name: str,
+) -> float:
+    metric_values: list[float] = []
+    for fold_index, fold_row in enumerate(fold_rows):
+        raw_value = fold_row.get(metric_name)
+        if not isinstance(raw_value, (int, float, np.floating)):
+            raise ValueError(
+                "mean_fold_scores aggregation requires per-fold metric values in fold_rows; "
+                f"missing metric='{metric_name}' at fold index {fold_index}."
+            )
+        metric_values.append(float(raw_value))
+    if not metric_values:
+        raise ValueError(
+            f"mean_fold_scores aggregation requires at least one fold row for metric '{metric_name}'."
+        )
+    return float(np.mean(np.asarray(metric_values, dtype=np.float64)))
+
+
+def _evaluate_grouped_nested_tuning_permutations(
+    *,
+    section_input: EvaluationInput,
+    metric_name: str,
+    observed_metric: float,
+    primary_metric_aggregation: str,
+    permutation_executor_id: str,
+) -> dict[str, Any]:
+    if section_input.metadata_df.empty:
+        raise ValueError(
+            "Grouped nested tuned permutation testing requires metadata_df to rebuild inner groups."
+        )
+    tuning_inner_cv_scheme = str(section_input.tuning_inner_cv_scheme or "").strip()
+    if tuning_inner_cv_scheme != "grouped_leave_one_group_out":
+        raise ValueError(
+            "Grouped nested tuned permutation testing requires "
+            "tuning_inner_cv_scheme='grouped_leave_one_group_out'."
+        )
+    tuning_inner_group_field = str(section_input.tuning_inner_group_field or "").strip()
+    if not tuning_inner_group_field:
+        raise ValueError(
+            "Grouped nested tuned permutation testing requires tuning_inner_group_field."
+        )
+    if tuning_inner_group_field not in section_input.metadata_df.columns:
+        raise ValueError(
+            "Grouped nested tuned permutation testing inner group field is missing from metadata."
+        )
+
+    (
+        resolved_tuning_search_space_id,
+        resolved_tuning_search_space_version,
+        resolved_param_grid,
+    ) = resolve_tuning_search_space_for_model(
+        model_name=section_input.model,
+        search_space_id=section_input.tuning_search_space_id,
+        search_space_version=section_input.tuning_search_space_version,
+    )
+    param_grid = dict(resolved_param_grid)
+    candidate_params = list(ParameterGrid(param_grid))
+    configured_candidate_count = int(len(candidate_params))
+    if configured_candidate_count <= 0:
+        raise ValueError("Grouped nested tuned permutation testing resolved an empty search space.")
+
+    pipeline_template = _build_pipeline_template(
+        build_pipeline_fn=section_input.build_pipeline_fn,
+        model_name=section_input.model,
+        seed=section_input.seed,
+        feature_recipe_id=section_input.feature_recipe_id,
+    )
+    tuning_executor_id, fallback_executor_id = _resolve_grouped_nested_tuning_executor(section_input)
+    permutation_count = int(section_input.n_permutations)
+    rng = np.random.default_rng(int(section_input.seed))
+    progress_base = {
+        "run_id": str(section_input.run_id),
+        "model": str(section_input.model),
+        "target": str(section_input.target_column),
+        "cv_mode": str(section_input.cv_mode),
+    }
+    emit_progress(
+        section_input.progress_callback,
+        stage="permutation",
+        message=f"starting tuned permutation test with {permutation_count} permutations",
+        completed_units=0.0,
+        total_units=float(permutation_count),
+        metadata=progress_base,
+    )
+    permutation_loop_start = perf_counter()
+    permutation_scores: list[float] = []
+    for permutation_index in range(permutation_count):
+        emit_progress(
+            section_input.progress_callback,
+            stage="permutation",
+            message=f"running permutation {permutation_index + 1}/{permutation_count}",
+            completed_units=float(permutation_index),
+            total_units=float(permutation_count),
+            metadata={
+                **progress_base,
+                "permutation_index": int(permutation_index + 1),
+                "n_permutations": permutation_count,
+            },
+        )
+        y_true_all: list[str] = []
+        y_pred_all: list[str] = []
+        fold_metric_scores: list[float] = []
+        for fold_index, (train_idx, test_idx) in enumerate(section_input.splits):
+            train_idx_array = np.asarray(train_idx, dtype=np.int64)
+            test_idx_array = np.asarray(test_idx, dtype=np.int64)
+            x_outer_train = section_input.x_matrix[train_idx_array]
+            y_outer_train = np.asarray(section_input.y[train_idx_array]).astype(str, copy=True)
+            rng.shuffle(y_outer_train)
+            inner_groups = (
+                section_input.metadata_df.iloc[train_idx_array][tuning_inner_group_field]
+                .astype(str)
+                .to_numpy()
+            )
+            inner_splits = list(LeaveOneGroupOut().split(x_outer_train, y_outer_train, inner_groups))
+            configured_inner_fold_count = int(len(inner_splits))
+            if configured_inner_fold_count < 2:
+                raise ValueError(
+                    "Grouped nested tuned permutation testing requires at least two inner groups."
+                )
+            tuning_result = run_tuning_executor(
+                executor_id=tuning_executor_id,
+                fallback_executor_id=fallback_executor_id,
+                pipeline_template=pipeline_template,
+                x_outer_train=x_outer_train,
+                y_outer_train=y_outer_train,
+                inner_groups=inner_groups,
+                inner_splits=inner_splits,
+                param_grid=param_grid,
+                candidate_params=candidate_params,
+                configured_candidate_count=configured_candidate_count,
+                configured_inner_fold_count=configured_inner_fold_count,
+                profiled_candidate_count=configured_candidate_count,
+                profiled_inner_fold_count=configured_inner_fold_count,
+                primary_metric_name=section_input.primary_metric_name,
+                progress_callback=section_input.progress_callback,
+                progress_metadata={
+                    **progress_base,
+                    "permutation_index": int(permutation_index + 1),
+                    "n_permutations": permutation_count,
+                    "fold_index": int(fold_index + 1),
+                    "total_folds": int(len(section_input.splits)),
+                    "null_tuning": True,
+                },
+            )
+            estimator = tuning_result["estimator"]
+            y_true_fold = np.asarray(section_input.y[test_idx_array]).astype(str, copy=False)
+            y_pred_fold = np.asarray(estimator.predict(section_input.x_matrix[test_idx_array])).astype(
+                str, copy=False
+            )
+            if primary_metric_aggregation == "mean_fold_scores":
+                fold_metric_scores.append(
+                    float(
+                        classification_metric_score(
+                            y_true_fold,
+                            y_pred_fold,
+                            metric_name=metric_name,
+                        )
+                    )
+                )
+            else:
+                y_true_all.extend(y_true_fold.tolist())
+                y_pred_all.extend(y_pred_fold.tolist())
+        permutation_scores.append(
+            float(np.mean(np.asarray(fold_metric_scores, dtype=np.float64)))
+            if primary_metric_aggregation == "mean_fold_scores"
+            else float(classification_metric_score(y_true_all, y_pred_all, metric_name=metric_name))
+        )
+        emit_progress(
+            section_input.progress_callback,
+            stage="permutation",
+            message=f"finished permutation {permutation_index + 1}/{permutation_count}",
+            completed_units=float(permutation_index + 1),
+            total_units=float(permutation_count),
+            metadata={
+                **progress_base,
+                "permutation_index": int(permutation_index + 1),
+                "n_permutations": permutation_count,
+            },
+        )
+    permutation_loop_seconds = float(perf_counter() - permutation_loop_start)
+    scores_array = np.asarray(permutation_scores, dtype=np.float64)
+    p_value = float((np.count_nonzero(scores_array >= float(observed_metric)) + 1) / (len(scores_array) + 1))
+    payload: dict[str, Any] = {
+        "metric_name": str(metric_name),
+        "primary_metric_aggregation": str(primary_metric_aggregation),
+        "n_permutations": int(permutation_count),
+        "observed_score": float(observed_metric),
+        "permutation_seed": int(section_input.seed),
+        "p_value": float(p_value),
+        "null_summary": {
+            "mean": float(np.mean(scores_array)),
+            "std": float(np.std(scores_array)),
+            "min": float(np.min(scores_array)),
+            "max": float(np.max(scores_array)),
+            "q25": float(np.quantile(scores_array, 0.25)),
+            "q50": float(np.quantile(scores_array, 0.50)),
+            "q75": float(np.quantile(scores_array, 0.75)),
+        },
+        "null_scores": [float(value) for value in permutation_scores],
+        "observed_metric": float(observed_metric),
+        "permutation_metric_mean": float(np.mean(scores_array)),
+        "permutation_metric_std": float(np.std(scores_array)),
+        "permutation_p_value": float(p_value),
+        "execution_mode": "grouped_nested_tuning_reference",
+        "backend_family": "sklearn_cpu",
+        "estimator_name": "Pipeline",
+        "shortcut_applied": False,
+        "shortcut_reason": None,
+        "shortcut_strategy": None,
+        "n_folds": int(len(section_input.splits)),
+        "fold_cache_build_seconds": 0.0,
+        "permutation_loop_seconds": float(permutation_loop_seconds),
+        "specialized_ridge_gpu_path_used": False,
+        "specialized_ridge_gpu_fallback_reason": None,
+        "permutation_batch_size": None,
+        "fold_gpu_state_build_seconds": None,
+        "fold_factorization_seconds": None,
+        "batched_solve_seconds": None,
+        "batched_predict_seconds": None,
+        "permutation_executor_id": str(permutation_executor_id),
+        "permutation_executor_fallback_reason": None,
+        "tuning_reapplied_under_null": True,
+        "null_matches_confirmatory_setup": True,
+        "null_tuning_search_space_id": str(resolved_tuning_search_space_id),
+        "null_tuning_search_space_version": str(resolved_tuning_search_space_version),
+        "null_inner_cv_scheme": str(tuning_inner_cv_scheme),
+        "null_inner_group_field": str(tuning_inner_group_field),
+        "null_tuning_executor_id": str(tuning_executor_id),
+        "null_tuning_fallback_executor_id": (
+            str(fallback_executor_id) if isinstance(fallback_executor_id, str) else None
+        ),
+    }
+    emit_progress(
+        section_input.progress_callback,
+        stage="permutation",
+        message="finished tuned permutation test",
+        completed_units=float(permutation_count),
+        total_units=float(permutation_count),
+        metadata=progress_base,
+    )
+    return payload
+
+
 def execute_evaluation(section_input: EvaluationInput) -> dict[str, Any]:
     report_dir = section_input.metrics_path.parent
     subgroup_metrics_json_path = (
@@ -1622,10 +1908,22 @@ def execute_evaluation(section_input: EvaluationInput) -> dict[str, Any]:
     overall_balanced = float(metric_values["balanced_accuracy"])
     overall_macro_f1 = float(metric_values["macro_f1"])
     primary_metric_name = str(section_input.primary_metric_name)
-    primary_metric_value = classification_metric_score(
+    primary_metric_aggregation = _resolve_primary_metric_aggregation(
+        section_input.primary_metric_aggregation
+    )
+    primary_metric_value_pooled = classification_metric_score(
         section_input.y_true_all,
         section_input.y_pred_all,
         metric_name=primary_metric_name,
+    )
+    primary_metric_value_mean_fold = _mean_fold_metric_value(
+        fold_rows=section_input.fold_rows,
+        metric_name=primary_metric_name,
+    )
+    primary_metric_value = (
+        float(primary_metric_value_mean_fold)
+        if primary_metric_aggregation == "mean_fold_scores"
+        else float(primary_metric_value_pooled)
     )
     labels_sorted = sorted(
         np.unique(
@@ -1677,8 +1975,11 @@ def execute_evaluation(section_input: EvaluationInput) -> dict[str, Any]:
             else str(section_input.run_id)
         ),
         "primary_metric_name": primary_metric_name,
-        "primary_metric_value": primary_metric_value,
-        "tuning_enabled": bool(section_input.methodology_policy_name == "grouped_nested_tuning"),
+        "primary_metric_aggregation": primary_metric_aggregation,
+        "primary_metric_value": float(primary_metric_value),
+        "primary_metric_value_mean_fold": float(primary_metric_value_mean_fold),
+        "primary_metric_value_pooled": float(primary_metric_value_pooled),
+        "tuning_enabled": bool(section_input.tuning_enabled),
         "tuning_summary_path": str(tuning_summary_path.resolve()),
         "tuning_best_params_path": str(tuning_best_params_path.resolve()),
         "labels": labels_sorted,
@@ -1709,30 +2010,56 @@ def execute_evaluation(section_input: EvaluationInput) -> dict[str, Any]:
             section_input.permutation_assignment,
             default_executor_id=PERMUTATION_REFERENCE_EXECUTOR_ID,
         )
-        permutation_payload = run_permutation_executor(
-            executor_id=permutation_executor_id,
-            evaluate_permutations_fn=section_input.evaluate_permutations_fn,
-            build_pipeline_fn=section_input.build_pipeline_fn,
-            model_name=section_input.model,
-            seed=section_input.seed,
-            x_matrix=section_input.x_matrix,
-            y=section_input.y,
-            splits=section_input.splits,
-            n_permutations=section_input.n_permutations,
-            metric_name=permutation_metric_name,
-            observed_metric=classification_metric_score(
-                section_input.y_true_all,
-                section_input.y_pred_all,
+        observed_permutation_metric = (
+            _mean_fold_metric_value(
+                fold_rows=section_input.fold_rows,
                 metric_name=permutation_metric_name,
-            ),
-            progress_callback=section_input.progress_callback,
-            progress_metadata={
-                "run_id": str(section_input.run_id),
-                "model": str(section_input.model),
-                "target": str(section_input.target_column),
-                "cv_mode": str(section_input.cv_mode),
-            },
+            )
+            if primary_metric_aggregation == "mean_fold_scores"
+            else float(
+                classification_metric_score(
+                    section_input.y_true_all,
+                    section_input.y_pred_all,
+                    metric_name=permutation_metric_name,
+                )
+            )
         )
+        use_tuned_permutation = (
+            bool(section_input.tuning_enabled)
+            and str(section_input.methodology_policy_name).strip() == "grouped_nested_tuning"
+            and str(section_input.evidence_run_role).strip() != "untuned_baseline"
+            and str(section_input.model).strip().lower() != "dummy"
+        )
+        if use_tuned_permutation:
+            permutation_payload = _evaluate_grouped_nested_tuning_permutations(
+                section_input=section_input,
+                metric_name=permutation_metric_name,
+                observed_metric=observed_permutation_metric,
+                primary_metric_aggregation=primary_metric_aggregation,
+                permutation_executor_id=permutation_executor_id,
+            )
+        else:
+            permutation_payload = run_permutation_executor(
+                executor_id=permutation_executor_id,
+                evaluate_permutations_fn=section_input.evaluate_permutations_fn,
+                build_pipeline_fn=section_input.build_pipeline_fn,
+                model_name=section_input.model,
+                seed=section_input.seed,
+                x_matrix=section_input.x_matrix,
+                y=section_input.y,
+                splits=section_input.splits,
+                n_permutations=section_input.n_permutations,
+                metric_name=permutation_metric_name,
+                observed_metric=observed_permutation_metric,
+                primary_metric_aggregation=primary_metric_aggregation,
+                progress_callback=section_input.progress_callback,
+                progress_metadata={
+                    "run_id": str(section_input.run_id),
+                    "model": str(section_input.model),
+                    "target": str(section_input.target_column),
+                    "cv_mode": str(section_input.cv_mode),
+                },
+            )
         permutation_payload["alpha"] = float(section_input.permutation_alpha)
         permutation_payload["minimum_required"] = int(section_input.permutation_minimum_required)
         permutation_payload["meets_minimum"] = bool(

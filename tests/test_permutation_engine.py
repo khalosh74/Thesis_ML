@@ -35,6 +35,30 @@ def _toy_permutation_inputs() -> tuple[np.ndarray, np.ndarray, list[tuple[np.nda
     return x_matrix, y, splits
 
 
+def _toy_permutation_inputs_unequal_folds() -> tuple[
+    np.ndarray, np.ndarray, list[tuple[np.ndarray, np.ndarray]]
+]:
+    x_matrix = np.asarray(
+        [
+            [2.2, 0.1, 0.0],
+            [2.0, 0.0, 0.2],
+            [-2.1, -0.2, 0.0],
+            [-1.9, 0.0, -0.1],
+            [1.8, 0.2, 0.1],
+            [-1.7, -0.2, -0.1],
+            [2.4, 0.3, 0.2],
+        ],
+        dtype=np.float64,
+    )
+    y = np.asarray(["positive", "positive", "negative", "negative", "positive", "negative", "positive"])
+    splits = [
+        (np.asarray([2, 3, 4, 5], dtype=np.int64), np.asarray([0, 1, 6], dtype=np.int64)),
+        (np.asarray([0, 1, 4, 6], dtype=np.int64), np.asarray([2, 3, 5], dtype=np.int64)),
+        (np.asarray([0, 1, 2, 3, 5, 6], dtype=np.int64), np.asarray([4], dtype=np.int64)),
+    ]
+    return x_matrix, y, splits
+
+
 def _reference_generic_loop(
     *,
     pipeline_template: Pipeline,
@@ -45,27 +69,41 @@ def _reference_generic_loop(
     n_permutations: int,
     metric_name: str,
     observed_metric: float,
+    primary_metric_aggregation: str = "pooled_held_out_predictions",
 ) -> dict[str, Any]:
     rng = np.random.default_rng(seed)
     permutation_scores: list[float] = []
     for _ in range(n_permutations):
         y_true_all: list[str] = []
         y_pred_all: list[str] = []
+        fold_scores: list[float] = []
         for train_idx, test_idx in splits:
             y_train = y[train_idx].copy()
             rng.shuffle(y_train)
             estimator = clone(pipeline_template)
             estimator.fit(x_matrix[train_idx], y_train)
             pred = estimator.predict(x_matrix[test_idx])
-            y_true_all.extend(y[test_idx].tolist())
-            y_pred_all.extend(np.asarray(pred).tolist())
-        permutation_scores.append(
-            classification_metric_score(
-                y_true=y_true_all,
-                y_pred=y_pred_all,
-                metric_name=metric_name,
+            if primary_metric_aggregation == "mean_fold_scores":
+                fold_scores.append(
+                    classification_metric_score(
+                        y_true=y[test_idx],
+                        y_pred=np.asarray(pred).tolist(),
+                        metric_name=metric_name,
+                    )
+                )
+            else:
+                y_true_all.extend(y[test_idx].tolist())
+                y_pred_all.extend(np.asarray(pred).tolist())
+        if primary_metric_aggregation == "mean_fold_scores":
+            permutation_scores.append(float(np.mean(np.asarray(fold_scores, dtype=np.float64))))
+        else:
+            permutation_scores.append(
+                classification_metric_score(
+                    y_true=y_true_all,
+                    y_pred=y_pred_all,
+                    metric_name=metric_name,
+                )
             )
-        )
     ge_count = sum(score >= observed_metric for score in permutation_scores)
     p_value = (ge_count + 1.0) / (n_permutations + 1.0)
     return {
@@ -197,6 +235,81 @@ def test_non_dummy_cpu_cached_path_matches_reference_generic_loop() -> None:
     assert payload["execution_mode"] == "cached_scaled_cpu"
     np.testing.assert_allclose(payload["null_scores"], reference["null_scores"], atol=0.0, rtol=0.0)
     assert payload["p_value"] == reference["p_value"]
+
+
+def test_permutation_null_scores_follow_selected_primary_metric_aggregation() -> None:
+    x_matrix, y, splits = _toy_permutation_inputs_unequal_folds()
+    pipeline_template = Pipeline(
+        steps=[
+            ("scaler", StandardScaler(with_mean=True, with_std=True)),
+            ("model", RidgeClassifier(random_state=71)),
+        ]
+    )
+    metric_name = "accuracy"
+    n_permutations = 9
+    seed = 71
+
+    pooled_payload = evaluate_permutations(
+        pipeline_template=pipeline_template,
+        x_matrix=x_matrix,
+        y=y,
+        splits=splits,
+        seed=seed,
+        n_permutations=n_permutations,
+        metric_name=metric_name,
+        observed_metric=0.5,
+        primary_metric_aggregation="pooled_held_out_predictions",
+    )
+    mean_fold_payload = evaluate_permutations(
+        pipeline_template=pipeline_template,
+        x_matrix=x_matrix,
+        y=y,
+        splits=splits,
+        seed=seed,
+        n_permutations=n_permutations,
+        metric_name=metric_name,
+        observed_metric=0.5,
+        primary_metric_aggregation="mean_fold_scores",
+    )
+
+    pooled_reference = _reference_generic_loop(
+        pipeline_template=pipeline_template,
+        x_matrix=x_matrix,
+        y=y,
+        splits=splits,
+        seed=seed,
+        n_permutations=n_permutations,
+        metric_name=metric_name,
+        observed_metric=0.5,
+        primary_metric_aggregation="pooled_held_out_predictions",
+    )
+    mean_fold_reference = _reference_generic_loop(
+        pipeline_template=pipeline_template,
+        x_matrix=x_matrix,
+        y=y,
+        splits=splits,
+        seed=seed,
+        n_permutations=n_permutations,
+        metric_name=metric_name,
+        observed_metric=0.5,
+        primary_metric_aggregation="mean_fold_scores",
+    )
+
+    assert pooled_payload["primary_metric_aggregation"] == "pooled_held_out_predictions"
+    assert mean_fold_payload["primary_metric_aggregation"] == "mean_fold_scores"
+    np.testing.assert_allclose(
+        pooled_payload["null_scores"],
+        pooled_reference["null_scores"],
+        atol=0.0,
+        rtol=0.0,
+    )
+    np.testing.assert_allclose(
+        mean_fold_payload["null_scores"],
+        mean_fold_reference["null_scores"],
+        atol=0.0,
+        rtol=0.0,
+    )
+    assert not np.allclose(pooled_payload["null_scores"], mean_fold_payload["null_scores"])
 
 
 class _FakeTorchPermutationEstimator(BaseEstimator, ClassifierMixin):

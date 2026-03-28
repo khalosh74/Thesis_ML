@@ -243,6 +243,7 @@ def stamp_metrics_artifact(
     tuning_enabled: bool,
     model_cost_tier: str,
     projected_runtime_seconds: int,
+    primary_metric_aggregation: str,
     preprocessing_kind: str | None,
     feature_recipe_id: str,
     tuning_summary_path: Path,
@@ -288,6 +289,7 @@ def stamp_metrics_artifact(
     persisted_metrics["tuning_enabled"] = bool(tuning_enabled)
     persisted_metrics["model_cost_tier"] = str(model_cost_tier)
     persisted_metrics["projected_runtime_seconds"] = int(projected_runtime_seconds)
+    persisted_metrics["primary_metric_aggregation"] = str(primary_metric_aggregation)
     persisted_metrics["preprocessing_kind"] = (
         str(preprocessing_kind) if preprocessing_kind is not None else None
     )
@@ -406,6 +408,7 @@ def build_run_config_payload(
     test_subject: str | None,
     seed: int,
     primary_metric_name: str,
+    primary_metric_aggregation: str,
     permutation_metric_name: str,
     repeat_id: int,
     repeat_count: int,
@@ -522,6 +525,7 @@ def build_run_config_payload(
             dict(data_policy_effective) if isinstance(data_policy_effective, dict) else None
         ),
         "primary_metric_name": primary_metric_name,
+        "primary_metric_aggregation": str(primary_metric_aggregation),
         "permutation_metric_name": permutation_metric_name,
         "metric_policy_effective": metric_policy_effective_payload(metric_policy_effective),
         "decision_metric_name": metric_policy_effective.decision_metric,

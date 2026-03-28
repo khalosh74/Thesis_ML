@@ -234,6 +234,9 @@ def build_confirmatory_lock_context(
         "target_mapping_hash_verified": str(mapping_validation.get("mapping_hash", "")),
         "split": str(primary_analysis.get("split")),
         "primary_metric": str(primary_analysis.get("metric")),
+        "primary_metric_aggregation": str(
+            primary_analysis.get("primary_metric_aggregation", "mean_fold_scores")
+        ),
         "model_family": str(primary_analysis.get("model_family")),
         "hyperparameter_policy": str(primary_analysis.get("hyperparameter_policy")),
         "class_weight_policy": str(primary_analysis.get("class_weight_policy")),
@@ -296,6 +299,14 @@ def adapt_confirmatory_freeze_to_thesis_protocol(
     confirmatory_lock = build_confirmatory_lock_context(payload, source_path=source_path)
 
     primary_metric = str(primary_analysis.get("metric", "balanced_accuracy"))
+    primary_metric_aggregation = str(
+        primary_analysis.get("primary_metric_aggregation", "mean_fold_scores")
+    ).strip()
+    if primary_metric_aggregation not in {"mean_fold_scores", "pooled_held_out_predictions"}:
+        raise ValueError(
+            "Confirmatory freeze requires primary_analysis.primary_metric_aggregation to be "
+            "'mean_fold_scores' or 'pooled_held_out_predictions'."
+        )
     requested_secondary_metrics = [
         str(value)
         for value in list(primary_analysis.get("secondary_metrics", ["macro_f1", "accuracy"]))
@@ -355,6 +366,7 @@ def adapt_confirmatory_freeze_to_thesis_protocol(
                 f"{target.get('mapping_hash', 'unknown')}"
             ),
             "primary_metric": primary_metric,
+            "primary_metric_aggregation": primary_metric_aggregation,
             "secondary_metrics": secondary_metrics,
             "seed_policy": {
                 "global_seed": seed,

@@ -520,6 +520,7 @@ def _execute_permutation_reference_entrypoint(
     n_permutations: int,
     metric_name: str,
     observed_metric: float,
+    primary_metric_aggregation: str,
     progress_callback: Any,
     progress_metadata: dict[str, Any] | None,
 ) -> dict[str, Any]:
@@ -535,6 +536,7 @@ def _execute_permutation_reference_entrypoint(
         n_permutations=n_permutations,
         metric_name=metric_name,
         observed_metric=observed_metric,
+        primary_metric_aggregation=primary_metric_aggregation,
         progress_callback=progress_callback,
         progress_metadata=progress_metadata,
     )
@@ -913,6 +915,7 @@ def run_permutation_executor(
     n_permutations: int,
     metric_name: str,
     observed_metric: float,
+    primary_metric_aggregation: str,
     progress_callback: Any,
     progress_metadata: dict[str, Any] | None,
 ) -> dict[str, Any]:
@@ -932,6 +935,7 @@ def run_permutation_executor(
         n_permutations=n_permutations,
         metric_name=metric_name,
         observed_metric=observed_metric,
+        primary_metric_aggregation=primary_metric_aggregation,
         progress_callback=progress_callback,
         progress_metadata=progress_metadata,
     )

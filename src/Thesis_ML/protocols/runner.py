@@ -111,6 +111,7 @@ def _protocol_context_payload(
         "evidence_run_role": spec.evidence_run_role.value,
         "evidence_policy": dict(evidence_policy_payload),
         "primary_metric": spec.primary_metric,
+        "primary_metric_aggregation": spec.primary_metric_aggregation,
         "metric_policy": {
             "primary_metric": metric_policy.primary_metric,
             "secondary_metrics": list(metric_policy.secondary_metrics),
@@ -752,6 +753,7 @@ def execute_compiled_protocol(
                 "resume": bool(run_resume),
                 "framework_mode": FrameworkMode.CONFIRMATORY.value,
                 "primary_metric_name": spec.primary_metric,
+                "primary_metric_aggregation": spec.primary_metric_aggregation,
                 "permutation_metric_name": spec.controls.permutation_metric,
                 "methodology_policy_name": spec.methodology_policy_name.value,
                 "class_weight_policy": spec.class_weight_policy.value,

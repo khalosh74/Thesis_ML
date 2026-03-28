@@ -5,7 +5,16 @@ import hashlib
 import json
 from pathlib import Path
 
+import pytest
+
+from Thesis_ML.config.framework_mode import FrameworkMode
+from Thesis_ML.experiments.errors import OfficialArtifactContractError
+from Thesis_ML.experiments.official_contracts import validate_run_artifact_contract
 from Thesis_ML.experiments.model_registry import MODEL_REGISTRY_VERSION
+from Thesis_ML.experiments.tuning_search_spaces import (
+    OFFICIAL_LINEAR_GROUPED_NESTED_SEARCH_SPACE_ID,
+    OFFICIAL_LINEAR_GROUPED_NESTED_SEARCH_SPACE_VERSION,
+)
 from Thesis_ML.verification.official_artifacts import verify_official_artifacts
 from Thesis_ML.verification.reproducibility import compare_official_outputs
 
@@ -186,6 +195,7 @@ def _write_confirmatory_output(root: Path) -> Path:
             },
         },
         "primary_metric_name": "balanced_accuracy",
+        "primary_metric_aggregation": "mean_fold_scores",
         "dataset_fingerprint": dataset_fingerprint,
     }
     metrics_payload = {
@@ -194,6 +204,8 @@ def _write_confirmatory_output(root: Path) -> Path:
         "macro_f1": 0.74,
         "accuracy": 0.76,
         "primary_metric_value": 0.75,
+        "primary_metric_value_mean_fold": 0.75,
+        "primary_metric_value_pooled": 1.0,
         "permutation_test": {
             "metric_name": "balanced_accuracy",
             "p_value": 0.03,
@@ -207,6 +219,11 @@ def _write_confirmatory_output(root: Path) -> Path:
     )
     (run_dir / "metrics.json").write_text(
         f"{json.dumps(metrics_payload, indent=2)}\n", encoding="utf-8"
+    )
+    (run_dir / "fold_metrics.csv").write_text(
+        "fold,accuracy,balanced_accuracy,macro_f1\n"
+        "0,0.75,0.75,0.74\n",
+        encoding="utf-8",
     )
     (run_dir / "fold_splits.csv").write_text("fold,train,test\n0,a,b\n", encoding="utf-8")
     (run_dir / "predictions.csv").write_text("y_true,y_pred\nanger,anger\n", encoding="utf-8")
@@ -354,6 +371,7 @@ def _write_confirmatory_output(root: Path) -> Path:
                         "framework_mode",
                         "canonical_run",
                         "methodology_policy_name",
+                        "primary_metric_aggregation",
                         "feature_recipe_id",
                         "model_cost_tier",
                         "projected_runtime_seconds",
@@ -401,6 +419,7 @@ def _write_confirmatory_output(root: Path) -> Path:
                     "framework_mode",
                     "canonical_run",
                     "methodology_policy_name",
+                    "primary_metric_aggregation",
                     "feature_recipe_id",
                     "model_cost_tier",
                     "projected_runtime_seconds",
@@ -755,3 +774,182 @@ def test_compare_official_outputs_ignores_stage_duration_seconds(tmp_path: Path)
 
     equal_summary = compare_official_outputs(left_dir=left_dir, right_dir=right_dir)
     assert equal_summary["passed"] is True
+
+
+def test_tuned_confirmatory_permutation_without_tuned_null_markers_fails_validation(
+    tmp_path: Path,
+) -> None:
+    output_dir = tmp_path / "protocol_runs" / "thesis-canonical__1.0.0"
+    run_dir = _write_confirmatory_output(output_dir)
+    config_payload = json.loads((run_dir / "config.json").read_text(encoding="utf-8"))
+    metrics_payload = json.loads((run_dir / "metrics.json").read_text(encoding="utf-8"))
+
+    for payload in (config_payload, metrics_payload):
+        payload["methodology_policy_name"] = "grouped_nested_tuning"
+        payload["tuning_enabled"] = True
+        payload["evidence_run_role"] = "primary"
+
+    with pytest.raises(
+        OfficialArtifactContractError,
+        match="must prove tuning replay under the null",
+    ):
+        validate_run_artifact_contract(
+            report_dir=run_dir,
+            required_run_artifacts=["config.json", "metrics.json"],
+            required_run_metadata_fields=[
+                "framework_mode",
+                "canonical_run",
+                "methodology_policy_name",
+                "tuning_enabled",
+                "metric_policy_effective",
+                "data_policy_effective",
+                "data_artifacts",
+            ],
+            framework_mode=FrameworkMode.CONFIRMATORY,
+            canonical_run=True,
+            config_payload=config_payload,
+            metrics_payload=metrics_payload,
+        )
+
+
+def test_tuned_confirmatory_permutation_with_tuned_null_markers_passes_validation(
+    tmp_path: Path,
+) -> None:
+    output_dir = tmp_path / "protocol_runs" / "thesis-canonical__1.0.0"
+    run_dir = _write_confirmatory_output(output_dir)
+    config_payload = json.loads((run_dir / "config.json").read_text(encoding="utf-8"))
+    metrics_payload = json.loads((run_dir / "metrics.json").read_text(encoding="utf-8"))
+
+    for payload in (config_payload, metrics_payload):
+        payload["methodology_policy_name"] = "grouped_nested_tuning"
+        payload["tuning_enabled"] = True
+        payload["evidence_run_role"] = "primary"
+    metrics_payload["permutation_test"] = {
+        **metrics_payload["permutation_test"],
+        "execution_mode": "grouped_nested_tuning_reference",
+        "tuning_reapplied_under_null": True,
+        "null_matches_confirmatory_setup": True,
+        "null_tuning_search_space_id": OFFICIAL_LINEAR_GROUPED_NESTED_SEARCH_SPACE_ID,
+        "null_tuning_search_space_version": OFFICIAL_LINEAR_GROUPED_NESTED_SEARCH_SPACE_VERSION,
+        "null_inner_cv_scheme": "grouped_leave_one_group_out",
+        "null_inner_group_field": "session",
+    }
+
+    validate_run_artifact_contract(
+        report_dir=run_dir,
+        required_run_artifacts=["config.json", "metrics.json"],
+        required_run_metadata_fields=[
+            "framework_mode",
+            "canonical_run",
+            "methodology_policy_name",
+            "tuning_enabled",
+            "metric_policy_effective",
+            "data_policy_effective",
+            "data_artifacts",
+        ],
+        framework_mode=FrameworkMode.CONFIRMATORY,
+        canonical_run=True,
+        config_payload=config_payload,
+        metrics_payload=metrics_payload,
+    )
+
+
+def test_mean_fold_aggregation_fails_when_primary_metric_value_mismatches_fold_mean(
+    tmp_path: Path,
+) -> None:
+    output_dir = tmp_path / "protocol_runs" / "thesis-canonical__1.0.0"
+    run_dir = _write_confirmatory_output(output_dir)
+    config_payload = json.loads((run_dir / "config.json").read_text(encoding="utf-8"))
+    metrics_payload = json.loads((run_dir / "metrics.json").read_text(encoding="utf-8"))
+    metrics_payload["primary_metric_value"] = 0.11
+
+    with pytest.raises(
+        OfficialArtifactContractError,
+        match="primary_metric_value does not match the declared primary_metric_aggregation rule",
+    ):
+        validate_run_artifact_contract(
+            report_dir=run_dir,
+            required_run_artifacts=["config.json", "metrics.json"],
+            required_run_metadata_fields=[
+                "framework_mode",
+                "canonical_run",
+                "methodology_policy_name",
+                "primary_metric_aggregation",
+                "metric_policy_effective",
+                "data_policy_effective",
+                "data_artifacts",
+            ],
+            framework_mode=FrameworkMode.CONFIRMATORY,
+            canonical_run=True,
+            config_payload=config_payload,
+            metrics_payload=metrics_payload,
+        )
+
+
+def test_pooled_aggregation_fails_when_primary_metric_value_mismatches_predictions(
+    tmp_path: Path,
+) -> None:
+    output_dir = tmp_path / "protocol_runs" / "thesis-canonical__1.0.0"
+    run_dir = _write_confirmatory_output(output_dir)
+    config_payload = json.loads((run_dir / "config.json").read_text(encoding="utf-8"))
+    metrics_payload = json.loads((run_dir / "metrics.json").read_text(encoding="utf-8"))
+
+    config_payload["primary_metric_aggregation"] = "pooled_held_out_predictions"
+    metrics_payload["primary_metric_aggregation"] = "pooled_held_out_predictions"
+    metrics_payload["primary_metric_value"] = 0.25
+
+    with pytest.raises(
+        OfficialArtifactContractError,
+        match="primary_metric_value does not match the declared primary_metric_aggregation rule",
+    ):
+        validate_run_artifact_contract(
+            report_dir=run_dir,
+            required_run_artifacts=["config.json", "metrics.json"],
+            required_run_metadata_fields=[
+                "framework_mode",
+                "canonical_run",
+                "methodology_policy_name",
+                "primary_metric_aggregation",
+                "metric_policy_effective",
+                "data_policy_effective",
+                "data_artifacts",
+            ],
+            framework_mode=FrameworkMode.CONFIRMATORY,
+            canonical_run=True,
+            config_payload=config_payload,
+            metrics_payload=metrics_payload,
+        )
+
+
+def test_aggregation_mismatch_between_config_and_metrics_fails_validation(
+    tmp_path: Path,
+) -> None:
+    output_dir = tmp_path / "protocol_runs" / "thesis-canonical__1.0.0"
+    run_dir = _write_confirmatory_output(output_dir)
+    config_payload = json.loads((run_dir / "config.json").read_text(encoding="utf-8"))
+    metrics_payload = json.loads((run_dir / "metrics.json").read_text(encoding="utf-8"))
+
+    config_payload["primary_metric_aggregation"] = "mean_fold_scores"
+    metrics_payload["primary_metric_aggregation"] = "pooled_held_out_predictions"
+
+    with pytest.raises(
+        OfficialArtifactContractError,
+        match="artifacts disagree on primary_metric_aggregation",
+    ):
+        validate_run_artifact_contract(
+            report_dir=run_dir,
+            required_run_artifacts=["config.json", "metrics.json"],
+            required_run_metadata_fields=[
+                "framework_mode",
+                "canonical_run",
+                "methodology_policy_name",
+                "primary_metric_aggregation",
+                "metric_policy_effective",
+                "data_policy_effective",
+                "data_artifacts",
+            ],
+            framework_mode=FrameworkMode.CONFIRMATORY,
+            canonical_run=True,
+            config_payload=config_payload,
+            metrics_payload=metrics_payload,
+        )

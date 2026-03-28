@@ -206,6 +206,7 @@ class EvaluationInput(_SectionModel):
     test_subject: str | None = None
     n_permutations: int = 0
     primary_metric_name: str = "balanced_accuracy"
+    primary_metric_aggregation: str = "mean_fold_scores"
     feature_recipe_id: str = BASELINE_STANDARD_SCALER_RECIPE_ID
     emit_feature_qc_artifacts: bool = True
     feature_qc_summary_path: Path | None = None
@@ -236,6 +237,13 @@ class EvaluationInput(_SectionModel):
     subgroup_metrics_csv_path: Path | None = None
     tuning_summary_path: Path | None = None
     tuning_best_params_path: Path | None = None
+    tuning_enabled: bool = False
+    tuning_search_space_id: str | None = None
+    tuning_search_space_version: str | None = None
+    tuning_inner_cv_scheme: str | None = None
+    tuning_inner_group_field: str | None = None
+    tuning_assignment: StageAssignment | None = None
+    tuning_fallback_executor_id: str | None = None
     calibration_enabled: bool = True
     calibration_n_bins: int = 10
     calibration_require_probabilities_for_validity: bool = False

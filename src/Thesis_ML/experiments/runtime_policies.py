@@ -32,6 +32,7 @@ CONFIRMATORY_PROTOCOL_CONTEXT_REQUIRED_KEYS: tuple[str, ...] = (
     "subgroup_reporting_enabled",
     "subgroup_dimensions",
     "subgroup_min_samples_per_group",
+    "primary_metric_aggregation",
     "metric_policy",
     "data_policy",
     "model_cost_tier",

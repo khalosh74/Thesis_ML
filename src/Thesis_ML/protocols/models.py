@@ -197,6 +197,9 @@ class ScientificContract(_ProtocolModel):
     target: str = Field(min_length=1)
     label_policy: str = Field(min_length=1)
     primary_metric: str = "balanced_accuracy"
+    primary_metric_aggregation: Literal["mean_fold_scores", "pooled_held_out_predictions"] = (
+        "mean_fold_scores"
+    )
     secondary_metrics: list[str] = Field(default_factory=lambda: ["macro_f1", "accuracy"])
     seed_policy: SeedPolicy = Field(default_factory=SeedPolicy)
 
@@ -408,6 +411,7 @@ class ArtifactContract(_ProtocolModel):
             "repeat_count",
             "base_run_id",
             "primary_metric_name",
+            "primary_metric_aggregation",
             "data_policy_effective",
             "protocol_id",
             "protocol_version",
@@ -470,6 +474,7 @@ class ArtifactContract(_ProtocolModel):
             "repeat_count",
             "base_run_id",
             "primary_metric_name",
+            "primary_metric_aggregation",
             "data_policy_effective",
             "protocol_id",
             "protocol_version",
@@ -1077,6 +1082,9 @@ class CompiledRunSpec(_ProtocolModel):
     filter_modality: str | None = None
     seed: int
     primary_metric: str = "balanced_accuracy"
+    primary_metric_aggregation: Literal["mean_fold_scores", "pooled_held_out_predictions"] = (
+        "mean_fold_scores"
+    )
     controls: CompiledRunControls = Field(default_factory=CompiledRunControls)
     interpretability_enabled: bool = False
     methodology_policy_name: MethodologyPolicyName = MethodologyPolicyName.FIXED_BASELINES_ONLY
@@ -1280,6 +1288,7 @@ class CompiledProtocolManifest(_ProtocolModel):
             "repeat_count",
             "base_run_id",
             "primary_metric_name",
+            "primary_metric_aggregation",
             "data_policy_effective",
             "protocol_id",
             "protocol_version",
@@ -1314,6 +1323,7 @@ class CompiledProtocolManifest(_ProtocolModel):
             "model_cost_tier",
             "projected_runtime_seconds",
             "data_policy_effective",
+            "primary_metric_aggregation",
             "protocol_id",
             "protocol_version",
             "suite_id",

@@ -7,7 +7,10 @@ from typing import Any
 import pandas as pd
 
 from Thesis_ML.config.framework_mode import FrameworkMode
-from Thesis_ML.config.metric_policy import validate_metric_name
+from Thesis_ML.config.metric_policy import (
+    classification_metric_score as policy_metric_score,
+    validate_metric_name,
+)
 from Thesis_ML.data.affect_labels import (
     blocking_derived_label_inconsistency_rows,
     blocking_target_derivation_audit_rows,
@@ -55,6 +58,8 @@ _TARGET_SOURCE_COLUMN_MAP = {
 }
 _REQUIRED_RUN_ARTIFACT_MINIMUM = {"config.json", "metrics.json"}
 _REQUIRED_RUN_METADATA_MINIMUM = {"framework_mode", "canonical_run"}
+_PRIMARY_METRIC_AGGREGATIONS = {"mean_fold_scores", "pooled_held_out_predictions"}
+_PRIMARY_METRIC_MATCH_ATOL = 1e-9
 
 
 @dataclass(frozen=True)
@@ -836,6 +841,37 @@ def validate_run_artifact_contract(
                 },
             )
 
+    config_primary_metric_aggregation = str(
+        config_payload.get("primary_metric_aggregation", "")
+    ).strip()
+    metrics_primary_metric_aggregation = str(
+        metrics_payload.get("primary_metric_aggregation", "")
+    ).strip()
+    if config_primary_metric_aggregation not in _PRIMARY_METRIC_AGGREGATIONS:
+        raise OfficialArtifactContractError(
+            "Official run config primary_metric_aggregation is missing or unsupported.",
+            details={
+                "allowed_primary_metric_aggregations": sorted(_PRIMARY_METRIC_AGGREGATIONS),
+                "config_primary_metric_aggregation": config_payload.get("primary_metric_aggregation"),
+            },
+        )
+    if metrics_primary_metric_aggregation not in _PRIMARY_METRIC_AGGREGATIONS:
+        raise OfficialArtifactContractError(
+            "Official run metrics primary_metric_aggregation is missing or unsupported.",
+            details={
+                "allowed_primary_metric_aggregations": sorted(_PRIMARY_METRIC_AGGREGATIONS),
+                "metrics_primary_metric_aggregation": metrics_payload.get("primary_metric_aggregation"),
+            },
+        )
+    if config_primary_metric_aggregation != metrics_primary_metric_aggregation:
+        raise OfficialArtifactContractError(
+            "Official run artifacts disagree on primary_metric_aggregation.",
+            details={
+                "config_primary_metric_aggregation": config_primary_metric_aggregation,
+                "metrics_primary_metric_aggregation": metrics_primary_metric_aggregation,
+            },
+        )
+
     primary_metric = config_metric_policy.get("primary_metric")
     permutation_payload = metrics_payload.get("permutation_test")
     if isinstance(permutation_payload, dict) and primary_metric is not None:
@@ -848,6 +884,132 @@ def validate_run_artifact_contract(
                 details={
                     "primary_metric": primary_metric,
                     "permutation_metric": metric_name,
+                },
+            )
+
+    try:
+        primary_metric_name = validate_metric_name(
+            str(metrics_payload.get("primary_metric_name", "")).strip()
+        )
+    except ValueError as exc:
+        raise OfficialArtifactContractError(
+            "Official run metrics artifact must include a valid primary_metric_name.",
+            details={"primary_metric_name": metrics_payload.get("primary_metric_name")},
+        ) from exc
+    try:
+        primary_metric_value = float(metrics_payload["primary_metric_value"])
+    except (TypeError, ValueError, KeyError) as exc:
+        raise OfficialArtifactContractError(
+            "Official run metrics artifact must include a numeric primary_metric_value.",
+            details={"primary_metric_value": metrics_payload.get("primary_metric_value")},
+        ) from exc
+    if metrics_primary_metric_aggregation == "mean_fold_scores":
+        fold_metrics_path = report_dir / "fold_metrics.csv"
+        if not fold_metrics_path.exists():
+            raise OfficialArtifactContractError(
+                "mean_fold_scores aggregation requires fold_metrics.csv.",
+                details={"fold_metrics_path": str(fold_metrics_path)},
+            )
+        fold_metrics_frame = pd.read_csv(fold_metrics_path)
+        if primary_metric_name not in fold_metrics_frame.columns:
+            raise OfficialArtifactContractError(
+                "mean_fold_scores aggregation requires primary metric column in fold_metrics.csv.",
+                details={
+                    "primary_metric_name": primary_metric_name,
+                    "fold_metrics_columns": fold_metrics_frame.columns.tolist(),
+                },
+            )
+        fold_metric_series = pd.to_numeric(
+            fold_metrics_frame[primary_metric_name],
+            errors="coerce",
+        ).dropna()
+        if fold_metric_series.empty:
+            raise OfficialArtifactContractError(
+                "mean_fold_scores aggregation requires non-empty numeric fold metrics.",
+                details={"primary_metric_name": primary_metric_name},
+            )
+        recomputed_primary_metric_value = float(fold_metric_series.mean())
+    else:
+        predictions_path = report_dir / "predictions.csv"
+        if not predictions_path.exists():
+            raise OfficialArtifactContractError(
+                "pooled_held_out_predictions aggregation requires predictions.csv.",
+                details={"predictions_path": str(predictions_path)},
+            )
+        predictions_frame = pd.read_csv(predictions_path)
+        required_prediction_columns = {"y_true", "y_pred"}
+        missing_prediction_columns = sorted(required_prediction_columns - set(predictions_frame.columns))
+        if missing_prediction_columns:
+            raise OfficialArtifactContractError(
+                "predictions.csv is missing columns required for pooled_held_out_predictions.",
+                details={"missing_prediction_columns": missing_prediction_columns},
+            )
+        recomputed_primary_metric_value = float(
+            policy_metric_score(
+                y_true=predictions_frame["y_true"].astype(str).tolist(),
+                y_pred=predictions_frame["y_pred"].astype(str).tolist(),
+                metric_name=primary_metric_name,
+            )
+        )
+    if abs(float(primary_metric_value) - float(recomputed_primary_metric_value)) > float(
+        _PRIMARY_METRIC_MATCH_ATOL
+    ):
+        raise OfficialArtifactContractError(
+            "primary_metric_value does not match the declared primary_metric_aggregation rule.",
+            details={
+                "primary_metric_aggregation": metrics_primary_metric_aggregation,
+                "primary_metric_name": primary_metric_name,
+                "declared_primary_metric_value": float(primary_metric_value),
+                "recomputed_primary_metric_value": float(recomputed_primary_metric_value),
+                "tolerance": float(_PRIMARY_METRIC_MATCH_ATOL),
+            },
+        )
+    if (
+        framework_mode == FrameworkMode.CONFIRMATORY
+        and bool(metrics_payload.get("tuning_enabled"))
+        and str(metrics_payload.get("methodology_policy_name", "")).strip()
+        == "grouped_nested_tuning"
+        and str(metrics_payload.get("evidence_run_role", "")).strip() != "untuned_baseline"
+        and isinstance(permutation_payload, dict)
+    ):
+        required_true_flags = {
+            "tuning_reapplied_under_null": permutation_payload.get("tuning_reapplied_under_null"),
+            "null_matches_confirmatory_setup": permutation_payload.get(
+                "null_matches_confirmatory_setup"
+            ),
+        }
+        missing_true_flags = sorted(
+            key for key, value in required_true_flags.items() if value is not True
+        )
+        required_nonempty_fields = {
+            "execution_mode": permutation_payload.get("execution_mode"),
+            "null_tuning_search_space_id": permutation_payload.get("null_tuning_search_space_id"),
+            "null_tuning_search_space_version": permutation_payload.get(
+                "null_tuning_search_space_version"
+            ),
+            "null_inner_cv_scheme": permutation_payload.get("null_inner_cv_scheme"),
+            "null_inner_group_field": permutation_payload.get("null_inner_group_field"),
+        }
+        missing_fields = sorted(
+            key
+            for key, value in required_nonempty_fields.items()
+            if not isinstance(value, str) or not value.strip()
+        )
+        if missing_true_flags or missing_fields:
+            raise OfficialArtifactContractError(
+                "Tuned confirmatory permutation artifact must prove tuning replay under the null.",
+                details={
+                    "missing_true_flags": missing_true_flags,
+                    "missing_fields": missing_fields,
+                    "present_execution_mode": permutation_payload.get("execution_mode"),
+                },
+            )
+        if str(permutation_payload.get("execution_mode")) != "grouped_nested_tuning_reference":
+            raise OfficialArtifactContractError(
+                "Tuned confirmatory permutation artifact execution_mode is invalid.",
+                details={
+                    "expected_execution_mode": "grouped_nested_tuning_reference",
+                    "actual_execution_mode": permutation_payload.get("execution_mode"),
                 },
             )
 

@@ -88,6 +88,7 @@ class SegmentExecutionRequest:
     interpretability_summary_path: Path
     interpretability_fold_artifacts_path: Path
     primary_metric_name: str = "balanced_accuracy"
+    primary_metric_aggregation: str = "mean_fold_scores"
     permutation_metric_name: str | None = None
     permutation_alpha: float = 0.05
     permutation_minimum_required: int = 0
@@ -642,6 +643,7 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
                     test_subject=request.test_subject,
                     n_permutations=request.n_permutations,
                     primary_metric_name=request.primary_metric_name,
+                    primary_metric_aggregation=request.primary_metric_aggregation,
                     feature_recipe_id=request.feature_recipe_id,
                     emit_feature_qc_artifacts=bool(request.emit_feature_qc_artifacts),
                     feature_qc_summary_path=request.feature_qc_summary_path,
@@ -682,6 +684,13 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
                     subgroup_metrics_csv_path=request.subgroup_metrics_csv_path,
                     tuning_summary_path=request.tuning_summary_path,
                     tuning_best_params_path=request.tuning_best_params_path,
+                    tuning_enabled=bool(request.tuning_enabled),
+                    tuning_search_space_id=request.tuning_search_space_id,
+                    tuning_search_space_version=request.tuning_search_space_version,
+                    tuning_inner_cv_scheme=request.tuning_inner_cv_scheme,
+                    tuning_inner_group_field=request.tuning_inner_group_field,
+                    tuning_assignment=stage_assignment_map.get(StageKey.TUNING),
+                    tuning_fallback_executor_id=stage_fallback_executor_ids.get(StageKey.TUNING),
                     calibration_enabled=bool(request.calibration_enabled),
                     calibration_n_bins=int(request.calibration_n_bins),
                     calibration_require_probabilities_for_validity=bool(

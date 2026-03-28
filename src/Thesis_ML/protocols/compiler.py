@@ -231,6 +231,7 @@ def compile_protocol(
                 filter_modality=suite.filter_modality,
                 seed=repeat_seed,
                 primary_metric=protocol.metric_policy.primary_metric,
+                primary_metric_aggregation=protocol.scientific_contract.primary_metric_aggregation,
                 controls=controls,
                 interpretability_enabled=_interpretability_enabled(protocol, suite, model_name),
                 methodology_policy_name=protocol.methodology_policy.policy_name,
