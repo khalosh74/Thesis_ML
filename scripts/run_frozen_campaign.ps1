@@ -507,6 +507,69 @@ function Get-PhaseSummaryRecord {
     return Read-JsonFile -Path (Get-PhaseSummaryPath -PhaseName $PhaseName)
 }
 
+function Get-UpstreamOutputsFromPhaseSummary {
+    param([string]$PhaseName)
+
+    $summary = Get-PhaseSummaryRecord -PhaseName $PhaseName
+    $confirmatory = ""
+    $comparison = ""
+    if ($null -eq $summary -or $null -eq $summary.phase_details) {
+        return [ordered]@{
+            upstream_confirmatory_output_dir       = $confirmatory
+            upstream_primary_comparison_output_dir = $comparison
+        }
+    }
+
+    $phaseDetails = $summary.phase_details
+    if ($phaseDetails -is [System.Collections.IDictionary]) {
+        if ($phaseDetails.Contains("upstream_confirmatory_output_dir")) {
+            $confirmatory = [string]$phaseDetails["upstream_confirmatory_output_dir"]
+        }
+        if ($phaseDetails.Contains("upstream_primary_comparison_output_dir")) {
+            $comparison = [string]$phaseDetails["upstream_primary_comparison_output_dir"]
+        }
+    }
+    else {
+        if ($phaseDetails.PSObject.Properties.Name -contains "upstream_confirmatory_output_dir") {
+            $confirmatory = [string]$phaseDetails.upstream_confirmatory_output_dir
+        }
+        if ($phaseDetails.PSObject.Properties.Name -contains "upstream_primary_comparison_output_dir") {
+            $comparison = [string]$phaseDetails.upstream_primary_comparison_output_dir
+        }
+    }
+
+    return [ordered]@{
+        upstream_confirmatory_output_dir       = $confirmatory
+        upstream_primary_comparison_output_dir = $comparison
+    }
+}
+
+function Invoke-DeterministicOfficialReproCheck {
+    param(
+        [Parameter(Mandatory = $true)]$Context,
+        [Parameter(Mandatory = $true)][string]$Label,
+        [Parameter(Mandatory = $true)][ValidateSet("comparison", "protocol")][string]$Mode,
+        [Parameter(Mandatory = $true)][string]$ConfigPath,
+        [Parameter(Mandatory = $true)][string]$SelectionFlag,
+        [Parameter(Mandatory = $true)][string]$SelectionValue,
+        [Parameter(Mandatory = $true)][string]$ReportsRoot,
+        [Parameter(Mandatory = $true)][string]$SummaryOut
+    )
+
+    $commandParts = @(
+        "python", "scripts/verify_official_reproducibility.py",
+        "--mode", $Mode,
+        "--config", $ConfigPath,
+        "--index-csv", $IndexCsv,
+        "--data-root", $DataRoot,
+        "--cache-dir", $CacheDir,
+        $SelectionFlag, $SelectionValue,
+        "--reports-root", $ReportsRoot,
+        "--summary-out", $SummaryOut
+    )
+    Invoke-PhaseCommand -Context $Context -Label $Label -CommandParts $commandParts | Out-Null
+}
+
 function New-PhaseContext {
     param([string]$PhaseName)
 
@@ -1310,28 +1373,9 @@ $PhaseRunners["replay"] = {
         (Test-Path -LiteralPath $manifestPath -PathType Leaf)
     ) {
         $replayVerification = Read-JsonFile -Path $replayVerificationPath
-        $priorReplaySummary = Get-PhaseSummaryRecord -PhaseName "replay"
-        $priorConfirmatory = ""
-        $priorComparison = ""
-        if ($null -ne $priorReplaySummary -and $null -ne $priorReplaySummary.phase_details) {
-            $phaseDetails = $priorReplaySummary.phase_details
-            if ($phaseDetails -is [System.Collections.IDictionary]) {
-                if ($phaseDetails.Contains("upstream_confirmatory_output_dir")) {
-                    $priorConfirmatory = [string]$phaseDetails["upstream_confirmatory_output_dir"]
-                }
-                if ($phaseDetails.Contains("upstream_primary_comparison_output_dir")) {
-                    $priorComparison = [string]$phaseDetails["upstream_primary_comparison_output_dir"]
-                }
-            }
-            else {
-                if ($phaseDetails.PSObject.Properties.Name -contains "upstream_confirmatory_output_dir") {
-                    $priorConfirmatory = [string]$phaseDetails.upstream_confirmatory_output_dir
-                }
-                if ($phaseDetails.PSObject.Properties.Name -contains "upstream_primary_comparison_output_dir") {
-                    $priorComparison = [string]$phaseDetails.upstream_primary_comparison_output_dir
-                }
-            }
-        }
+        $priorReplaySummary = Get-UpstreamOutputsFromPhaseSummary -PhaseName "replay"
+        $priorConfirmatory = [string]$priorReplaySummary.upstream_confirmatory_output_dir
+        $priorComparison = [string]$priorReplaySummary.upstream_primary_comparison_output_dir
         $sameUpstream = (
             (Normalize-PathText -PathText $priorConfirmatory) -eq (Normalize-PathText -PathText $confirmatoryDir) -and
             (Normalize-PathText -PathText $priorComparison) -eq (Normalize-PathText -PathText $primaryComparisonDir)
@@ -1356,29 +1400,25 @@ $PhaseRunners["replay"] = {
         }
     }
 
-    Invoke-PhaseCommand -Context $Context -Label "Deterministic comparison reproducibility" -CommandParts @(
-        "python", "scripts/verify_official_reproducibility.py",
-        "--mode", "comparison",
-        "--config", $PrimaryComparisonSpec,
-        "--index-csv", $IndexCsv,
-        "--data-root", $DataRoot,
-        "--cache-dir", $CacheDir,
-        "--variant", "ridge",
-        "--reports-root", $determinismComparisonReports,
-        "--summary-out", $determinismComparisonSummary
-    ) | Out-Null
+    Invoke-DeterministicOfficialReproCheck `
+        -Context $Context `
+        -Label "Deterministic comparison reproducibility" `
+        -Mode "comparison" `
+        -ConfigPath $PrimaryComparisonSpec `
+        -SelectionFlag "--variant" `
+        -SelectionValue "ridge" `
+        -ReportsRoot $determinismComparisonReports `
+        -SummaryOut $determinismComparisonSummary
 
-    Invoke-PhaseCommand -Context $Context -Label "Deterministic confirmatory reproducibility" -CommandParts @(
-        "python", "scripts/verify_official_reproducibility.py",
-        "--mode", "protocol",
-        "--config", $ConfirmatoryProtocol,
-        "--index-csv", $IndexCsv,
-        "--data-root", $DataRoot,
-        "--cache-dir", $CacheDir,
-        "--suite", "confirmatory_primary_within_subject",
-        "--reports-root", $determinismConfirmatoryReports,
-        "--summary-out", $determinismConfirmatorySummary
-    ) | Out-Null
+    Invoke-DeterministicOfficialReproCheck `
+        -Context $Context `
+        -Label "Deterministic confirmatory reproducibility" `
+        -Mode "protocol" `
+        -ConfigPath $ConfirmatoryProtocol `
+        -SelectionFlag "--suite" `
+        -SelectionValue "confirmatory_primary_within_subject" `
+        -ReportsRoot $determinismConfirmatoryReports `
+        -SummaryOut $determinismConfirmatorySummary
 
     Invoke-PhaseCommand -Context $Context -Label "Official replay orchestration" -CommandParts @(
         "python", "scripts/replay_official_paths.py",
@@ -1425,28 +1465,9 @@ $PhaseRunners["bundle"] = {
         (Test-Path -LiteralPath $bundleVerificationSummary -PathType Leaf)
     ) {
         $bundleVerificationPayload = Read-JsonFile -Path $bundleVerificationSummary
-        $priorBundleSummary = Get-PhaseSummaryRecord -PhaseName "bundle"
-        $priorConfirmatory = ""
-        $priorComparison = ""
-        if ($null -ne $priorBundleSummary -and $null -ne $priorBundleSummary.phase_details) {
-            $phaseDetails = $priorBundleSummary.phase_details
-            if ($phaseDetails -is [System.Collections.IDictionary]) {
-                if ($phaseDetails.Contains("upstream_confirmatory_output_dir")) {
-                    $priorConfirmatory = [string]$phaseDetails["upstream_confirmatory_output_dir"]
-                }
-                if ($phaseDetails.Contains("upstream_primary_comparison_output_dir")) {
-                    $priorComparison = [string]$phaseDetails["upstream_primary_comparison_output_dir"]
-                }
-            }
-            else {
-                if ($phaseDetails.PSObject.Properties.Name -contains "upstream_confirmatory_output_dir") {
-                    $priorConfirmatory = [string]$phaseDetails.upstream_confirmatory_output_dir
-                }
-                if ($phaseDetails.PSObject.Properties.Name -contains "upstream_primary_comparison_output_dir") {
-                    $priorComparison = [string]$phaseDetails.upstream_primary_comparison_output_dir
-                }
-            }
-        }
+        $priorBundleSummary = Get-UpstreamOutputsFromPhaseSummary -PhaseName "bundle"
+        $priorConfirmatory = [string]$priorBundleSummary.upstream_confirmatory_output_dir
+        $priorComparison = [string]$priorBundleSummary.upstream_primary_comparison_output_dir
         $sameUpstream = (
             (Normalize-PathText -PathText $priorConfirmatory) -eq (Normalize-PathText -PathText $confirmatoryOutputDir) -and
             (Normalize-PathText -PathText $priorComparison) -eq (Normalize-PathText -PathText $primaryComparisonOutputDir)

@@ -83,55 +83,16 @@
       "variant_templates": [
         {
           "experiment_id": "E02",
-          "template_id": "pooled_tasks",
+          "template_id": "wb_row_003",
           "supported": true,
           "unsupported_reason": null,
           "params": {
             "target": "coarse_affect",
             "cv": "within_subject_loso_session",
-            "model": "ridge"
+            "model": "ridge",
+            "filter_task": "VARIES"
           },
-          "expand": {
-            "subject": "subjects"
-          },
-          "sections": [
-            "dataset_selection",
-            "feature_cache_build",
-            "feature_matrix_load",
-            "spatial_validation",
-            "model_fit",
-            "interpretability",
-            "evaluation"
-          ],
-          "artifacts": [],
-          "start_section": "dataset_selection",
-          "end_section": "evaluation",
-          "base_artifact_id": null,
-          "reuse_policy": "require_explicit_base",
-          "search_space_id": null,
-          "study_id": null,
-          "trial_id": null,
-          "cell_id": null,
-          "repeat_id": null,
-          "seed": null,
-          "factor_settings": {},
-          "fixed_controls": {},
-          "design_metadata": {}
-        },
-        {
-          "experiment_id": "E02",
-          "template_id": "task_specific",
-          "supported": true,
-          "unsupported_reason": null,
-          "params": {
-            "target": "coarse_affect",
-            "cv": "within_subject_loso_session",
-            "model": "ridge"
-          },
-          "expand": {
-            "subject": "subjects",
-            "filter_task": "tasks"
-          },
+          "expand": {},
           "sections": [
             "dataset_selection",
             "feature_cache_build",

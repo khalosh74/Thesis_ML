@@ -27,6 +27,11 @@ from Thesis_ML.verification.repro_manifest import (
 )
 from Thesis_ML.verification.reproducibility import compare_official_outputs
 
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+from _common import write_json
+
 
 def _demo_dataset_paths() -> dict[str, Path]:
     base = PROJECT_ROOT / "demo_data" / "synthetic_v1"
@@ -350,12 +355,6 @@ def _determinism_for_mode(
     }
 
 
-def _write_json(path: Path, payload: dict[str, Any]) -> Path:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(f"{json.dumps(payload, indent=2)}\n", encoding="utf-8")
-    return path
-
-
 def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
@@ -571,8 +570,8 @@ def main(argv: list[str] | None = None) -> int:
         repo_root=PROJECT_ROOT,
     )
 
-    _write_json(summary_out, replay_summary)
-    _write_json(verification_summary_out, replay_verification_summary)
+    write_json(summary_out, replay_summary)
+    write_json(verification_summary_out, replay_verification_summary)
     write_reproducibility_manifest(
         manifest=manifest_payload,
         output_path=manifest_out,

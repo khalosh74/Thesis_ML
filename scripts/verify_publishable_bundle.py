@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import sys
 from pathlib import Path
@@ -10,18 +9,12 @@ from typing import Any
 from Thesis_ML.verification.confirmatory_ready import verify_confirmatory_ready
 from Thesis_ML.verification.official_artifacts import verify_official_artifacts
 
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+from _common import file_sha256
+
 EXPECTED_SCHEMA_VERSION = "publishable-bundle-v1"
-
-
-def _file_sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        while True:
-            chunk = handle.read(1024 * 1024)
-            if not chunk:
-                break
-            digest.update(chunk)
-    return digest.hexdigest()
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -136,7 +129,7 @@ def verify_bundle(bundle_dir: Path) -> dict[str, Any]:
                 }
             )
             continue
-        actual_hash = _file_sha256(candidate)
+        actual_hash = file_sha256(candidate)
         n_files_checked += 1
         if expected_hash != actual_hash:
             issues.append(

@@ -19,6 +19,11 @@ from Thesis_ML.protocols.loader import load_protocol
 from Thesis_ML.protocols.runner import compile_and_run_protocol
 from Thesis_ML.verification.reproducibility import compare_official_outputs
 
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+from _common import write_json
+
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -236,8 +241,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.summary_out:
         summary_path = Path(args.summary_out)
-        summary_path.parent.mkdir(parents=True, exist_ok=True)
-        summary_path.write_text(f"{json.dumps(summary, indent=2)}\n", encoding="utf-8")
+        write_json(summary_path, summary)
 
     print(json.dumps(summary, indent=2))
     if not bool(summary.get("passed", False)):

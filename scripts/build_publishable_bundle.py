@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import argparse
 import csv
-import hashlib
 import json
 import shutil
+import sys
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -18,18 +18,12 @@ from Thesis_ML.config.paths import (
 )
 from Thesis_ML.config.runtime_selection import resolve_runtime_config_path
 
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+from _common import file_sha256
+
 BUNDLE_SCHEMA_VERSION = "publishable-bundle-v1"
-
-
-def _file_sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        while True:
-            chunk = handle.read(1024 * 1024)
-            if not chunk:
-                break
-            digest.update(chunk)
-    return digest.hexdigest()
 
 
 def _copy_file(source: Path, destination: Path) -> Path:
@@ -296,7 +290,7 @@ def main(argv: list[str] | None = None) -> int:
         files.append(
             {
                 "path": relative,
-                "sha256": _file_sha256(candidate),
+                "sha256": file_sha256(candidate),
                 "size_bytes": int(candidate.stat().st_size),
             }
         )
