@@ -985,7 +985,10 @@ class ThesisProtocol(_ProtocolModel):
                 )
 
         if (
-            self.success_criteria.require_dummy_baseline_outperformance
+            (
+                self.success_criteria.require_dummy_baseline_outperformance
+                or self.success_criteria.require_permutation_pass
+            )
             and self.protocol_id != "thesis_confirmatory_v1"
         ):
             supporting_control_claims = [
@@ -998,28 +1001,53 @@ class ThesisProtocol(_ProtocolModel):
                 )
             ]
             if not supporting_control_claims:
+                if self.success_criteria.require_dummy_baseline_outperformance:
+                    raise ValueError(
+                        "success_criteria.require_dummy_baseline_outperformance=true requires "
+                        "a supporting CONTROL_EVIDENCE claim that matches the primary estimand_scope."
+                    )
                 raise ValueError(
-                    "success_criteria.require_dummy_baseline_outperformance=true requires "
+                    "success_criteria.require_permutation_pass=true requires "
                     "a supporting CONTROL_EVIDENCE claim that matches the primary estimand_scope."
                 )
-            dummy_control_suites = set(self.control_policy.dummy_baseline.suites)
-            if not dummy_control_suites:
-                raise ValueError(
-                    "success_criteria.require_dummy_baseline_outperformance=true requires "
-                    "control_policy.dummy_baseline.suites to be non-empty."
-                )
+
             supporting_control_suite_ids = {
                 suite_id for claim in supporting_control_claims for suite_id in claim.suite_ids
             }
-            missing_dummy_control_suite_links = sorted(
-                dummy_control_suites - supporting_control_suite_ids
-            )
-            if missing_dummy_control_suite_links:
-                raise ValueError(
-                    "control_policy.dummy_baseline.suites must be represented by supporting "
-                    "CONTROL_EVIDENCE claims for primary-claim dummy-baseline evaluation. Missing: "
-                    + ", ".join(missing_dummy_control_suite_links)
+
+            if self.success_criteria.require_dummy_baseline_outperformance:
+                dummy_control_suites = set(self.control_policy.dummy_baseline.suites)
+                if not dummy_control_suites:
+                    raise ValueError(
+                        "success_criteria.require_dummy_baseline_outperformance=true requires "
+                        "control_policy.dummy_baseline.suites to be non-empty."
+                    )
+                missing_dummy_control_suite_links = sorted(
+                    dummy_control_suites - supporting_control_suite_ids
                 )
+                if missing_dummy_control_suite_links:
+                    raise ValueError(
+                        "control_policy.dummy_baseline.suites must be represented by supporting "
+                        "CONTROL_EVIDENCE claims for primary-claim dummy-baseline evaluation. Missing: "
+                        + ", ".join(missing_dummy_control_suite_links)
+                    )
+
+            if self.success_criteria.require_permutation_pass:
+                permutation_control_suites = set(self.control_policy.permutation.suites)
+                if not permutation_control_suites:
+                    raise ValueError(
+                        "success_criteria.require_permutation_pass=true requires "
+                        "control_policy.permutation.suites to be non-empty."
+                    )
+                missing_permutation_control_suite_links = sorted(
+                    permutation_control_suites - supporting_control_suite_ids
+                )
+                if missing_permutation_control_suite_links:
+                    raise ValueError(
+                        "control_policy.permutation.suites must be represented by supporting "
+                        "CONTROL_EVIDENCE claims for primary-claim permutation evaluation. Missing: "
+                        + ", ".join(missing_permutation_control_suite_links)
+                    )
 
         has_interpretability_claim = any(
             claim.category == ClaimCategory.INTERPRETABILITY_ROBUSTNESS for claim in self.claims

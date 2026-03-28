@@ -441,6 +441,24 @@ def _suite_summary(
         increment_run_status_count(status_counts, result.status)
     for counts in by_suite.values():
         counts["completed"] = int(counts.get("success", 0))
+    primary_claim_id = claim_outcomes.get("primary_claim_id")
+    primary_claim_outcome = (
+        next(
+            (
+                claim
+                for claim in claim_outcomes.get("claims", [])
+                if claim.get("claim_id") == primary_claim_id
+            ),
+            None,
+        )
+        if isinstance(claim_outcomes.get("claims"), list)
+        else None
+    )
+    primary_strict_summary = (
+        primary_claim_outcome.get("strict_gate_summary", {})
+        if isinstance(primary_claim_outcome, dict)
+        else {}
+    )
     return {
         "framework_mode": FrameworkMode.CONFIRMATORY.value,
         "protocol_id": compiled_manifest.protocol_id,
@@ -502,8 +520,18 @@ def _suite_summary(
         "suite_status_counts": by_suite,
         "n_runs": int(len(run_results)),
         "claim_outcomes_summary": {
-            "primary_claim_id": claim_outcomes.get("primary_claim_id"),
+            "primary_claim_id": primary_claim_id,
             "primary_claim_verdict": claim_outcomes.get("primary_claim_verdict"),
+            "primary_claim_reason": claim_outcomes.get("primary_claim_reason"),
+            "all_required_conditions_passed": bool(
+                claim_outcomes.get("primary_claim_all_required_conditions_passed", False)
+            ),
+            "failed_condition_names": list(
+                claim_outcomes.get("primary_claim_failed_condition_names", [])
+            ),
+            "main_failed_condition_names": list(
+                primary_strict_summary.get("failed_condition_names", [])
+            )[:3],
             "n_claims": len(claim_outcomes.get("claims", []))
             if isinstance(claim_outcomes.get("claims"), list)
             else 0,

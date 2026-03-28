@@ -15,6 +15,9 @@ from Thesis_ML.experiments.tuning_search_spaces import (
     OFFICIAL_LINEAR_GROUPED_NESTED_SEARCH_SPACE_ID,
     OFFICIAL_LINEAR_GROUPED_NESTED_SEARCH_SPACE_VERSION,
 )
+from Thesis_ML.protocols.artifacts import write_protocol_artifacts
+from Thesis_ML.protocols.compiler import compile_protocol
+from Thesis_ML.protocols.loader import load_protocol
 from Thesis_ML.verification.official_artifacts import verify_official_artifacts
 from Thesis_ML.verification.reproducibility import compare_official_outputs
 
@@ -31,6 +34,30 @@ def _write_report_index(path: Path, report_dir: Path) -> None:
                 "report_dir": str(report_dir.resolve()),
             }
         )
+
+
+def _repo_root() -> Path:
+    return Path(__file__).resolve().parents[1]
+
+
+def _strict_gate_protocol_artifacts(tmp_path: Path) -> Path:
+    protocol = load_protocol(
+        _repo_root() / "configs" / "protocols" / "thesis_canonical_nested_v2.json"
+    )
+    compiled_manifest = compile_protocol(
+        protocol,
+        index_csv=_repo_root() / "demo_data" / "synthetic_v1" / "dataset_index.csv",
+        suite_ids=["primary_within_subject", "primary_controls"],
+    )
+    output_dir = tmp_path / "protocol_runs" / "strict_gate"
+    write_protocol_artifacts(
+        protocol=protocol,
+        compiled_manifest=compiled_manifest,
+        run_results=[],
+        output_dir=output_dir,
+        dry_run=True,
+    )
+    return output_dir
 
 
 def _write_confirmatory_output(root: Path) -> Path:
@@ -953,3 +980,53 @@ def test_aggregation_mismatch_between_config_and_metrics_fails_validation(
             config_payload=config_payload,
             metrics_payload=metrics_payload,
         )
+
+
+def test_claim_outcome_payload_includes_strict_gate_summary_fields(tmp_path: Path) -> None:
+    output_dir = _strict_gate_protocol_artifacts(tmp_path)
+    claim_outcomes = json.loads((output_dir / "claim_outcomes.json").read_text(encoding="utf-8"))
+    primary_claim = next(
+        claim
+        for claim in claim_outcomes["claims"]
+        if claim["claim_id"] == claim_outcomes["primary_claim_id"]
+    )
+    strict_summary = primary_claim.get("strict_gate_summary", {})
+
+    for key in (
+        "required_conditions",
+        "all_required_conditions_passed",
+        "condition_summary",
+        "missing_primary_run_ids",
+        "metric_mismatch_run_ids",
+        "cv_mismatch_run_ids",
+        "missing_control_run_ids",
+        "missing_dummy_run_ids",
+        "baseline_fail_run_ids",
+        "permutation_fail_run_ids",
+        "protocol_invalid_run_ids",
+    ):
+        assert key in strict_summary
+
+
+def test_suite_summary_exposes_strict_final_gate_result(tmp_path: Path) -> None:
+    output_dir = _strict_gate_protocol_artifacts(tmp_path)
+    suite_summary = json.loads((output_dir / "suite_summary.json").read_text(encoding="utf-8"))
+    claim_summary = suite_summary["claim_outcomes_summary"]
+
+    assert "primary_claim_verdict" in claim_summary
+    assert "primary_claim_reason" in claim_summary
+    assert "all_required_conditions_passed" in claim_summary
+    assert "main_failed_condition_names" in claim_summary
+
+
+def test_primary_claim_cannot_be_supported_when_confirmatory_valid_is_false(
+    tmp_path: Path,
+) -> None:
+    output_dir = _strict_gate_protocol_artifacts(tmp_path)
+    suite_summary = json.loads((output_dir / "suite_summary.json").read_text(encoding="utf-8"))
+    claim_outcomes = json.loads((output_dir / "claim_outcomes.json").read_text(encoding="utf-8"))
+
+    assert (
+        suite_summary["confirmatory_reporting_contract"]["confirmatory_valid"] is False
+    )
+    assert claim_outcomes["primary_claim_verdict"] != "supported"
