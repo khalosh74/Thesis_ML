@@ -414,6 +414,26 @@ thesisml-run-decision-support \
   --all
 ```
 
+Freeze workbook to execution JSON registry (recommended for stable reruns):
+
+```bash
+python scripts/freeze_workbook_registry.py \
+  --workbook templates/thesis_experiment_program_revised.xlsx \
+  --output configs/decision_support_registry_revised_execution.json
+```
+
+Run from the frozen execution registry:
+
+```bash
+thesisml-run-decision-support \
+  --registry configs/decision_support_registry_revised_execution.json \
+  --index-csv Data/processed/dataset_index.csv \
+  --data-root Data \
+  --cache-dir Data/processed/feature_cache \
+  --output-root outputs/artifacts/decision_support \
+  --all
+```
+
 Optuna mode requires optional dependency installation (`--extra optuna` or `.[optuna]`):
 
 ```bash

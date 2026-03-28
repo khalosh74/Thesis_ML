@@ -160,6 +160,23 @@ thesisml-run-decision-support \
   --dry-run
 ```
 
+Frozen workbook execution registry (recommended for repeatable campaigns):
+
+```bash
+python scripts/freeze_workbook_registry.py \
+  --workbook templates/thesis_experiment_program_revised.xlsx \
+  --output configs/decision_support_registry_revised_execution.json
+
+thesisml-run-decision-support \
+  --registry configs/decision_support_registry_revised_execution.json \
+  --index-csv Data/processed/dataset_index.csv \
+  --data-root Data \
+  --cache-dir Data/processed/feature_cache \
+  --output-root outputs/artifacts/decision_support \
+  --all \
+  --dry-run
+```
+
 Installed-wheel note:
 - the default registry path is packaged in the wheel, so `--registry` is optional
 - passing explicit `--registry` remains supported and recommended for controlled campaigns
