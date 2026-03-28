@@ -57,4 +57,7 @@ def test_execution_status_payload_contains_counts(tmp_path: Path, monkeypatch) -
         assert key in payload, f"Missing key {key} in execution_status payload"
         assert isinstance(payload[key], int)
 
+    assert isinstance(payload["source_protocol"], dict)
+    assert payload["source_protocol"]["registered"] is True
+    assert payload["source_protocol"]["config_id"] == "protocol.thesis_canonical_nested_v2"
     assert all(run["status"] == "planned" for run in payload["runs"])

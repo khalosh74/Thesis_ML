@@ -5,6 +5,7 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
+from Thesis_ML.config import describe_config_path
 from Thesis_ML.config.schema_versions import SUPPORTED_THESIS_PROTOCOL_SCHEMA_VERSIONS
 from Thesis_ML.protocols.confirmatory_freeze import (
     CONFIRMATORY_FREEZE_PROTOCOL_ID,
@@ -19,7 +20,7 @@ def load_protocol(protocol_path: Path | str) -> ThesisProtocol:
     # - thesis_confirmatory_v1.json is retained for frozen confirmatory replay / hard-gate validation.
     # - thesis_canonical_nested_v2.json is the canonical modeling-layer protocol.
 
-    resolved_path = Path(protocol_path)
+    resolved_path = Path(protocol_path).resolve()
     if not resolved_path.exists():
         raise FileNotFoundError(f"Protocol file was not found: {resolved_path}")
 
@@ -49,16 +50,22 @@ def load_protocol(protocol_path: Path | str) -> ThesisProtocol:
         # adapted into the existing ThesisProtocol runtime contract after preflight.
         validated_payload = validate_confirmatory_freeze_preflight(resolved_path)
         try:
-            return adapt_confirmatory_freeze_to_thesis_protocol(
+            adapted = adapt_confirmatory_freeze_to_thesis_protocol(
                 validated_payload,
                 source_path=resolved_path,
             )
+            adapted._source_config_path = str(resolved_path)
+            adapted._source_config_identity = describe_config_path(resolved_path)
+            return adapted
         except ValidationError as exc:
             raise ValueError(
                 f"Adapted confirmatory freeze protocol validation failed for '{resolved_path}': {exc}"
             ) from exc
 
     try:
-        return ThesisProtocol.model_validate(payload)
+        protocol = ThesisProtocol.model_validate(payload)
+        protocol._source_config_path = str(resolved_path)
+        protocol._source_config_identity = describe_config_path(resolved_path)
+        return protocol
     except ValidationError as exc:
         raise ValueError(f"Protocol validation failed for '{resolved_path}': {exc}") from exc

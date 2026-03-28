@@ -46,6 +46,37 @@ def _relative_path(path_text: str | None) -> str | None:
         return str(path_obj)
 
 
+def _fallback_source_comparison_identity(path_text: str | None) -> dict[str, Any]:
+    resolved_path = str(Path(path_text).resolve()) if path_text else ""
+    return {
+        "registered": False,
+        "config_id": None,
+        "kind": None,
+        "family": None,
+        "version": None,
+        "lifecycle": None,
+        "replay_allowed": None,
+        "superseded_by": None,
+        "path": resolved_path,
+        "path_relative": None,
+        "aliases": [],
+    }
+
+
+def _resolve_source_comparison_identity(
+    *,
+    comparison: ComparisonSpec,
+    source_comparison: dict[str, Any] | None,
+) -> dict[str, Any]:
+    if isinstance(source_comparison, dict):
+        return dict(source_comparison)
+    source_identity = getattr(comparison, "_source_config_identity", None)
+    if isinstance(source_identity, dict):
+        return dict(source_identity)
+    source_path = getattr(comparison, "_source_config_path", None)
+    return _fallback_source_comparison_identity(str(source_path) if source_path else None)
+
+
 def _comparison_summary(
     comparison: ComparisonSpec,
     compiled_manifest: CompiledComparisonManifest,
@@ -109,6 +140,7 @@ def _execution_status_payload(
     run_results: list[ComparisonRunResult],
     *,
     dry_run: bool,
+    source_comparison: dict[str, Any],
     stage_timings: dict[str, float] | None = None,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
@@ -119,6 +151,7 @@ def _execution_status_payload(
         "compiled_schema_version": compiled_manifest.compiled_schema_version,
         "dry_run": bool(dry_run),
         "runs": [result.model_dump(mode="json") for result in run_results],
+        "source_comparison": dict(source_comparison),
     }
     if stage_timings:
         payload["stage_timings_seconds"] = {
@@ -414,6 +447,7 @@ def write_comparison_artifacts(
     output_dir: Path | str,
     dry_run: bool,
     stage_timings: dict[str, float] | None = None,
+    source_comparison: dict[str, Any] | None = None,
 ) -> dict[str, str]:
     comparison_dir = Path(output_dir)
     comparison_dir.mkdir(parents=True, exist_ok=True)
@@ -453,6 +487,10 @@ def write_comparison_artifacts(
         "permutation_metric": metric_policy_effective.permutation_metric,
         "higher_is_better": bool(metric_policy_effective.higher_is_better),
     }
+    source_comparison_payload = _resolve_source_comparison_identity(
+        comparison=comparison,
+        source_comparison=source_comparison,
+    )
 
     report_rows = _report_index_rows(compiled_manifest, run_results)
     with report_index_path.open("w", encoding="utf-8", newline="") as handle:
@@ -524,6 +562,7 @@ def write_comparison_artifacts(
             compiled_manifest=compiled_manifest,
             run_results=run_results,
             dry_run=dry_run,
+            source_comparison=source_comparison_payload,
             stage_timings=stage_timings,
         ),
     )

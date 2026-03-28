@@ -3,7 +3,7 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
 
 from Thesis_ML.config.framework_mode import FrameworkMode
 from Thesis_ML.config.methodology import (
@@ -100,6 +100,8 @@ def _reject_exploratory_only_official_model(*, model_name: str, field_name: str)
 
 class _ComparisonModel(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    _source_config_path: str | None = PrivateAttr(default=None)
+    _source_config_identity: dict[str, Any] | None = PrivateAttr(default=None)
 
 
 class ComparisonStatus(StrEnum):

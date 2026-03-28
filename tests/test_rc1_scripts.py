@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 from pathlib import Path
 
 
@@ -119,6 +120,58 @@ def test_verify_repro_protocol_mode_resolves_config_alias(
     )
     assert exit_code == 0
     assert captured["config_path"] == Path(module.DEFAULT_THESIS_CONFIRMATORY_PROTOCOL_PATH)
+
+
+def test_verify_repro_protocol_summary_includes_config_identity(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    module = _load_verify_repro_module()
+
+    def _stub_run_protocol_once(**kwargs):
+        return {
+            "n_failed": 0,
+            "protocol_output_dir": str(
+                tmp_path / "protocol_runs" / "thesis-canonical-nested__2.0.0"
+            ),
+        }
+
+    monkeypatch.setattr(module, "_run_protocol_once", _stub_run_protocol_once)
+    monkeypatch.setattr(
+        module,
+        "compare_official_outputs",
+        lambda **_: {
+            "passed": True,
+            "left": {},
+            "right": {},
+            "mismatches": [],
+        },
+    )
+
+    summary_out = tmp_path / "summary.json"
+    exit_code = module.main(
+        [
+            "--mode",
+            "protocol",
+            "--index-csv",
+            "dummy_index.csv",
+            "--data-root",
+            "dummy_data_root",
+            "--cache-dir",
+            "dummy_cache",
+            "--suite",
+            "primary_controls",
+            "--reports-root",
+            str(tmp_path / "reports"),
+            "--summary-out",
+            str(summary_out),
+        ]
+    )
+    assert exit_code == 0
+    summary = json.loads(summary_out.read_text(encoding="utf-8"))
+    assert isinstance(summary["config_identity"], dict)
+    assert summary["config_identity"]["config_id"] == "protocol.thesis_confirmatory_v1"
+    assert summary["config_identity"]["lifecycle"] == "frozen_confirmatory"
 
 
 def test_verify_repro_uses_default_comparison_config_when_omitted(

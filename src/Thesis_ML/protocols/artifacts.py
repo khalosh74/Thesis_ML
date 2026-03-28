@@ -75,6 +75,37 @@ def _load_json(path_text: str | None) -> dict[str, Any] | None:
     return payload if isinstance(payload, dict) else None
 
 
+def _fallback_source_protocol_identity(path_text: str | None) -> dict[str, Any]:
+    resolved_path = str(Path(path_text).resolve()) if path_text else ""
+    return {
+        "registered": False,
+        "config_id": None,
+        "kind": None,
+        "family": None,
+        "version": None,
+        "lifecycle": None,
+        "replay_allowed": None,
+        "superseded_by": None,
+        "path": resolved_path,
+        "path_relative": None,
+        "aliases": [],
+    }
+
+
+def _resolve_source_protocol_identity(
+    *,
+    protocol: ThesisProtocol,
+    source_protocol: dict[str, Any] | None,
+) -> dict[str, Any]:
+    if isinstance(source_protocol, dict):
+        return dict(source_protocol)
+    source_identity = getattr(protocol, "_source_config_identity", None)
+    if isinstance(source_identity, dict):
+        return dict(source_identity)
+    source_path = getattr(protocol, "_source_config_path", None)
+    return _fallback_source_protocol_identity(str(source_path) if source_path else None)
+
+
 def _is_science_critical_deviation(error_text: str) -> bool:
     normalized = str(error_text).strip().lower()
     if not normalized:
@@ -548,6 +579,7 @@ def _execution_status_payload(
     dry_run: bool,
     reporting_contract: dict[str, Any],
     deviation_log_payload: dict[str, Any],
+    source_protocol: dict[str, Any],
     stage_timings: dict[str, float] | None = None,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
@@ -565,6 +597,7 @@ def _execution_status_payload(
             deviation_log_payload.get("science_critical_deviation_detected", False)
         ),
         "confirmatory_reporting_contract": reporting_contract,
+        "source_protocol": dict(source_protocol),
     }
     if stage_timings:
         payload["stage_timings_seconds"] = {
@@ -788,6 +821,7 @@ def write_protocol_artifacts(
     output_dir: Path | str,
     dry_run: bool,
     stage_timings: dict[str, float] | None = None,
+    source_protocol: dict[str, Any] | None = None,
 ) -> dict[str, str]:
     protocol_dir = Path(output_dir)
     protocol_dir.mkdir(parents=True, exist_ok=True)
@@ -825,6 +859,10 @@ def write_protocol_artifacts(
     _write_json(protocol_json_path, protocol.model_dump(mode="json"))
     _write_json(compiled_manifest_path, compiled_manifest_payload)
     _write_json(claim_map_path, compiled_manifest.claim_to_run_map)
+    source_protocol_payload = _resolve_source_protocol_identity(
+        protocol=protocol,
+        source_protocol=source_protocol,
+    )
     deviation_log_payload = _deviation_log_payload(protocol, run_results)
     reporting_contract = _confirmatory_reporting_contract(
         protocol,
@@ -865,6 +903,7 @@ def write_protocol_artifacts(
             dry_run=dry_run,
             reporting_contract=reporting_contract,
             deviation_log_payload=deviation_log_payload,
+            source_protocol=source_protocol_payload,
             stage_timings=stage_timings,
         ),
     )

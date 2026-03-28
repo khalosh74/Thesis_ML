@@ -169,6 +169,7 @@ def main(argv: list[str] | None = None) -> int:
                 "n_planned": result["n_planned"],
                 "max_parallel_runs_effective": result["max_parallel_runs_effective"],
                 "artifact_paths": result["artifact_paths"],
+                "source_protocol": result.get("source_protocol"),
             },
             indent=2,
         )

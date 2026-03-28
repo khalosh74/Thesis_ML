@@ -167,6 +167,7 @@ def main(argv: list[str] | None = None) -> int:
                 "n_planned": result["n_planned"],
                 "max_parallel_runs_effective": result["max_parallel_runs_effective"],
                 "artifact_paths": result["artifact_paths"],
+                "source_comparison": result.get("source_comparison"),
             },
             indent=2,
         )

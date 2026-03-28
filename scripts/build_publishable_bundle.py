@@ -9,7 +9,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from Thesis_ML.config import describe_config_path, validate_config_bundle
 from Thesis_ML.config.paths import (
+    DEFAULT_COARSE_AFFECT_TARGET_MAPPING_PATH,
     DEFAULT_COMPARISON_SPEC_PATH,
     DEFAULT_THESIS_CONFIRMATORY_PROTOCOL_PATH,
     PROJECT_ROOT,
@@ -204,6 +206,17 @@ def main(argv: list[str] | None = None) -> int:
         default_alias="protocol.thesis_confirmatory_frozen",
         fallback_path=DEFAULT_THESIS_CONFIRMATORY_PROTOCOL_PATH,
     )
+    if comparison_spec_path is not None and protocol_spec_path is not None:
+        spec_bundle_validation: dict[str, Any] | None = validate_config_bundle(
+            protocol_path=protocol_spec_path,
+            comparison_path=comparison_spec_path,
+            target_path=DEFAULT_COARSE_AFFECT_TARGET_MAPPING_PATH,
+        )
+        if not bool(spec_bundle_validation.get("valid", False)):
+            errors = spec_bundle_validation.get("errors", [])
+            raise ValueError(f"Invalid publishable bundle config combination: {errors}")
+    else:
+        spec_bundle_validation = None
 
     official_outputs: dict[str, Any] = {}
     if args.comparison_output is not None:
@@ -247,6 +260,15 @@ def main(argv: list[str] | None = None) -> int:
         destination = _copy_file(source, specs_root / source.name)
         spec_files[key] = str(destination.relative_to(bundle_root).as_posix())
 
+    spec_registry_identity = {
+        "comparison_spec": (
+            describe_config_path(comparison_spec_path) if comparison_spec_path is not None else None
+        ),
+        "confirmatory_protocol": (
+            describe_config_path(protocol_spec_path) if protocol_spec_path is not None else None
+        ),
+    }
+
     governance_candidates = [
         PROJECT_ROOT / "LICENSE",
         PROJECT_ROOT / "CITATION.cff",
@@ -286,6 +308,8 @@ def main(argv: list[str] | None = None) -> int:
         "official_outputs": official_outputs,
         "verification_files": verification_files,
         "spec_files": spec_files,
+        "spec_registry_identity": spec_registry_identity,
+        "spec_bundle_validation": spec_bundle_validation,
         "governance_files": governance_files,
         "files": files,
     }

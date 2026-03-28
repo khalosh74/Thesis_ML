@@ -30,7 +30,6 @@ _EXPECTED_ALIASES = {
 }
 
 _EXPECTED_LIFECYCLE_BY_ID = {
-    "target.affect_mapping_v1": "archived_deprecated",
     "target.affect_mapping_v2": "active_default",
     "protocol.thesis_canonical_v1": "active_variant",
     "protocol.thesis_canonical_nested_v1": "compatibility",
@@ -91,6 +90,18 @@ def test_registry_lists_every_current_config_json_file() -> None:
         {
             path.relative_to(repo_root).as_posix()
             for path in (repo_root / "configs" / "comparisons").glob("*.json")
+        }
+    )
+    expected_paths.update(
+        {
+            path.relative_to(repo_root).as_posix()
+            for path in (repo_root / "configs" / "archive" / "protocols").glob("*.json")
+        }
+    )
+    expected_paths.update(
+        {
+            path.relative_to(repo_root).as_posix()
+            for path in (repo_root / "configs" / "archive" / "comparisons").glob("*.json")
         }
     )
     expected_paths.add("configs/decision_support_registry.json")
@@ -174,3 +185,17 @@ def test_version_alignment_with_underlying_files() -> None:
             assert version == path.stem
         else:
             raise AssertionError(f"Unsupported kind in registry: {kind}")
+
+
+def test_retired_section_contains_affect_mapping_v1_replacement() -> None:
+    payload = _load_registry()
+    retired = payload.get("retired")
+    assert isinstance(retired, list)
+    retired_by_id = {
+        str(entry["config_id"]): entry
+        for entry in retired
+        if isinstance(entry, dict) and "config_id" in entry
+    }
+    assert "target.affect_mapping_v1" in retired_by_id
+    retired_entry = retired_by_id["target.affect_mapping_v1"]
+    assert retired_entry["replacement"] == "target.affect_mapping_v2"

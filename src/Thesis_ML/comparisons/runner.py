@@ -57,6 +57,31 @@ from Thesis_ML.verification.official_artifacts import verify_official_artifacts
 _OFFICIAL_LOCKED_COMPARISON_MAX_PARALLEL_GPU_RUNS = 1
 
 
+def _fallback_source_comparison_identity(path_text: str | None) -> dict[str, Any]:
+    resolved_path = str(Path(path_text).resolve()) if path_text else ""
+    return {
+        "registered": False,
+        "config_id": None,
+        "kind": None,
+        "family": None,
+        "version": None,
+        "lifecycle": None,
+        "replay_allowed": None,
+        "superseded_by": None,
+        "path": resolved_path,
+        "path_relative": None,
+        "aliases": [],
+    }
+
+
+def _source_comparison_identity(comparison: ComparisonSpec) -> dict[str, Any]:
+    source_identity = getattr(comparison, "_source_config_identity", None)
+    if isinstance(source_identity, dict):
+        return dict(source_identity)
+    source_path = getattr(comparison, "_source_config_path", None)
+    return _fallback_source_comparison_identity(str(source_path) if source_path else None)
+
+
 def _official_locked_comparison_gpu_allowlist() -> frozenset[tuple[str, str]]:
     return frozenset(
         official_gpu_only_backend_pairs(framework_mode=FrameworkMode.LOCKED_COMPARISON)
@@ -1023,6 +1048,7 @@ def execute_compiled_comparison(
     }
     if compile_duration_seconds is not None:
         stage_timings["compile"] = float(compile_duration_seconds)
+    source_comparison = _source_comparison_identity(comparison)
     artifact_paths = write_comparison_artifacts(
         comparison=comparison,
         compiled_manifest=compiled_manifest,
@@ -1030,6 +1056,7 @@ def execute_compiled_comparison(
         output_dir=comparison_output_dir,
         dry_run=dry_run,
         stage_timings=stage_timings,
+        source_comparison=source_comparison,
     )
     run_index_path = comparison_output_dir / "run_index.json"
     run_index_payload = {
@@ -1095,6 +1122,7 @@ def execute_compiled_comparison(
         "artifact_paths": artifact_paths,
         "artifact_verification": artifact_verification,
         "resume_reconciliation": resume_reconciliation_payload,
+        "source_comparison": source_comparison,
     }
 
 

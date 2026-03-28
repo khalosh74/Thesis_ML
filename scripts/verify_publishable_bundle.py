@@ -157,6 +157,101 @@ def verify_bundle(bundle_dir: Path) -> dict[str, Any]:
         )
         official_outputs = {}
 
+    spec_files = manifest.get("spec_files")
+    if not isinstance(spec_files, dict):
+        issues.append(
+            {
+                "code": "bundle_spec_files_missing",
+                "message": "bundle_manifest.json must include object field 'spec_files'.",
+            }
+        )
+        spec_files = {}
+
+    required_spec_keys = (
+        "comparison_spec",
+        "confirmatory_protocol",
+    )
+    if any(spec_files.get(key) for key in required_spec_keys):
+        spec_registry_identity = manifest.get("spec_registry_identity")
+        if not isinstance(spec_registry_identity, dict):
+            issues.append(
+                {
+                    "code": "bundle_spec_registry_identity_missing",
+                    "message": (
+                        "bundle_manifest.json must include object field "
+                        "'spec_registry_identity' when spec_files are present."
+                    ),
+                }
+            )
+        else:
+            for key in required_spec_keys:
+                if not spec_files.get(key):
+                    continue
+                if key not in spec_registry_identity:
+                    issues.append(
+                        {
+                            "code": "bundle_spec_registry_identity_entry_missing",
+                            "message": f"spec_registry_identity.{key} is required when spec_files.{key} is present.",
+                        }
+                    )
+                    continue
+                identity_entry = spec_registry_identity.get(key)
+                if identity_entry is None:
+                    continue
+                if not isinstance(identity_entry, dict):
+                    issues.append(
+                        {
+                            "code": "bundle_spec_registry_identity_entry_invalid",
+                            "message": f"spec_registry_identity.{key} must be null or an object.",
+                        }
+                    )
+                    continue
+                for required_field in ("registered", "path", "aliases"):
+                    if required_field not in identity_entry:
+                        issues.append(
+                            {
+                                "code": "bundle_spec_registry_identity_entry_field_missing",
+                                "message": (
+                                    f"spec_registry_identity.{key} is missing required field "
+                                    f"'{required_field}'."
+                                ),
+                            }
+                        )
+    if all(spec_files.get(key) for key in required_spec_keys):
+        spec_bundle_validation = manifest.get("spec_bundle_validation")
+        if not isinstance(spec_bundle_validation, dict):
+            issues.append(
+                {
+                    "code": "bundle_spec_bundle_validation_missing",
+                    "message": (
+                        "bundle_manifest.json must include object field "
+                        "'spec_bundle_validation' when both spec_files are present."
+                    ),
+                }
+            )
+        else:
+            if not bool(spec_bundle_validation.get("valid", False)):
+                issues.append(
+                    {
+                        "code": "bundle_spec_bundle_validation_invalid",
+                        "message": "spec_bundle_validation.valid must be true when both specs are present.",
+                    }
+                )
+            matched_bundle_ids = spec_bundle_validation.get("matched_bundle_ids")
+            if (
+                not isinstance(matched_bundle_ids, list)
+                or len(matched_bundle_ids) == 0
+            ):
+                issues.append(
+                    {
+                        "code": "bundle_spec_bundle_validation_matches_missing",
+                        "message": (
+                            "spec_bundle_validation.matched_bundle_ids must be a non-empty list "
+                            "when both specs are present."
+                        ),
+                    }
+                )
+
     official_verifications: dict[str, Any] = {}
     for key, mode in (("comparison", "comparison"), ("confirmatory", "confirmatory")):
         section = official_outputs.get(key)

@@ -4,6 +4,10 @@ import importlib.util
 import json
 from pathlib import Path
 
+import pytest
+
+from tests._config_refs import canonical_v1_protocol_variant_path
+
 
 def _load_replay_module():
     repo_root = Path(__file__).resolve().parents[1]
@@ -311,3 +315,100 @@ def test_replay_official_paths_resolves_comparison_and_protocol_aliases(
     assert exit_code == 0
     assert captured["comparison_path"] == Path(module.DEFAULT_COMPARISON_SPEC_PATH).resolve()
     assert captured["protocol_path"] == Path(module.DEFAULT_THESIS_CONFIRMATORY_PROTOCOL_PATH).resolve()
+
+
+def test_replay_official_paths_both_mode_writes_valid_config_bundle_validation(
+    tmp_path: Path, monkeypatch
+) -> None:
+    module = _load_replay_module()
+    comparison_output = tmp_path / "comparison_output"
+    confirmatory_output = tmp_path / "confirmatory_output"
+    comparison_output.mkdir(parents=True, exist_ok=True)
+    confirmatory_output.mkdir(parents=True, exist_ok=True)
+    summary_out = tmp_path / "replay_summary.json"
+
+    monkeypatch.setattr(
+        module,
+        "_run_comparison",
+        lambda **_: {
+            "comparison_id": "cmp",
+            "comparison_version": "2.0.0",
+            "comparison_output_dir": str(comparison_output),
+            "n_success": 1,
+            "n_completed": 1,
+            "n_failed": 0,
+            "n_timed_out": 0,
+            "n_skipped_due_to_policy": 0,
+            "n_planned": 0,
+        },
+    )
+    monkeypatch.setattr(
+        module,
+        "_run_confirmatory",
+        lambda **_: {
+            "protocol_id": "protocol",
+            "protocol_version": "v1.1",
+            "protocol_output_dir": str(confirmatory_output),
+            "n_success": 1,
+            "n_completed": 1,
+            "n_failed": 0,
+            "n_timed_out": 0,
+            "n_skipped_due_to_policy": 0,
+            "n_planned": 0,
+        },
+    )
+    monkeypatch.setattr(module, "verify_official_artifacts", lambda **_: {"passed": True, "issues": []})
+    monkeypatch.setattr(module, "verify_confirmatory_ready", lambda **_: {"passed": True, "issues": []})
+    monkeypatch.setattr(
+        module,
+        "build_reproducibility_manifest",
+        lambda **_: {"manifest_schema_version": "reproducibility-manifest-v1"},
+    )
+    monkeypatch.setattr(
+        module,
+        "write_reproducibility_manifest",
+        lambda *, manifest, output_path: output_path.write_text(
+            f"{json.dumps(manifest, indent=2)}\n",
+            encoding="utf-8",
+        ),
+    )
+
+    exit_code = module.main(
+        [
+            "--mode",
+            "both",
+            "--comparison-alias",
+            "comparison.grouped_nested_default",
+            "--protocol-alias",
+            "protocol.thesis_confirmatory_frozen",
+            "--all-variants",
+            "--all-suites",
+            "--use-demo-dataset",
+            "--reports-root",
+            str(tmp_path / "reports"),
+            "--summary-out",
+            str(summary_out),
+        ]
+    )
+    assert exit_code == 0
+    summary = json.loads(summary_out.read_text(encoding="utf-8"))
+    bundle_validation = summary["config_bundle_validation"]
+    assert bundle_validation["valid"] is True
+    assert bundle_validation["matched_bundle_id"] == "bundle.thesis_confirmatory_v1_publishable"
+
+
+def test_replay_official_paths_both_mode_rejects_invalid_bundle(monkeypatch) -> None:
+    module = _load_replay_module()
+    protocol_path = canonical_v1_protocol_variant_path()
+    monkeypatch.setattr(module, "_run_comparison", lambda **_: None)
+    monkeypatch.setattr(module, "_run_confirmatory", lambda **_: None)
+
+    with pytest.raises(ValueError):
+        module.main(
+            [
+                "--mode",
+                "both",
+                "--protocol",
+                str(protocol_path),
+            ]
+        )

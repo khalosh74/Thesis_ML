@@ -4,6 +4,10 @@ import importlib.util
 import json
 from pathlib import Path
 
+import pytest
+
+from tests._config_refs import canonical_v1_protocol_variant_path
+
 
 def _load_script_module(script_name: str):
     repo_root = Path(__file__).resolve().parents[1]
@@ -143,3 +147,60 @@ def test_build_publishable_bundle_supports_alias_spec_flags(tmp_path: Path) -> N
     assert build_exit == 0
     assert (bundle_dir / "specs" / "model_family_grouped_nested_comparison_v2.json").exists()
     assert (bundle_dir / "specs" / "thesis_confirmatory_v1.json").exists()
+
+    manifest = json.loads((bundle_dir / "bundle_manifest.json").read_text(encoding="utf-8"))
+    assert isinstance(manifest["spec_registry_identity"], dict)
+    assert isinstance(manifest["spec_bundle_validation"], dict)
+    assert manifest["spec_bundle_validation"]["valid"] is True
+    assert manifest["spec_bundle_validation"]["matched_bundle_id"] == "bundle.thesis_confirmatory_v1_publishable"
+    protocol_identity = manifest["spec_registry_identity"]["confirmatory_protocol"]
+    assert protocol_identity["config_id"] == "protocol.thesis_confirmatory_v1"
+    assert protocol_identity["lifecycle"] == "frozen_confirmatory"
+
+    comparison_identity = manifest["spec_registry_identity"]["comparison_spec"]
+    assert comparison_identity["config_id"] == "comparison.model_family_grouped_nested_comparison_v2"
+    assert comparison_identity["lifecycle"] == "active_default"
+
+
+def test_build_publishable_bundle_default_specs_include_valid_bundle_validation(
+    tmp_path: Path,
+) -> None:
+    build_module = _load_script_module("build_publishable_bundle.py")
+
+    confirmatory_output = tmp_path / "protocol_runs" / "thesis-canonical__1.0.0"
+    _write_confirmatory_output_fixture(confirmatory_output)
+
+    bundle_dir = tmp_path / "bundle_default_specs"
+    build_exit = build_module.main(
+        [
+            "--output-dir",
+            str(bundle_dir),
+            "--confirmatory-output",
+            str(confirmatory_output),
+        ]
+    )
+    assert build_exit == 0
+    manifest = json.loads((bundle_dir / "bundle_manifest.json").read_text(encoding="utf-8"))
+    assert isinstance(manifest["spec_bundle_validation"], dict)
+    assert manifest["spec_bundle_validation"]["valid"] is True
+    assert manifest["spec_bundle_validation"]["matched_bundle_id"] == "bundle.thesis_confirmatory_v1_publishable"
+
+
+def test_build_publishable_bundle_rejects_invalid_protocol_comparison_bundle(tmp_path: Path) -> None:
+    build_module = _load_script_module("build_publishable_bundle.py")
+
+    confirmatory_output = tmp_path / "protocol_runs" / "thesis-canonical__1.0.0"
+    _write_confirmatory_output_fixture(confirmatory_output)
+    protocol_path = canonical_v1_protocol_variant_path()
+
+    with pytest.raises(ValueError):
+        build_module.main(
+            [
+                "--output-dir",
+                str(tmp_path / "bundle_invalid"),
+                "--confirmatory-output",
+                str(confirmatory_output),
+                "--protocol-spec",
+                str(protocol_path),
+            ]
+        )

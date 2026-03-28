@@ -9,7 +9,9 @@ from typing import Any
 
 from Thesis_ML.comparisons.loader import load_comparison_spec
 from Thesis_ML.comparisons.runner import compile_and_run_comparison
+from Thesis_ML.config import validate_config_bundle
 from Thesis_ML.config.paths import (
+    DEFAULT_COARSE_AFFECT_TARGET_MAPPING_PATH,
     DEFAULT_COMPARISON_SPEC_PATH,
     DEFAULT_THESIS_CONFIRMATORY_PROTOCOL_PATH,
     PROJECT_ROOT,
@@ -378,6 +380,17 @@ def main(argv: list[str] | None = None) -> int:
         default_alias="protocol.thesis_confirmatory_frozen",
         fallback_path=DEFAULT_THESIS_CONFIRMATORY_PROTOCOL_PATH,
     )
+    if mode == "both":
+        config_bundle_validation: dict[str, Any] | None = validate_config_bundle(
+            protocol_path=protocol_path,
+            comparison_path=comparison_path,
+            target_path=DEFAULT_COARSE_AFFECT_TARGET_MAPPING_PATH,
+        )
+        if not bool(config_bundle_validation.get("valid", False)):
+            errors = config_bundle_validation.get("errors", [])
+            raise ValueError(f"Invalid config bundle for replay mode 'both': {errors}")
+    else:
+        config_bundle_validation = None
 
     index_csv, data_root, cache_dir = _resolve_dataset_paths(args)
     reports_root = Path(args.reports_root).resolve()
@@ -505,6 +518,7 @@ def main(argv: list[str] | None = None) -> int:
         "cache_dir": str(cache_dir.resolve()),
         "comparison_spec": (str(comparison_path.resolve()) if run_comparison_mode else None),
         "protocol_spec": (str(protocol_path.resolve()) if run_confirmatory_mode else None),
+        "config_bundle_validation": config_bundle_validation,
         "results": mode_results,
         "determinism": determinism_summary,
     }

@@ -75,7 +75,7 @@ Grouped nested comparison execution:
 
 ```bash
 thesisml-run-comparison \
-  --comparison configs/comparisons/model_family_grouped_nested_comparison_v1.json \
+  --comparison configs/archive/comparisons/model_family_grouped_nested_comparison_v1.json \
   --variant ridge \
   --reports-root outputs/reports/comparisons
 ```

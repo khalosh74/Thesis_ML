@@ -9,6 +9,7 @@ from typing import Any
 
 from Thesis_ML.comparisons.loader import load_comparison_spec
 from Thesis_ML.comparisons.runner import compile_and_run_comparison
+from Thesis_ML.config import describe_config_path
 from Thesis_ML.config.paths import (
     DEFAULT_COMPARISON_SPEC_PATH,
     DEFAULT_THESIS_CONFIRMATORY_PROTOCOL_PATH,
@@ -216,6 +217,7 @@ def main(argv: list[str] | None = None) -> int:
             "passed": False,
             "mode": args.mode,
             "config": str(config_path.resolve()),
+            "config_identity": describe_config_path(config_path),
             "reason": "one_or_more_runs_not_successful",
             "run_a": result_a,
             "run_b": result_b,
@@ -226,6 +228,7 @@ def main(argv: list[str] | None = None) -> int:
             "passed": bool(comparison_summary.get("passed", False)),
             "mode": args.mode,
             "config": str(config_path.resolve()),
+            "config_identity": describe_config_path(config_path),
             "left_output_dir": str(left_dir.resolve()),
             "right_output_dir": str(right_dir.resolve()),
             "comparison": comparison_summary,

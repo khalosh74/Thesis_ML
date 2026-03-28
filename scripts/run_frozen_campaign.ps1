@@ -18,7 +18,7 @@ param(
 
     [string[]]$ComparisonSpecs = @(
         "configs/comparisons/model_family_comparison_v1.json",
-        "configs/comparisons/model_family_grouped_nested_comparison_v1.json"
+        "configs/archive/comparisons/model_family_grouped_nested_comparison_v1.json"
     ),
 
     [string]$PrimaryComparisonSpec = "configs/comparisons/model_family_comparison_v1.json",

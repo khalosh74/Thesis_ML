@@ -1,10 +1,16 @@
 """Central configuration helpers for paths and defaults."""
 
 from .config_registry import (
+    aliases_for_config_id,
+    describe_config_path,
+    get_config_entry,
+    get_bundle_entry,
+    list_config_bundles,
     load_config_registry,
     resolve_config_alias,
     resolve_config_id,
     resolve_config_registry_path,
+    validate_config_bundle,
 )
 from .runtime_selection import resolve_runtime_config_path
 from .framework_mode import FrameworkMode, coerce_framework_mode
@@ -144,6 +150,12 @@ __all__ = [
     "resolve_config_registry_path",
     "resolve_config_id",
     "resolve_config_alias",
+    "get_config_entry",
+    "aliases_for_config_id",
+    "describe_config_path",
+    "list_config_bundles",
+    "get_bundle_entry",
+    "validate_config_bundle",
     "resolve_runtime_config_path",
     "FrameworkMode",
     "coerce_framework_mode",

@@ -264,12 +264,20 @@ def test_comparison_runner_dry_run_emits_artifacts(
     assert "paired_model_comparisons" in result["artifact_paths"]
     assert "paired_model_comparisons_csv" in result["artifact_paths"]
     assert Path(result["artifact_paths"]["comparison_decision"]).exists()
+    source_comparison = result["source_comparison"]
+    assert source_comparison["registered"] is True
+    assert source_comparison["config_id"] == "comparison.model_family_comparison_v1"
+    assert source_comparison["lifecycle"] == "active_variant"
 
     status_payload = json.loads(
         Path(result["artifact_paths"]["execution_status"]).read_text(encoding="utf-8")
     )
     assert status_payload["framework_mode"] == "locked_comparison"
     assert status_payload["dry_run"] is True
+    assert isinstance(status_payload["source_comparison"], dict)
+    assert status_payload["source_comparison"]["registered"] is True
+    assert status_payload["source_comparison"]["config_id"] == "comparison.model_family_comparison_v1"
+    assert status_payload["source_comparison"]["lifecycle"] == "active_variant"
     assert all(run["status"] == "planned" for run in status_payload["runs"])
 
     summary_payload = json.loads(

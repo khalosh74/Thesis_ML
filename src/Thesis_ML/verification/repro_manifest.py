@@ -8,6 +8,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from Thesis_ML.config import describe_config_path, validate_config_bundle
+from Thesis_ML.config.paths import DEFAULT_COARSE_AFFECT_TARGET_MAPPING_PATH
 from Thesis_ML.experiments.provenance import collect_git_provenance
 from Thesis_ML.experiments.run_states import is_run_success_status
 
@@ -64,12 +66,14 @@ def _spec_identity(path: Path | None) -> dict[str, Any] | None:
         return {
             "path": str(resolved),
             "exists": False,
+            "registry_identity": describe_config_path(resolved),
         }
     payload = _load_json(resolved)
     identity: dict[str, Any] = {
         "path": str(resolved.resolve()),
         "exists": True,
         "sha256": _file_sha256(resolved),
+        "registry_identity": describe_config_path(resolved),
     }
     if isinstance(payload, dict):
         for key in (
@@ -226,6 +230,14 @@ def build_reproducibility_manifest(
         if replay_verification_summary is not None
         else None
     )
+    if comparison_spec_path is not None and protocol_path is not None:
+        spec_bundle_validation: dict[str, Any] | None = validate_config_bundle(
+            protocol_path=protocol_path,
+            comparison_path=comparison_spec_path,
+            target_path=DEFAULT_COARSE_AFFECT_TARGET_MAPPING_PATH,
+        )
+    else:
+        spec_bundle_validation = None
 
     return {
         "manifest_schema_version": MANIFEST_SCHEMA_VERSION,
@@ -249,6 +261,7 @@ def build_reproducibility_manifest(
             "comparison": _spec_identity(comparison_spec_path),
             "confirmatory_protocol": _spec_identity(protocol_path),
         },
+        "spec_bundle_validation": spec_bundle_validation,
         "official_outputs": mode_outputs,
         "replay_status": {
             "replay_summary_hash": replay_summary_hash,

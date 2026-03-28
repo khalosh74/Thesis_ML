@@ -9,10 +9,11 @@ from Thesis_ML.comparisons.models import (
     SUPPORTED_COMPARISON_SCHEMA_VERSIONS,
     ComparisonSpec,
 )
+from Thesis_ML.config import describe_config_path
 
 
 def load_comparison_spec(comparison_path: Path | str) -> ComparisonSpec:
-    resolved_path = Path(comparison_path)
+    resolved_path = Path(comparison_path).resolve()
     if not resolved_path.exists():
         raise FileNotFoundError(f"Comparison spec file was not found: {resolved_path}")
 
@@ -34,6 +35,9 @@ def load_comparison_spec(comparison_path: Path | str) -> ComparisonSpec:
         )
 
     try:
-        return ComparisonSpec.model_validate(payload)
+        comparison = ComparisonSpec.model_validate(payload)
+        comparison._source_config_path = str(resolved_path)
+        comparison._source_config_identity = describe_config_path(resolved_path)
+        return comparison
     except ValidationError as exc:
         raise ValueError(f"Comparison spec validation failed for '{resolved_path}': {exc}") from exc
