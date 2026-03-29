@@ -303,6 +303,9 @@ def evaluation(section_input: EvaluationInput) -> EvaluationOutput:
                 "model": section_input.model,
                 "cv": section_input.cv_mode,
                 "seed": int(section_input.seed),
+                "dimensionality_strategy": section_input.dimensionality_strategy,
+                "pca_n_components": section_input.pca_n_components,
+                "pca_variance_ratio": section_input.pca_variance_ratio,
             }
         ),
         code_ref=section_input.code_ref,

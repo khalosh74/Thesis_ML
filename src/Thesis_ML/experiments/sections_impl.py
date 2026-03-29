@@ -32,6 +32,10 @@ from Thesis_ML.experiments.stage_registry import (
     run_tuning_executor,
 )
 from Thesis_ML.experiments.tuning_search_spaces import resolve_tuning_search_space_for_model
+from Thesis_ML.features.dimensionality import (
+    resolve_dimensionality_config,
+    validate_dimensionality_for_training_data,
+)
 from Thesis_ML.features.feature_qc import (
     FEATURE_QC_SAMPLE_FIELDS,
     compute_sample_feature_qc,
@@ -343,6 +347,16 @@ def execute_model_fit(section_input: ModelFitInput) -> dict[str, Any]:
                     "frozen_cross_person_transfer produced unexpected train/test subject "
                     "membership."
                 )
+
+        dimensionality_config = resolve_dimensionality_config(
+            dimensionality_strategy=section_input.dimensionality_strategy,
+            pca_n_components=section_input.pca_n_components,
+            pca_variance_ratio=section_input.pca_variance_ratio,
+        )
+        validate_dimensionality_for_training_data(
+            config=dimensionality_config,
+            x_train=np.asarray(section_input.x_matrix[train_idx]),
+        )
 
         estimator = clone(pipeline_template)
         estimator_fit_elapsed_seconds: float | None = None
@@ -1942,6 +1956,17 @@ def execute_evaluation(section_input: EvaluationInput) -> dict[str, Any]:
         "model": section_input.model,
         "target": section_input.target_column,
         "feature_recipe_id": str(section_input.feature_recipe_id),
+        "dimensionality_strategy": str(section_input.dimensionality_strategy),
+        "pca_n_components": (
+            int(section_input.pca_n_components)
+            if section_input.pca_n_components is not None
+            else None
+        ),
+        "pca_variance_ratio": (
+            float(section_input.pca_variance_ratio)
+            if section_input.pca_variance_ratio is not None
+            else None
+        ),
         "cv": section_input.cv_mode,
         "experiment_mode": section_input.cv_mode,
         "subject": (

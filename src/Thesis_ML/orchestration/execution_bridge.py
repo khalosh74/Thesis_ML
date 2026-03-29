@@ -160,6 +160,12 @@ def build_command(
         command.extend(["--feature-space", str(params["feature_space"])])
     if params.get("roi_spec_path"):
         command.extend(["--roi-spec-path", str(params["roi_spec_path"])])
+    if params.get("dimensionality_strategy"):
+        command.extend(["--dimensionality-strategy", str(params["dimensionality_strategy"])])
+    if params.get("pca_n_components") is not None:
+        command.extend(["--pca-n-components", str(params["pca_n_components"])])
+    if params.get("pca_variance_ratio") is not None:
+        command.extend(["--pca-variance-ratio", str(params["pca_variance_ratio"])])
     if methodology_policy_name:
         command.extend(["--methodology-policy", str(methodology_policy_name)])
     if class_weight_policy:
@@ -321,6 +327,21 @@ def execute_variant(
                         roi_spec_path=(
                             str(params["roi_spec_path"]) if params.get("roi_spec_path") else None
                         ),
+                        dimensionality_strategy=(
+                            str(params["dimensionality_strategy"])
+                            if params.get("dimensionality_strategy")
+                            else "none"
+                        ),
+                        pca_n_components=(
+                            int(params["pca_n_components"])
+                            if params.get("pca_n_components") is not None
+                            else None
+                        ),
+                        pca_variance_ratio=(
+                            float(params["pca_variance_ratio"])
+                            if params.get("pca_variance_ratio") is not None
+                            else None
+                        ),
                         n_permutations=n_permutations,
                         methodology_policy_name=methodology_params["methodology_policy_name"],
                         class_weight_policy=methodology_params["class_weight_policy"],
@@ -397,6 +418,9 @@ def execute_variant(
         "target_definition": params.get("target"),
         "feature_space": params.get("feature_space"),
         "roi_spec_path": params.get("roi_spec_path"),
+        "dimensionality_strategy": params.get("dimensionality_strategy"),
+        "pca_n_components": params.get("pca_n_components"),
+        "pca_variance_ratio": params.get("pca_variance_ratio"),
         "primary_metric_name": primary_metric_name,
         "primary_metric_value": primary_metric_value,
         "secondary_metrics": {
@@ -483,6 +507,9 @@ def execute_variant(
         "filter_modality": params.get("filter_modality"),
         "feature_space": params.get("feature_space"),
         "roi_spec_path": params.get("roi_spec_path"),
+        "dimensionality_strategy": params.get("dimensionality_strategy"),
+        "pca_n_components": params.get("pca_n_components"),
+        "pca_variance_ratio": params.get("pca_variance_ratio"),
         "start_section": start_section,
         "end_section": end_section,
         "base_artifact_id": base_artifact_id,

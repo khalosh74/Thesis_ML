@@ -456,6 +456,9 @@ def build_run_config_payload(
     filter_modality: str | None,
     feature_space: str,
     roi_spec_path: Path | None,
+    dimensionality_strategy: str,
+    pca_n_components: int | None,
+    pca_variance_ratio: float | None,
     n_permutations: int,
     framework_mode: str,
     canonical_run: bool,
@@ -599,6 +602,13 @@ def build_run_config_payload(
         "roi_spec_path": str(roi_spec_path.resolve()) if roi_spec_path is not None else None,
         "roi_spec_path_relative": (
             _relative_path(roi_spec_path) if roi_spec_path is not None else None
+        ),
+        "dimensionality_strategy": str(dimensionality_strategy),
+        "pca_n_components": (
+            int(pca_n_components) if pca_n_components is not None else None
+        ),
+        "pca_variance_ratio": (
+            float(pca_variance_ratio) if pca_variance_ratio is not None else None
         ),
         "n_permutations": int(n_permutations),
         "framework_mode": framework_mode,
@@ -747,6 +757,9 @@ def build_run_result_payload(
     feature_recipe_id: str,
     feature_space: str,
     roi_spec_path: Path | None,
+    dimensionality_strategy: str,
+    pca_n_components: int | None,
+    pca_variance_ratio: float | None,
     protocol_context: dict[str, Any],
     comparison_context: dict[str, Any],
     stage_timings_seconds: dict[str, float] | None = None,
@@ -858,6 +871,13 @@ def build_run_result_payload(
         "roi_spec_path": str(roi_spec_path.resolve()) if roi_spec_path is not None else None,
         "roi_spec_path_relative": (
             _relative_path(roi_spec_path) if roi_spec_path is not None else None
+        ),
+        "dimensionality_strategy": str(dimensionality_strategy),
+        "pca_n_components": (
+            int(pca_n_components) if pca_n_components is not None else None
+        ),
+        "pca_variance_ratio": (
+            float(pca_variance_ratio) if pca_variance_ratio is not None else None
         ),
         "protocol_context": protocol_context if protocol_context else None,
         "comparison_context": comparison_context if comparison_context else None,

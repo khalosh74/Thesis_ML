@@ -56,23 +56,42 @@ def _build_dataset_subset_label(params: dict[str, Any]) -> str:
         str(params.get("feature_space") or "whole_brain_masked").strip()
         or "whole_brain_masked"
     )
+    dimensionality_strategy = (
+        str(params.get("dimensionality_strategy") or "none").strip() or "none"
+    )
     if train_subject and test_subject:
         subject_part = f"train={train_subject}|test={test_subject}"
     elif subject:
         subject_part = f"subject={subject}"
     else:
         subject_part = "subject=pooled"
-    return f"{subject_part};task={task};modality={modality};feature_space={feature_space}"
+    return (
+        f"{subject_part};task={task};modality={modality};feature_space={feature_space};"
+        f"dimensionality={dimensionality_strategy}"
+    )
 
 
 def _feature_set_label(params: dict[str, Any]) -> str:
     feature_space = str(params.get("feature_space") or "whole_brain_masked").strip().lower()
+    dimensionality_strategy = (
+        str(params.get("dimensionality_strategy") or "none").strip().lower()
+    )
+    pca_variance_ratio = params.get("pca_variance_ratio")
+    pca_n_components = params.get("pca_n_components")
+    pca_suffix = ""
+    if dimensionality_strategy == "pca":
+        if pca_variance_ratio is not None:
+            pca_suffix = f" + PCA(var={pca_variance_ratio})"
+        elif pca_n_components is not None:
+            pca_suffix = f" + PCA(n={pca_n_components})"
+        else:
+            pca_suffix = " + PCA"
     if feature_space == "roi_mean_predefined":
         roi_spec_path = str(params.get("roi_spec_path") or "").strip()
         if roi_spec_path:
-            return f"predefined ROI means ({Path(roi_spec_path).name})"
-        return "predefined ROI means"
-    return "masked whole-brain voxel cache (current pipeline)"
+            return f"predefined ROI means ({Path(roi_spec_path).name}){pca_suffix}"
+        return f"predefined ROI means{pca_suffix}"
+    return f"masked whole-brain voxel cache (current pipeline){pca_suffix}"
 
 
 def status_for_machine_sheet(variant_records: list[dict[str, Any]]) -> str:

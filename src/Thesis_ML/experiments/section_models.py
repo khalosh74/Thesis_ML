@@ -123,6 +123,9 @@ class ModelFitInput(_SectionModel):
     primary_metric_name: str = "balanced_accuracy"
     methodology_policy_name: str = "fixed_baselines_only"
     class_weight_policy: str = "none"
+    dimensionality_strategy: str = "none"
+    pca_n_components: int | None = None
+    pca_variance_ratio: float | None = None
     feature_recipe_id: str = BASELINE_STANDARD_SCALER_RECIPE_ID
     tuning_enabled: bool = False
     tuning_search_space_id: str | None = None
@@ -210,6 +213,9 @@ class EvaluationInput(_SectionModel):
     n_permutations: int = 0
     primary_metric_name: str = "balanced_accuracy"
     primary_metric_aggregation: str = "mean_fold_scores"
+    dimensionality_strategy: str = "none"
+    pca_n_components: int | None = None
+    pca_variance_ratio: float | None = None
     feature_recipe_id: str = BASELINE_STANDARD_SCALER_RECIPE_ID
     emit_feature_qc_artifacts: bool = True
     feature_qc_summary_path: Path | None = None

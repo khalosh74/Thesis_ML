@@ -120,6 +120,12 @@ from Thesis_ML.experiments.tuning_search_spaces import (
     LINEAR_GROUPED_NESTED_SEARCH_SPACE_VERSION,
 )
 from Thesis_ML.features.preprocessing import BASELINE_STANDARD_SCALER_RECIPE_ID
+from Thesis_ML.features.dimensionality import (
+    ResolvedDimensionalityConfig,
+    SUPPORTED_DIMENSIONALITY_STRATEGIES,
+    apply_dimensionality_to_pipeline,
+    resolve_dimensionality_config,
+)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -210,13 +216,20 @@ def _build_pipeline(
     class_weight_policy: str = "none",
     compute_policy=None,
     feature_recipe_id: str = BASELINE_STANDARD_SCALER_RECIPE_ID,
+    dimensionality_config: ResolvedDimensionalityConfig | None = None,
 ):
-    return build_model_pipeline(
+    pipeline = build_model_pipeline(
         model_name=model_name,
         seed=seed,
         class_weight_policy=class_weight_policy,
         compute_policy=compute_policy,
         feature_recipe_id=feature_recipe_id,
+    )
+    if dimensionality_config is None:
+        return pipeline
+    return apply_dimensionality_to_pipeline(
+        pipeline=pipeline,
+        config=dimensionality_config,
     )
 
 
@@ -356,6 +369,9 @@ def run_experiment(
     filter_modality: str | None = None,
     feature_space: str = FEATURE_SPACE_WHOLE_BRAIN_MASKED,
     roi_spec_path: Path | str | None = None,
+    dimensionality_strategy: str = "none",
+    pca_n_components: int | None = None,
+    pca_variance_ratio: float | None = None,
     n_permutations: int = 0,
     primary_metric_name: str = "balanced_accuracy",
     primary_metric_aggregation: str = "mean_fold_scores",
@@ -503,6 +519,11 @@ def run_experiment(
         raise ValueError(
             "feature_space='roi_mean_predefined' requires a non-empty roi_spec_path."
         )
+    resolved_dimensionality_config = resolve_dimensionality_config(
+        dimensionality_strategy=dimensionality_strategy,
+        pca_n_components=pca_n_components,
+        pca_variance_ratio=pca_variance_ratio,
+    )
     resolved_preprocessing_kind = model_preprocess_kind(model)
     resolved_feature_recipe_id = resolve_preprocessing_recipe(
         recipe_id=feature_recipe_id,
@@ -897,6 +918,9 @@ def run_experiment(
             filter_modality=filter_modality,
             feature_space=resolved_feature_space,
             roi_spec_path=resolved_roi_spec_path,
+            dimensionality_strategy=resolved_dimensionality_config.strategy,
+            pca_n_components=resolved_dimensionality_config.pca_n_components,
+            pca_variance_ratio=resolved_dimensionality_config.pca_variance_ratio,
             n_permutations=n_permutations,
             primary_metric_name=resolved_primary_metric_name,
             permutation_metric_name=resolved_permutation_metric_name,
@@ -1076,6 +1100,9 @@ def run_experiment(
                         filter_modality=filter_modality,
                         feature_space=resolved_feature_space,
                         roi_spec_path=resolved_roi_spec_path,
+                        dimensionality_strategy=resolved_dimensionality_config.strategy,
+                        pca_n_components=resolved_dimensionality_config.pca_n_components,
+                        pca_variance_ratio=resolved_dimensionality_config.pca_variance_ratio,
                         seed=seed,
                         n_permutations=n_permutations,
                         primary_metric_name=resolved_primary_metric_name,
@@ -1162,6 +1189,7 @@ def run_experiment(
                                     if feature_recipe_id is not None
                                     else resolved_feature_recipe_id
                                 ),
+                                dimensionality_config=resolved_dimensionality_config,
                             )
                         ),
                         progress_callback=progress_callback,
@@ -1679,6 +1707,9 @@ def run_experiment(
         feature_recipe_id=resolved_feature_recipe_id,
         feature_space=resolved_feature_space,
         roi_spec_path=resolved_roi_spec_path,
+        dimensionality_strategy=resolved_dimensionality_config.strategy,
+        pca_n_components=resolved_dimensionality_config.pca_n_components,
+        pca_variance_ratio=resolved_dimensionality_config.pca_variance_ratio,
         model_cost_tier=str(resolved_model_cost_tier),
         projected_runtime_seconds=int(resolved_projected_runtime_seconds),
         protocol_context=resolved_protocol_context,
@@ -1760,6 +1791,27 @@ def _build_parser() -> argparse.ArgumentParser:
         help=(
             "Path to ROI feature-space spec JSON. Required when --feature-space "
             "roi_mean_predefined."
+        ),
+    )
+    parser.add_argument(
+        "--dimensionality-strategy",
+        default="none",
+        choices=list(SUPPORTED_DIMENSIONALITY_STRATEGIES),
+        help="Optional post-feature dimensionality strategy applied inside each fold.",
+    )
+    parser.add_argument(
+        "--pca-n-components",
+        type=int,
+        default=None,
+        help="Optional PCA component count when --dimensionality-strategy pca.",
+    )
+    parser.add_argument(
+        "--pca-variance-ratio",
+        type=float,
+        default=None,
+        help=(
+            "Optional PCA explained-variance ratio in (0, 1] when "
+            "--dimensionality-strategy pca."
         ),
     )
     parser.add_argument(
@@ -1997,6 +2049,9 @@ def main(argv: list[str] | None = None) -> int:
             filter_modality=args.filter_modality,
             feature_space=args.feature_space,
             roi_spec_path=args.roi_spec_path,
+            dimensionality_strategy=args.dimensionality_strategy,
+            pca_n_components=args.pca_n_components,
+            pca_variance_ratio=args.pca_variance_ratio,
             n_permutations=args.n_permutations,
             methodology_policy_name=args.methodology_policy,
             class_weight_policy=args.class_weight_policy,
