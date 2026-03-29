@@ -36,6 +36,7 @@ from Thesis_ML.features.dimensionality import (
     resolve_dimensionality_config,
     validate_dimensionality_for_training_data,
 )
+from Thesis_ML.features.preprocessing import validate_preprocessing_for_training_data
 from Thesis_ML.features.feature_qc import (
     FEATURE_QC_SAMPLE_FIELDS,
     compute_sample_feature_qc,
@@ -133,27 +134,29 @@ def _build_pipeline_template(
     model_name: str,
     seed: int,
     feature_recipe_id: str,
+    preprocessing_strategy: str | None,
 ) -> Any:
     try:
         signature = inspect.signature(build_pipeline_fn)
     except (TypeError, ValueError):
         signature = None
 
-    if signature is not None:
-        accepts_kwargs = any(
-            parameter.kind == inspect.Parameter.VAR_KEYWORD
-            for parameter in signature.parameters.values()
-        )
-        if "feature_recipe_id" in signature.parameters or accepts_kwargs:
-            return build_pipeline_fn(
-                model_name=model_name,
-                seed=seed,
-                feature_recipe_id=feature_recipe_id,
-            )
-    return build_pipeline_fn(
-        model_name=model_name,
-        seed=seed,
+    pipeline_kwargs: dict[str, Any] = {
+        "model_name": model_name,
+        "seed": seed,
+    }
+    if signature is None:
+        return build_pipeline_fn(**pipeline_kwargs)
+
+    accepts_kwargs = any(
+        parameter.kind == inspect.Parameter.VAR_KEYWORD
+        for parameter in signature.parameters.values()
     )
+    if "feature_recipe_id" in signature.parameters or accepts_kwargs:
+        pipeline_kwargs["feature_recipe_id"] = feature_recipe_id
+    if "preprocessing_strategy" in signature.parameters or accepts_kwargs:
+        pipeline_kwargs["preprocessing_strategy"] = preprocessing_strategy
+    return build_pipeline_fn(**pipeline_kwargs)
 
 
 def execute_model_fit(section_input: ModelFitInput) -> dict[str, Any]:
@@ -186,6 +189,7 @@ def execute_model_fit(section_input: ModelFitInput) -> dict[str, Any]:
         model_name=section_input.model,
         seed=section_input.seed,
         feature_recipe_id=section_input.feature_recipe_id,
+        preprocessing_strategy=section_input.preprocessing_strategy,
     )
     tuning_summary_path = (
         section_input.tuning_summary_path
@@ -348,6 +352,12 @@ def execute_model_fit(section_input: ModelFitInput) -> dict[str, Any]:
                     "membership."
                 )
 
+        x_train_fold = np.asarray(section_input.x_matrix[train_idx])
+        validate_preprocessing_for_training_data(
+            preprocessing_strategy=section_input.preprocessing_strategy,
+            x_train=x_train_fold,
+        )
+
         dimensionality_config = resolve_dimensionality_config(
             dimensionality_strategy=section_input.dimensionality_strategy,
             pca_n_components=section_input.pca_n_components,
@@ -355,7 +365,7 @@ def execute_model_fit(section_input: ModelFitInput) -> dict[str, Any]:
         )
         validate_dimensionality_for_training_data(
             config=dimensionality_config,
-            x_train=np.asarray(section_input.x_matrix[train_idx]),
+            x_train=x_train_fold,
         )
 
         estimator = clone(pipeline_template)
@@ -1648,6 +1658,7 @@ def _evaluate_grouped_nested_tuning_permutations(
         model_name=section_input.model,
         seed=section_input.seed,
         feature_recipe_id=section_input.feature_recipe_id,
+        preprocessing_strategy=section_input.preprocessing_strategy,
     )
     tuning_executor_id, fallback_executor_id = _resolve_grouped_nested_tuning_executor(section_input)
     permutation_count = int(section_input.n_permutations)
@@ -1956,6 +1967,11 @@ def execute_evaluation(section_input: EvaluationInput) -> dict[str, Any]:
         "model": section_input.model,
         "target": section_input.target_column,
         "feature_recipe_id": str(section_input.feature_recipe_id),
+        "preprocessing_strategy": (
+            str(section_input.preprocessing_strategy)
+            if section_input.preprocessing_strategy is not None
+            else None
+        ),
         "dimensionality_strategy": str(section_input.dimensionality_strategy),
         "pca_n_components": (
             int(section_input.pca_n_components)

@@ -56,6 +56,10 @@ def _build_dataset_subset_label(params: dict[str, Any]) -> str:
         str(params.get("feature_space") or "whole_brain_masked").strip()
         or "whole_brain_masked"
     )
+    preprocessing_strategy = (
+        str(params.get("preprocessing_strategy") or "model_default").strip()
+        or "model_default"
+    )
     dimensionality_strategy = (
         str(params.get("dimensionality_strategy") or "none").strip() or "none"
     )
@@ -67,12 +71,16 @@ def _build_dataset_subset_label(params: dict[str, Any]) -> str:
         subject_part = "subject=pooled"
     return (
         f"{subject_part};task={task};modality={modality};feature_space={feature_space};"
+        f"preprocessing={preprocessing_strategy};"
         f"dimensionality={dimensionality_strategy}"
     )
 
 
 def _feature_set_label(params: dict[str, Any]) -> str:
     feature_space = str(params.get("feature_space") or "whole_brain_masked").strip().lower()
+    preprocessing_strategy = (
+        str(params.get("preprocessing_strategy") or "").strip().lower()
+    )
     dimensionality_strategy = (
         str(params.get("dimensionality_strategy") or "none").strip().lower()
     )
@@ -89,9 +97,14 @@ def _feature_set_label(params: dict[str, Any]) -> str:
     if feature_space == "roi_mean_predefined":
         roi_spec_path = str(params.get("roi_spec_path") or "").strip()
         if roi_spec_path:
-            return f"predefined ROI means ({Path(roi_spec_path).name}){pca_suffix}"
-        return f"predefined ROI means{pca_suffix}"
-    return f"masked whole-brain voxel cache (current pipeline){pca_suffix}"
+            base_label = f"predefined ROI means ({Path(roi_spec_path).name}){pca_suffix}"
+        else:
+            base_label = f"predefined ROI means{pca_suffix}"
+    else:
+        base_label = f"masked whole-brain voxel cache (current pipeline){pca_suffix}"
+    if preprocessing_strategy:
+        return f"{base_label}; preprocess={preprocessing_strategy}"
+    return base_label
 
 
 def status_for_machine_sheet(variant_records: list[dict[str, Any]]) -> str:

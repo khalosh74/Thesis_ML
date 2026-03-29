@@ -68,6 +68,7 @@ class SegmentExecutionRequest:
     filter_modality: str | None
     feature_space: str = "whole_brain_masked"
     roi_spec_path: Path | None = None
+    preprocessing_strategy: str | None = None
     dimensionality_strategy: str = "none"
     pca_n_components: int | None = None
     pca_variance_ratio: float | None = None
@@ -502,6 +503,7 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
                     primary_metric_name=request.primary_metric_name,
                     methodology_policy_name=request.methodology_policy_name,
                     class_weight_policy=request.class_weight_policy,
+                    preprocessing_strategy=request.preprocessing_strategy,
                     dimensionality_strategy=request.dimensionality_strategy,
                     pca_n_components=request.pca_n_components,
                     pca_variance_ratio=request.pca_variance_ratio,
@@ -636,6 +638,7 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
                             "model": request.model,
                             "cv": request.cv_mode,
                             "seed": int(request.seed),
+                            "preprocessing_strategy": request.preprocessing_strategy,
                             "dimensionality_strategy": request.dimensionality_strategy,
                             "pca_n_components": request.pca_n_components,
                             "pca_variance_ratio": request.pca_variance_ratio,
@@ -673,6 +676,7 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
                     n_permutations=request.n_permutations,
                     primary_metric_name=request.primary_metric_name,
                     primary_metric_aggregation=request.primary_metric_aggregation,
+                    preprocessing_strategy=request.preprocessing_strategy,
                     dimensionality_strategy=request.dimensionality_strategy,
                     pca_n_components=request.pca_n_components,
                     pca_variance_ratio=request.pca_variance_ratio,

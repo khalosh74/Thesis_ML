@@ -160,6 +160,8 @@ def build_command(
         command.extend(["--feature-space", str(params["feature_space"])])
     if params.get("roi_spec_path"):
         command.extend(["--roi-spec-path", str(params["roi_spec_path"])])
+    if params.get("preprocessing_strategy"):
+        command.extend(["--preprocessing-strategy", str(params["preprocessing_strategy"])])
     if params.get("dimensionality_strategy"):
         command.extend(["--dimensionality-strategy", str(params["dimensionality_strategy"])])
     if params.get("pca_n_components") is not None:
@@ -327,6 +329,11 @@ def execute_variant(
                         roi_spec_path=(
                             str(params["roi_spec_path"]) if params.get("roi_spec_path") else None
                         ),
+                        preprocessing_strategy=(
+                            str(params["preprocessing_strategy"])
+                            if params.get("preprocessing_strategy")
+                            else None
+                        ),
                         dimensionality_strategy=(
                             str(params["dimensionality_strategy"])
                             if params.get("dimensionality_strategy")
@@ -418,6 +425,7 @@ def execute_variant(
         "target_definition": params.get("target"),
         "feature_space": params.get("feature_space"),
         "roi_spec_path": params.get("roi_spec_path"),
+        "preprocessing_strategy": params.get("preprocessing_strategy"),
         "dimensionality_strategy": params.get("dimensionality_strategy"),
         "pca_n_components": params.get("pca_n_components"),
         "pca_variance_ratio": params.get("pca_variance_ratio"),
@@ -507,6 +515,7 @@ def execute_variant(
         "filter_modality": params.get("filter_modality"),
         "feature_space": params.get("feature_space"),
         "roi_spec_path": params.get("roi_spec_path"),
+        "preprocessing_strategy": params.get("preprocessing_strategy"),
         "dimensionality_strategy": params.get("dimensionality_strategy"),
         "pca_n_components": params.get("pca_n_components"),
         "pca_variance_ratio": params.get("pca_variance_ratio"),

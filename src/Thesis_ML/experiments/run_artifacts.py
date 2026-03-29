@@ -245,6 +245,7 @@ def stamp_metrics_artifact(
     projected_runtime_seconds: int,
     primary_metric_aggregation: str,
     preprocessing_kind: str | None,
+    preprocessing_strategy: str | None,
     feature_recipe_id: str,
     tuning_summary_path: Path,
     tuning_best_params_path: Path,
@@ -292,6 +293,9 @@ def stamp_metrics_artifact(
     persisted_metrics["primary_metric_aggregation"] = str(primary_metric_aggregation)
     persisted_metrics["preprocessing_kind"] = (
         str(preprocessing_kind) if preprocessing_kind is not None else None
+    )
+    persisted_metrics["preprocessing_strategy"] = (
+        str(preprocessing_strategy) if preprocessing_strategy is not None else None
     )
     persisted_metrics["feature_recipe_id"] = str(feature_recipe_id)
     persisted_metrics["tuning_summary_path"] = str(tuning_summary_path.resolve())
@@ -423,6 +427,7 @@ def build_run_config_payload(
     model_cost_tier: str,
     projected_runtime_seconds: int,
     preprocessing_kind: str | None,
+    preprocessing_strategy: str | None,
     feature_recipe_id: str,
     tuning_search_space_id: str | None,
     tuning_search_space_version: str | None,
@@ -541,6 +546,9 @@ def build_run_config_payload(
         "model_cost_tier": str(model_cost_tier),
         "projected_runtime_seconds": int(projected_runtime_seconds),
         "preprocessing_kind": (str(preprocessing_kind) if preprocessing_kind is not None else None),
+        "preprocessing_strategy": (
+            str(preprocessing_strategy) if preprocessing_strategy is not None else None
+        ),
         "feature_recipe_id": str(feature_recipe_id),
         "tuning_search_space_id": tuning_search_space_id,
         "tuning_search_space_version": tuning_search_space_version,
@@ -752,6 +760,7 @@ def build_run_result_payload(
     methodology_policy_name: str,
     class_weight_policy: str,
     tuning_enabled: bool,
+    preprocessing_strategy: str | None,
     model_cost_tier: str,
     projected_runtime_seconds: int,
     feature_recipe_id: str,
@@ -864,6 +873,9 @@ def build_run_result_payload(
         "methodology_policy_name": methodology_policy_name,
         "class_weight_policy": class_weight_policy,
         "tuning_enabled": bool(tuning_enabled),
+        "preprocessing_strategy": (
+            str(preprocessing_strategy) if preprocessing_strategy is not None else None
+        ),
         "model_cost_tier": str(model_cost_tier),
         "projected_runtime_seconds": int(projected_runtime_seconds),
         "feature_recipe_id": str(feature_recipe_id),

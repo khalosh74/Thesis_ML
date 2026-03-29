@@ -120,6 +120,11 @@ from Thesis_ML.experiments.tuning_search_spaces import (
     LINEAR_GROUPED_NESTED_SEARCH_SPACE_VERSION,
 )
 from Thesis_ML.features.preprocessing import BASELINE_STANDARD_SCALER_RECIPE_ID
+from Thesis_ML.features.preprocessing import (
+    SUPPORTED_PREPROCESSING_STRATEGIES,
+    apply_preprocessing_to_pipeline,
+    resolve_preprocessing_strategy,
+)
 from Thesis_ML.features.dimensionality import (
     ResolvedDimensionalityConfig,
     SUPPORTED_DIMENSIONALITY_STRATEGIES,
@@ -216,6 +221,7 @@ def _build_pipeline(
     class_weight_policy: str = "none",
     compute_policy=None,
     feature_recipe_id: str = BASELINE_STANDARD_SCALER_RECIPE_ID,
+    preprocessing_strategy: str | None = None,
     dimensionality_config: ResolvedDimensionalityConfig | None = None,
 ):
     pipeline = build_model_pipeline(
@@ -224,6 +230,10 @@ def _build_pipeline(
         class_weight_policy=class_weight_policy,
         compute_policy=compute_policy,
         feature_recipe_id=feature_recipe_id,
+    )
+    pipeline = apply_preprocessing_to_pipeline(
+        pipeline=pipeline,
+        preprocessing_strategy=preprocessing_strategy,
     )
     if dimensionality_config is None:
         return pipeline
@@ -369,6 +379,7 @@ def run_experiment(
     filter_modality: str | None = None,
     feature_space: str = FEATURE_SPACE_WHOLE_BRAIN_MASKED,
     roi_spec_path: Path | str | None = None,
+    preprocessing_strategy: str | None = None,
     dimensionality_strategy: str = "none",
     pca_n_components: int | None = None,
     pca_variance_ratio: float | None = None,
@@ -524,6 +535,7 @@ def run_experiment(
         pca_n_components=pca_n_components,
         pca_variance_ratio=pca_variance_ratio,
     )
+    resolved_preprocessing_config = resolve_preprocessing_strategy(preprocessing_strategy)
     resolved_preprocessing_kind = model_preprocess_kind(model)
     resolved_feature_recipe_id = resolve_preprocessing_recipe(
         recipe_id=feature_recipe_id,
@@ -557,6 +569,17 @@ def run_experiment(
                 "Use protocol/comparison spec values only."
             )
         resolved_feature_recipe_id = context_recipe_id
+    context_preprocessing_strategy = official_context.get("preprocessing_strategy")
+    if context_preprocessing_strategy is not None:
+        context_preprocessing_config = resolve_preprocessing_strategy(
+            str(context_preprocessing_strategy),
+        )
+        if context_preprocessing_config.strategy != resolved_preprocessing_config.strategy:
+            raise ValueError(
+                "Illegal override for official run key 'preprocessing_strategy'. "
+                "Use protocol/comparison spec values only."
+            )
+        resolved_preprocessing_config = context_preprocessing_config
     context_emit_feature_qc_artifacts = official_context.get("emit_feature_qc_artifacts")
     if context_emit_feature_qc_artifacts is not None and bool(
         context_emit_feature_qc_artifacts
@@ -1100,6 +1123,7 @@ def run_experiment(
                         filter_modality=filter_modality,
                         feature_space=resolved_feature_space,
                         roi_spec_path=resolved_roi_spec_path,
+                        preprocessing_strategy=resolved_preprocessing_config.strategy,
                         dimensionality_strategy=resolved_dimensionality_config.strategy,
                         pca_n_components=resolved_dimensionality_config.pca_n_components,
                         pca_variance_ratio=resolved_dimensionality_config.pca_variance_ratio,
@@ -1178,7 +1202,7 @@ def run_experiment(
                         reuse_policy=reuse_policy,
                         reuse_completed_artifacts=should_reuse_completed_artifacts,
                         feature_recipe_id=resolved_feature_recipe_id,
-                        build_pipeline_fn=lambda model_name, seed, feature_recipe_id=None: (
+                        build_pipeline_fn=lambda model_name, seed, feature_recipe_id=None, preprocessing_strategy=None: (
                             _build_pipeline(
                                 model_name=model_name,
                                 seed=seed,
@@ -1188,6 +1212,11 @@ def run_experiment(
                                     feature_recipe_id
                                     if feature_recipe_id is not None
                                     else resolved_feature_recipe_id
+                                ),
+                                preprocessing_strategy=(
+                                    preprocessing_strategy
+                                    if preprocessing_strategy is not None
+                                    else resolved_preprocessing_config.strategy
                                 ),
                                 dimensionality_config=resolved_dimensionality_config,
                             )
@@ -1310,6 +1339,7 @@ def run_experiment(
             model_cost_tier=str(resolved_model_cost_tier),
             projected_runtime_seconds=int(resolved_projected_runtime_seconds),
             preprocessing_kind=resolved_preprocessing_kind,
+            preprocessing_strategy=resolved_preprocessing_config.strategy,
             feature_recipe_id=resolved_feature_recipe_id,
             primary_metric_aggregation=resolved_primary_metric_aggregation,
             tuning_summary_path=tuning_summary_path,
@@ -1424,6 +1454,7 @@ def run_experiment(
             model_cost_tier=str(resolved_model_cost_tier),
             projected_runtime_seconds=int(resolved_projected_runtime_seconds),
             preprocessing_kind=resolved_preprocessing_kind,
+            preprocessing_strategy=resolved_preprocessing_config.strategy,
             feature_recipe_id=resolved_feature_recipe_id,
             tuning_search_space_id=effective_tuning_space_id,
             tuning_search_space_version=effective_tuning_space_version,
@@ -1459,6 +1490,11 @@ def run_experiment(
             ),
             filter_task=filter_task,
             filter_modality=filter_modality,
+            feature_space=resolved_feature_space,
+            roi_spec_path=resolved_roi_spec_path,
+            dimensionality_strategy=resolved_dimensionality_config.strategy,
+            pca_n_components=resolved_dimensionality_config.pca_n_components,
+            pca_variance_ratio=resolved_dimensionality_config.pca_variance_ratio,
             n_permutations=n_permutations,
             framework_mode=resolved_framework_mode.value,
             canonical_run=bool(canonical_run),
@@ -1704,6 +1740,7 @@ def run_experiment(
         methodology_policy_name=methodology_policy.policy_name.value,
         class_weight_policy=methodology_policy.class_weight_policy.value,
         tuning_enabled=bool(methodology_policy.tuning_enabled),
+        preprocessing_strategy=resolved_preprocessing_config.strategy,
         feature_recipe_id=resolved_feature_recipe_id,
         feature_space=resolved_feature_space,
         roi_spec_path=resolved_roi_spec_path,
@@ -1791,6 +1828,15 @@ def _build_parser() -> argparse.ArgumentParser:
         help=(
             "Path to ROI feature-space spec JSON. Required when --feature-space "
             "roi_mean_predefined."
+        ),
+    )
+    parser.add_argument(
+        "--preprocessing-strategy",
+        default=None,
+        choices=list(SUPPORTED_PREPROCESSING_STRATEGIES),
+        help=(
+            "Optional fold-local preprocessing override for lock experiments "
+            "(none or standardize_zscore)."
         ),
     )
     parser.add_argument(
@@ -2049,6 +2095,7 @@ def main(argv: list[str] | None = None) -> int:
             filter_modality=args.filter_modality,
             feature_space=args.feature_space,
             roi_spec_path=args.roi_spec_path,
+            preprocessing_strategy=args.preprocessing_strategy,
             dimensionality_strategy=args.dimensionality_strategy,
             pca_n_components=args.pca_n_components,
             pca_variance_ratio=args.pca_variance_ratio,

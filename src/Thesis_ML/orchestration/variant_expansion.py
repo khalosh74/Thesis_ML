@@ -26,6 +26,7 @@ def variant_label(params: dict[str, Any]) -> str:
         "filter_modality",
         "feature_space",
         "roi_spec_path",
+        "preprocessing_strategy",
         "dimensionality_strategy",
         "pca_n_components",
         "pca_variance_ratio",

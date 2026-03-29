@@ -123,6 +123,7 @@ class ModelFitInput(_SectionModel):
     primary_metric_name: str = "balanced_accuracy"
     methodology_policy_name: str = "fixed_baselines_only"
     class_weight_policy: str = "none"
+    preprocessing_strategy: str | None = None
     dimensionality_strategy: str = "none"
     pca_n_components: int | None = None
     pca_variance_ratio: float | None = None
@@ -213,6 +214,7 @@ class EvaluationInput(_SectionModel):
     n_permutations: int = 0
     primary_metric_name: str = "balanced_accuracy"
     primary_metric_aggregation: str = "mean_fold_scores"
+    preprocessing_strategy: str | None = None
     dimensionality_strategy: str = "none"
     pca_n_components: int | None = None
     pca_variance_ratio: float | None = None
