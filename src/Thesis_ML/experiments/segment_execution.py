@@ -19,6 +19,7 @@ from Thesis_ML.artifacts.registry import (
     get_artifact,
 )
 from Thesis_ML.experiments.compute_policy import ResolvedComputePolicy
+from Thesis_ML.experiments.feature_space_loading import load_feature_matrix
 from Thesis_ML.experiments.progress import ProgressCallback, emit_progress
 from Thesis_ML.experiments.section_models import (
     DatasetSelectionInput,
@@ -65,6 +66,8 @@ class SegmentExecutionRequest:
     test_subject: str | None
     filter_task: str | None
     filter_modality: str | None
+    feature_space: str = "whole_brain_masked"
+    roi_spec_path: Path | None = None
     seed: int
     n_permutations: int
     run_id: str
@@ -303,11 +306,15 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
             cache_manifest_path = Path(upstream_feature_cache.path)
             feature_cache_artifact_id = upstream_feature_cache.artifact_id
             artifact_ids["feature_cache"] = upstream_feature_cache.artifact_id
-            x_matrix, metadata_df, spatial_compatibility = load_features_from_cache_fn(
-                index_df=selected_index_df,
+            x_matrix, metadata_df, spatial_compatibility = load_feature_matrix(
+                selected_index_df=selected_index_df,
+                data_root=request.data_root,
                 cache_manifest_path=cache_manifest_path,
                 spatial_report_path=request.spatial_report_path,
                 affine_atol=request.affine_atol,
+                feature_space=request.feature_space,
+                roi_spec_path=request.roi_spec_path,
+                load_features_from_cache_fn=load_features_from_cache_fn,
             )
 
     for section in planned_sections:
@@ -403,16 +410,26 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
                             "test_subject": request.test_subject,
                             "filter_task": request.filter_task,
                             "filter_modality": request.filter_modality,
+                            "feature_space": request.feature_space,
+                            "roi_spec_path": (
+                                str(request.roi_spec_path.resolve())
+                                if request.roi_spec_path is not None
+                                else None
+                            ),
                             "cache_manifest_path": str(cache_manifest_path.resolve()),
                         }
                     ),
                 )
                 if reusable_feature_matrix is not None:
-                    x_matrix, metadata_df, spatial_compatibility = load_features_from_cache_fn(
-                        index_df=selected_index_df,
+                    x_matrix, metadata_df, spatial_compatibility = load_feature_matrix(
+                        selected_index_df=selected_index_df,
+                        data_root=request.data_root,
                         cache_manifest_path=cache_manifest_path,
                         spatial_report_path=request.spatial_report_path,
                         affine_atol=request.affine_atol,
+                        feature_space=request.feature_space,
+                        roi_spec_path=request.roi_spec_path,
+                        load_features_from_cache_fn=load_features_from_cache_fn,
                     )
                     feature_matrix_artifact_id = reusable_feature_matrix.artifact_id
                     artifact_ids["feature_matrix_bundle"] = reusable_feature_matrix.artifact_id
@@ -430,6 +447,7 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
             matrix_output = feature_matrix_load(
                 FeatureMatrixLoadInput(
                     selected_index_df=selected_index_df,
+                    data_root=request.data_root,
                     cache_manifest_path=cache_manifest_path,
                     spatial_report_path=request.spatial_report_path,
                     affine_atol=request.affine_atol,
@@ -444,6 +462,8 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
                     test_subject=request.test_subject,
                     filter_task=request.filter_task,
                     filter_modality=request.filter_modality,
+                    feature_space=request.feature_space,
+                    roi_spec_path=request.roi_spec_path,
                     load_features_from_cache_fn=load_features_from_cache_fn,
                 )
             )

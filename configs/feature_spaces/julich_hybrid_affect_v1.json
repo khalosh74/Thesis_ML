@@ -1,0 +1,18 @@
+{
+  "feature_space_id": "julich_hybrid_affect_v1",
+  "representation": "roi_mean_predefined",
+  "description": "Fixed predefined ROI set for E09 feature-space comparison using available in-repo mask resources.",
+  "reference_space": "native_functional",
+  "rois": [
+    {
+      "roi_id": "julich_v1_proxy_mask",
+      "type": "mask",
+      "mask_path": "Data/sub-001/ses-01/BAS2/mask.nii"
+    },
+    {
+      "roi_id": "julich_primary_auditory_proxy_mask",
+      "type": "mask",
+      "mask_path": "Data/sub-001/ses-01/BAS22/mask.nii"
+    }
+  ]
+}

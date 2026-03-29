@@ -35,6 +35,12 @@ from Thesis_ML.config.methodology import (
 )
 from Thesis_ML.config.paths import DEFAULT_EXPERIMENT_REPORTS_ROOT
 from Thesis_ML.experiments.cache_loading import load_features_from_cache
+from Thesis_ML.experiments.feature_space_loading import (
+    FEATURE_SPACE_ROI_MEAN_PREDEFINED,
+    FEATURE_SPACE_WHOLE_BRAIN_MASKED,
+    SUPPORTED_FEATURE_SPACES,
+    normalize_feature_space,
+)
 from Thesis_ML.experiments.compute_policy import (
     HARDWARE_MODE_CHOICES,
     resolve_compute_policy,
@@ -348,6 +354,8 @@ def run_experiment(
     seed: int = 42,
     filter_task: str | None = None,
     filter_modality: str | None = None,
+    feature_space: str = FEATURE_SPACE_WHOLE_BRAIN_MASKED,
+    roi_spec_path: Path | str | None = None,
     n_permutations: int = 0,
     primary_metric_name: str = "balanced_accuracy",
     primary_metric_aggregation: str = "mean_fold_scores",
@@ -482,6 +490,19 @@ def run_experiment(
         )
 
     target_column = _resolve_target_column(target)
+    resolved_feature_space = normalize_feature_space(feature_space)
+    resolved_roi_spec_path = (
+        Path(roi_spec_path).resolve()
+        if roi_spec_path is not None and str(roi_spec_path).strip()
+        else None
+    )
+    if (
+        resolved_feature_space == FEATURE_SPACE_ROI_MEAN_PREDEFINED
+        and resolved_roi_spec_path is None
+    ):
+        raise ValueError(
+            "feature_space='roi_mean_predefined' requires a non-empty roi_spec_path."
+        )
     resolved_preprocessing_kind = model_preprocess_kind(model)
     resolved_feature_recipe_id = resolve_preprocessing_recipe(
         recipe_id=feature_recipe_id,
@@ -874,6 +895,8 @@ def run_experiment(
             test_subject=test_subject,
             filter_task=filter_task,
             filter_modality=filter_modality,
+            feature_space=resolved_feature_space,
+            roi_spec_path=resolved_roi_spec_path,
             n_permutations=n_permutations,
             primary_metric_name=resolved_primary_metric_name,
             permutation_metric_name=resolved_permutation_metric_name,
@@ -1051,6 +1074,8 @@ def run_experiment(
                         test_subject=test_subject,
                         filter_task=filter_task,
                         filter_modality=filter_modality,
+                        feature_space=resolved_feature_space,
+                        roi_spec_path=resolved_roi_spec_path,
                         seed=seed,
                         n_permutations=n_permutations,
                         primary_metric_name=resolved_primary_metric_name,
@@ -1652,6 +1677,8 @@ def run_experiment(
         class_weight_policy=methodology_policy.class_weight_policy.value,
         tuning_enabled=bool(methodology_policy.tuning_enabled),
         feature_recipe_id=resolved_feature_recipe_id,
+        feature_space=resolved_feature_space,
+        roi_spec_path=resolved_roi_spec_path,
         model_cost_tier=str(resolved_model_cost_tier),
         projected_runtime_seconds=int(resolved_projected_runtime_seconds),
         protocol_context=resolved_protocol_context,
@@ -1721,6 +1748,20 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--seed", type=int, default=42, help="Random seed.")
     parser.add_argument("--filter-task", default=None, help="Optional task filter.")
     parser.add_argument("--filter-modality", default=None, help="Optional modality filter.")
+    parser.add_argument(
+        "--feature-space",
+        default=FEATURE_SPACE_WHOLE_BRAIN_MASKED,
+        choices=list(SUPPORTED_FEATURE_SPACES),
+        help="Feature representation path: whole-brain masked voxels or predefined ROI means.",
+    )
+    parser.add_argument(
+        "--roi-spec-path",
+        default=None,
+        help=(
+            "Path to ROI feature-space spec JSON. Required when --feature-space "
+            "roi_mean_predefined."
+        ),
+    )
     parser.add_argument(
         "--n-permutations",
         type=int,
@@ -1954,6 +1995,8 @@ def main(argv: list[str] | None = None) -> int:
             seed=args.seed,
             filter_task=args.filter_task,
             filter_modality=args.filter_modality,
+            feature_space=args.feature_space,
+            roi_spec_path=args.roi_spec_path,
             n_permutations=args.n_permutations,
             methodology_policy_name=args.methodology_policy,
             class_weight_policy=args.class_weight_policy,

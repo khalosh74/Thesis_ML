@@ -156,6 +156,10 @@ def build_command(
         command.extend(["--filter-task", str(params["filter_task"])])
     if params.get("filter_modality"):
         command.extend(["--filter-modality", str(params["filter_modality"])])
+    if params.get("feature_space"):
+        command.extend(["--feature-space", str(params["feature_space"])])
+    if params.get("roi_spec_path"):
+        command.extend(["--roi-spec-path", str(params["roi_spec_path"])])
     if methodology_policy_name:
         command.extend(["--methodology-policy", str(methodology_policy_name)])
     if class_weight_policy:
@@ -309,6 +313,14 @@ def execute_variant(
                             if params.get("filter_modality")
                             else None
                         ),
+                        feature_space=(
+                            str(params["feature_space"])
+                            if params.get("feature_space")
+                            else "whole_brain_masked"
+                        ),
+                        roi_spec_path=(
+                            str(params["roi_spec_path"]) if params.get("roi_spec_path") else None
+                        ),
                         n_permutations=n_permutations,
                         methodology_policy_name=methodology_params["methodology_policy_name"],
                         class_weight_policy=methodology_params["class_weight_policy"],
@@ -383,6 +395,8 @@ def execute_variant(
         "split_logic": params.get("cv"),
         "model": params.get("model"),
         "target_definition": params.get("target"),
+        "feature_space": params.get("feature_space"),
+        "roi_spec_path": params.get("roi_spec_path"),
         "primary_metric_name": primary_metric_name,
         "primary_metric_value": primary_metric_value,
         "secondary_metrics": {
@@ -467,6 +481,8 @@ def execute_variant(
         "test_subject": params.get("test_subject"),
         "filter_task": params.get("filter_task"),
         "filter_modality": params.get("filter_modality"),
+        "feature_space": params.get("feature_space"),
+        "roi_spec_path": params.get("roi_spec_path"),
         "start_section": start_section,
         "end_section": end_section,
         "base_artifact_id": base_artifact_id,

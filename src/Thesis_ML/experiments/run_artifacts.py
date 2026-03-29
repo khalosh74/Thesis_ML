@@ -454,6 +454,8 @@ def build_run_config_payload(
     data_artifacts: dict[str, Any] | None,
     filter_task: str | None,
     filter_modality: str | None,
+    feature_space: str,
+    roi_spec_path: Path | None,
     n_permutations: int,
     framework_mode: str,
     canonical_run: bool,
@@ -593,6 +595,11 @@ def build_run_config_payload(
         "data_artifacts": dict(data_artifacts) if isinstance(data_artifacts, dict) else None,
         "filter_task": filter_task,
         "filter_modality": filter_modality,
+        "feature_space": str(feature_space),
+        "roi_spec_path": str(roi_spec_path.resolve()) if roi_spec_path is not None else None,
+        "roi_spec_path_relative": (
+            _relative_path(roi_spec_path) if roi_spec_path is not None else None
+        ),
         "n_permutations": int(n_permutations),
         "framework_mode": framework_mode,
         "canonical_run": bool(canonical_run),
@@ -738,6 +745,8 @@ def build_run_result_payload(
     model_cost_tier: str,
     projected_runtime_seconds: int,
     feature_recipe_id: str,
+    feature_space: str,
+    roi_spec_path: Path | None,
     protocol_context: dict[str, Any],
     comparison_context: dict[str, Any],
     stage_timings_seconds: dict[str, float] | None = None,
@@ -845,6 +854,11 @@ def build_run_result_payload(
         "model_cost_tier": str(model_cost_tier),
         "projected_runtime_seconds": int(projected_runtime_seconds),
         "feature_recipe_id": str(feature_recipe_id),
+        "feature_space": str(feature_space),
+        "roi_spec_path": str(roi_spec_path.resolve()) if roi_spec_path is not None else None,
+        "roi_spec_path_relative": (
+            _relative_path(roi_spec_path) if roi_spec_path is not None else None
+        ),
         "protocol_context": protocol_context if protocol_context else None,
         "comparison_context": comparison_context if comparison_context else None,
         "stage_timings_seconds": (

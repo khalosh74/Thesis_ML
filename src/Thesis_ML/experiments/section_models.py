@@ -74,6 +74,7 @@ class FeatureCacheBuildOutput(_SectionModel):
 
 class FeatureMatrixLoadInput(_SectionModel):
     selected_index_df: pd.DataFrame
+    data_root: Path
     cache_manifest_path: Path
     spatial_report_path: Path
     affine_atol: float
@@ -88,6 +89,8 @@ class FeatureMatrixLoadInput(_SectionModel):
     test_subject: str | None = None
     filter_task: str | None = None
     filter_modality: str | None = None
+    feature_space: str = "whole_brain_masked"
+    roi_spec_path: Path | None = None
     load_features_from_cache_fn: Callable[..., tuple[np.ndarray, pd.DataFrame, dict[str, Any]]]
 
 

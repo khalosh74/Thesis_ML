@@ -20,6 +20,7 @@ from Thesis_ML.data.affect_labels import (
     with_binary_valence_like,
     with_coarse_affect,
 )
+from Thesis_ML.experiments.feature_space_loading import load_feature_matrix
 from Thesis_ML.experiments.section_models import (
     DatasetSelectionInput,
     DatasetSelectionOutput,
@@ -175,11 +176,20 @@ def feature_cache_build(section_input: FeatureCacheBuildInput) -> FeatureCacheBu
 
 
 def feature_matrix_load(section_input: FeatureMatrixLoadInput) -> FeatureMatrixLoadOutput:
-    x_matrix, metadata_df, spatial_compatibility = section_input.load_features_from_cache_fn(
-        index_df=section_input.selected_index_df,
+    resolved_roi_spec_path = (
+        str(section_input.roi_spec_path.resolve())
+        if section_input.roi_spec_path is not None
+        else None
+    )
+    x_matrix, metadata_df, spatial_compatibility = load_feature_matrix(
+        selected_index_df=section_input.selected_index_df,
+        data_root=section_input.data_root,
         cache_manifest_path=section_input.cache_manifest_path,
         spatial_report_path=section_input.spatial_report_path,
         affine_atol=section_input.affine_atol,
+        feature_space=section_input.feature_space,
+        roi_spec_path=section_input.roi_spec_path,
+        load_features_from_cache_fn=section_input.load_features_from_cache_fn,
     )
     metadata_df = with_coarse_affect(
         metadata_df,
@@ -210,6 +220,8 @@ def feature_matrix_load(section_input: FeatureMatrixLoadInput) -> FeatureMatrixL
                 "test_subject": section_input.test_subject,
                 "filter_task": section_input.filter_task,
                 "filter_modality": section_input.filter_modality,
+                "feature_space": section_input.feature_space,
+                "roi_spec_path": resolved_roi_spec_path,
                 "cache_manifest_path": str(section_input.cache_manifest_path.resolve()),
             }
         ),

@@ -24,6 +24,8 @@ def variant_label(params: dict[str, Any]) -> str:
         "test_subject",
         "filter_task",
         "filter_modality",
+        "feature_space",
+        "roi_spec_path",
         "methodology_policy_name",
         "class_weight_policy",
         "tuning_search_space_id",

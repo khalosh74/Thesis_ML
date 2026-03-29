@@ -52,13 +52,27 @@ def _build_dataset_subset_label(params: dict[str, Any]) -> str:
     test_subject = str(params.get("test_subject") or "").strip()
     task = str(params.get("filter_task") or "all_tasks").strip() or "all_tasks"
     modality = str(params.get("filter_modality") or "all_modalities").strip() or "all_modalities"
+    feature_space = (
+        str(params.get("feature_space") or "whole_brain_masked").strip()
+        or "whole_brain_masked"
+    )
     if train_subject and test_subject:
         subject_part = f"train={train_subject}|test={test_subject}"
     elif subject:
         subject_part = f"subject={subject}"
     else:
         subject_part = "subject=pooled"
-    return f"{subject_part};task={task};modality={modality}"
+    return f"{subject_part};task={task};modality={modality};feature_space={feature_space}"
+
+
+def _feature_set_label(params: dict[str, Any]) -> str:
+    feature_space = str(params.get("feature_space") or "whole_brain_masked").strip().lower()
+    if feature_space == "roi_mean_predefined":
+        roi_spec_path = str(params.get("roi_spec_path") or "").strip()
+        if roi_spec_path:
+            return f"predefined ROI means ({Path(roi_spec_path).name})"
+        return "predefined ROI means"
+    return "masked whole-brain voxel cache (current pipeline)"
 
 
 def status_for_machine_sheet(variant_records: list[dict[str, Any]]) -> str:
@@ -354,7 +368,7 @@ def build_run_log_writeback_rows(
                 "Task_Coverage": "",
                 "Modality_Coverage": "",
                 "Model": row.get("model"),
-                "Feature_Set": "masked whole-brain voxel cache (current pipeline)",
+                "Feature_Set": _feature_set_label(row),
                 "Run_Type": "Decision-support",
                 "Affects_Frozen_Pipeline": "Yes",
                 "Eligible_for_Method_Decision": (
