@@ -3131,7 +3131,7 @@
           "end_section": "evaluation",
           "base_artifact_id": null,
           "reuse_policy": "require_explicit_base",
-          "search_space_id": "SS05",
+          "search_space_id": null,
           "study_id": null,
           "trial_id": null,
           "cell_id": null,

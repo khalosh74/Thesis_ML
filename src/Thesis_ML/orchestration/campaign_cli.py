@@ -12,6 +12,7 @@ from Thesis_ML.config.paths import (
     DEFAULT_WORKBOOK_OUTPUT_DIR,
 )
 from Thesis_ML.config.runtime_selection import resolve_runtime_config_path
+from Thesis_ML.experiments.compute_policy import HARDWARE_MODE_CHOICES
 from Thesis_ML.orchestration.contracts import CompiledStudyManifest
 from Thesis_ML.orchestration.execution_bridge import command_to_text as _command_to_text
 from Thesis_ML.orchestration.experiment_selection import (
@@ -128,6 +129,52 @@ def build_parser() -> argparse.ArgumentParser:
         help="Optional number of Optuna trials per search space when --search-mode optuna is used.",
     )
     parser.add_argument(
+        "--max-parallel-runs",
+        type=int,
+        default=1,
+        help=(
+            "Operational scheduling control: maximum process-level runs dispatched in parallel "
+            "within a phase group."
+        ),
+    )
+    parser.add_argument(
+        "--max-parallel-gpu-runs",
+        type=int,
+        default=1,
+        help=(
+            "Operational scheduling control: GPU-lane cap per dispatch window when hardware mode "
+            "supports GPU usage."
+        ),
+    )
+    parser.add_argument(
+        "--hardware-mode",
+        default="cpu_only",
+        choices=list(HARDWARE_MODE_CHOICES),
+        help="Operational compute policy for dispatched decision-support runs.",
+    )
+    parser.add_argument(
+        "--gpu-device-id",
+        type=int,
+        default=None,
+        help="Optional GPU device ID for gpu_only/max_both operational scheduling.",
+    )
+    parser.add_argument(
+        "--deterministic-compute",
+        action="store_true",
+        help="Operational flag: request deterministic compute mode for dispatched runs.",
+    )
+    parser.add_argument(
+        "--allow-backend-fallback",
+        action="store_true",
+        help="Operational flag: allow GPU requests to fall back to CPU reference backend.",
+    )
+    parser.add_argument(
+        "--phase-plan",
+        default="auto",
+        choices=["auto", "flat"],
+        help="Operational scheduler phase plan selection (default: auto).",
+    )
+    parser.add_argument(
         "--write-back-workbook",
         action="store_true",
         help="When --workbook is used, write machine/trial outputs back to a versioned workbook copy.",
@@ -205,6 +252,20 @@ def print_stage1_commands(args: argparse.Namespace) -> None:
         base.extend(["--search-mode", str(args.search_mode)])
     if args.optuna_trials:
         base.extend(["--optuna-trials", str(args.optuna_trials)])
+    if int(args.max_parallel_runs) != 1:
+        base.extend(["--max-parallel-runs", str(args.max_parallel_runs)])
+    if int(args.max_parallel_gpu_runs) != 1:
+        base.extend(["--max-parallel-gpu-runs", str(args.max_parallel_gpu_runs)])
+    if str(args.hardware_mode) != "cpu_only":
+        base.extend(["--hardware-mode", str(args.hardware_mode)])
+    if args.gpu_device_id is not None:
+        base.extend(["--gpu-device-id", str(args.gpu_device_id)])
+    if bool(args.deterministic_compute):
+        base.append("--deterministic-compute")
+    if bool(args.allow_backend_fallback):
+        base.append("--allow-backend-fallback")
+    if str(args.phase_plan).strip().lower() != "auto":
+        base.extend(["--phase-plan", str(args.phase_plan)])
 
     command = _command_to_text(base)
     print("Stage 1 command:")
@@ -268,6 +329,13 @@ def main(
                 append_workbook_run_log=not bool(args.no_write_back_run_log),
                 search_mode=str(args.search_mode),
                 optuna_trials=args.optuna_trials,
+                max_parallel_runs=int(args.max_parallel_runs),
+                max_parallel_gpu_runs=int(args.max_parallel_gpu_runs),
+                hardware_mode=str(args.hardware_mode),
+                gpu_device_id=args.gpu_device_id,
+                deterministic_compute=bool(args.deterministic_compute),
+                allow_backend_fallback=bool(args.allow_backend_fallback),
+                phase_plan=str(args.phase_plan),
             )
         else:
             result = run_decision_support_campaign_fn(
@@ -289,6 +357,13 @@ def main(
                 dataset_name=args.dataset_name,
                 search_mode=str(args.search_mode),
                 optuna_trials=args.optuna_trials,
+                max_parallel_runs=int(args.max_parallel_runs),
+                max_parallel_gpu_runs=int(args.max_parallel_gpu_runs),
+                hardware_mode=str(args.hardware_mode),
+                gpu_device_id=args.gpu_device_id,
+                deterministic_compute=bool(args.deterministic_compute),
+                allow_backend_fallback=bool(args.allow_backend_fallback),
+                phase_plan=str(args.phase_plan),
             )
     except RuntimeError as exc:
         print_registry_status(registry)

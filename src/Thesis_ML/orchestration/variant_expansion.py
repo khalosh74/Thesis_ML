@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from typing import Any
 
 from Thesis_ML.orchestration.search_space import expand_variant_search_space
@@ -344,8 +345,256 @@ def expand_experiment_variants(
     return variants, warnings
 
 
+def _copy_variant(variant: dict[str, Any]) -> dict[str, Any]:
+    copied = dict(variant)
+    copied["params"] = (
+        dict(variant.get("params", {})) if isinstance(variant.get("params"), dict) else {}
+    )
+    copied["factor_settings"] = (
+        dict(variant.get("factor_settings", {}))
+        if isinstance(variant.get("factor_settings"), dict)
+        else {}
+    )
+    copied["fixed_controls"] = (
+        dict(variant.get("fixed_controls", {}))
+        if isinstance(variant.get("fixed_controls"), dict)
+        else {}
+    )
+    copied["design_metadata"] = (
+        dict(variant.get("design_metadata", {}))
+        if isinstance(variant.get("design_metadata"), dict)
+        else {}
+    )
+    return copied
+
+
+def _reindex_variants(variants: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    resolved: list[dict[str, Any]] = []
+    seen_trial_ids: set[str] = set()
+    for index, variant in enumerate(variants, start=1):
+        row = _copy_variant(variant)
+        row["variant_index"] = int(index)
+        trial_id = str(row.get("trial_id")).strip() if row.get("trial_id") else None
+        if trial_id:
+            candidate = trial_id
+            suffix = 1
+            while candidate in seen_trial_ids:
+                suffix += 1
+                candidate = f"{trial_id}__v{suffix:03d}"
+            seen_trial_ids.add(candidate)
+            row["trial_id"] = candidate
+        resolved.append(row)
+    return resolved
+
+
+def _expand_e12_permutation_cells(
+    *,
+    variants: list[dict[str, Any]],
+    n_permutations: int,
+) -> tuple[list[dict[str, Any]], list[str]]:
+    if int(n_permutations) <= 0:
+        return (
+            [],
+            [
+                "E12 requires --n-permutations > 0 to materialize permutation chunks."
+            ],
+        )
+
+    chunk_size = 50
+    if int(n_permutations) < chunk_size:
+        chunk_size = int(n_permutations)
+    chunk_count = max(1, int(math.ceil(float(n_permutations) / float(chunk_size))))
+    cells: list[dict[str, Any]] = []
+    for base in variants:
+        if not bool(base.get("supported", False)):
+            cells.append(_copy_variant(base))
+            continue
+        for chunk_index in range(1, chunk_count + 1):
+            start = int((chunk_index - 1) * chunk_size + 1)
+            end = int(min(int(n_permutations), chunk_index * chunk_size))
+            size = int(max(0, end - start + 1))
+            row = _copy_variant(base)
+            row["n_permutations_override"] = size
+            row["factor_settings"]["permutation_chunk_index"] = int(chunk_index)
+            row["design_metadata"].update(
+                {
+                    "special_cell_kind": "permutation_chunk",
+                    "chunk_index": int(chunk_index),
+                    "chunk_start": int(start),
+                    "chunk_end": int(end),
+                    "chunk_size": int(size),
+                    "total_permutations_requested": int(n_permutations),
+                }
+            )
+            trial_id = str(row.get("trial_id")).strip() if row.get("trial_id") else None
+            if trial_id:
+                row["trial_id"] = f"{trial_id}__perm_chunk_{chunk_index:03d}"
+            cell_id = str(row.get("cell_id")).strip() if row.get("cell_id") else None
+            row["cell_id"] = (
+                f"{cell_id}__perm_chunk_{chunk_index:03d}"
+                if cell_id
+                else f"{row.get('template_id', 'cell')}__perm_chunk_{chunk_index:03d}"
+            )
+            cells.append(row)
+    return _reindex_variants(cells), []
+
+
+def _resolve_omitted_sessions(
+    *,
+    dataset_scope: dict[str, Any],
+    subject: str,
+    task: str,
+    filter_modality: str | None,
+) -> list[str]:
+    modality_map = dataset_scope.get("sessions_by_subject_task_modality", {})
+    if not isinstance(modality_map, dict):
+        return []
+    subject_map = modality_map.get(str(subject), {})
+    if not isinstance(subject_map, dict):
+        return []
+    task_map = subject_map.get(str(task), {})
+    if not isinstance(task_map, dict):
+        return []
+
+    if filter_modality:
+        values = task_map.get(str(filter_modality), [])
+        if not isinstance(values, list):
+            return []
+        return sorted(str(value) for value in values if str(value).strip())
+
+    merged: set[str] = set()
+    for raw_sessions in task_map.values():
+        if not isinstance(raw_sessions, list):
+            continue
+        for value in raw_sessions:
+            value_text = str(value).strip()
+            if value_text:
+                merged.add(value_text)
+    return sorted(merged)
+
+
+def _expand_e23_omitted_session_cells(
+    *,
+    variants: list[dict[str, Any]],
+    dataset_scope: dict[str, Any],
+) -> tuple[list[dict[str, Any]], list[str]]:
+    cells: list[dict[str, Any]] = []
+    missing: list[str] = []
+    default_subjects = [str(value) for value in dataset_scope.get("subjects", [])]
+    default_tasks = [str(value) for value in dataset_scope.get("tasks", [])]
+
+    for base in variants:
+        if not bool(base.get("supported", False)):
+            cells.append(_copy_variant(base))
+            continue
+        params = dict(base.get("params", {}))
+        subject_values = (
+            [str(params.get("subject"))]
+            if params.get("subject")
+            else list(default_subjects)
+        )
+        task_values = (
+            [str(params.get("filter_task"))]
+            if params.get("filter_task")
+            else list(default_tasks)
+        )
+        filter_modality = (
+            str(params.get("filter_modality")).strip()
+            if params.get("filter_modality")
+            else None
+        )
+        for subject in subject_values:
+            for task in task_values:
+                omitted_sessions = _resolve_omitted_sessions(
+                    dataset_scope=dataset_scope,
+                    subject=str(subject),
+                    task=str(task),
+                    filter_modality=filter_modality,
+                )
+                if not omitted_sessions:
+                    missing.append(
+                        f"subject={subject}, task={task}, modality={filter_modality or 'all'}"
+                    )
+                    continue
+                for omitted_session in omitted_sessions:
+                    row = _copy_variant(base)
+                    row_params = dict(row.get("params", {}))
+                    row_params["subject"] = str(subject)
+                    row_params["filter_task"] = str(task)
+                    row_params["omitted_session"] = str(omitted_session)
+                    row["params"] = row_params
+                    row["factor_settings"]["omitted_session"] = str(omitted_session)
+                    row["design_metadata"].update(
+                        {
+                            "special_cell_kind": "session_influence_jackknife",
+                            "omitted_session": str(omitted_session),
+                        }
+                    )
+                    trial_id = str(row.get("trial_id")).strip() if row.get("trial_id") else None
+                    suffix = f"__{subject}__{task}__omit_{omitted_session}"
+                    if trial_id:
+                        row["trial_id"] = f"{trial_id}{suffix}"
+                    cell_id = str(row.get("cell_id")).strip() if row.get("cell_id") else None
+                    row["cell_id"] = (
+                        f"{cell_id}{suffix}"
+                        if cell_id
+                        else f"{row.get('template_id', 'cell')}{suffix}"
+                    )
+                    cells.append(row)
+
+    if not cells:
+        reason = (
+            "E23 omitted-session units could not be derived safely from dataset scope: "
+            + "; ".join(sorted(set(missing)))
+        )
+        return [], [reason]
+    return _reindex_variants(cells), []
+
+
+def _expand_e24_rerun_cells(
+    *,
+    variants: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[str]]:
+    cells: list[dict[str, Any]] = []
+    for base in variants:
+        row = _copy_variant(base)
+        row["sequential_only"] = True
+        row["design_metadata"].update(
+            {
+                "special_cell_kind": "reproducibility_rerun",
+                "sequential_only": True,
+            }
+        )
+        cells.append(row)
+    return _reindex_variants(cells), []
+
+
+def materialize_experiment_cells(
+    *,
+    experiment: dict[str, Any],
+    variants: list[dict[str, Any]],
+    dataset_scope: dict[str, Any],
+    n_permutations: int,
+) -> tuple[list[dict[str, Any]], list[str]]:
+    experiment_id = str(experiment.get("experiment_id"))
+    if experiment_id == "E12":
+        return _expand_e12_permutation_cells(
+            variants=variants,
+            n_permutations=int(n_permutations),
+        )
+    if experiment_id == "E23":
+        return _expand_e23_omitted_session_cells(
+            variants=variants,
+            dataset_scope=dataset_scope,
+        )
+    if experiment_id == "E24":
+        return _expand_e24_rerun_cells(variants=variants)
+    return _reindex_variants([_copy_variant(variant) for variant in variants]), []
+
+
 __all__ = [
     "expand_experiment_variants",
     "expand_template_variants",
+    "materialize_experiment_cells",
     "variant_label",
 ]

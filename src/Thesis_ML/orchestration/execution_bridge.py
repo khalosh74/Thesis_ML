@@ -13,11 +13,25 @@ from Thesis_ML.artifacts.registry import (
     compute_config_hash,
     register_artifact,
 )
+from Thesis_ML.config.framework_mode import FrameworkMode
 from Thesis_ML.config.methodology import (
     ClassWeightPolicy,
     MethodologyPolicy,
     MethodologyPolicyName,
 )
+from Thesis_ML.experiments.compute_policy import resolve_compute_policy
+from Thesis_ML.experiments.compute_scheduler import (
+    ComputeRunAssignment,
+    ComputeRunRequest,
+    materialize_scheduled_compute_policy,
+    plan_compute_schedule,
+)
+from Thesis_ML.experiments.parallel_execution import (
+    OfficialRunJob,
+    execute_official_run_jobs,
+)
+from Thesis_ML.experiments.run_states import RUN_STATUS_SUCCESS
+from Thesis_ML.experiments.runtime_policies import resolve_run_timeout_policy
 from Thesis_ML.config.metric_policy import extract_metric_value, validate_metric_name
 from Thesis_ML.orchestration.reporting import build_dataset_subset_label
 from Thesis_ML.orchestration.variant_expansion import variant_label
@@ -120,6 +134,12 @@ def build_command(
     class_weight_policy: str | None = None,
     tuning_search_space_id: str | None = None,
     tuning_search_space_version: str | None = None,
+    hardware_mode: str | None = None,
+    gpu_device_id: int | None = None,
+    deterministic_compute: bool = False,
+    allow_backend_fallback: bool = False,
+    max_parallel_runs: int | None = None,
+    max_parallel_gpu_runs: int | None = None,
 ) -> list[str]:
     command = [
         sys.executable,
@@ -176,6 +196,18 @@ def build_command(
         command.extend(["--tuning-search-space-id", str(tuning_search_space_id)])
     if tuning_search_space_version:
         command.extend(["--tuning-search-space-version", str(tuning_search_space_version)])
+    if hardware_mode:
+        command.extend(["--hardware-mode", str(hardware_mode)])
+    if gpu_device_id is not None:
+        command.extend(["--gpu-device-id", str(gpu_device_id)])
+    if deterministic_compute:
+        command.append("--deterministic-compute")
+    if allow_backend_fallback:
+        command.append("--allow-backend-fallback")
+    if max_parallel_runs is not None:
+        command.extend(["--max-parallel-runs", str(int(max_parallel_runs))])
+    if max_parallel_gpu_runs is not None:
+        command.extend(["--max-parallel-gpu-runs", str(int(max_parallel_gpu_runs))])
     if start_section:
         command.extend(["--start-section", str(start_section)])
     if end_section:
@@ -191,6 +223,234 @@ def command_to_text(command: list[str]) -> str:
     return " ".join(shlex.quote(part) for part in command)
 
 
+def resolve_variant_id(variant: dict[str, Any]) -> str:
+    template_id = str(variant["template_id"])
+    variant_index = int(variant["variant_index"])
+    trial_id = str(variant.get("trial_id")).strip() if variant.get("trial_id") else None
+    return trial_id or f"{template_id}__{variant_index:03d}"
+
+
+def resolve_variant_run_id(
+    *,
+    experiment_id: str,
+    variant: dict[str, Any],
+    campaign_id: str,
+) -> str:
+    variant_id = resolve_variant_id(variant)
+    run_token = variant_id.replace(" ", "_").replace("/", "_").replace("\\", "_").replace(":", "_")
+    return f"ds_{experiment_id}_{run_token}_{campaign_id}"
+
+
+def _resolve_run_kwargs_methodology_params(
+    *,
+    params: dict[str, Any],
+    variant: dict[str, Any],
+) -> tuple[dict[str, Any], str | None]:
+    try:
+        resolved = _resolve_methodology_params(params)
+    except ValueError as exc:
+        return {}, str(exc)
+    return resolved, None
+
+
+def build_variant_run_kwargs(
+    *,
+    experiment: dict[str, Any],
+    variant: dict[str, Any],
+    campaign_id: str,
+    experiment_root: Path,
+    index_csv: Path,
+    data_root: Path,
+    cache_dir: Path,
+    seed: int,
+    n_permutations: int,
+    hardware_mode: str,
+    gpu_device_id: int | None,
+    deterministic_compute: bool,
+    allow_backend_fallback: bool,
+    scheduled_compute_assignment: ComputeRunAssignment | None = None,
+) -> tuple[dict[str, Any] | None, str | None, str]:
+    experiment_id = str(experiment["experiment_id"])
+    params = dict(variant.get("params", {}))
+    methodology_params, blocked_reason = _resolve_run_kwargs_methodology_params(
+        params=params,
+        variant=variant,
+    )
+    run_id = resolve_variant_run_id(
+        experiment_id=experiment_id,
+        variant=variant,
+        campaign_id=campaign_id,
+    )
+    if blocked_reason is not None:
+        return None, blocked_reason, run_id
+
+    effective_seed = int(variant.get("seed")) if variant.get("seed") is not None else int(seed)
+    reports_root = experiment_root / "reports"
+    reports_root.mkdir(parents=True, exist_ok=True)
+    start_section = (
+        str(variant.get("start_section")).strip() if variant.get("start_section") else None
+    )
+    end_section = str(variant.get("end_section")).strip() if variant.get("end_section") else None
+    base_artifact_id = (
+        str(variant.get("base_artifact_id")).strip() if variant.get("base_artifact_id") else None
+    )
+    reuse_policy = str(variant.get("reuse_policy")).strip() if variant.get("reuse_policy") else None
+    effective_n_permutations = (
+        int(variant.get("n_permutations_override"))
+        if variant.get("n_permutations_override") is not None
+        else int(n_permutations)
+    )
+
+    run_kwargs = {
+        "index_csv": Path(index_csv),
+        "data_root": Path(data_root),
+        "cache_dir": Path(cache_dir),
+        "target": str(params["target"]),
+        "model": str(params["model"]),
+        "cv": str(params["cv"]),
+        "subject": str(params["subject"]) if params.get("subject") else None,
+        "train_subject": str(params["train_subject"]) if params.get("train_subject") else None,
+        "test_subject": str(params["test_subject"]) if params.get("test_subject") else None,
+        "seed": int(effective_seed),
+        "filter_task": str(params["filter_task"]) if params.get("filter_task") else None,
+        "filter_modality": (
+            str(params["filter_modality"]) if params.get("filter_modality") else None
+        ),
+        "feature_space": str(params["feature_space"]) if params.get("feature_space") else "whole_brain_masked",
+        "roi_spec_path": str(params["roi_spec_path"]) if params.get("roi_spec_path") else None,
+        "preprocessing_strategy": (
+            str(params["preprocessing_strategy"]) if params.get("preprocessing_strategy") else None
+        ),
+        "dimensionality_strategy": (
+            str(params["dimensionality_strategy"]) if params.get("dimensionality_strategy") else "none"
+        ),
+        "pca_n_components": (
+            int(params["pca_n_components"]) if params.get("pca_n_components") is not None else None
+        ),
+        "pca_variance_ratio": (
+            float(params["pca_variance_ratio"]) if params.get("pca_variance_ratio") is not None else None
+        ),
+        "n_permutations": int(effective_n_permutations),
+        "methodology_policy_name": methodology_params["methodology_policy_name"],
+        "class_weight_policy": methodology_params["class_weight_policy"],
+        "tuning_enabled": bool(methodology_params["tuning_enabled"]),
+        "tuning_search_space_id": methodology_params["tuning_search_space_id"],
+        "tuning_search_space_version": methodology_params["tuning_search_space_version"],
+        "tuning_inner_cv_scheme": methodology_params["tuning_inner_cv_scheme"],
+        "tuning_inner_group_field": methodology_params["tuning_inner_group_field"],
+        "run_id": run_id,
+        "reports_root": reports_root,
+        "start_section": start_section,
+        "end_section": end_section,
+        "base_artifact_id": base_artifact_id,
+        "reuse_policy": reuse_policy,
+        "hardware_mode": str(hardware_mode),
+        "gpu_device_id": int(gpu_device_id) if gpu_device_id is not None else None,
+        "deterministic_compute": bool(deterministic_compute),
+        "allow_backend_fallback": bool(allow_backend_fallback),
+        "max_parallel_runs": 1,
+        "max_parallel_gpu_runs": 1,
+        "scheduled_compute_assignment": (
+            scheduled_compute_assignment.to_payload()
+            if scheduled_compute_assignment is not None
+            else None
+        ),
+    }
+    return run_kwargs, None, run_id
+
+
+def build_variant_official_job(
+    *,
+    experiment: dict[str, Any],
+    variant: dict[str, Any],
+    campaign_id: str,
+    experiment_root: Path,
+    index_csv: Path,
+    data_root: Path,
+    cache_dir: Path,
+    seed: int,
+    n_permutations: int,
+    phase_name: str,
+    order_index: int,
+    hardware_mode: str,
+    gpu_device_id: int | None,
+    deterministic_compute: bool,
+    allow_backend_fallback: bool,
+    scheduled_compute_assignment: ComputeRunAssignment | None = None,
+) -> tuple[OfficialRunJob | None, str | None, str]:
+    run_kwargs, blocked_reason, run_id = build_variant_run_kwargs(
+        experiment=experiment,
+        variant=variant,
+        campaign_id=campaign_id,
+        experiment_root=experiment_root,
+        index_csv=index_csv,
+        data_root=data_root,
+        cache_dir=cache_dir,
+        seed=seed,
+        n_permutations=n_permutations,
+        hardware_mode=hardware_mode,
+        gpu_device_id=gpu_device_id,
+        deterministic_compute=deterministic_compute,
+        allow_backend_fallback=allow_backend_fallback,
+        scheduled_compute_assignment=scheduled_compute_assignment,
+    )
+    if run_kwargs is None:
+        return None, blocked_reason, run_id
+
+    timeout_policy = resolve_run_timeout_policy(
+        framework_mode=FrameworkMode.EXPLORATORY,
+        model_name=str(run_kwargs["model"]),
+    )
+    run_identity = {
+        "run_id": str(run_id),
+        "experiment_id": str(experiment.get("experiment_id")),
+        "template_id": str(variant.get("template_id")),
+        "variant_id": resolve_variant_id(variant),
+        "cell_id": variant.get("cell_id"),
+        "repeat_id": variant.get("repeat_id"),
+    }
+    return (
+        OfficialRunJob(
+            order_index=int(order_index),
+            run_id=str(run_id),
+            run_kwargs=run_kwargs,
+            timeout_policy=timeout_policy,
+            phase_name=str(phase_name),
+            run_identity=run_identity,
+        ),
+        None,
+        run_id,
+    )
+
+
+def execute_official_jobs(
+    *,
+    jobs: list[OfficialRunJob],
+    max_parallel_runs: int,
+    run_experiment_fn: Callable[..., dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    watchdog_executor = None
+    if run_experiment_fn is not None:
+        module_name = getattr(run_experiment_fn, "__module__", "")
+        function_name = getattr(run_experiment_fn, "__name__", "")
+        if not (
+            module_name == "Thesis_ML.experiments.run_experiment"
+            and function_name == "run_experiment"
+        ):
+            def _local_watchdog(**kwargs: Any) -> dict[str, Any]:
+                run_kwargs = dict(kwargs.get("run_kwargs", {}))
+                result = run_experiment_fn(**run_kwargs)
+                return {"status": "success", "run_payload": result}
+
+            watchdog_executor = _local_watchdog
+
+    return execute_official_run_jobs(
+        jobs=jobs,
+        max_parallel_runs=max_parallel_runs,
+        watchdog_executor=watchdog_executor,
+    )
+
+
 def execute_variant(
     *,
     experiment: dict[str, Any],
@@ -204,12 +464,19 @@ def execute_variant(
     n_permutations: int,
     dry_run: bool,
     run_experiment_fn: Callable[..., dict[str, Any]],
+    hardware_mode: str = "cpu_only",
+    gpu_device_id: int | None = None,
+    deterministic_compute: bool = False,
+    allow_backend_fallback: bool = False,
+    max_parallel_runs: int = 1,
+    max_parallel_gpu_runs: int = 1,
+    scheduled_compute_assignment: dict[str, Any] | None = None,
+    job_execution_result: dict[str, Any] | None = None,
     artifact_registry_path: Path | None = None,
     code_ref: str | None = None,
 ) -> dict[str, Any]:
     experiment_id = str(experiment["experiment_id"])
     template_id = str(variant["template_id"])
-    variant_index = int(variant["variant_index"])
     repeat_raw = variant.get("repeat_id")
     seed_raw = variant.get("seed")
     study_id = str(variant.get("study_id")).strip() if variant.get("study_id") else None
@@ -232,7 +499,7 @@ def execute_variant(
         if isinstance(variant.get("design_metadata"), dict)
         else {}
     )
-    variant_id = trial_id or f"{template_id}__{variant_index:03d}"
+    variant_id = resolve_variant_id(variant)
     params = dict(variant.get("params", {}))
     params_snapshot = dict(params)
     supported = bool(variant.get("supported", False))
@@ -250,8 +517,11 @@ def execute_variant(
     )
     search_assignment = variant.get("search_assignment")
 
-    run_token = variant_id.replace(" ", "_").replace("/", "_").replace("\\", "_").replace(":", "_")
-    run_id = f"ds_{experiment_id}_{run_token}_{campaign_id}"
+    run_id = resolve_variant_run_id(
+        experiment_id=experiment_id,
+        variant=variant,
+        campaign_id=campaign_id,
+    )
     reports_root = experiment_root / "reports"
     reports_root.mkdir(parents=True, exist_ok=True)
     manifests_dir = experiment_root / "run_manifests"
@@ -265,6 +535,11 @@ def execute_variant(
     result: dict[str, Any] | None = None
 
     effective_seed = int(trial_seed) if trial_seed is not None else int(seed)
+    effective_n_permutations = (
+        int(variant.get("n_permutations_override"))
+        if variant.get("n_permutations_override") is not None
+        else int(n_permutations)
+    )
 
     if not supported:
         status = "blocked"
@@ -282,7 +557,7 @@ def execute_variant(
                 reports_root=reports_root,
                 run_id=run_id,
                 seed=effective_seed,
-                n_permutations=n_permutations,
+                n_permutations=int(effective_n_permutations),
                 params=params,
                 start_section=start_section,
                 end_section=end_section,
@@ -292,10 +567,39 @@ def execute_variant(
                 class_weight_policy=methodology_params["class_weight_policy"],
                 tuning_search_space_id=methodology_params["tuning_search_space_id"],
                 tuning_search_space_version=methodology_params["tuning_search_space_version"],
+                hardware_mode=hardware_mode,
+                gpu_device_id=gpu_device_id,
+                deterministic_compute=bool(deterministic_compute),
+                allow_backend_fallback=bool(allow_backend_fallback),
+                max_parallel_runs=int(max_parallel_runs),
+                max_parallel_gpu_runs=int(max_parallel_gpu_runs),
             )
             command_text = command_to_text(command)
             if dry_run:
                 status = "dry_run"
+            elif job_execution_result is not None:
+                execution_error = job_execution_result.get("execution_error")
+                watchdog_result = job_execution_result.get("watchdog_result")
+                if isinstance(execution_error, dict):
+                    status = "failed"
+                    error = str(execution_error.get("error") or "official_job_execution_error")
+                elif not isinstance(watchdog_result, dict):
+                    status = "failed"
+                    error = "official_job_result_missing_watchdog_payload"
+                else:
+                    watchdog_status = str(watchdog_result.get("status", "")).strip().lower()
+                    if watchdog_status in {"success", RUN_STATUS_SUCCESS} and isinstance(
+                        watchdog_result.get("run_payload"), dict
+                    ):
+                        result = dict(watchdog_result["run_payload"])
+                        status = "completed"
+                    else:
+                        status = "failed"
+                        error = str(
+                            watchdog_result.get("error")
+                            or watchdog_result.get("error_code")
+                            or "official_job_failed"
+                        )
             else:
                 try:
                     result = run_experiment_fn(
@@ -349,7 +653,7 @@ def execute_variant(
                             if params.get("pca_variance_ratio") is not None
                             else None
                         ),
-                        n_permutations=n_permutations,
+                        n_permutations=int(effective_n_permutations),
                         methodology_policy_name=methodology_params["methodology_policy_name"],
                         class_weight_policy=methodology_params["class_weight_policy"],
                         tuning_enabled=bool(methodology_params["tuning_enabled"]),
@@ -365,6 +669,17 @@ def execute_variant(
                         end_section=end_section,
                         base_artifact_id=base_artifact_id,
                         reuse_policy=reuse_policy,
+                        hardware_mode=str(hardware_mode),
+                        gpu_device_id=(int(gpu_device_id) if gpu_device_id is not None else None),
+                        deterministic_compute=bool(deterministic_compute),
+                        allow_backend_fallback=bool(allow_backend_fallback),
+                        max_parallel_runs=int(max_parallel_runs),
+                        max_parallel_gpu_runs=int(max_parallel_gpu_runs),
+                        scheduled_compute_assignment=(
+                            dict(scheduled_compute_assignment)
+                            if isinstance(scheduled_compute_assignment, dict)
+                            else None
+                        ),
                     )
                     status = "completed"
                 except Exception as exc:
@@ -402,7 +717,7 @@ def execute_variant(
             "data_root": str(data_root.resolve()),
             "cache_dir": str(cache_dir.resolve()),
             "seed": int(effective_seed),
-            "n_permutations": int(n_permutations),
+            "n_permutations": int(effective_n_permutations),
             "start_section": start_section,
             "end_section": end_section,
             "base_artifact_id": base_artifact_id,
@@ -418,6 +733,17 @@ def execute_variant(
             "factor_settings": factor_settings,
             "fixed_controls": fixed_controls,
             "design_metadata": design_metadata,
+            "hardware_mode": str(hardware_mode),
+            "gpu_device_id": int(gpu_device_id) if gpu_device_id is not None else None,
+            "deterministic_compute": bool(deterministic_compute),
+            "allow_backend_fallback": bool(allow_backend_fallback),
+            "max_parallel_runs": int(max_parallel_runs),
+            "max_parallel_gpu_runs": int(max_parallel_gpu_runs),
+            "scheduled_compute_assignment": (
+                dict(scheduled_compute_assignment)
+                if isinstance(scheduled_compute_assignment, dict)
+                else None
+            ),
         },
         "dataset_subset": build_dataset_subset_label(params),
         "split_logic": params.get("cv"),
@@ -541,6 +867,15 @@ def execute_variant(
         "accuracy": _safe_float(metrics.get("accuracy")),
         "run_id": run_id,
         "seed": int(effective_seed),
+        "hardware_mode": str(hardware_mode),
+        "gpu_device_id": int(gpu_device_id) if gpu_device_id is not None else None,
+        "deterministic_compute": bool(deterministic_compute),
+        "allow_backend_fallback": bool(allow_backend_fallback),
+        "scheduled_compute_assignment": (
+            dict(scheduled_compute_assignment)
+            if isinstance(scheduled_compute_assignment, dict)
+            else None
+        ),
         "report_dir": result.get("report_dir") if result else None,
         "config_path": result.get("config_path") if result else None,
         "metrics_path": result.get("metrics_path") if result else None,
@@ -557,4 +892,13 @@ def execute_variant(
     return record
 
 
-__all__ = ["build_command", "command_to_text", "execute_variant"]
+__all__ = [
+    "build_command",
+    "build_variant_official_job",
+    "build_variant_run_kwargs",
+    "command_to_text",
+    "execute_official_jobs",
+    "execute_variant",
+    "resolve_variant_id",
+    "resolve_variant_run_id",
+]

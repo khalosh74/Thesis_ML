@@ -48,12 +48,41 @@ def collect_dataset_scope(
         selected = set(modalities_filter)
         modalities = [value for value in modalities if value in selected]
 
+    scoped_df = df.copy()
+    if subjects_filter:
+        scoped_df = scoped_df[scoped_df["subject"].astype(str).isin(set(subjects_filter))]
+    if tasks_filter:
+        scoped_df = scoped_df[scoped_df["task"].astype(str).isin(set(tasks_filter))]
+    if modalities_filter:
+        scoped_df = scoped_df[scoped_df["modality"].astype(str).isin(set(modalities_filter))]
+
     ordered_pairs = [(train, test) for train in subjects for test in subjects if train != test]
+    sessions = _as_str_list(scoped_df["session"]) if "session" in scoped_df.columns else []
+    sessions_by_subject_task_modality: dict[str, dict[str, dict[str, list[str]]]] = {}
+    if "session" in scoped_df.columns:
+        for _, row in scoped_df.iterrows():
+            subject = str(row.get("subject", "")).strip()
+            task = str(row.get("task", "")).strip()
+            modality = str(row.get("modality", "")).strip()
+            session = str(row.get("session", "")).strip()
+            if not subject or not task or not modality or not session:
+                continue
+            subject_map = sessions_by_subject_task_modality.setdefault(subject, {})
+            task_map = subject_map.setdefault(task, {})
+            session_values = task_map.setdefault(modality, [])
+            if session not in session_values:
+                session_values.append(session)
+        for subject_map in sessions_by_subject_task_modality.values():
+            for task_map in subject_map.values():
+                for modality_key, session_values in list(task_map.items()):
+                    task_map[modality_key] = sorted(session_values)
 
     return {
         "subjects": subjects,
         "tasks": tasks,
         "modalities": modalities,
+        "sessions": sessions,
+        "sessions_by_subject_task_modality": sessions_by_subject_task_modality,
         "ordered_subject_pairs": ordered_pairs,
         "models_linear": ["ridge", "logreg", "linearsvc"],
     }
