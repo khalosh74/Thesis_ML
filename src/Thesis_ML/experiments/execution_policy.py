@@ -51,6 +51,8 @@ def write_run_status(
     warning_summary: dict[str, Any] | None = None,
     stage_timings_seconds: dict[str, float] | None = None,
     resource_summary: dict[str, Any] | None = None,
+    process_profile_summary: dict[str, Any] | None = None,
+    process_profile_artifacts: dict[str, Any] | None = None,
 ) -> Path:
     report_dir = Path(report_dir)
     report_dir.mkdir(parents=True, exist_ok=True)
@@ -85,6 +87,10 @@ def write_run_status(
         }
     if resource_summary is not None:
         payload["resource_summary"] = dict(resource_summary)
+    if process_profile_summary is not None:
+        payload["process_profile_summary"] = dict(process_profile_summary)
+    if process_profile_artifacts is not None:
+        payload["process_profile_artifacts"] = dict(process_profile_artifacts)
 
     path = run_status_path(report_dir)
     path.write_text(f"{json.dumps(payload, indent=2)}\n", encoding="utf-8")

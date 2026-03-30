@@ -16,6 +16,7 @@ from Thesis_ML.experiments.run_states import (
     RUN_STATUS_SUCCESS,
     RUN_STATUS_TIMED_OUT,
 )
+from Thesis_ML.observability.process_sampler import ProcessSampler
 
 
 def _utc_now() -> str:
@@ -50,6 +51,44 @@ def _output_tail(value: str, *, max_chars: int = 4000) -> str:
     return text[-max_chars:]
 
 
+def _process_profile_artifacts_payload(
+    *,
+    report_dir: Path,
+) -> dict[str, Any]:
+    return {
+        "process_samples_path": str((report_dir / "process_samples.jsonl").resolve()),
+        "process_profile_summary_path": str(
+            (report_dir / "process_profile_summary.json").resolve()
+        ),
+    }
+
+
+def _attach_process_profile_to_status_file(
+    *,
+    report_dir: Path,
+    run_id: str,
+    fallback_status: str,
+    process_profile_summary: dict[str, Any],
+    process_profile_artifacts: dict[str, Any],
+) -> None:
+    status_payload = read_run_status(report_dir)
+    if isinstance(status_payload, dict):
+        status_payload["updated_at_utc"] = _utc_now()
+        status_payload["process_profile_summary"] = dict(process_profile_summary)
+        status_payload["process_profile_artifacts"] = dict(process_profile_artifacts)
+        status_path = report_dir / "run_status.json"
+        status_path.write_text(f"{json.dumps(status_payload, indent=2)}\n", encoding="utf-8")
+        return
+    write_run_status(
+        report_dir,
+        run_id=run_id,
+        status=str(fallback_status),
+        message="process profile attached by timeout watchdog",
+        process_profile_summary=process_profile_summary,
+        process_profile_artifacts=process_profile_artifacts,
+    )
+
+
 def execute_run_with_timeout_watchdog(
     *,
     run_kwargs: dict[str, Any],
@@ -69,6 +108,8 @@ def execute_run_with_timeout_watchdog(
     started_utc = _utc_now()
     started = perf_counter()
     timeout_diagnostics_path: Path | None = None
+    process_profile_summary: dict[str, Any] = {}
+    process_profile_artifacts: dict[str, Any] = {}
 
     with tempfile.TemporaryDirectory(prefix="thesisml_watchdog_") as temp_dir_text:
         temp_dir = Path(temp_dir_text)
@@ -100,6 +141,18 @@ def execute_run_with_timeout_watchdog(
             env=process_env,
         )
         pid = int(process.pid)
+        sample_interval_seconds = float(timeout_policy.get("process_sample_interval_seconds", 10.0))
+        include_io_counters = bool(timeout_policy.get("process_include_io_counters", True))
+        sampler = ProcessSampler(
+            pid=pid,
+            report_dir=report_dir,
+            sample_interval_seconds=sample_interval_seconds,
+            include_io_counters=include_io_counters,
+        )
+        try:
+            sampler.start()
+        except Exception:
+            sampler = None  # type: ignore[assignment]
 
         timed_out = False
         termination_method = "normal_exit"
@@ -124,6 +177,61 @@ def execute_run_with_timeout_watchdog(
         ended = perf_counter()
         ended_utc = _utc_now()
         elapsed_seconds = float(round(ended - started, 6))
+        if sampler is not None:
+            try:
+                sampler.stop()
+                process_profile_summary = sampler.finalize(
+                    wall_clock_elapsed_seconds=elapsed_seconds,
+                    terminated_by_watchdog=bool(timed_out),
+                    termination_method=str(termination_method),
+                    child_pid=pid,
+                )
+            except Exception as exc:
+                process_profile_summary = {
+                    "sampling_enabled": False,
+                    "sample_interval_seconds": float(sample_interval_seconds),
+                    "sample_count": 0,
+                    "first_sample_at_utc": None,
+                    "last_sample_at_utc": None,
+                    "wall_clock_elapsed_seconds": float(elapsed_seconds),
+                    "peak_rss_mb": 0.0,
+                    "peak_vms_mb": 0.0,
+                    "peak_thread_count": 0,
+                    "mean_cpu_percent": 0.0,
+                    "peak_cpu_percent": 0.0,
+                    "peak_child_process_count": 0,
+                    "peak_read_bytes": 0,
+                    "peak_write_bytes": 0,
+                    "sampling_errors": [str(exc)],
+                    "terminated_by_watchdog": bool(timed_out),
+                    "termination_method": str(termination_method),
+                    "child_pid": int(pid),
+                }
+        if not process_profile_summary:
+            process_profile_summary = {
+                "sampling_enabled": False,
+                "sample_interval_seconds": float(sample_interval_seconds),
+                "sample_count": 0,
+                "first_sample_at_utc": None,
+                "last_sample_at_utc": None,
+                "wall_clock_elapsed_seconds": float(elapsed_seconds),
+                "peak_rss_mb": 0.0,
+                "peak_vms_mb": 0.0,
+                "peak_thread_count": 0,
+                "mean_cpu_percent": 0.0,
+                "peak_cpu_percent": 0.0,
+                "peak_child_process_count": 0,
+                "peak_read_bytes": 0,
+                "peak_write_bytes": 0,
+                "sampling_errors": ["process_sampler_unavailable"],
+                "terminated_by_watchdog": bool(timed_out),
+                "termination_method": str(termination_method),
+                "child_pid": int(pid),
+            }
+            (report_dir / "process_samples.jsonl").parent.mkdir(parents=True, exist_ok=True)
+            (report_dir / "process_samples.jsonl").touch(exist_ok=True)
+            _write_json(report_dir / "process_profile_summary.json", process_profile_summary)
+        process_profile_artifacts = _process_profile_artifacts_payload(report_dir=report_dir)
 
         if timed_out:
             existing_status = read_run_status(report_dir)
@@ -154,6 +262,8 @@ def execute_run_with_timeout_watchdog(
                 "stdout_tail": _output_tail(stdout_text),
                 "stderr_tail": _output_tail(stderr_text),
                 "timeout_policy_effective": dict(timeout_policy),
+                "process_profile_summary": dict(process_profile_summary),
+                "process_profile_artifacts": dict(process_profile_artifacts),
             }
             _write_json(timeout_diagnostics_path, timeout_payload)
             write_run_status(
@@ -174,6 +284,8 @@ def execute_run_with_timeout_watchdog(
                     "timeout_diagnostics_path": str(timeout_diagnostics_path.resolve()),
                 },
                 stage_timings_seconds={"wall_clock_elapsed": elapsed_seconds},
+                process_profile_summary=process_profile_summary,
+                process_profile_artifacts=process_profile_artifacts,
             )
             return {
                 "status": RUN_STATUS_TIMED_OUT,
@@ -189,6 +301,8 @@ def execute_run_with_timeout_watchdog(
                 "timeout_diagnostics_path": str(timeout_diagnostics_path.resolve()),
                 "child_pid": pid,
                 "termination_method": termination_method,
+                "process_profile_summary": dict(process_profile_summary),
+                "process_profile_artifacts": dict(process_profile_artifacts),
                 "command": command,
             }
 
@@ -222,8 +336,17 @@ def execute_run_with_timeout_watchdog(
                     "timeout_diagnostics_path": None,
                     "child_pid": pid,
                     "termination_method": termination_method,
+                    "process_profile_summary": dict(process_profile_summary),
+                    "process_profile_artifacts": dict(process_profile_artifacts),
                     "command": command,
                 }
+            _attach_process_profile_to_status_file(
+                report_dir=report_dir,
+                run_id=run_id,
+                fallback_status=RUN_STATUS_SUCCESS,
+                process_profile_summary=process_profile_summary,
+                process_profile_artifacts=process_profile_artifacts,
+            )
             return {
                 "status": RUN_STATUS_SUCCESS,
                 "run_payload": result_payload,
@@ -238,6 +361,8 @@ def execute_run_with_timeout_watchdog(
                 "timeout_diagnostics_path": None,
                 "child_pid": pid,
                 "termination_method": termination_method,
+                "process_profile_summary": dict(process_profile_summary),
+                "process_profile_artifacts": dict(process_profile_artifacts),
                 "command": command,
             }
 
@@ -270,6 +395,16 @@ def execute_run_with_timeout_watchdog(
                 failure_stage=failure_stage,
                 error_details=error_details,
                 stage_timings_seconds={"wall_clock_elapsed": elapsed_seconds},
+                process_profile_summary=process_profile_summary,
+                process_profile_artifacts=process_profile_artifacts,
+            )
+        else:
+            _attach_process_profile_to_status_file(
+                report_dir=report_dir,
+                run_id=run_id,
+                fallback_status=RUN_STATUS_FAILED,
+                process_profile_summary=process_profile_summary,
+                process_profile_artifacts=process_profile_artifacts,
             )
         return {
             "status": RUN_STATUS_FAILED,
@@ -285,6 +420,8 @@ def execute_run_with_timeout_watchdog(
             "timeout_diagnostics_path": None,
             "child_pid": pid,
             "termination_method": termination_method,
+            "process_profile_summary": dict(process_profile_summary),
+            "process_profile_artifacts": dict(process_profile_artifacts),
             "command": command,
         }
 
