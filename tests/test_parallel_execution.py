@@ -363,3 +363,41 @@ def test_execute_official_run_jobs_parallel_path_keeps_deterministic_order(
 
     assert [int(row["order_index"]) for row in results] == [0, 1, 2]
     assert [str(row["run_id"]) for row in results] == ["run_000", "run_001", "run_002"]
+
+
+def test_execute_official_run_jobs_injects_shared_stage_lease_context() -> None:
+    seen_context_ids: list[str] = []
+    seen_max_gpu_leases: list[int] = []
+
+    def _watchdog_executor(**kwargs: Any) -> dict[str, Any]:
+        run_kwargs = dict(kwargs["run_kwargs"])
+        lease_context = run_kwargs.get("stage_lease_context")
+        assert isinstance(lease_context, dict)
+        context_id = lease_context.get("context_id")
+        assert isinstance(context_id, str) and context_id.strip()
+        seen_context_ids.append(context_id)
+        seen_max_gpu_leases.append(int(lease_context.get("max_parallel_gpu_leases", -1)))
+        run_id = str(run_kwargs["run_id"])
+        return {
+            "status": "success",
+            "run_payload": {
+                "report_dir": f"/tmp/{run_id}",
+                "config_path": f"/tmp/{run_id}/config.json",
+                "metrics_path": f"/tmp/{run_id}/metrics.json",
+                "metrics": {"primary_metric_value": 0.5, "n_folds": 1},
+            },
+        }
+
+    execute_official_run_jobs(
+        jobs=[
+            _job(order_index=0, run_id="run_000", resource_lane_hint="gpu"),
+            _job(order_index=1, run_id="run_001", resource_lane_hint="cpu"),
+        ],
+        max_parallel_runs=1,
+        max_parallel_gpu_runs=1,
+        watchdog_executor=_watchdog_executor,
+    )
+
+    assert len(seen_context_ids) == 2
+    assert len(set(seen_context_ids)) == 1
+    assert seen_max_gpu_leases == [1, 1]

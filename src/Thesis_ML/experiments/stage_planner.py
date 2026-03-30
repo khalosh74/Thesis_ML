@@ -56,9 +56,21 @@ _PERMUTATION_EXECUTOR_BY_ROUTE: dict[str, str] = {
 
 
 @dataclass(frozen=True)
+class StageResourceContract:
+    stage_key: StageKey
+    requires_gpu_lease: bool
+    preferred_compute_lane: str | None
+    lease_class: str
+    lease_reason: str
+    expected_backend_family: StageBackendFamily
+    expected_executor_id: str | None
+
+
+@dataclass(frozen=True)
 class StagePlanningResult:
     assignments: tuple[StageAssignment, ...]
     runtime_fallback_executor_ids: dict[str, str]
+    stage_resource_contracts: tuple[StageResourceContract, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -284,6 +296,72 @@ def _executor_candidates_from_route_tokens(
     return tuple(executor_ids)
 
 
+def _executor_id_is_gpu_specialized(executor_id: str | None) -> bool:
+    if not isinstance(executor_id, str):
+        return False
+    normalized = executor_id.strip().lower()
+    if not normalized:
+        return False
+    return "gpu" in normalized or normalized.startswith("torch_")
+
+
+def _build_stage_resource_contracts(
+    assignments: tuple[StageAssignment, ...],
+) -> tuple[StageResourceContract, ...]:
+    assignment_by_stage = {StageKey(str(item.stage)): item for item in assignments}
+    contracts: list[StageResourceContract] = []
+    for stage_key in StageKey:
+        assignment = assignment_by_stage.get(stage_key)
+        if assignment is None:
+            continue
+        planned_lane = (
+            str(assignment.compute_lane)
+            if assignment.compute_lane is not None
+            else (
+                "gpu"
+                if str(assignment.backend_family)
+                in {
+                    StageBackendFamily.TORCH_GPU.value,
+                    StageBackendFamily.XGBOOST_GPU.value,
+                }
+                else "cpu"
+            )
+        )
+        backend_requires_gpu = str(assignment.backend_family) in {
+            StageBackendFamily.TORCH_GPU.value,
+            StageBackendFamily.XGBOOST_GPU.value,
+        }
+        lane_requires_gpu = str(planned_lane).strip().lower() == "gpu"
+        executor_requires_gpu = _executor_id_is_gpu_specialized(assignment.executor_id)
+        requires_gpu_lease = bool(
+            backend_requires_gpu or lane_requires_gpu or executor_requires_gpu
+        )
+
+        if backend_requires_gpu:
+            lease_reason = "planned_gpu_backend_family"
+        elif lane_requires_gpu:
+            lease_reason = "planned_gpu_compute_lane"
+        elif executor_requires_gpu:
+            lease_reason = "planned_gpu_specialized_executor"
+        else:
+            lease_reason = "planned_cpu_stage"
+
+        contracts.append(
+            StageResourceContract(
+                stage_key=stage_key,
+                requires_gpu_lease=bool(requires_gpu_lease),
+                preferred_compute_lane=planned_lane,
+                lease_class=("gpu" if requires_gpu_lease else "cpu"),
+                lease_reason=str(lease_reason),
+                expected_backend_family=assignment.backend_family,
+                expected_executor_id=(
+                    str(assignment.executor_id) if assignment.executor_id is not None else None
+                ),
+            )
+        )
+    return tuple(contracts)
+
+
 def _model_fit_executor_candidates(model_name: str) -> tuple[str, ...]:
     spec = get_model_spec(model_name)
     return _executor_candidates_from_route_tokens(
@@ -414,9 +492,13 @@ def plan_stage_execution(
                 resolution.runtime_fallback_executor_id
             )
 
+    assignment_tuple = tuple(assignments)
+    stage_resource_contracts = _build_stage_resource_contracts(assignment_tuple)
+
     return StagePlanningResult(
-        assignments=tuple(assignments),
+        assignments=assignment_tuple,
         runtime_fallback_executor_ids=runtime_fallback_executor_ids,
+        stage_resource_contracts=stage_resource_contracts,
     )
 
 

@@ -3,6 +3,7 @@
 import json
 from collections import Counter
 from collections.abc import Mapping
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -59,6 +60,39 @@ def _normalize_stage_execution(
         return StageExecutionResult.model_validate(dict(value)).model_dump(mode="json")
     except Exception:
         return None
+
+
+def _parse_utc(value: Any) -> datetime | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    text = value.strip()
+    if text.endswith("Z"):
+        text = f"{text[:-1]}+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
+
+
+def _looks_gpu_execution(
+    *,
+    observed_backend_family: Any,
+    observed_compute_lane: Any,
+    observed_executor_id: Any,
+) -> bool:
+    backend_value = str(observed_backend_family or "").strip().lower()
+    lane_value = str(observed_compute_lane or "").strip().lower()
+    executor_value = str(observed_executor_id or "").strip().lower()
+    if lane_value == "gpu":
+        return True
+    if backend_value in {"torch_gpu", "xgboost_gpu"}:
+        return True
+    if executor_value and ("gpu" in executor_value or executor_value.startswith("torch_")):
+        return True
+    return False
 
 
 def verify_stage_execution_evidence(
@@ -128,10 +162,108 @@ def verify_stage_execution_evidence(
         fallback_expected = bool(row.get("fallback_expected", False))
         observed_present = bool(row.get("observed_evidence_present", False))
         missing_observed = bool(row.get("missing_observed_evidence", False))
+        lease_required = bool(row.get("lease_required", False))
+        lease_acquired_raw = row.get("lease_acquired")
+        lease_acquired = (
+            bool(lease_acquired_raw)
+            if isinstance(lease_acquired_raw, (bool, int))
+            else False
+        )
+        lease_released_raw = row.get("lease_released")
+        lease_released = (
+            bool(lease_released_raw)
+            if isinstance(lease_released_raw, (bool, int))
+            else False
+        )
+        lease_acquired_at_utc = row.get("lease_acquired_at_utc")
+        lease_released_at_utc = row.get("lease_released_at_utc")
         primary_artifacts = row.get("primary_artifacts")
         derived_from_stage = row.get("derived_from_stage")
         evidence_quality = str(row.get("evidence_quality") or "")
         resource_coverage = str(row.get("resource_coverage") or "")
+        observed_backend_family = row.get("observed_backend_family")
+        observed_compute_lane = row.get("observed_compute_lane")
+        observed_executor_id = row.get("observed_executor_id")
+
+        if lease_required and not lease_acquired:
+            findings.append(
+                _issue(
+                    code="required_gpu_lease_missing",
+                    stage_key=stage_key,
+                    severity="error",
+                    message="Stage requires GPU lease evidence but no lease acquisition was recorded.",
+                )
+            )
+
+        observed_gpu_execution = _looks_gpu_execution(
+            observed_backend_family=observed_backend_family,
+            observed_compute_lane=observed_compute_lane,
+            observed_executor_id=observed_executor_id,
+        )
+        if observed_gpu_execution and not lease_acquired:
+            findings.append(
+                _issue(
+                    code="observed_gpu_without_lease",
+                    stage_key=stage_key,
+                    severity="error",
+                    message="Observed GPU execution has no lease acquisition evidence.",
+                )
+            )
+
+        if lease_acquired:
+            if not isinstance(lease_acquired_at_utc, str) or not lease_acquired_at_utc.strip():
+                findings.append(
+                    _issue(
+                        code="lease_missing_acquired_timestamp",
+                        stage_key=stage_key,
+                        severity="warning",
+                        message="Lease acquisition is recorded but lease_acquired_at_utc is missing.",
+                    )
+                )
+            if not isinstance(lease_released_at_utc, str) or not lease_released_at_utc.strip():
+                findings.append(
+                    _issue(
+                        code="lease_missing_released_timestamp",
+                        stage_key=stage_key,
+                        severity="warning",
+                        message="Lease acquisition is recorded but lease_released_at_utc is missing.",
+                    )
+                )
+
+        stage_started = _parse_utc(row.get("started_at_utc"))
+        stage_ended = _parse_utc(row.get("ended_at_utc"))
+        lease_started = _parse_utc(lease_acquired_at_utc)
+        lease_ended = _parse_utc(lease_released_at_utc)
+        if (
+            lease_acquired
+            and stage_started is not None
+            and stage_ended is not None
+            and lease_started is not None
+            and lease_ended is not None
+        ):
+            interval_tolerance = timedelta(seconds=1)
+            if (
+                lease_started < (stage_started - interval_tolerance)
+                or lease_ended > (stage_ended + interval_tolerance)
+            ):
+                findings.append(
+                    _issue(
+                        code="lease_outside_stage_interval",
+                        stage_key=stage_key,
+                        severity="warning",
+                        message="Lease interval falls outside the observed stage interval.",
+                    )
+                )
+
+        if str(status) in {"failed", "missing"} and lease_acquired and not lease_released:
+            findings.append(
+                _issue(
+                    code="lease_leak_on_failure_path",
+                    stage_key=stage_key,
+                    severity="error",
+                    message="Stage failed/missing with lease acquisition but no release evidence.",
+                )
+            )
 
         if backend_match is False:
             findings.append(

@@ -353,3 +353,24 @@ def test_stage_planner_xgboost_fallback_to_cpu_requires_policy_allowance(
     assignments = _assignment_map(result)
     assert assignments[StageKey.MODEL_FIT.value]["executor_id"] == MODEL_FIT_XGBOOST_CPU_EXECUTOR_ID
     assert assignments[StageKey.MODEL_FIT.value]["fallback_used"] is True
+
+
+def test_stage_planner_emits_stage_resource_contracts_for_runtime_leasing() -> None:
+    result = plan_stage_execution(
+        framework_mode=FrameworkMode.EXPLORATORY,
+        compute_policy=_torch_compute_policy(),
+        model_name="ridge",
+        methodology_policy_name="grouped_nested_tuning",
+        tuning_enabled=True,
+        n_permutations=8,
+    )
+    contracts_by_stage = {
+        str(contract.stage_key): contract for contract in result.stage_resource_contracts
+    }
+
+    assert StageKey.MODEL_FIT.value in contracts_by_stage
+    assert StageKey.PERMUTATION.value in contracts_by_stage
+    assert bool(contracts_by_stage[StageKey.MODEL_FIT.value].requires_gpu_lease) is True
+    assert bool(contracts_by_stage[StageKey.PERMUTATION.value].requires_gpu_lease) is True
+    assert contracts_by_stage[StageKey.MODEL_FIT.value].lease_class == "gpu"
+    assert contracts_by_stage[StageKey.DATASET_SELECTION.value].lease_class == "cpu"

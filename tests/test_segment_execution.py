@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import nibabel as nib
 import numpy as np
@@ -18,7 +19,15 @@ from Thesis_ML.artifacts.registry import (
 from Thesis_ML.data.index_dataset import build_dataset_index
 from Thesis_ML.experiments import segment_execution as segment_execution_module
 from Thesis_ML.experiments.run_experiment import run_experiment
-from Thesis_ML.experiments.segment_execution import plan_section_path
+from Thesis_ML.experiments.segment_execution import (
+    SegmentExecutionRequest,
+    execute_section_segment,
+    plan_section_path,
+)
+from Thesis_ML.experiments.stage_execution import StageAssignment, StageBackendFamily, StageKey
+from Thesis_ML.experiments.stage_lease_manager import StageLeaseHandle, StageLeaseReleaseResult
+from Thesis_ML.experiments.stage_observability import StageBoundaryRecorder
+from Thesis_ML.experiments.stage_planner import StageResourceContract
 from Thesis_ML.experiments.stage_registry import (
     MODEL_FIT_CPU_EXECUTOR_ID,
     PERMUTATION_REFERENCE_EXECUTOR_ID,
@@ -415,6 +424,190 @@ def test_logreg_tuning_dispatch_through_stage_planner_with_progress_telemetry(
     assert tuning_summary["specialized_logreg_tuning_used"] is True
     assert int(tuning_summary["tuning_progress_event_count_total"]) > 0
     assert int(tuning_summary["tuning_progress_total_units_total"]) > 0
+
+
+class _FakeStageLeaseManager:
+    def __init__(self) -> None:
+        self.acquire_requests: list[object] = []
+        self.release_handles: list[object] = []
+
+    def acquire(self, request: object) -> StageLeaseHandle:
+        self.acquire_requests.append(request)
+        return StageLeaseHandle(
+            lease_id="lease-test-001",
+            lease_class="gpu",
+            run_id="segment_lease_run",
+            stage_key="dataset_selection",
+            owner_identity="segment_lease_run:dataset_selection",
+            acquired_at_utc="2026-01-01T00:00:00+00:00",
+            wait_seconds=0.125,
+            queue_depth_at_acquire=1,
+            lease_path=None,
+        )
+
+    def release(self, handle: object) -> StageLeaseReleaseResult:
+        self.release_handles.append(handle)
+        return StageLeaseReleaseResult(
+            lease_id="lease-test-001",
+            lease_class="gpu",
+            released=True,
+            released_at_utc="2026-01-01T00:00:02+00:00",
+            hold_seconds=2.0,
+        )
+
+
+def _minimal_dataset_only_request(
+    *,
+    tmp_path: Path,
+    observer: StageBoundaryRecorder,
+    lease_manager: object,
+    stage_resource_contracts: tuple[StageResourceContract, ...],
+) -> SegmentExecutionRequest:
+    index_csv = tmp_path / "index.csv"
+    index_csv.write_text("row_id\n0\n", encoding="utf-8")
+    report_dir = tmp_path / "report"
+    report_dir.mkdir(parents=True, exist_ok=True)
+
+    return SegmentExecutionRequest(
+        index_csv=index_csv,
+        data_root=tmp_path / "Data",
+        cache_dir=tmp_path / "cache",
+        target_column="emotion",
+        cv_mode="loso_session",
+        model="ridge",
+        subject=None,
+        train_subject=None,
+        test_subject=None,
+        filter_task=None,
+        filter_modality=None,
+        seed=7,
+        n_permutations=0,
+        run_id="segment_lease_run",
+        config_filename="config.json",
+        report_dir=report_dir,
+        artifact_registry_path=tmp_path / "artifact_registry.sqlite3",
+        code_ref=None,
+        affine_atol=1e-6,
+        fold_metrics_path=report_dir / "fold_metrics.csv",
+        fold_splits_path=report_dir / "fold_splits.csv",
+        predictions_path=report_dir / "predictions.csv",
+        metrics_path=report_dir / "metrics.json",
+        subgroup_metrics_json_path=report_dir / "subgroup_metrics.json",
+        subgroup_metrics_csv_path=report_dir / "subgroup_metrics.csv",
+        tuning_summary_path=report_dir / "tuning_summary.json",
+        tuning_best_params_path=report_dir / "tuning_best_params.csv",
+        fit_timing_summary_path=report_dir / "fit_timing_summary.json",
+        spatial_report_path=report_dir / "spatial.json",
+        calibration_summary_path=report_dir / "calibration_summary.json",
+        calibration_table_path=report_dir / "calibration_table.csv",
+        interpretability_summary_path=report_dir / "interpretability_summary.json",
+        interpretability_fold_artifacts_path=report_dir / "interpretability_folds.csv",
+        start_section="dataset_selection",
+        end_section="dataset_selection",
+        build_pipeline_fn=lambda **_: None,
+        load_features_from_cache_fn=lambda **_: (np.zeros((0, 0)), pd.DataFrame(), {}),
+        scores_for_predictions_fn=lambda **_: {},
+        extract_linear_coefficients_fn=lambda **_: (np.zeros((0, 0)), np.zeros((0,)), []),
+        compute_interpretability_stability_fn=lambda _: {},
+        evaluate_permutations_fn=lambda **_: {},
+        stage_assignments=(
+            StageAssignment(
+                stage=StageKey.DATASET_SELECTION,
+                backend_family=StageBackendFamily.SKLEARN_CPU,
+                compute_lane="cpu",
+                source="stage_planner_v1",
+                reason="unit_test",
+                executor_id="dataset_selection_cpu_reference_v1",
+                official_admitted=True,
+            ),
+        ),
+        stage_fallback_executor_ids={},
+        stage_observer=observer,
+        stage_resource_contracts=stage_resource_contracts,
+        stage_lease_manager=lease_manager,
+    )
+
+
+def test_segment_execution_acquires_and_releases_stage_lease_when_required(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    observer = StageBoundaryRecorder(report_dir=tmp_path / "report", run_id="segment_lease_run")
+    lease_manager = _FakeStageLeaseManager()
+    contract = StageResourceContract(
+        stage_key=StageKey.DATASET_SELECTION,
+        requires_gpu_lease=True,
+        preferred_compute_lane="gpu",
+        lease_class="gpu",
+        lease_reason="test_gpu_required",
+        expected_backend_family=StageBackendFamily.TORCH_GPU,
+        expected_executor_id="dataset_selection_gpu_test",
+    )
+    monkeypatch.setattr(
+        segment_execution_module,
+        "dataset_selection",
+        lambda *_args, **_kwargs: SimpleNamespace(selected_index_df=pd.DataFrame()),
+    )
+
+    result = execute_section_segment(
+        _minimal_dataset_only_request(
+            tmp_path=tmp_path,
+            observer=observer,
+            lease_manager=lease_manager,
+            stage_resource_contracts=(contract,),
+        )
+    )
+
+    assert result.executed_sections == ["dataset_selection"]
+    assert len(lease_manager.acquire_requests) == 1
+    assert len(lease_manager.release_handles) == 1
+
+    observed_payload = json.loads(
+        (tmp_path / "report" / "stage_observed_evidence.json").read_text(encoding="utf-8")
+    )
+    rows = {
+        str(row.get("stage_key")): row
+        for row in observed_payload.get("stages", [])
+        if isinstance(row, dict)
+    }
+    assert rows["dataset_selection"]["lease_required"] is True
+    assert rows["dataset_selection"]["lease_acquired"] is True
+    assert rows["dataset_selection"]["lease_released"] is True
+
+
+def test_segment_execution_skips_stage_lease_when_not_required(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    observer = StageBoundaryRecorder(report_dir=tmp_path / "report", run_id="segment_lease_run")
+    lease_manager = _FakeStageLeaseManager()
+    contract = StageResourceContract(
+        stage_key=StageKey.DATASET_SELECTION,
+        requires_gpu_lease=False,
+        preferred_compute_lane="cpu",
+        lease_class="cpu",
+        lease_reason="test_cpu_only",
+        expected_backend_family=StageBackendFamily.SKLEARN_CPU,
+        expected_executor_id="dataset_selection_cpu_reference_v1",
+    )
+    monkeypatch.setattr(
+        segment_execution_module,
+        "dataset_selection",
+        lambda *_args, **_kwargs: SimpleNamespace(selected_index_df=pd.DataFrame()),
+    )
+
+    result = execute_section_segment(
+        _minimal_dataset_only_request(
+            tmp_path=tmp_path,
+            observer=observer,
+            lease_manager=lease_manager,
+            stage_resource_contracts=(contract,),
+        )
+    )
+
+    assert result.executed_sections == ["dataset_selection"]
+    assert lease_manager.acquire_requests == []
+    assert lease_manager.release_handles == []
 
 
 def test_invalid_start_end_combination_raises(prepared_dataset: dict[str, Path]) -> None:

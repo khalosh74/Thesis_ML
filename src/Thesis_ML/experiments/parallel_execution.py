@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import hashlib
+import os
+import tempfile
 from collections.abc import Callable
 from concurrent.futures import FIRST_COMPLETED, Future, ProcessPoolExecutor, wait
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any, Literal
 
 from Thesis_ML.experiments.errors import exception_failure_payload
@@ -171,7 +175,77 @@ def _with_runtime_admission_metadata(
     enriched["admitted_at_utc"] = str(admitted_at_utc)
     enriched["completed_at_utc"] = str(completed_at_utc)
     enriched["max_parallel_gpu_runs_effective"] = int(max_parallel_gpu_runs_effective)
+    stage_lease_context = job.run_kwargs.get("stage_lease_context")
+    if isinstance(stage_lease_context, dict):
+        context_id = stage_lease_context.get("context_id")
+        lease_root = stage_lease_context.get("lease_root")
+        if isinstance(context_id, str) and context_id.strip():
+            enriched["stage_lease_context_id"] = str(context_id)
+        if isinstance(lease_root, str) and lease_root.strip():
+            enriched["stage_lease_root"] = str(lease_root)
     return enriched
+
+
+def _resolve_stage_lease_context(
+    *,
+    jobs: list[OfficialRunJob],
+    max_parallel_gpu_runs_effective: int,
+) -> dict[str, Any]:
+    resolved_max_parallel_gpu_runs = int(max_parallel_gpu_runs_effective)
+    report_roots: list[str] = []
+    for job in jobs:
+        reports_root = job.run_kwargs.get("reports_root")
+        if isinstance(reports_root, str) and reports_root.strip():
+            report_roots.append(str(Path(reports_root).resolve()))
+
+    common_root: Path
+    if report_roots:
+        try:
+            common_root = Path(os.path.commonpath(report_roots))
+        except Exception:
+            common_root = Path(tempfile.gettempdir())
+    else:
+        common_root = Path(tempfile.gettempdir())
+
+    context_seed = "|".join(sorted(str(job.run_id) for job in jobs))
+    context_hash = hashlib.sha1(context_seed.encode("utf-8")).hexdigest()[:12]
+    lease_root = common_root / ".runtime_stage_leases" / f"context_{context_hash}"
+    return {
+        "context_id": str(context_hash),
+        "lease_root": str(lease_root.resolve()),
+        "max_parallel_gpu_leases": int(resolved_max_parallel_gpu_runs),
+        "poll_interval_seconds": 0.05,
+    }
+
+
+def _job_with_stage_lease_context(
+    *,
+    job: OfficialRunJob,
+    stage_lease_context: dict[str, Any],
+) -> OfficialRunJob:
+    run_kwargs = dict(job.run_kwargs)
+    if not isinstance(run_kwargs.get("stage_lease_context"), dict):
+        run_kwargs["stage_lease_context"] = dict(stage_lease_context)
+    return OfficialRunJob(
+        order_index=int(job.order_index),
+        run_id=str(job.run_id),
+        run_kwargs=run_kwargs,
+        timeout_policy=dict(job.timeout_policy),
+        phase_name=str(job.phase_name),
+        run_identity=dict(job.run_identity),
+        resource_lane_hint=job.resource_lane_hint,
+        scheduled_compute_assignment=(
+            dict(job.scheduled_compute_assignment)
+            if isinstance(job.scheduled_compute_assignment, dict)
+            else None
+        ),
+        worker_execution_mode=resolve_official_job_worker_execution_mode(job.worker_execution_mode),
+        worker_execution_metadata=(
+            dict(job.worker_execution_metadata)
+            if isinstance(job.worker_execution_metadata, dict)
+            else None
+        ),
+    )
 
 
 def execute_official_run_jobs(
@@ -196,6 +270,14 @@ def execute_official_run_jobs(
     )
     resolved_parallelism = int(max_parallel_runs)
     resolved_max_parallel_gpu_runs = int(max_parallel_gpu_runs)
+    stage_lease_context = _resolve_stage_lease_context(
+        jobs=resolved_jobs,
+        max_parallel_gpu_runs_effective=resolved_max_parallel_gpu_runs,
+    )
+    resolved_jobs = [
+        _job_with_stage_lease_context(job=job, stage_lease_context=stage_lease_context)
+        for job in resolved_jobs
+    ]
 
     if resolved_parallelism <= 1:
         serial_payloads = []

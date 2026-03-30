@@ -49,7 +49,14 @@ from Thesis_ML.experiments.segment_execution_helpers import (
     resolve_base_artifact,
 )
 from Thesis_ML.experiments.stage_observability import StageBoundaryRecorder
+from Thesis_ML.experiments.stage_lease_manager import (
+    StageLeaseHandle,
+    StageLeaseManager,
+    StageLeaseReleaseResult,
+    StageLeaseRequest,
+)
 from Thesis_ML.experiments.stage_execution import StageAssignment, StageKey
+from Thesis_ML.experiments.stage_planner import StageResourceContract
 from Thesis_ML.features.preprocessing import BASELINE_STANDARD_SCALER_RECIPE_ID
 from Thesis_ML.orchestration.contracts import ReusePolicy, SectionName
 
@@ -162,6 +169,8 @@ class SegmentExecutionRequest:
     stage_assignments: tuple[StageAssignment, ...] | None = None
     stage_fallback_executor_ids: dict[str, str] | None = None
     stage_observer: StageBoundaryRecorder | None = None
+    stage_resource_contracts: tuple[StageResourceContract, ...] | None = None
+    stage_lease_manager: StageLeaseManager | None = None
 
 
 @dataclass(frozen=True)
@@ -188,6 +197,79 @@ _SECTION_TO_STAGE_KEY: dict[SectionName, StageKey] = {
     SectionName.MODEL_FIT: StageKey.MODEL_FIT,
     SectionName.EVALUATION: StageKey.EVALUATION,
 }
+
+_SECTION_TO_STAGE_KEYS_FOR_LEASING: dict[SectionName, tuple[StageKey, ...]] = {
+    SectionName.DATASET_SELECTION: (StageKey.DATASET_SELECTION,),
+    SectionName.FEATURE_CACHE_BUILD: (StageKey.FEATURE_CACHE_BUILD,),
+    SectionName.FEATURE_MATRIX_LOAD: (StageKey.FEATURE_MATRIX_LOAD,),
+    SectionName.SPATIAL_VALIDATION: (StageKey.SPATIAL_VALIDATION,),
+    SectionName.MODEL_FIT: (StageKey.PREPROCESS, StageKey.MODEL_FIT, StageKey.TUNING),
+    SectionName.EVALUATION: (StageKey.PERMUTATION, StageKey.EVALUATION),
+}
+
+
+def _section_stage_keys_for_leasing(section_name: SectionName) -> tuple[StageKey, ...]:
+    if section_name in _SECTION_TO_STAGE_KEYS_FOR_LEASING:
+        return _SECTION_TO_STAGE_KEYS_FOR_LEASING[section_name]
+    mapped = _SECTION_TO_STAGE_KEY.get(section_name)
+    if mapped is None:
+        return ()
+    return (mapped,)
+
+
+def _build_section_stage_lease_plan(
+    *,
+    section_name: SectionName,
+    run_id: str,
+    stage_resource_contract_map: dict[StageKey, StageResourceContract],
+) -> dict[str, Any]:
+    relevant_stage_keys = _section_stage_keys_for_leasing(section_name)
+    relevant_contracts = [
+        stage_resource_contract_map[stage_key]
+        for stage_key in relevant_stage_keys
+        if stage_key in stage_resource_contract_map
+    ]
+    gpu_contracts = [
+        contract for contract in relevant_contracts if bool(contract.requires_gpu_lease)
+    ]
+    lease_required = bool(gpu_contracts)
+    selected_contract = (
+        gpu_contracts[0] if gpu_contracts else (relevant_contracts[0] if relevant_contracts else None)
+    )
+    lease_owner_identity = f"{str(run_id)}:{section_name.value}"
+    lease_reason = (
+        ";".join(
+            f"{contract.stage_key.value}:{contract.lease_reason}"
+            for contract in gpu_contracts
+        )
+        if gpu_contracts
+        else "section_cpu_only"
+    )
+    return {
+        "lease_required": bool(lease_required),
+        "lease_class": "gpu" if lease_required else "cpu",
+        "lease_reason": str(lease_reason),
+        "lease_owner_identity": str(lease_owner_identity),
+        "lease_expected_stage_keys": [stage_key.value for stage_key in relevant_stage_keys],
+        "lease_expected_backend_family": (
+            str(selected_contract.expected_backend_family)
+            if selected_contract is not None and selected_contract.expected_backend_family is not None
+            else None
+        ),
+        "lease_expected_executor_id": (
+            str(selected_contract.expected_executor_id)
+            if selected_contract is not None and selected_contract.expected_executor_id is not None
+            else None
+        ),
+        "lease_acquired": False,
+        "lease_wait_seconds": 0.0,
+        "lease_queue_depth_at_acquire": 0,
+        "lease_acquired_at_utc": None,
+        "lease_released_at_utc": None,
+        "lease_held_seconds": None,
+        "lease_released": None,
+        "lease_id": None,
+    }
 
 
 def _stage_assignment_metadata(assignment: StageAssignment | None) -> dict[str, Any]:
@@ -219,6 +301,7 @@ def _stage_observed_metadata(
     observed_backend_family: str | None = None,
     observed_compute_lane: str | None = None,
     observed_executor_id: str | None = None,
+    stage_lease_metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     payload = _stage_assignment_metadata(assignment)
     payload["observed_backend_family"] = (
@@ -259,6 +342,9 @@ def _stage_observed_metadata(
         payload["fallback_reason"] = str(assignment.fallback_reason)
     if execution_mode is not None:
         payload["execution_mode"] = str(execution_mode)
+    if isinstance(stage_lease_metadata, dict):
+        for key, value in stage_lease_metadata.items():
+            payload[str(key)] = value
     return payload
 
 
@@ -348,6 +434,15 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
                 continue
             stage_fallback_executor_ids[StageKey(str(stage_key_raw))] = executor_id_raw.strip()
     stage_observer = request.stage_observer
+    stage_resource_contract_map: dict[StageKey, StageResourceContract] = {}
+    for contract in request.stage_resource_contracts or ():
+        normalized_contract = (
+            contract
+            if isinstance(contract, StageResourceContract)
+            else StageResourceContract(**dict(contract))
+        )
+        stage_resource_contract_map[StageKey(str(normalized_contract.stage_key))] = normalized_contract
+    stage_lease_manager = request.stage_lease_manager
 
     def _section_stage_key(section_name: SectionName) -> StageKey | None:
         return _SECTION_TO_STAGE_KEY.get(section_name)
@@ -461,10 +556,82 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
         stage_assignment = (
             stage_assignment_map.get(stage_key) if isinstance(stage_key, StageKey) else None
         )
+        section_stage_lease_metadata = _build_section_stage_lease_plan(
+            section_name=section,
+            run_id=str(request.run_id),
+            stage_resource_contract_map=stage_resource_contract_map,
+        )
+        stage_lease_handle: StageLeaseHandle | None = None
+
+        def _release_section_stage_lease() -> StageLeaseReleaseResult | None:
+            if stage_lease_handle is None or stage_lease_manager is None:
+                return None
+            release_result = stage_lease_manager.release(stage_lease_handle)
+            section_stage_lease_metadata["lease_released"] = bool(release_result.released)
+            section_stage_lease_metadata["lease_released_at_utc"] = str(
+                release_result.released_at_utc
+            )
+            section_stage_lease_metadata["lease_held_seconds"] = (
+                float(release_result.hold_seconds)
+                if release_result.hold_seconds is not None
+                else None
+            )
+            if stage_observer is not None and isinstance(stage_key, StageKey):
+                stage_observer.update_stage_context(
+                    stage_key,
+                    metadata=dict(section_stage_lease_metadata),
+                )
+            return release_result
+
+        if bool(section_stage_lease_metadata.get("lease_required", False)):
+            if stage_lease_manager is None:
+                raise ValueError("gpu_stage_requires_stage_lease_manager")
+            stage_lease_request = StageLeaseRequest(
+                run_id=str(request.run_id),
+                stage_key=str(stage_key.value if isinstance(stage_key, StageKey) else section.value),
+                owner_identity=str(section_stage_lease_metadata["lease_owner_identity"]),
+                lease_class="gpu",
+                lease_reason=str(section_stage_lease_metadata.get("lease_reason") or ""),
+                expected_backend_family=(
+                    str(section_stage_lease_metadata.get("lease_expected_backend_family"))
+                    if section_stage_lease_metadata.get("lease_expected_backend_family") is not None
+                    else None
+                ),
+                expected_executor_id=(
+                    str(section_stage_lease_metadata.get("lease_expected_executor_id"))
+                    if section_stage_lease_metadata.get("lease_expected_executor_id") is not None
+                    else None
+                ),
+                expected_compute_lane=(
+                    str(stage_assignment.compute_lane)
+                    if stage_assignment is not None and stage_assignment.compute_lane is not None
+                    else None
+                ),
+            )
+            stage_lease_handle = stage_lease_manager.acquire(stage_lease_request)
+            section_stage_lease_metadata["lease_id"] = str(stage_lease_handle.lease_id)
+            section_stage_lease_metadata["lease_acquired"] = True
+            section_stage_lease_metadata["lease_wait_seconds"] = float(
+                stage_lease_handle.wait_seconds
+            )
+            section_stage_lease_metadata["lease_queue_depth_at_acquire"] = int(
+                stage_lease_handle.queue_depth_at_acquire
+            )
+            section_stage_lease_metadata["lease_acquired_at_utc"] = str(
+                stage_lease_handle.acquired_at_utc
+            )
+
         if stage_observer is not None and isinstance(stage_key, StageKey):
             stage_observer.stage_started(
                 stage_key,
-                metadata=_stage_assignment_metadata(stage_assignment),
+                metadata={
+                    **_stage_assignment_metadata(stage_assignment),
+                    **dict(section_stage_lease_metadata),
+                },
+            )
+            stage_observer.update_stage_context(
+                stage_key,
+                metadata=dict(section_stage_lease_metadata),
             )
         _emit_section_event(
             section_name=section.value,
@@ -523,10 +690,14 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
                         stage_observer.stage_reused(
                             stage_key,
                             metadata={
-                                **_stage_observed_metadata(assignment=stage_assignment),
+                                **_stage_observed_metadata(
+                                    assignment=stage_assignment,
+                                    stage_lease_metadata=section_stage_lease_metadata,
+                                ),
                                 "primary_artifacts": _primary_artifacts_for_section(section),
                             },
                         )
+                    _release_section_stage_lease()
                     continue
 
             cache_output = feature_cache_build(
@@ -607,10 +778,14 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
                         stage_observer.stage_reused(
                             stage_key,
                             metadata={
-                                **_stage_observed_metadata(assignment=stage_assignment),
+                                **_stage_observed_metadata(
+                                    assignment=stage_assignment,
+                                    stage_lease_metadata=section_stage_lease_metadata,
+                                ),
                                 "primary_artifacts": _primary_artifacts_for_section(section),
                             },
                         )
+                    _release_section_stage_lease()
                     continue
             matrix_output = feature_matrix_load(
                 FeatureMatrixLoadInput(
@@ -784,7 +959,10 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
                 stage_observer.stage_finished(
                     StageKey.PREPROCESS,
                     metadata={
-                        **_stage_observed_metadata(assignment=preprocess_assignment),
+                        **_stage_observed_metadata(
+                            assignment=preprocess_assignment,
+                            stage_lease_metadata=section_stage_lease_metadata,
+                        ),
                         "derived_from_stage": StageKey.MODEL_FIT.value,
                         "status_source": "derived_from_model_fit",
                     },
@@ -803,6 +981,7 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
                                     if tuning_assignment_effective is not None
                                     else None
                                 ),
+                                stage_lease_metadata=section_stage_lease_metadata,
                             ),
                             "derived_from_stage": StageKey.MODEL_FIT.value,
                             "status_source": "derived_from_model_fit",
@@ -816,6 +995,7 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
                             **_stage_observed_metadata(
                                 assignment=tuning_assignment_effective,
                                 fallback_used=False,
+                                stage_lease_metadata=section_stage_lease_metadata,
                             ),
                             "derived_from_stage": StageKey.MODEL_FIT.value,
                             "status_source": "derived_from_model_fit",
@@ -861,10 +1041,14 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
                         stage_observer.stage_reused(
                             stage_key,
                             metadata={
-                                **_stage_observed_metadata(assignment=stage_assignment),
+                                **_stage_observed_metadata(
+                                    assignment=stage_assignment,
+                                    stage_lease_metadata=section_stage_lease_metadata,
+                                ),
                                 "primary_artifacts": _primary_artifacts_for_section(section),
                             },
                         )
+                    _release_section_stage_lease()
                     continue
             interpretability_output = interpretability(
                 InterpretabilityInput(
@@ -945,7 +1129,10 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
                         stage_observer.stage_reused(
                             stage_key,
                             metadata={
-                                **_stage_observed_metadata(assignment=stage_assignment),
+                                **_stage_observed_metadata(
+                                    assignment=stage_assignment,
+                                    stage_lease_metadata=section_stage_lease_metadata,
+                                ),
                                 "primary_artifacts": _primary_artifacts_for_section(section),
                             },
                         )
@@ -987,6 +1174,7 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
                                         execution_mode=permutation_execution_mode,
                                         observed_backend_family=permutation_backend_family,
                                         observed_executor_id=permutation_executor_id,
+                                        stage_lease_metadata=section_stage_lease_metadata,
                                     ),
                                     "derived_from_stage": StageKey.EVALUATION.value,
                                     "status_source": "derived_from_evaluation",
@@ -1000,6 +1188,7 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
                                     **_stage_observed_metadata(
                                         assignment=permutation_assignment_effective,
                                         fallback_used=False,
+                                        stage_lease_metadata=section_stage_lease_metadata,
                                     ),
                                     "derived_from_stage": StageKey.EVALUATION.value,
                                     "status_source": "derived_from_evaluation",
@@ -1007,6 +1196,7 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
                                 reason="permutations_disabled",
                                 derived_from_stage=StageKey.EVALUATION,
                             )
+                    _release_section_stage_lease()
                     continue
             evaluation_output = evaluation(
                 EvaluationInput(
@@ -1190,6 +1380,7 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
                                 execution_mode=permutation_execution_mode,
                                 observed_backend_family=permutation_backend_family,
                                 observed_executor_id=permutation_executor_id,
+                                stage_lease_metadata=section_stage_lease_metadata,
                             ),
                             "derived_from_stage": StageKey.EVALUATION.value,
                             "status_source": "derived_from_evaluation",
@@ -1203,6 +1394,7 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
                             **_stage_observed_metadata(
                                 assignment=permutation_assignment_effective,
                                 fallback_used=False,
+                                stage_lease_metadata=section_stage_lease_metadata,
                             ),
                             "derived_from_stage": StageKey.EVALUATION.value,
                             "status_source": "derived_from_evaluation",
@@ -1213,6 +1405,8 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
             artifact_ids[ARTIFACT_TYPE_METRICS_BUNDLE] = evaluation_output.metrics_artifact_id
         else:
             raise ValueError(f"Unsupported section encountered in execution plan: {section.value}")
+
+        _release_section_stage_lease()
 
         executed_sections.append(section.value)
         _record_section_duration(
@@ -1246,6 +1440,7 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
                         assignment=stage_assignment,
                         observed_backend_family=observed_backend_family,
                         observed_executor_id=observed_executor_id,
+                        stage_lease_metadata=section_stage_lease_metadata,
                     ),
                     "primary_artifacts": _primary_artifacts_for_section(section),
                 },

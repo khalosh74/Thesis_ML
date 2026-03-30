@@ -220,6 +220,16 @@ def _build_stage_evidence_rows(variant_records: list[dict[str, Any]]) -> list[di
                     "peak_gpu_utilization_percent": _safe_float(
                         telemetry.get("peak_gpu_utilization_percent")
                     ),
+                    "lease_required": bool(telemetry.get("lease_required", False)),
+                    "lease_class": telemetry.get("lease_class"),
+                    "lease_owner_identity": telemetry.get("lease_owner_identity"),
+                    "lease_acquired": telemetry.get("lease_acquired"),
+                    "lease_wait_seconds": _safe_float(telemetry.get("lease_wait_seconds")),
+                    "lease_queue_depth_at_acquire": telemetry.get("lease_queue_depth_at_acquire"),
+                    "lease_acquired_at_utc": telemetry.get("lease_acquired_at_utc"),
+                    "lease_released_at_utc": telemetry.get("lease_released_at_utc"),
+                    "lease_held_seconds": _safe_float(telemetry.get("lease_held_seconds")),
+                    "lease_released": telemetry.get("lease_released"),
                 }
             )
     return rows
@@ -232,11 +242,44 @@ def _write_stage_evidence_summaries(
 ) -> dict[str, str]:
     stage_rows = _build_stage_evidence_rows(variant_records)
 
+    def _parse_utc(value: Any) -> datetime | None:
+        if not isinstance(value, str) or not value.strip():
+            return None
+        text = value.strip()
+        if text.endswith("Z"):
+            text = f"{text[:-1]}+00:00"
+        try:
+            parsed = datetime.fromisoformat(text)
+        except ValueError:
+            return None
+        if parsed.tzinfo is None:
+            return parsed.replace(tzinfo=UTC)
+        return parsed.astimezone(UTC)
+
+    def _percentile(values: list[float], quantile: float) -> float | None:
+        if not values:
+            return None
+        sorted_values = sorted(float(item) for item in values)
+        if len(sorted_values) == 1:
+            return float(sorted_values[0])
+        clipped = min(max(float(quantile), 0.0), 1.0)
+        position = (len(sorted_values) - 1) * clipped
+        lower = int(position)
+        upper = min(lower + 1, len(sorted_values) - 1)
+        weight = float(position - lower)
+        return float(sorted_values[lower] * (1.0 - weight) + sorted_values[upper] * weight)
+
     stage_totals: dict[str, float] = {}
     stage_counts: Counter[str] = Counter()
     stage_missing: Counter[str] = Counter()
     stage_fallbacks: Counter[str] = Counter()
     stage_coverage: dict[str, Counter[str]] = {}
+    stage_lease_required_counts: Counter[str] = Counter()
+    stage_lease_acquired_counts: Counter[str] = Counter()
+    stage_lease_missing_counts: Counter[str] = Counter()
+    stage_lease_waits: dict[str, list[float]] = {}
+    gpu_lease_intervals: list[dict[str, Any]] = []
+    stage_gpu_hold_totals: dict[str, float] = {}
     for row in stage_rows:
         stage_key = str(row.get("stage_key") or "")
         if not stage_key:
@@ -253,6 +296,35 @@ def _write_stage_evidence_summaries(
             stage_fallbacks[stage_key] += 1
         coverage = str(row.get("resource_coverage") or "none")
         stage_coverage.setdefault(stage_key, Counter())[coverage] += 1
+
+        lease_required = bool(row.get("lease_required", False))
+        lease_acquired = bool(row.get("lease_acquired", False))
+        if lease_required:
+            stage_lease_required_counts[stage_key] += 1
+            if lease_acquired:
+                stage_lease_acquired_counts[stage_key] += 1
+            else:
+                stage_lease_missing_counts[stage_key] += 1
+            wait_seconds = _safe_float(row.get("lease_wait_seconds"))
+            if wait_seconds is not None:
+                stage_lease_waits.setdefault(stage_key, []).append(float(wait_seconds))
+
+        lease_class = str(row.get("lease_class") or "").strip().lower()
+        lease_started = _parse_utc(row.get("lease_acquired_at_utc"))
+        lease_ended = _parse_utc(row.get("lease_released_at_utc"))
+        if lease_class == "gpu" and lease_started is not None and lease_ended is not None:
+            hold_seconds = max(0.0, float((lease_ended - lease_started).total_seconds()))
+            gpu_lease_intervals.append(
+                {
+                    "stage_key": stage_key,
+                    "start": lease_started,
+                    "end": lease_ended,
+                    "hold_seconds": hold_seconds,
+                }
+            )
+            stage_gpu_hold_totals[stage_key] = float(
+                stage_gpu_hold_totals.get(stage_key, 0.0)
+            ) + float(hold_seconds)
 
     dominant_stages = sorted(
         [
@@ -311,6 +383,84 @@ def _write_stage_evidence_summaries(
 
     pd.DataFrame(stage_rows).to_csv(stage_resource_summary_path, index=False)
 
+    stage_lease_summary = {
+        "schema_version": "stage-lease-summary-v1",
+        "generated_at_utc": _utc_timestamp(),
+        "n_stage_rows": int(len(stage_rows)),
+        "stage_lease_totals": {
+            stage_key: {
+                "observation_count": int(stage_counts.get(stage_key, 0)),
+                "lease_required_count": int(stage_lease_required_counts.get(stage_key, 0)),
+                "lease_acquired_count": int(stage_lease_acquired_counts.get(stage_key, 0)),
+                "lease_missing_count": int(stage_lease_missing_counts.get(stage_key, 0)),
+                "wait_mean_seconds": (
+                    float(sum(stage_lease_waits.get(stage_key, [])) / len(stage_lease_waits[stage_key]))
+                    if stage_lease_waits.get(stage_key)
+                    else None
+                ),
+                "wait_p50_seconds": _percentile(stage_lease_waits.get(stage_key, []), 0.50),
+                "wait_p95_seconds": _percentile(stage_lease_waits.get(stage_key, []), 0.95),
+            }
+            for stage_key in sorted(stage_counts)
+        },
+    }
+    stage_lease_summary_path = campaign_root / "stage_lease_summary.json"
+    stage_lease_summary_path.write_text(
+        f"{json.dumps(stage_lease_summary, indent=2)}\\n",
+        encoding="utf-8",
+    )
+
+    queue_rows = [
+        {
+            "experiment_id": str(row.get("experiment_id") or ""),
+            "variant_id": str(row.get("variant_id") or ""),
+            "run_id": str(row.get("run_id") or ""),
+            "stage_key": str(row.get("stage_key") or ""),
+            "lease_class": row.get("lease_class"),
+            "lease_required": bool(row.get("lease_required", False)),
+            "lease_acquired": bool(row.get("lease_acquired", False)),
+            "lease_wait_seconds": _safe_float(row.get("lease_wait_seconds")),
+            "lease_queue_depth_at_acquire": row.get("lease_queue_depth_at_acquire"),
+            "lease_owner_identity": row.get("lease_owner_identity"),
+            "lease_acquired_at_utc": row.get("lease_acquired_at_utc"),
+            "lease_released_at_utc": row.get("lease_released_at_utc"),
+        }
+        for row in stage_rows
+        if bool(row.get("lease_required", False))
+    ]
+    stage_queue_summary_path = campaign_root / "stage_queue_summary.csv"
+    pd.DataFrame(queue_rows).to_csv(stage_queue_summary_path, index=False)
+
+    campaign_window_seconds: float | None = None
+    aggregate_gpu_held_seconds = float(
+        sum(float(item.get("hold_seconds", 0.0)) for item in gpu_lease_intervals)
+    )
+    if gpu_lease_intervals:
+        min_start = min(item["start"] for item in gpu_lease_intervals)
+        max_end = max(item["end"] for item in gpu_lease_intervals)
+        campaign_window_seconds = max(0.0, float((max_end - min_start).total_seconds()))
+    gpu_stage_utilization_summary = {
+        "schema_version": "gpu-stage-utilization-summary-v1",
+        "generated_at_utc": _utc_timestamp(),
+        "gpu_stage_interval_count": int(len(gpu_lease_intervals)),
+        "campaign_window_seconds": campaign_window_seconds,
+        "aggregate_gpu_held_seconds": float(aggregate_gpu_held_seconds),
+        "aggregate_gpu_duty_cycle": (
+            float(aggregate_gpu_held_seconds / campaign_window_seconds)
+            if campaign_window_seconds is not None and campaign_window_seconds > 0.0
+            else None
+        ),
+        "stage_gpu_hold_seconds": {
+            stage_key: float(stage_gpu_hold_totals[stage_key])
+            for stage_key in sorted(stage_gpu_hold_totals)
+        },
+    }
+    gpu_stage_utilization_summary_path = campaign_root / "gpu_stage_utilization_summary.json"
+    gpu_stage_utilization_summary_path.write_text(
+        f"{json.dumps(gpu_stage_utilization_summary, indent=2)}\\n",
+        encoding="utf-8",
+    )
+
     backend_fallback_summary = {
         "schema_version": "backend-fallback-summary-v1",
         "generated_at_utc": _utc_timestamp(),
@@ -347,6 +497,9 @@ def _write_stage_evidence_summaries(
         "stage_execution_summary": str(stage_execution_summary_path.resolve()),
         "stage_resource_summary": str(stage_resource_summary_path.resolve()),
         "backend_fallback_summary": str(backend_fallback_summary_path.resolve()),
+        "stage_lease_summary": str(stage_lease_summary_path.resolve()),
+        "stage_queue_summary": str(stage_queue_summary_path.resolve()),
+        "gpu_stage_utilization_summary": str(gpu_stage_utilization_summary_path.resolve()),
     }
 
 
@@ -1656,6 +1809,21 @@ def run_decision_support_campaign(
                 if isinstance(stage_evidence_summary_paths, dict)
                 else None
             ),
+            "stage_lease_summary": (
+                stage_evidence_summary_paths.get("stage_lease_summary")
+                if isinstance(stage_evidence_summary_paths, dict)
+                else None
+            ),
+            "stage_queue_summary": (
+                stage_evidence_summary_paths.get("stage_queue_summary")
+                if isinstance(stage_evidence_summary_paths, dict)
+                else None
+            ),
+            "gpu_stage_utilization_summary": (
+                stage_evidence_summary_paths.get("gpu_stage_utilization_summary")
+                if isinstance(stage_evidence_summary_paths, dict)
+                else None
+            ),
             "stage_decision_notes": [str(path.resolve()) for path in stage_decision_paths],
             "phase_artifacts": list(phase_artifact_paths),
             "phase_skip_summary": str(phase_skip_summary_path.resolve()),
@@ -1708,6 +1876,21 @@ def run_decision_support_campaign(
         ),
         "backend_fallback_summary_path": (
             stage_evidence_summary_paths.get("backend_fallback_summary")
+            if isinstance(stage_evidence_summary_paths, dict)
+            else None
+        ),
+        "stage_lease_summary_path": (
+            stage_evidence_summary_paths.get("stage_lease_summary")
+            if isinstance(stage_evidence_summary_paths, dict)
+            else None
+        ),
+        "stage_queue_summary_path": (
+            stage_evidence_summary_paths.get("stage_queue_summary")
+            if isinstance(stage_evidence_summary_paths, dict)
+            else None
+        ),
+        "gpu_stage_utilization_summary_path": (
+            stage_evidence_summary_paths.get("gpu_stage_utilization_summary")
             if isinstance(stage_evidence_summary_paths, dict)
             else None
         ),

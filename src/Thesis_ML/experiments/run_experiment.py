@@ -117,6 +117,10 @@ from Thesis_ML.experiments.stage_observability import (
     load_stage_observed_evidence,
     merge_stage_resource_attribution,
 )
+from Thesis_ML.experiments.stage_lease_manager import (
+    StageLeaseManager,
+    build_stage_lease_manager_from_context,
+)
 from Thesis_ML.experiments.stage_execution import StageKey, build_stage_execution_result
 from Thesis_ML.experiments.stage_planner import (
     StagePlanningResult,
@@ -580,6 +584,7 @@ def run_experiment(
     max_parallel_runs: int = 1,
     max_parallel_gpu_runs: int = 1,
     scheduled_compute_assignment: dict[str, Any] | None = None,
+    stage_lease_context: dict[str, Any] | None = None,
     load_features_from_cache_fn_override: (
         Callable[..., tuple[np.ndarray, pd.DataFrame, dict[str, Any]]] | None
     ) = None,
@@ -613,6 +618,7 @@ def run_experiment(
     process_profile_artifacts: dict[str, Any] | None = None
     process_profile_child_pid = int(os.getpid())
     stage_observer: StageBoundaryRecorder | None = None
+    stage_lease_manager: StageLeaseManager | None = None
     stage_resource_attribution_payload: dict[str, Any] | None = None
 
     if process_sample_interval_seconds_resolved <= 0.0:
@@ -1160,6 +1166,14 @@ def run_experiment(
         run_id=str(resolved_run_id),
         progress_callback=progress_callback,
     )
+    stage_lease_manager = build_stage_lease_manager_from_context(
+        stage_lease_context=(
+            dict(stage_lease_context) if isinstance(stage_lease_context, dict) else None
+        ),
+        reports_root=reports_root,
+        run_id=str(resolved_run_id),
+        max_parallel_gpu_leases=int(max_parallel_gpu_runs),
+    )
 
     fold_metrics_path = report_dir / "fold_metrics.csv"
     fold_splits_path = report_dir / "fold_splits.csv"
@@ -1512,6 +1526,10 @@ def run_experiment(
                             stage_planning_result.runtime_fallback_executor_ids
                         ),
                         stage_observer=stage_observer,
+                        stage_resource_contracts=tuple(
+                            stage_planning_result.stage_resource_contracts
+                        ),
+                        stage_lease_manager=stage_lease_manager,
                     )
                 )
             finally:
@@ -1525,6 +1543,11 @@ def run_experiment(
                     }
         stage_timings["segment_execution"] = float(perf_counter() - execute_start)
     except Exception as exc:
+        if stage_lease_manager is not None:
+            try:
+                stage_lease_manager.cleanup_run_leases(run_id=str(resolved_run_id))
+            except Exception:
+                pass
         failure = _failure_payload(exc)
         stage_timings["total"] = float(perf_counter() - overall_start)
         process_profile_summary_payload, process_profile_artifacts_payload = (

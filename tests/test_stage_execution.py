@@ -332,3 +332,48 @@ def test_stage_execution_marks_missing_when_observed_layer_enabled_but_stage_uno
     model_fit = telemetry_by_stage["model_fit"]
     assert model_fit.status == "missing"
     assert model_fit.missing_observed_evidence is True
+
+
+def test_stage_execution_surfaces_lease_observability_fields() -> None:
+    compute_policy = resolve_compute_policy(
+        framework_mode=FrameworkMode.EXPLORATORY,
+        hardware_mode="cpu_only",
+    )
+    stage_result = build_stage_execution_result(
+        compute_policy=compute_policy,
+        planned_sections=["model_fit", "evaluation"],
+        executed_sections=["model_fit", "evaluation"],
+        reused_sections=[],
+        tuning_enabled=True,
+        n_permutations=2,
+        observed_stage_evidence={
+            "model_fit": {
+                "observed_status": "executed",
+                "status_source": "stage_events",
+                "observed_backend_family": "torch_gpu",
+                "observed_compute_lane": "gpu",
+                "lease_required": True,
+                "lease_class": "gpu",
+                "lease_owner_identity": "run_123:model_fit",
+                "lease_acquired": True,
+                "lease_wait_seconds": 0.25,
+                "lease_queue_depth_at_acquire": 1,
+                "lease_acquired_at_utc": "2026-01-01T00:00:00+00:00",
+                "lease_released_at_utc": "2026-01-01T00:00:03+00:00",
+                "lease_held_seconds": 3.0,
+                "lease_released": True,
+                "started_at_utc": "2026-01-01T00:00:00+00:00",
+                "ended_at_utc": "2026-01-01T00:00:03+00:00",
+            }
+        },
+    )
+
+    telemetry_by_stage = {row.stage: row for row in stage_result.telemetry}
+    model_fit = telemetry_by_stage["model_fit"]
+    assert model_fit.lease_required is True
+    assert model_fit.lease_class == "gpu"
+    assert model_fit.lease_acquired is True
+    assert model_fit.lease_wait_seconds == 0.25
+    assert model_fit.lease_queue_depth_at_acquire == 1
+    assert model_fit.lease_held_seconds == 3.0
+    assert model_fit.lease_released is True

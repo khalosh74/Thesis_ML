@@ -153,3 +153,54 @@ def test_stage_execution_verifier_passes_on_planned_observed_agreement() -> None
     )
     assert result["passed"] is True
     assert result["findings"] == []
+
+
+def test_stage_execution_verifier_flags_missing_required_gpu_lease_evidence() -> None:
+    stage_execution = {
+        "policy": {
+            "source": "run_level_compute_policy_bridge_v1",
+            "hardware_mode_requested": "gpu_only",
+            "hardware_mode_effective": "gpu_only",
+            "requested_backend_family": "torch_gpu",
+            "effective_backend_family": "torch_gpu",
+            "assigned_compute_lane": "gpu",
+            "deterministic_compute": False,
+        },
+        "assignments": [
+            {
+                "stage": "permutation",
+                "backend_family": "torch_gpu",
+                "compute_lane": "gpu",
+                "source": "stage_planner_v1",
+                "reason": "test",
+                "executor_id": "permutation_ridge_gpu_preferred_v1",
+                "fallback_used": False,
+            }
+        ],
+        "telemetry": [
+            {
+                "stage": "permutation",
+                "status": "executed",
+                "planned_backend_family": "torch_gpu",
+                "planned_compute_lane": "gpu",
+                "planned_executor_id": "permutation_ridge_gpu_preferred_v1",
+                "observed_backend_family": "torch_gpu",
+                "observed_compute_lane": "gpu",
+                "observed_executor_id": "permutation_ridge_gpu_preferred_v1",
+                "observed_evidence_present": True,
+                "missing_observed_evidence": False,
+                "lease_required": True,
+                "lease_class": "gpu",
+                "lease_acquired": False,
+                "lease_released": False,
+                "evidence_quality": "medium",
+                "resource_coverage": "partial",
+                "details": {},
+            }
+        ],
+    }
+
+    result = verify_stage_execution_evidence(stage_execution=stage_execution)
+    codes = {str(item.get("code")) for item in result["findings"]}
+    assert "required_gpu_lease_missing" in codes
+    assert "observed_gpu_without_lease" in codes

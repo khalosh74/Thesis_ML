@@ -101,6 +101,16 @@ class StageExecutionTelemetry(_StageModel):
     peak_gpu_memory_mb: float | None = None
     peak_gpu_utilization_percent: float | None = None
     mean_gpu_utilization_percent: float | None = None
+    lease_required: bool | None = None
+    lease_class: str | None = None
+    lease_owner_identity: str | None = None
+    lease_acquired: bool | None = None
+    lease_wait_seconds: float | None = None
+    lease_queue_depth_at_acquire: int | None = None
+    lease_acquired_at_utc: str | None = None
+    lease_released_at_utc: str | None = None
+    lease_held_seconds: float | None = None
+    lease_released: bool | None = None
     primary_artifacts: list[str] = Field(default_factory=list)
     status_source: str | None = None
     derived_from_stage: StageKey | None = None
@@ -171,6 +181,23 @@ def _default_compute_lane_for_backend(backend_family: StageBackendFamily) -> Com
         "gpu"
         if backend_family in {StageBackendFamily.TORCH_GPU, StageBackendFamily.XGBOOST_GPU}
         else "cpu"
+    )
+
+
+def _assignment_requires_gpu_lease(assignment: StageAssignment) -> bool:
+    backend_family_value = str(assignment.backend_family).strip().lower()
+    compute_lane_value = (
+        str(assignment.compute_lane).strip().lower()
+        if assignment.compute_lane is not None
+        else ""
+    )
+    executor_id_value = (
+        str(assignment.executor_id).strip().lower() if assignment.executor_id is not None else ""
+    )
+    return bool(
+        backend_family_value in {StageBackendFamily.TORCH_GPU.value, StageBackendFamily.XGBOOST_GPU.value}
+        or compute_lane_value == "gpu"
+        or (executor_id_value and ("gpu" in executor_id_value or executor_id_value.startswith("torch_")))
     )
 
 
@@ -588,6 +615,55 @@ def build_stage_execution_result(
             and str(observed_payload.get("execution_mode")).strip()
             else None
         )
+        planned_lease_required = _assignment_requires_gpu_lease(assignment)
+        lease_required_raw = observed_payload.get("lease_required")
+        if isinstance(lease_required_raw, bool):
+            lease_required = bool(lease_required_raw)
+        elif isinstance(lease_required_raw, int):
+            lease_required = bool(int(lease_required_raw))
+        else:
+            lease_required = bool(planned_lease_required)
+        lease_class = (
+            str(observed_payload.get("lease_class"))
+            if isinstance(observed_payload.get("lease_class"), str)
+            and str(observed_payload.get("lease_class")).strip()
+            else ("gpu" if lease_required else "cpu")
+        )
+        lease_owner_identity = (
+            str(observed_payload.get("lease_owner_identity"))
+            if isinstance(observed_payload.get("lease_owner_identity"), str)
+            and str(observed_payload.get("lease_owner_identity")).strip()
+            else None
+        )
+        lease_acquired = (
+            bool(observed_payload.get("lease_acquired"))
+            if isinstance(observed_payload.get("lease_acquired"), (bool, int))
+            else None
+        )
+        lease_wait_seconds = _coerce_float(observed_payload.get("lease_wait_seconds"))
+        lease_queue_depth_at_acquire = (
+            int(observed_payload.get("lease_queue_depth_at_acquire"))
+            if isinstance(observed_payload.get("lease_queue_depth_at_acquire"), int)
+            else None
+        )
+        lease_acquired_at_utc = (
+            str(observed_payload.get("lease_acquired_at_utc"))
+            if isinstance(observed_payload.get("lease_acquired_at_utc"), str)
+            and str(observed_payload.get("lease_acquired_at_utc")).strip()
+            else None
+        )
+        lease_released_at_utc = (
+            str(observed_payload.get("lease_released_at_utc"))
+            if isinstance(observed_payload.get("lease_released_at_utc"), str)
+            and str(observed_payload.get("lease_released_at_utc")).strip()
+            else None
+        )
+        lease_held_seconds = _coerce_float(observed_payload.get("lease_held_seconds"))
+        lease_released = (
+            bool(observed_payload.get("lease_released"))
+            if isinstance(observed_payload.get("lease_released"), (bool, int))
+            else None
+        )
         primary_artifacts = (
             [str(item) for item in observed_payload.get("primary_artifacts", []) if str(item).strip()]
             if isinstance(observed_payload.get("primary_artifacts"), list)
@@ -682,6 +758,16 @@ def build_stage_execution_result(
         details["lane_match"] = lane_match
         details["executor_match"] = executor_match
         details["fallback_expected"] = fallback_expected
+        details["lease_required"] = lease_required
+        details["lease_class"] = lease_class
+        details["lease_owner_identity"] = lease_owner_identity
+        details["lease_acquired"] = lease_acquired
+        details["lease_wait_seconds"] = lease_wait_seconds
+        details["lease_queue_depth_at_acquire"] = lease_queue_depth_at_acquire
+        details["lease_acquired_at_utc"] = lease_acquired_at_utc
+        details["lease_released_at_utc"] = lease_released_at_utc
+        details["lease_held_seconds"] = lease_held_seconds
+        details["lease_released"] = lease_released
 
         telemetry_rows.append(
             StageExecutionTelemetry(
@@ -730,6 +816,16 @@ def build_stage_execution_result(
                 mean_gpu_utilization_percent=_coerce_float(
                     resource_payload.get("mean_gpu_utilization_percent")
                 ),
+                lease_required=lease_required,
+                lease_class=lease_class,
+                lease_owner_identity=lease_owner_identity,
+                lease_acquired=lease_acquired,
+                lease_wait_seconds=lease_wait_seconds,
+                lease_queue_depth_at_acquire=lease_queue_depth_at_acquire,
+                lease_acquired_at_utc=lease_acquired_at_utc,
+                lease_released_at_utc=lease_released_at_utc,
+                lease_held_seconds=lease_held_seconds,
+                lease_released=lease_released,
                 primary_artifacts=primary_artifacts,
                 status_source=status_source,
                 derived_from_stage=derived_from_stage,
