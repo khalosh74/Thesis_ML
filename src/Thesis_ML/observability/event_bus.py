@@ -9,6 +9,7 @@ from Thesis_ML.experiments.progress import ProgressEvent
 from Thesis_ML.observability.live_status import (
     apply_event_to_live_status,
     initial_live_status,
+    merge_anomaly_payload_into_live_status,
     merge_eta_payload_into_live_status,
     write_live_status_atomic,
 )
@@ -38,11 +39,13 @@ class ExecutionEventBus:
         campaign_id: str,
         keep_recent_events: int = 50,
         eta_estimator: Any | None = None,
+        anomaly_engine: Any | None = None,
     ) -> None:
         self.campaign_root = Path(campaign_root)
         self.campaign_id = str(campaign_id)
         self.keep_recent_events = int(keep_recent_events)
         self.eta_estimator = eta_estimator
+        self.anomaly_engine = anomaly_engine
         self.execution_events_path = self.campaign_root / "execution_events.jsonl"
         self.live_status_path = self.campaign_root / "campaign_live_status.json"
         self.campaign_root.mkdir(parents=True, exist_ok=True)
@@ -67,6 +70,7 @@ class ExecutionEventBus:
         metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         eta_payload: dict[str, Any] | None = None
+        anomaly_payload: dict[str, Any] | None = None
         event_payload = {
             "event_name": str(event_name),
             "scope": str(scope),
@@ -90,6 +94,14 @@ class ExecutionEventBus:
                     eta_payload = dict(eta_result)
             except Exception:
                 eta_payload = None
+        if self.anomaly_engine is not None:
+            try:
+                self.anomaly_engine.ingest_event(event_payload)
+                anomaly_result = self.anomaly_engine.current_anomaly_payload()
+                if isinstance(anomaly_result, dict):
+                    anomaly_payload = dict(anomaly_result)
+            except Exception:
+                anomaly_payload = None
         try:
             with self.execution_events_path.open("a", encoding="utf-8") as handle:
                 handle.write(f"{json.dumps(event_payload, ensure_ascii=True)}\n")
@@ -102,6 +114,11 @@ class ExecutionEventBus:
                 self._live_status = merge_eta_payload_into_live_status(
                     self._live_status,
                     eta_payload,
+                )
+            if anomaly_payload is not None:
+                self._live_status = merge_anomaly_payload_into_live_status(
+                    self._live_status,
+                    anomaly_payload,
                 )
             write_live_status_atomic(self.live_status_path, self._live_status)
         except Exception:

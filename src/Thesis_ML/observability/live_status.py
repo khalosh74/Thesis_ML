@@ -56,6 +56,8 @@ def initial_live_status(campaign_id: str) -> dict[str, Any]:
         "campaign_eta": None,
         "phase_eta": None,
         "anomalies": [],
+        "anomaly_counts": {"total": 0, "by_severity": {}, "by_code": {}, "by_category": {}},
+        "latest_anomaly": None,
     }
 
 
@@ -198,6 +200,33 @@ def merge_eta_payload_into_live_status(
         state["phase_eta"] = dict(phase_eta)
     if "current_phase" in eta_payload and eta_payload.get("current_phase") is not None:
         state["current_phase"] = eta_payload.get("current_phase")
+    return state
+
+
+def merge_anomaly_payload_into_live_status(
+    state: dict[str, Any],
+    anomaly_payload: dict[str, Any] | None,
+    *,
+    keep_recent_anomalies: int = 20,
+) -> dict[str, Any]:
+    if not isinstance(anomaly_payload, dict):
+        return state
+    anomalies = anomaly_payload.get("anomalies")
+    if isinstance(anomalies, list):
+        normalized = [_json_safe(dict(item)) for item in anomalies if isinstance(item, dict)]
+        if int(keep_recent_anomalies) > 0 and len(normalized) > int(keep_recent_anomalies):
+            normalized = normalized[-int(keep_recent_anomalies) :]
+        state["anomalies"] = normalized
+    anomaly_counts = anomaly_payload.get("anomaly_counts")
+    if isinstance(anomaly_counts, dict):
+        state["anomaly_counts"] = _json_safe(dict(anomaly_counts))
+    else:
+        state.setdefault(
+            "anomaly_counts",
+            {"total": 0, "by_severity": {}, "by_code": {}, "by_category": {}},
+        )
+    latest = anomaly_payload.get("latest_anomaly")
+    state["latest_anomaly"] = _json_safe(dict(latest)) if isinstance(latest, dict) else None
     return state
 
 

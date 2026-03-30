@@ -1,3 +1,8 @@
+from Thesis_ML.observability.anomalies import (
+    AnomalyEngine,
+    append_anomaly,
+    build_anomaly_id,
+)
 from Thesis_ML.observability.eta import (
     EtaEstimator,
     append_runtime_history,
@@ -16,8 +21,11 @@ from Thesis_ML.observability.process_sampler import ProcessSampler
 
 __all__ = [
     "ExecutionEventBus",
+    "AnomalyEngine",
     "EtaEstimator",
+    "append_anomaly",
     "append_runtime_history",
+    "build_anomaly_id",
     "build_runtime_keys",
     "load_runtime_history",
     "load_runtime_profile_summary",

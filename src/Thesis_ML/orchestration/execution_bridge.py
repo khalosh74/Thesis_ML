@@ -549,6 +549,8 @@ def execute_variant(
     status = "planned"
     error: str | None = None
     result: dict[str, Any] | None = None
+    watchdog_process_profile_summary: dict[str, Any] | None = None
+    watchdog_process_profile_artifacts: dict[str, Any] | None = None
 
     effective_seed = int(trial_seed) if trial_seed is not None else int(seed)
     resolved_permutation_override = _optional_int(variant.get("n_permutations_override"))
@@ -604,6 +606,14 @@ def execute_variant(
                     status = "failed"
                     error = "official_job_result_missing_watchdog_payload"
                 else:
+                    if isinstance(watchdog_result.get("process_profile_summary"), dict):
+                        watchdog_process_profile_summary = dict(
+                            watchdog_result["process_profile_summary"]
+                        )
+                    if isinstance(watchdog_result.get("process_profile_artifacts"), dict):
+                        watchdog_process_profile_artifacts = dict(
+                            watchdog_result["process_profile_artifacts"]
+                        )
                     watchdog_status = str(watchdog_result.get("status", "")).strip().lower()
                     if watchdog_status in {"success", RUN_STATUS_SUCCESS} and isinstance(
                         watchdog_result.get("run_payload"), dict
@@ -859,6 +869,19 @@ def execute_variant(
         if isinstance(result, dict) and result.get("tuning_enabled") is not None
         else None
     )
+    result_process_profile_summary = (
+        dict(result.get("process_profile_summary"))
+        if isinstance(result, dict) and isinstance(result.get("process_profile_summary"), dict)
+        else None
+    )
+    result_eta_p80_seconds = (
+        _safe_float(result.get("eta_p80_seconds")) if isinstance(result, dict) else None
+    )
+    effective_process_profile_summary = (
+        result_process_profile_summary
+        if result_process_profile_summary is not None
+        else watchdog_process_profile_summary
+    )
 
     record = {
         "experiment_id": experiment_id,
@@ -891,6 +914,9 @@ def execute_variant(
         "model_cost_tier": result_model_cost_tier,
         "projected_runtime_seconds": result_projected_runtime_seconds,
         "stage_timings_seconds": result_stage_timings_seconds,
+        "eta_p80_seconds": result_eta_p80_seconds,
+        "process_profile_summary": effective_process_profile_summary,
+        "process_profile_artifacts": watchdog_process_profile_artifacts,
         "tuning_enabled": result_tuning_enabled,
         "n_permutations": int(effective_n_permutations),
         "start_section": start_section,

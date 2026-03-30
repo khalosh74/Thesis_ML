@@ -26,7 +26,7 @@ from Thesis_ML.experiments.model_catalog import (
 from Thesis_ML.experiments.model_catalog import (
     projected_runtime_seconds as resolve_projected_runtime_seconds,
 )
-from Thesis_ML.observability import EtaEstimator, ExecutionEventBus
+from Thesis_ML.observability import AnomalyEngine, EtaEstimator, ExecutionEventBus
 from Thesis_ML.orchestration.contracts import CompiledStudyManifest
 from Thesis_ML.orchestration.decision_reports import (
     write_decision_reports as _write_decision_reports,
@@ -466,6 +466,14 @@ def run_decision_support_campaign(
     campaign_root = output_root / "campaigns" / campaign_id
     campaign_root.mkdir(parents=True, exist_ok=False)
     history_path = campaign_root.parent / "runtime_history.jsonl"
+    anomaly_engine: AnomalyEngine | None = None
+    try:
+        anomaly_engine = AnomalyEngine(
+            campaign_root=campaign_root,
+            campaign_id=campaign_id,
+        )
+    except Exception:
+        anomaly_engine = None
     eta_estimator: EtaEstimator | None = None
     try:
         eta_estimator = EtaEstimator(
@@ -484,6 +492,7 @@ def run_decision_support_campaign(
             campaign_root=campaign_root,
             campaign_id=campaign_id,
             eta_estimator=eta_estimator,
+            anomaly_engine=anomaly_engine,
         )
     except Exception:
         event_bus = None
@@ -940,6 +949,20 @@ def run_decision_support_campaign(
                     )
                 if record.get("tuning_enabled") is not None:
                     eta_terminal_metadata["tuning_enabled"] = bool(record.get("tuning_enabled"))
+                anomaly_terminal_metadata = dict(eta_terminal_metadata)
+                anomaly_terminal_metadata.update(
+                    {
+                        "status": str(record_status),
+                        "roi_spec_path": record.get("roi_spec_path"),
+                        "stage_timings_seconds": record.get("stage_timings_seconds"),
+                        "process_profile_summary": record.get("process_profile_summary"),
+                    }
+                )
+                if anomaly_engine is not None:
+                    try:
+                        anomaly_engine.inspect_terminal_run(anomaly_terminal_metadata)
+                    except Exception:
+                        pass
                 if record_status == "completed":
                     _emit_campaign_event(
                         event_name="run_finished",
@@ -1217,6 +1240,14 @@ def run_decision_support_campaign(
         except Exception:
             eta_calibration_path = None
 
+    anomaly_report_path: str | None = None
+    if anomaly_engine is not None:
+        try:
+            anomaly_engine.finalize()
+            anomaly_report_path = str((campaign_root / "campaign_anomaly_report.json").resolve())
+        except Exception:
+            anomaly_report_path = None
+
     campaign_manifest = {
         "campaign_id": campaign_id,
         "created_at": _utc_timestamp(),
@@ -1252,6 +1283,8 @@ def run_decision_support_campaign(
             "eta_state": str((campaign_root / "eta_state.json").resolve()),
             "eta_calibration": eta_calibration_path,
             "runtime_history": str(history_path.resolve()),
+            "anomalies": str((campaign_root / "anomalies.jsonl").resolve()),
+            "anomaly_report": anomaly_report_path,
             "workbook_output_path": (
                 str(workbook_output_path.resolve()) if workbook_output_path is not None else None
             ),
@@ -1285,6 +1318,8 @@ def run_decision_support_campaign(
         "eta_state_path": str((campaign_root / "eta_state.json").resolve()),
         "eta_calibration_path": eta_calibration_path,
         "runtime_history_path": str(history_path.resolve()),
+        "anomalies_path": str((campaign_root / "anomalies.jsonl").resolve()),
+        "anomaly_report_path": anomaly_report_path,
         "selected_experiments": [str(exp["experiment_id"]) for exp in selected_experiments],
         "status_counts": _status_snapshot(all_variant_records),
         "blocked_experiments": blocked_experiments,
