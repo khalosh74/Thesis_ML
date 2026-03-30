@@ -202,7 +202,9 @@ def test_full_pipeline_stage_execution_metadata_is_additive(
     assert metrics_payload.get("preprocessing_kind") == "standard_scaler"
 
 
-def test_segment_execution_emits_stage_boundary_artifacts(prepared_dataset: dict[str, Path]) -> None:
+def test_segment_execution_emits_stage_boundary_artifacts(
+    prepared_dataset: dict[str, Path],
+) -> None:
     result = run_experiment(
         **_base_run_kwargs(prepared_dataset),
         run_id="segment_stage_boundary_artifacts",

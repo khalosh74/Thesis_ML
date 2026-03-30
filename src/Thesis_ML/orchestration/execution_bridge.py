@@ -27,6 +27,7 @@ from Thesis_ML.experiments.parallel_execution import (
     OfficialRunJob,
     execute_official_run_jobs,
     resolve_official_job_resource_lane_hint,
+    resolve_official_job_worker_execution_mode,
 )
 from Thesis_ML.experiments.progress import ProgressCallback
 from Thesis_ML.experiments.run_states import RUN_STATUS_SUCCESS
@@ -310,7 +311,9 @@ def plan_sibling_feature_matrix_reuse(
         if upstream_identity is None:
             continue
         key = compute_config_hash(upstream_identity)
-        grouped_indexes.setdefault(key, []).append(int(index))
+        if key is None:
+            continue
+        grouped_indexes.setdefault(str(key), []).append(int(index))
 
     dependency_map: dict[int, int] = {}
     for indexes in grouped_indexes.values():
@@ -561,7 +564,9 @@ def build_variant_official_job(
                 scheduled_compute_assignment=scheduled_assignment_payload,
             ),
             scheduled_compute_assignment=scheduled_assignment_payload,
-            worker_execution_mode=str(worker_execution_mode),
+            worker_execution_mode=resolve_official_job_worker_execution_mode(
+                str(worker_execution_mode)
+            ),
         ),
         None,
         run_id,
@@ -992,9 +997,12 @@ def execute_variant(
     result_projected_runtime_seconds = (
         _safe_float(result.get("projected_runtime_seconds")) if isinstance(result, dict) else None
     )
+    result_stage_timings_payload = (
+        result.get("stage_timings_seconds") if isinstance(result, dict) else None
+    )
     result_stage_timings_seconds = (
-        dict(result.get("stage_timings_seconds"))
-        if isinstance(result, dict) and isinstance(result.get("stage_timings_seconds"), dict)
+        dict(result_stage_timings_payload)
+        if isinstance(result_stage_timings_payload, dict)
         else None
     )
     result_tuning_enabled = (
@@ -1002,9 +1010,12 @@ def execute_variant(
         if isinstance(result, dict) and result.get("tuning_enabled") is not None
         else None
     )
+    result_process_profile_payload = (
+        result.get("process_profile_summary") if isinstance(result, dict) else None
+    )
     result_process_profile_summary = (
-        dict(result.get("process_profile_summary"))
-        if isinstance(result, dict) and isinstance(result.get("process_profile_summary"), dict)
+        dict(result_process_profile_payload)
+        if isinstance(result_process_profile_payload, dict)
         else None
     )
     result_eta_p80_seconds = (

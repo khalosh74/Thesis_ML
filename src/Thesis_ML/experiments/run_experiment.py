@@ -112,16 +112,16 @@ from Thesis_ML.experiments.segment_execution import (
     execute_section_segment,
 )
 from Thesis_ML.experiments.spatial_validation import SPATIAL_AFFINE_ATOL
+from Thesis_ML.experiments.stage_execution import StageKey, build_stage_execution_result
+from Thesis_ML.experiments.stage_lease_manager import (
+    StageLeaseManager,
+    build_stage_lease_manager_from_context,
+)
 from Thesis_ML.experiments.stage_observability import (
     StageBoundaryRecorder,
     load_stage_observed_evidence,
     merge_stage_resource_attribution,
 )
-from Thesis_ML.experiments.stage_lease_manager import (
-    StageLeaseManager,
-    build_stage_lease_manager_from_context,
-)
-from Thesis_ML.experiments.stage_execution import StageKey, build_stage_execution_result
 from Thesis_ML.experiments.stage_planner import (
     StagePlanningResult,
     plan_stage_execution,
@@ -324,25 +324,23 @@ def _stage_assignment_metadata_payload(assignment: Any | None) -> dict[str, Any]
         return {}
     payload: dict[str, Any] = {
         "planned_backend_family": (
-            str(getattr(assignment, "backend_family"))
+            str(assignment.backend_family)
             if getattr(assignment, "backend_family", None) is not None
             else None
         ),
         "planned_compute_lane": (
-            str(getattr(assignment, "compute_lane"))
+            str(assignment.compute_lane)
             if getattr(assignment, "compute_lane", None) is not None
             else None
         ),
         "planned_executor_id": (
-            str(getattr(assignment, "executor_id"))
+            str(assignment.executor_id)
             if getattr(assignment, "executor_id", None) is not None
             else None
         ),
         "official_admitted": getattr(assignment, "official_admitted", None),
         "assignment_source": (
-            str(getattr(assignment, "source"))
-            if getattr(assignment, "source", None) is not None
-            else None
+            str(assignment.source) if getattr(assignment, "source", None) is not None else None
         ),
         "fallback_expected": bool(getattr(assignment, "fallback_used", False)),
     }
@@ -1266,7 +1264,9 @@ def run_experiment(
                 stage_resource_attribution_payload = merge_stage_resource_attribution(
                     report_dir=report_dir,
                     process_profile_summary=(
-                        process_profile_summary if isinstance(process_profile_summary, dict) else None
+                        process_profile_summary
+                        if isinstance(process_profile_summary, dict)
+                        else None
                     ),
                 )
                 stage_resource_attribution_path = report_dir / "stage_resource_attribution.json"
@@ -1642,7 +1642,7 @@ def run_experiment(
                 "observed_backend_family": "sklearn_cpu",
                 "observed_compute_lane": "cpu",
                 "observed_executor_id": (
-                    str(getattr(reporting_assignment, "executor_id"))
+                    str(reporting_assignment.executor_id)
                     if reporting_assignment is not None
                     and getattr(reporting_assignment, "executor_id", None) is not None
                     else None
@@ -2018,7 +2018,7 @@ def run_experiment(
                 "observed_backend_family": "sklearn_cpu",
                 "observed_compute_lane": "cpu",
                 "observed_executor_id": (
-                    str(getattr(reporting_assignment, "executor_id"))
+                    str(reporting_assignment.executor_id)
                     if reporting_assignment is not None
                     and getattr(reporting_assignment, "executor_id", None) is not None
                     else None

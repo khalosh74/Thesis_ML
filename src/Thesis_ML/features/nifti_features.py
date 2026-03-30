@@ -767,6 +767,10 @@ def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+    parallel_backend: Literal["serial", "process"] = cast(
+        Literal["serial", "process"],
+        args.parallel_backend,
+    )
 
     manifest_path = build_feature_cache(
         index_csv=Path(args.index_csv),
@@ -775,7 +779,7 @@ def main(argv: list[str] | None = None) -> int:
         group_key=args.group_key,
         force=args.force,
         max_workers=int(args.max_workers),
-        parallel_backend=str(args.parallel_backend),
+        parallel_backend=parallel_backend,
     )
 
     manifest = pd.read_csv(manifest_path)

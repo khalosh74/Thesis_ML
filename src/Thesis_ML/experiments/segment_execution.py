@@ -48,14 +48,14 @@ from Thesis_ML.experiments.segment_execution_helpers import (
     require_callable,
     resolve_base_artifact,
 )
-from Thesis_ML.experiments.stage_observability import StageBoundaryRecorder
+from Thesis_ML.experiments.stage_execution import StageAssignment, StageKey
 from Thesis_ML.experiments.stage_lease_manager import (
     StageLeaseHandle,
     StageLeaseManager,
     StageLeaseReleaseResult,
     StageLeaseRequest,
 )
-from Thesis_ML.experiments.stage_execution import StageAssignment, StageKey
+from Thesis_ML.experiments.stage_observability import StageBoundaryRecorder
 from Thesis_ML.experiments.stage_planner import StageResourceContract
 from Thesis_ML.features.preprocessing import BASELINE_STANDARD_SCALER_RECIPE_ID
 from Thesis_ML.orchestration.contracts import ReusePolicy, SectionName
@@ -234,13 +234,14 @@ def _build_section_stage_lease_plan(
     ]
     lease_required = bool(gpu_contracts)
     selected_contract = (
-        gpu_contracts[0] if gpu_contracts else (relevant_contracts[0] if relevant_contracts else None)
+        gpu_contracts[0]
+        if gpu_contracts
+        else (relevant_contracts[0] if relevant_contracts else None)
     )
     lease_owner_identity = f"{str(run_id)}:{section_name.value}"
     lease_reason = (
         ";".join(
-            f"{contract.stage_key.value}:{contract.lease_reason}"
-            for contract in gpu_contracts
+            f"{contract.stage_key.value}:{contract.lease_reason}" for contract in gpu_contracts
         )
         if gpu_contracts
         else "section_cpu_only"
@@ -253,7 +254,8 @@ def _build_section_stage_lease_plan(
         "lease_expected_stage_keys": [stage_key.value for stage_key in relevant_stage_keys],
         "lease_expected_backend_family": (
             str(selected_contract.expected_backend_family)
-            if selected_contract is not None and selected_contract.expected_backend_family is not None
+            if selected_contract is not None
+            and selected_contract.expected_backend_family is not None
             else None
         ),
         "lease_expected_executor_id": (
@@ -346,6 +348,30 @@ def _stage_observed_metadata(
         for key, value in stage_lease_metadata.items():
             payload[str(key)] = value
     return payload
+
+
+def _release_section_stage_lease(
+    *,
+    stage_lease_handle: StageLeaseHandle | None,
+    stage_lease_manager: StageLeaseManager | None,
+    section_stage_lease_metadata: dict[str, Any],
+    stage_observer: StageBoundaryRecorder | None,
+    stage_key: StageKey | None,
+) -> StageLeaseReleaseResult | None:
+    if stage_lease_handle is None or stage_lease_manager is None:
+        return None
+    release_result = stage_lease_manager.release(stage_lease_handle)
+    section_stage_lease_metadata["lease_released"] = bool(release_result.released)
+    section_stage_lease_metadata["lease_released_at_utc"] = str(release_result.released_at_utc)
+    section_stage_lease_metadata["lease_held_seconds"] = (
+        float(release_result.hold_seconds) if release_result.hold_seconds is not None else None
+    )
+    if stage_observer is not None and stage_key is not None:
+        stage_observer.update_stage_context(
+            stage_key,
+            metadata=dict(section_stage_lease_metadata),
+        )
+    return release_result
 
 
 def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutionResult:
@@ -441,7 +467,9 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
             if isinstance(contract, StageResourceContract)
             else StageResourceContract(**dict(contract))
         )
-        stage_resource_contract_map[StageKey(str(normalized_contract.stage_key))] = normalized_contract
+        stage_resource_contract_map[StageKey(str(normalized_contract.stage_key))] = (
+            normalized_contract
+        )
     stage_lease_manager = request.stage_lease_manager
 
     def _section_stage_key(section_name: SectionName) -> StageKey | None:
@@ -563,32 +591,14 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
         )
         stage_lease_handle: StageLeaseHandle | None = None
 
-        def _release_section_stage_lease() -> StageLeaseReleaseResult | None:
-            if stage_lease_handle is None or stage_lease_manager is None:
-                return None
-            release_result = stage_lease_manager.release(stage_lease_handle)
-            section_stage_lease_metadata["lease_released"] = bool(release_result.released)
-            section_stage_lease_metadata["lease_released_at_utc"] = str(
-                release_result.released_at_utc
-            )
-            section_stage_lease_metadata["lease_held_seconds"] = (
-                float(release_result.hold_seconds)
-                if release_result.hold_seconds is not None
-                else None
-            )
-            if stage_observer is not None and isinstance(stage_key, StageKey):
-                stage_observer.update_stage_context(
-                    stage_key,
-                    metadata=dict(section_stage_lease_metadata),
-                )
-            return release_result
-
         if bool(section_stage_lease_metadata.get("lease_required", False)):
             if stage_lease_manager is None:
                 raise ValueError("gpu_stage_requires_stage_lease_manager")
             stage_lease_request = StageLeaseRequest(
                 run_id=str(request.run_id),
-                stage_key=str(stage_key.value if isinstance(stage_key, StageKey) else section.value),
+                stage_key=str(
+                    stage_key.value if isinstance(stage_key, StageKey) else section.value
+                ),
                 owner_identity=str(section_stage_lease_metadata["lease_owner_identity"]),
                 lease_class="gpu",
                 lease_reason=str(section_stage_lease_metadata.get("lease_reason") or ""),
@@ -697,7 +707,13 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
                                 "primary_artifacts": _primary_artifacts_for_section(section),
                             },
                         )
-                    _release_section_stage_lease()
+                    _release_section_stage_lease(
+                        stage_lease_handle=stage_lease_handle,
+                        stage_lease_manager=stage_lease_manager,
+                        section_stage_lease_metadata=section_stage_lease_metadata,
+                        stage_observer=stage_observer,
+                        stage_key=(stage_key if isinstance(stage_key, StageKey) else None),
+                    )
                     continue
 
             cache_output = feature_cache_build(
@@ -785,7 +801,13 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
                                 "primary_artifacts": _primary_artifacts_for_section(section),
                             },
                         )
-                    _release_section_stage_lease()
+                    _release_section_stage_lease(
+                        stage_lease_handle=stage_lease_handle,
+                        stage_lease_manager=stage_lease_manager,
+                        section_stage_lease_metadata=section_stage_lease_metadata,
+                        stage_observer=stage_observer,
+                        stage_key=(stage_key if isinstance(stage_key, StageKey) else None),
+                    )
                     continue
             matrix_output = feature_matrix_load(
                 FeatureMatrixLoadInput(
@@ -898,10 +920,12 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
                 if isinstance(fit_output.fit_timing_summary, dict)
                 else None
             )
+            model_fit_duration_raw = (
+                fit_timing_totals.get("outer_fold") if isinstance(fit_timing_totals, dict) else None
+            )
             model_fit_duration = (
-                float(fit_timing_totals.get("outer_fold"))
-                if isinstance(fit_timing_totals, dict)
-                and isinstance(fit_timing_totals.get("outer_fold"), (int, float))
+                float(model_fit_duration_raw)
+                if isinstance(model_fit_duration_raw, (int, float))
                 else None
             )
             if model_fit_duration is not None:
@@ -925,10 +949,14 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
                 if isinstance(fit_output.tuning_summary, dict)
                 else None
             )
-            tuning_duration = (
-                float(tuning_timing_totals.get("tuned_search_total"))
+            tuning_duration_raw = (
+                tuning_timing_totals.get("tuned_search_total")
                 if isinstance(tuning_timing_totals, dict)
-                and isinstance(tuning_timing_totals.get("tuned_search_total"), (int, float))
+                else None
+            )
+            tuning_duration = (
+                float(tuning_duration_raw)
+                if isinstance(tuning_duration_raw, (int, float))
                 else None
             )
             if bool(request.tuning_enabled) and tuning_duration is not None:
@@ -1048,7 +1076,13 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
                                 "primary_artifacts": _primary_artifacts_for_section(section),
                             },
                         )
-                    _release_section_stage_lease()
+                    _release_section_stage_lease(
+                        stage_lease_handle=stage_lease_handle,
+                        stage_lease_manager=stage_lease_manager,
+                        section_stage_lease_metadata=section_stage_lease_metadata,
+                        stage_observer=stage_observer,
+                        stage_key=(stage_key if isinstance(stage_key, StageKey) else None),
+                    )
                     continue
             interpretability_output = interpretability(
                 InterpretabilityInput(
@@ -1162,7 +1196,9 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
                             permutation_executor_id = (
                                 str(permutation_payload.get("permutation_executor_id"))
                                 if isinstance(permutation_payload, dict)
-                                and isinstance(permutation_payload.get("permutation_executor_id"), str)
+                                and isinstance(
+                                    permutation_payload.get("permutation_executor_id"), str
+                                )
                                 and str(permutation_payload.get("permutation_executor_id")).strip()
                                 else None
                             )
@@ -1196,7 +1232,13 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
                                 reason="permutations_disabled",
                                 derived_from_stage=StageKey.EVALUATION,
                             )
-                    _release_section_stage_lease()
+                    _release_section_stage_lease(
+                        stage_lease_handle=stage_lease_handle,
+                        stage_lease_manager=stage_lease_manager,
+                        section_stage_lease_metadata=section_stage_lease_metadata,
+                        stage_observer=stage_observer,
+                        stage_key=(stage_key if isinstance(stage_key, StageKey) else None),
+                    )
                     continue
             evaluation_output = evaluation(
                 EvaluationInput(
@@ -1310,9 +1352,14 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
             if isinstance(permutation_payload, dict) and isinstance(
                 permutation_payload.get("permutation_loop_seconds"), (int, float)
             ):
+                permutation_loop_seconds_raw = permutation_payload.get("permutation_loop_seconds")
                 _set_stage_timing(
                     stage_name=StageKey.PERMUTATION.value,
-                    duration_seconds=float(permutation_payload.get("permutation_loop_seconds")),
+                    duration_seconds=(
+                        float(permutation_loop_seconds_raw)
+                        if isinstance(permutation_loop_seconds_raw, (int, float))
+                        else None
+                    ),
                     duration_source="metrics.permutation_test.permutation_loop_seconds",
                     derived_from="metrics.permutation_test",
                 )
@@ -1406,7 +1453,13 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
         else:
             raise ValueError(f"Unsupported section encountered in execution plan: {section.value}")
 
-        _release_section_stage_lease()
+        _release_section_stage_lease(
+            stage_lease_handle=stage_lease_handle,
+            stage_lease_manager=stage_lease_manager,
+            section_stage_lease_metadata=section_stage_lease_metadata,
+            stage_observer=stage_observer,
+            stage_key=(stage_key if isinstance(stage_key, StageKey) else None),
+        )
 
         executed_sections.append(section.value)
         _record_section_duration(

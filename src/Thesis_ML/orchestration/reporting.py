@@ -280,7 +280,9 @@ def summarize_by_experiment(
         if failed:
             notes.append(f"failed_variants={len(failed)}")
         if warnings:
-            notes.append("warnings: " + "; ".join(sorted({str(item) for item in warnings if str(item)})))
+            notes.append(
+                "warnings: " + "; ".join(sorted({str(item) for item in warnings if str(item)}))
+            )
 
         rows.append(
             {
@@ -522,7 +524,9 @@ def write_campaign_execution_report(
             else None
         ),
         "result_aggregation": (
-            "result_aggregation.json" if (campaign_root / "result_aggregation.json").exists() else None
+            "result_aggregation.json"
+            if (campaign_root / "result_aggregation.json").exists()
+            else None
         ),
         "summary_outputs_export": (
             "summary_outputs_export.csv"
@@ -540,55 +544,78 @@ def write_campaign_execution_report(
     if anomaly_report is not None:
         key_artifacts["campaign_anomaly_report"] = "campaign_anomaly_report.json"
 
-    counts = live_status.get("counts") if isinstance(live_status.get("counts"), dict) else {}
-    report_payload = {
-        "campaign_id": str(campaign_id),
-        "generated_at_utc": _utc_now(),
-        "campaign_root": str(campaign_root.resolve()),
-        "final_execution_status": {
-            "status": live_status.get("status"),
-            "started_at_utc": live_status.get("started_at_utc"),
-            "last_updated_at_utc": live_status.get("last_updated_at_utc"),
-        },
-        "phase_summary": {
-            "current_phase": live_status.get("current_phase"),
-            "current_phase_status": live_status.get("current_phase_status"),
-            "blocked_experiments": list(live_status.get("blocked_experiments", [])),
-        },
-        "run_summary": {
-            "runs_planned": int(counts.get("runs_planned", 0)),
-            "runs_dispatched": int(counts.get("runs_dispatched", 0)),
-            "runs_started": int(counts.get("runs_started", 0)),
-            "runs_completed": int(counts.get("runs_completed", 0)),
-            "runs_failed": int(counts.get("runs_failed", 0)),
-            "runs_blocked": int(counts.get("runs_blocked", 0)),
-            "runs_dry_run": int(counts.get("runs_dry_run", 0)),
-            "active_runs": len(live_status.get("active_runs", []))
+    counts_payload = live_status.get("counts")
+    counts: dict[str, Any] = dict(counts_payload) if isinstance(counts_payload, dict) else {}
+    blocked_experiments = (
+        [str(item) for item in live_status.get("blocked_experiments", [])]
+        if isinstance(live_status.get("blocked_experiments"), list)
+        else []
+    )
+    failed_runs = (
+        [str(item) for item in live_status.get("failed_runs", [])]
+        if isinstance(live_status.get("failed_runs"), list)
+        else []
+    )
+
+    final_execution_status: dict[str, Any] = {
+        "status": live_status.get("status"),
+        "started_at_utc": live_status.get("started_at_utc"),
+        "last_updated_at_utc": live_status.get("last_updated_at_utc"),
+    }
+    phase_summary: dict[str, Any] = {
+        "current_phase": live_status.get("current_phase"),
+        "current_phase_status": live_status.get("current_phase_status"),
+        "blocked_experiments": list(blocked_experiments),
+    }
+    run_summary: dict[str, int] = {
+        "runs_planned": int(counts.get("runs_planned", 0)),
+        "runs_dispatched": int(counts.get("runs_dispatched", 0)),
+        "runs_started": int(counts.get("runs_started", 0)),
+        "runs_completed": int(counts.get("runs_completed", 0)),
+        "runs_failed": int(counts.get("runs_failed", 0)),
+        "runs_blocked": int(counts.get("runs_blocked", 0)),
+        "runs_dry_run": int(counts.get("runs_dry_run", 0)),
+        "active_runs": (
+            len(live_status.get("active_runs", []))
             if isinstance(live_status.get("active_runs"), list)
-            else 0,
-        },
-        "eta_summary": {
-            "campaign_eta": eta_state.get("campaign_eta") if isinstance(eta_state, dict) else None,
-            "phase_eta": eta_state.get("phase_eta") if isinstance(eta_state, dict) else None,
-            "calibration": eta_calibration,
-        },
-        "anomaly_summary": anomaly_report
+            else 0
+        ),
+    }
+    eta_summary: dict[str, Any] = {
+        "campaign_eta": eta_state.get("campaign_eta") if isinstance(eta_state, dict) else None,
+        "phase_eta": eta_state.get("phase_eta") if isinstance(eta_state, dict) else None,
+        "calibration": eta_calibration,
+    }
+    anomaly_summary: dict[str, Any] = (
+        dict(anomaly_report)
         if isinstance(anomaly_report, dict)
         else {
             "anomaly_counts": live_status.get("anomaly_counts"),
             "latest_anomaly": live_status.get("latest_anomaly"),
-        },
+        }
+    )
+    operator_notes: dict[str, list[str]] = {
+        "blocked_experiments": list(blocked_experiments),
+        "failed_runs": list(failed_runs),
+    }
+
+    report_payload: dict[str, Any] = {
+        "campaign_id": str(campaign_id),
+        "generated_at_utc": _utc_now(),
+        "campaign_root": str(campaign_root.resolve()),
+        "final_execution_status": final_execution_status,
+        "phase_summary": phase_summary,
+        "run_summary": run_summary,
+        "eta_summary": eta_summary,
+        "anomaly_summary": anomaly_summary,
         "key_generated_artifacts": key_artifacts,
-        "operator_notes": {
-            "blocked_experiments": list(live_status.get("blocked_experiments", [])),
-            "failed_runs": list(live_status.get("failed_runs", [])),
-        },
+        "operator_notes": operator_notes,
     }
 
     report_json_path = campaign_root / "campaign_execution_report.json"
     report_json_path.write_text(f"{json.dumps(report_payload, indent=2)}\n", encoding="utf-8")
 
-    status_value = str(report_payload["final_execution_status"].get("status") or "unknown")
+    status_value = str(final_execution_status.get("status") or "unknown")
     lines = [
         "# Campaign Execution Report",
         "",
@@ -599,32 +626,32 @@ def write_campaign_execution_report(
         "",
         "## Final execution status",
         f"- Status: {status_value}",
-        f"- Started at: {report_payload['final_execution_status'].get('started_at_utc')}",
-        f"- Last updated at: {report_payload['final_execution_status'].get('last_updated_at_utc')}",
+        f"- Started at: {final_execution_status.get('started_at_utc')}",
+        f"- Last updated at: {final_execution_status.get('last_updated_at_utc')}",
         "",
         "## Phase summary",
-        f"- Current phase: {report_payload['phase_summary'].get('current_phase')}",
-        f"- Current phase status: {report_payload['phase_summary'].get('current_phase_status')}",
-        f"- Blocked experiments: {', '.join(report_payload['phase_summary'].get('blocked_experiments', [])) or 'none'}",
+        f"- Current phase: {phase_summary.get('current_phase')}",
+        f"- Current phase status: {phase_summary.get('current_phase_status')}",
+        f"- Blocked experiments: {', '.join(blocked_experiments) or 'none'}",
         "",
         "## Run summary",
-        f"- Runs planned: {report_payload['run_summary']['runs_planned']}",
-        f"- Runs dispatched: {report_payload['run_summary']['runs_dispatched']}",
-        f"- Runs started: {report_payload['run_summary']['runs_started']}",
-        f"- Runs completed: {report_payload['run_summary']['runs_completed']}",
-        f"- Runs failed: {report_payload['run_summary']['runs_failed']}",
-        f"- Runs blocked: {report_payload['run_summary']['runs_blocked']}",
-        f"- Runs dry-run: {report_payload['run_summary']['runs_dry_run']}",
-        f"- Active runs: {report_payload['run_summary']['active_runs']}",
+        f"- Runs planned: {run_summary['runs_planned']}",
+        f"- Runs dispatched: {run_summary['runs_dispatched']}",
+        f"- Runs started: {run_summary['runs_started']}",
+        f"- Runs completed: {run_summary['runs_completed']}",
+        f"- Runs failed: {run_summary['runs_failed']}",
+        f"- Runs blocked: {run_summary['runs_blocked']}",
+        f"- Runs dry-run: {run_summary['runs_dry_run']}",
+        f"- Active runs: {run_summary['active_runs']}",
         "",
         "## ETA summary and calibration",
-        f"- Campaign ETA: {json.dumps(report_payload['eta_summary'].get('campaign_eta'))}",
-        f"- Phase ETA: {json.dumps(report_payload['eta_summary'].get('phase_eta'))}",
+        f"- Campaign ETA: {json.dumps(eta_summary.get('campaign_eta'))}",
+        f"- Phase ETA: {json.dumps(eta_summary.get('phase_eta'))}",
         f"- Calibration available: {'yes' if eta_calibration is not None else 'no'}",
         "",
         "## Anomaly summary",
         f"- Anomaly report available: {'yes' if anomaly_report is not None else 'no'}",
-        f"- Latest anomaly: {json.dumps((live_status.get('latest_anomaly') if isinstance(live_status, dict) else None))}",
+        f"- Latest anomaly: {json.dumps(live_status.get('latest_anomaly') if isinstance(live_status, dict) else None)}",
         "",
         "## Key generated artifacts",
     ]
@@ -644,8 +671,8 @@ def write_campaign_execution_report(
         [
             "",
             "## Operator notes / blocked items",
-            f"- Blocked experiments: {', '.join(report_payload['operator_notes'].get('blocked_experiments', [])) or 'none'}",
-            f"- Failed runs: {', '.join(report_payload['operator_notes'].get('failed_runs', [])) or 'none'}",
+            f"- Blocked experiments: {', '.join(operator_notes.get('blocked_experiments', [])) or 'none'}",
+            f"- Failed runs: {', '.join(operator_notes.get('failed_runs', [])) or 'none'}",
             "",
         ]
     )
