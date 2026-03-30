@@ -139,3 +139,38 @@ def test_campaign_eta_files_and_live_status_fields_are_written(tmp_path: Path) -
     assert "eta_p80_seconds" in live_payload
     assert "eta_confidence" in live_payload
     assert "eta_source" in live_payload
+
+
+def test_campaign_dry_run_eta_is_marked_planning_only(tmp_path: Path) -> None:
+    registry_path = tmp_path / "registry.json"
+    index_csv = tmp_path / "index.csv"
+    _write_registry(registry_path)
+    _write_index(index_csv)
+
+    result = campaign_engine.run_decision_support_campaign(
+        registry_path=registry_path,
+        index_csv=index_csv,
+        data_root=tmp_path / "Data",
+        cache_dir=tmp_path / "cache",
+        output_root=tmp_path / "outputs",
+        experiment_id=None,
+        stage=None,
+        run_all=True,
+        seed=42,
+        n_permutations=0,
+        dry_run=True,
+        run_experiment_fn=_stub_run_experiment,
+    )
+    campaign_root = Path(result["campaign_root"])
+    eta_payload = json.loads((campaign_root / "eta_state.json").read_text(encoding="utf-8"))
+    live_payload = json.loads(
+        (campaign_root / "campaign_live_status.json").read_text(encoding="utf-8")
+    )
+
+    assert eta_payload.get("dry_run_planning_only") is True
+    assert eta_payload["campaign_eta"]["eta_p50_seconds"] is None
+    assert eta_payload["campaign_eta"]["eta_p80_seconds"] is None
+    assert eta_payload["campaign_eta"]["eta_source"] == "planning_only_dry_run"
+    assert live_payload.get("eta_p50_seconds") is None
+    assert live_payload.get("eta_p80_seconds") is None
+    assert live_payload.get("eta_source") == "planning_only_dry_run"

@@ -197,6 +197,7 @@ class EtaEstimator:
             if self.runtime_profile_summary_path is not None
             else None
         )
+        self._campaign_dry_run = False
 
         self._live_exact_samples: dict[str, list[float]] = defaultdict(list)
         self._history_exact_samples: dict[str, list[float]] = defaultdict(list)
@@ -510,6 +511,10 @@ class EtaEstimator:
         event_metadata.setdefault("experiment_id", event.get("experiment_id"))
         event_metadata.setdefault("variant_id", event.get("variant_id"))
         event_metadata.setdefault("run_id", event.get("run_id"))
+        if event_name == "campaign_started":
+            self._campaign_dry_run = bool(event_metadata.get("dry_run"))
+        elif bool(event_metadata.get("dry_run")):
+            self._campaign_dry_run = True
 
         if event_name == "phase_started":
             self._current_phase = (
@@ -598,6 +603,37 @@ class EtaEstimator:
             key=lambda row: float(row["eta_p50_seconds"]),
             reverse=True,
         )[:5]
+
+        if bool(self._campaign_dry_run):
+            payload = {
+                "campaign_id": self.campaign_id,
+                "counts": {
+                    "runs_planned": int(len(self._planned_runs)),
+                    "runs_completed": int(len(self._terminal_run_ids)),
+                    "runs_remaining": int(len(remaining_runs)),
+                },
+                "current_phase": phase_name,
+                "campaign_eta": {
+                    "eta_p50_seconds": None,
+                    "eta_p80_seconds": None,
+                    "eta_confidence": "low",
+                    "eta_source": "planning_only_dry_run",
+                },
+                "phase_eta": {
+                    "eta_p50_seconds": None,
+                    "eta_p80_seconds": None,
+                    "eta_confidence": "low",
+                    "eta_source": "planning_only_dry_run",
+                },
+                "eta_p50_seconds": None,
+                "eta_p80_seconds": None,
+                "eta_confidence": "low",
+                "eta_source": "planning_only_dry_run",
+                "dry_run_planning_only": True,
+                "source_counts": {},
+                "top_remaining_runtime_buckets": top_buckets,
+            }
+            return payload
 
         payload = {
             "campaign_id": self.campaign_id,

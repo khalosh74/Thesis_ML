@@ -609,6 +609,7 @@ def run_decision_support_campaign(
             phase_name=phase_name,
             message="phase started",
             metadata={
+                "dry_run": bool(dry_run),
                 "expected_experiment_ids": [
                     str(value) for value in phase.get("expected_experiment_ids", [])
                 ],
@@ -676,6 +677,19 @@ def run_decision_support_campaign(
                             "reason": reason,
                         }
                     )
+                    _emit_campaign_event(
+                        event_name="experiment_skipped",
+                        scope="experiment",
+                        status="skipped",
+                        stage="campaign",
+                        phase_name=phase_name,
+                        experiment_id=exp_id,
+                        message="experiment selected but produced no materialized cells",
+                        metadata={
+                            "reason": reason,
+                            "dry_run": bool(dry_run),
+                        },
+                    )
                     continue
                 if exp_id not in experiment_started_ids:
                     _emit_campaign_event(
@@ -730,6 +744,7 @@ def run_decision_support_campaign(
                     run_id=run_id,
                     message="run planned",
                     metadata={
+                        "dry_run": bool(dry_run),
                         "supported": bool(cell.get("supported", False)),
                         "blocked_reason": cell.get("blocked_reason"),
                         **eta_planning_metadata,
@@ -946,6 +961,7 @@ def run_decision_support_campaign(
                     params=terminal_params,
                     effective_n_permutations=int(terminal_n_permutations),
                 )
+                eta_terminal_metadata["dry_run"] = bool(dry_run)
                 eta_terminal_metadata["actual_runtime_seconds"] = _extract_actual_runtime_seconds(
                     record
                 )
@@ -1025,6 +1041,7 @@ def run_decision_support_campaign(
                         run_id=run_id,
                         message="run blocked",
                         metadata={
+                            "dry_run": bool(dry_run),
                             "blocked_reason": record.get("blocked_reason"),
                             **eta_terminal_metadata,
                         },
@@ -1078,6 +1095,7 @@ def run_decision_support_campaign(
             phase_name=phase_name,
             message="phase finished",
             metadata={
+                "dry_run": bool(dry_run),
                 "experiment_ids": list(sorted(set(phase_experiment_ids))),
                 "selected_or_completed_cells": list(phase_payload["selected_or_completed_cells"]),
             },
@@ -1102,6 +1120,8 @@ def run_decision_support_campaign(
         variant_records = list(experiment_records.get(exp_id, []))
         warnings = list(experiment_warnings.get(exp_id, []))
         experiment_status = _phase_status_from_records(variant_records)
+        if not variant_records and warnings:
+            experiment_status = "skipped"
         _write_experiment_outputs(
             experiment=experiment,
             experiment_root=output_root / exp_id / campaign_id,
@@ -1118,6 +1138,13 @@ def run_decision_support_campaign(
             message="experiment finished",
             metadata={"warnings": list(warnings)},
         )
+        if not variant_records and warnings:
+            blocked_experiments.append(
+                {
+                    "experiment_id": exp_id,
+                    "reasons": sorted({str(item) for item in warnings if str(item)}),
+                }
+            )
         if variant_records and all(row["status"] == "blocked" for row in variant_records):
             blocked_reasons = sorted(
                 {
@@ -1160,6 +1187,7 @@ def run_decision_support_campaign(
     summary_df = _summarize_by_experiment(
         experiments=selected_experiments,
         variant_records=all_variant_records,
+        warnings_by_experiment=experiment_warnings,
     )
     decision_summary_path = campaign_root / "decision_support_summary.csv"
     summary_df.to_csv(decision_summary_path, index=False)

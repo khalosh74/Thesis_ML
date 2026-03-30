@@ -50,6 +50,9 @@ class ConsoleReporter:
         self.quiet = bool(quiet)
         self._last_summary_at: float = 0.0
         self._last_error_anomaly_id: str | None = None
+        self._dry_run_blocked_limit_per_experiment = 3
+        self._dry_run_blocked_counts: dict[tuple[str, str], int] = {}
+        self._dry_run_blocked_suppressed_notified: set[tuple[str, str]] = set()
 
     def _write_line(self, line: str) -> None:
         self.stream.write(f"{line}\n")
@@ -145,6 +148,7 @@ class ConsoleReporter:
             "campaign_finished",
             "phase_started",
             "phase_finished",
+            "experiment_skipped",
             "run_failed",
             "run_blocked",
             "run_dry_run",
@@ -159,6 +163,24 @@ class ConsoleReporter:
         run_id = str(event.get("run_id") or "")
         status = str(event.get("status") or "")
         message = str(event.get("message") or "").strip()
+        metadata = event.get("metadata")
+        event_metadata = dict(metadata) if isinstance(metadata, dict) else {}
+
+        if event_name == "run_blocked" and bool(event_metadata.get("dry_run")):
+            key = (phase_name, experiment_id)
+            current = int(self._dry_run_blocked_counts.get(key, 0)) + 1
+            self._dry_run_blocked_counts[key] = current
+            if current > int(self._dry_run_blocked_limit_per_experiment):
+                if key not in self._dry_run_blocked_suppressed_notified:
+                    self._dry_run_blocked_suppressed_notified.add(key)
+                    self._write_line(
+                        "[event:run_blocked] "
+                        f"{timestamp} status=blocked phase={phase_name or 'n/a'} "
+                        f"experiment={experiment_id or 'n/a'} "
+                        f"msg=additional blocked dry-run events suppressed after "
+                        f"{self._dry_run_blocked_limit_per_experiment}"
+                    )
+                return
         parts = [f"[event:{event_name}] {timestamp}", f"status={status}"]
         if phase_name:
             parts.append(f"phase={phase_name}")

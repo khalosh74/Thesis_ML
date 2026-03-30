@@ -129,11 +129,21 @@ def apply_event_to_live_status(
             state.setdefault("active_experiments", []),
             None if experiment_id is None else str(experiment_id),
         )
-        if str(event_status or "").strip().lower() == "blocked":
+        if str(event_status or "").strip().lower() in {"blocked", "skipped"}:
             _append_unique(
                 state.setdefault("blocked_experiments", []),
                 None if experiment_id is None else str(experiment_id),
             )
+    elif event_name == "experiment_skipped":
+        counts["experiments_finished"] = int(counts.get("experiments_finished", 0)) + 1
+        _remove_value(
+            state.setdefault("active_experiments", []),
+            None if experiment_id is None else str(experiment_id),
+        )
+        _append_unique(
+            state.setdefault("blocked_experiments", []),
+            None if experiment_id is None else str(experiment_id),
+        )
     elif event_name == "run_planned":
         counts["runs_planned"] = int(counts.get("runs_planned", 0)) + 1
     elif event_name == "run_dispatched":

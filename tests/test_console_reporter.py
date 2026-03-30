@@ -85,3 +85,29 @@ def test_console_reporter_summary_line_includes_eta_fields_when_present() -> Non
     text = stream.getvalue()
     assert "eta_p50=01:00" in text
     assert "eta_p80=02:00" in text
+
+
+def test_console_reporter_suppresses_repeated_dry_run_blocked_lines_per_experiment() -> None:
+    stream = io.StringIO()
+    reporter = ConsoleReporter(stream=stream, interval_seconds=300.0, quiet=False)
+    reporter._last_summary_at = time.monotonic()
+
+    for idx in range(8):
+        reporter.handle_event(
+            {
+                "event_name": "run_blocked",
+                "timestamp_utc": "2026-01-01T00:00:00+00:00",
+                "status": "blocked",
+                "phase_name": "Context robustness",
+                "experiment_id": "E23",
+                "run_id": f"run_{idx}",
+                "message": "run blocked",
+                "metadata": {"dry_run": True, "blocked_reason": "unsupported"},
+            },
+            _live_status(),
+        )
+
+    text = stream.getvalue()
+    blocked_lines = [line for line in text.splitlines() if "[event:run_blocked]" in line]
+    assert len(blocked_lines) == 4
+    assert any("suppressed after 3" in line for line in blocked_lines)

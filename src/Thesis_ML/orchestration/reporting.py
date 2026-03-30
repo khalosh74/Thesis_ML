@@ -215,8 +215,10 @@ def write_experiment_outputs(
 def summarize_by_experiment(
     experiments: list[dict[str, Any]],
     variant_records: list[dict[str, Any]],
+    warnings_by_experiment: dict[str, list[str]] | None = None,
 ) -> pd.DataFrame:
     rows: list[dict[str, Any]] = []
+    warnings_lookup = warnings_by_experiment or {}
     for experiment in experiments:
         experiment_id = str(experiment["experiment_id"])
         raw_metric_name = experiment.get("primary_metric")
@@ -224,6 +226,7 @@ def summarize_by_experiment(
             raise ValueError(f"Experiment '{experiment_id}' is missing required primary_metric.")
         metric_name = validate_metric_name(str(raw_metric_name))
         records = [row for row in variant_records if row["experiment_id"] == experiment_id]
+        warnings = list(warnings_lookup.get(experiment_id, []))
 
         completed = [row for row in records if row["status"] == "completed"]
         failed = [row for row in records if row["status"] == "failed"]
@@ -262,6 +265,8 @@ def summarize_by_experiment(
             status = "blocked"
         elif failed and not completed:
             status = "failed"
+        elif not records and warnings:
+            status = "skipped"
         else:
             status = "not_executed"
 
@@ -274,6 +279,8 @@ def summarize_by_experiment(
                 notes.append("blocked: " + "; ".join(blocked_reasons))
         if failed:
             notes.append(f"failed_variants={len(failed)}")
+        if warnings:
+            notes.append("warnings: " + "; ".join(sorted({str(item) for item in warnings if str(item)})))
 
         rows.append(
             {

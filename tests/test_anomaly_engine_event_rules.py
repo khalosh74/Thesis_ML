@@ -104,3 +104,38 @@ def test_event_rules_lock_phase_blocked_ratio_and_phase_with_no_completions(tmp_
         }
     )
     assert any(row["code"] == "PHASE_WITH_NO_COMPLETIONS" for row in finished_rows)
+
+
+def test_event_rules_phase_with_only_dry_run_terminal_states_is_not_error(tmp_path: Path) -> None:
+    engine = AnomalyEngine(campaign_root=tmp_path / "campaigns" / "c4", campaign_id="c4")
+    phase_name = "Stage 3 model lock"
+    for idx in range(4):
+        engine.ingest_event(
+            {
+                "event_name": "run_planned",
+                "status": "planned",
+                "phase_name": phase_name,
+                "experiment_id": "E08",
+                "run_id": f"planned_{idx}",
+                "metadata": {"supported": True, "dry_run": True},
+            }
+        )
+        engine.ingest_event(
+            {
+                "event_name": "run_dry_run",
+                "status": "dry_run",
+                "phase_name": phase_name,
+                "experiment_id": "E08",
+                "run_id": f"planned_{idx}",
+                "metadata": {"dry_run": True},
+            }
+        )
+    finished_rows = engine.ingest_event(
+        {
+            "event_name": "phase_finished",
+            "status": "dry_run",
+            "phase_name": phase_name,
+            "metadata": {"dry_run": True},
+        }
+    )
+    assert all(row["code"] != "PHASE_WITH_NO_COMPLETIONS" for row in finished_rows)

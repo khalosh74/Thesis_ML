@@ -345,7 +345,9 @@ class AnomalyEngine:
             phase_counts = self._phase_counts.get(str(phase_name or ""), {})
             planned = int(phase_counts.get("runs_planned", 0))
             completed = int(phase_counts.get("runs_completed", 0))
-            if planned > 0 and completed == 0:
+            dry_run_count = int(phase_counts.get("runs_dry_run", 0))
+            event_is_dry_run = bool(event_metadata.get("dry_run"))
+            if planned > 0 and completed == 0 and not (event_is_dry_run or dry_run_count > 0):
                 anomaly = self._emit(
                     severity="error",
                     category="scheduler",
