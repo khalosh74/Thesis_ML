@@ -1,7 +1,7 @@
 {
   "feature_space_id": "julich_hybrid_affect_v1",
   "representation": "roi_mean_predefined",
-  "description": "Fixed predefined ROI set for E09 feature-space comparison using available in-repo mask resources.",
+  "description": "Legacy proxy ROI spec retained for backward traceability only. Uses subject/session-specific placeholder masks and must not be treated as the final scientific E09 ROI definition.",
   "reference_space": "native_functional",
   "rois": [
     {

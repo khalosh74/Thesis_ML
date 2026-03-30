@@ -1,0 +1,129 @@
+{
+  "atlas_source_zip": "atlas-download-6146c580-c664-40d4-b665-41ee92053eef.zip",
+  "atlas_source_files": {
+    "label_image": "configs\\feature_spaces\\assets\\julich_v3_0_3\\source\\JULICH_BRAIN_CYTOARCHITECTONIC_ATLAS_V3_0_3.label.nii.gz",
+    "reference_image": "configs\\feature_spaces\\assets\\julich_v3_0_3\\source\\MNI_152_ICBM_2009C_NONLINEAR_ASYMMETRIC.nii.gz"
+  },
+  "label_selection": {
+    "v1_bilateral": {
+      "labels": [
+        8,
+        1008
+      ],
+      "names": [
+        "Area hOc1 (V1, 17, CalcS) left",
+        "Area hOc1 (V1, 17, CalcS) right"
+      ]
+    },
+    "primary_auditory_bilateral": {
+      "labels": [
+        11,
+        14,
+        16,
+        1011,
+        1014,
+        1016
+      ],
+      "names": [
+        "Area TE 1.0 (HESCHL) left",
+        "Area TE 1.1 (HESCHL) left",
+        "Area TE 1.2 (HESCHL) left",
+        "Area TE 1.0 (HESCHL) right",
+        "Area TE 1.1 (HESCHL) right",
+        "Area TE 1.2 (HESCHL) right"
+      ]
+    }
+  },
+  "space_compatibility": {
+    "atlas_shape": [
+      193,
+      229,
+      193
+    ],
+    "atlas_affine": [
+      [
+        1.0,
+        0.0,
+        0.0,
+        -96.0
+      ],
+      [
+        0.0,
+        1.0,
+        0.0,
+        -132.0
+      ],
+      [
+        0.0,
+        0.0,
+        1.0,
+        -78.0
+      ],
+      [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ]
+    ],
+    "beta_reference": "Data\\sub-001\\ses-01\\BAS2\\beta_0001.nii",
+    "beta_shape": [
+      77,
+      95,
+      82
+    ],
+    "beta_affine": [
+      [
+        2.0,
+        0.0,
+        0.0,
+        -76.0
+      ],
+      [
+        0.0,
+        2.0,
+        0.0,
+        -112.0
+      ],
+      [
+        0.0,
+        0.0,
+        2.0,
+        -76.0
+      ],
+      [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ]
+    ],
+    "resampling": "nearest-neighbor label-preserving (order=0) from atlas 1mm to beta 2mm grid"
+  },
+  "generated_masks": {
+    "v1_mni": {
+      "path": "configs\\feature_spaces\\assets\\julich_v3_0_3\\masks\\julich_v303_v1_bilateral_mni2009c_1mm.nii.gz",
+      "voxels": 33737,
+      "sha256": "9aca06631fc167430ae9fb431b925ad41e7190a7a0cf79de423bd1a2bb7d9a01"
+    },
+    "pac_mni": {
+      "path": "configs\\feature_spaces\\assets\\julich_v3_0_3\\masks\\julich_v303_pac_te1_bilateral_mni2009c_1mm.nii.gz",
+      "voxels": 6415,
+      "sha256": "22fbbb290d30469fdf9c4c326af94ff08d96658663f46fe0b4f4c3dc0fd255e5"
+    },
+    "v1_beta2mm": {
+      "path": "configs\\feature_spaces\\assets\\julich_v3_0_3\\masks\\julich_v303_v1_bilateral_beta2mm.nii.gz",
+      "voxels": 4218,
+      "sha256": "cc64a7d208dd0cd37b846a65a8e17989800ad6fdb2b4b7294214de7df7f9ac43"
+    },
+    "pac_beta2mm": {
+      "path": "configs\\feature_spaces\\assets\\julich_v3_0_3\\masks\\julich_v303_pac_te1_bilateral_beta2mm.nii.gz",
+      "voxels": 801,
+      "sha256": "92d2f41de2340597aa5cbbc4313c61c67b5ba54bec68a8d2e4ab09f2f6acc22f"
+    }
+  },
+  "notes": [
+    "Atlas-mask component is real and atlas-derived.",
+    "29 spherical ROI coordinate provenance remains unresolved and is intentionally not fabricated."
+  ]
+}

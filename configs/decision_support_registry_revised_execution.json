@@ -1586,7 +1586,7 @@
       "executable_now": true,
       "execution_status": "unknown",
       "blocked_reasons": [],
-      "notes": null,
+      "notes": "Atlas-mask ROI component repaired with Julich v3.0.3-derived bilateral V1 and primary auditory masks. The 29 spherical ROI coordinate provenance is unresolved and intentionally not fabricated; do not treat E09 as a fully frozen D06 lock on this basis alone.",
       "section_plan": [
         "dataset_selection",
         "feature_cache_build",
@@ -1649,7 +1649,7 @@
             "filter_task": "emo",
             "filter_modality": "audiovisual",
             "feature_space": "roi_mean_predefined",
-            "roi_spec_path": "configs/feature_spaces/julich_hybrid_affect_v1.json"
+            "roi_spec_path": "configs/feature_spaces/julich_hybrid_affect_v2_real_atlas.json"
           },
           "expand": {},
           "sections": [
@@ -1728,7 +1728,7 @@
             "filter_task": "emo",
             "filter_modality": "audiovisual",
             "feature_space": "roi_mean_predefined",
-            "roi_spec_path": "configs/feature_spaces/julich_hybrid_affect_v1.json"
+            "roi_spec_path": "configs/feature_spaces/julich_hybrid_affect_v2_real_atlas.json"
           },
           "expand": {},
           "sections": [
@@ -1807,7 +1807,7 @@
             "filter_task": "recog",
             "filter_modality": "audiovisual",
             "feature_space": "roi_mean_predefined",
-            "roi_spec_path": "configs/feature_spaces/julich_hybrid_affect_v1.json"
+            "roi_spec_path": "configs/feature_spaces/julich_hybrid_affect_v2_real_atlas.json"
           },
           "expand": {},
           "sections": [
@@ -1886,7 +1886,7 @@
             "filter_task": "recog",
             "filter_modality": "audiovisual",
             "feature_space": "roi_mean_predefined",
-            "roi_spec_path": "configs/feature_spaces/julich_hybrid_affect_v1.json"
+            "roi_spec_path": "configs/feature_spaces/julich_hybrid_affect_v2_real_atlas.json"
           },
           "expand": {},
           "sections": [

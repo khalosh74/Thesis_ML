@@ -122,13 +122,17 @@ def _validate_roi_spec(roi_spec: dict[str, Any], *, roi_spec_path: Path) -> dict
             normalized_roi["radius_mm"] = radius_mm
         normalized_rois.append(normalized_roi)
 
-    return {
+    normalized: dict[str, Any] = {
         "feature_space_id": str(roi_spec["feature_space_id"]),
         "representation": str(roi_spec["representation"]),
         "description": str(roi_spec["description"]),
         "reference_space": str(roi_spec["reference_space"]),
         "rois": normalized_rois,
     }
+    for optional_key in ("scientific_readiness", "pending_components", "provenance_manifest"):
+        if optional_key in roi_spec:
+            normalized[optional_key] = roi_spec[optional_key]
+    return normalized
 
 
 def _load_roi_spec(roi_spec_path: Path) -> dict[str, Any]:
@@ -289,10 +293,17 @@ def load_roi_feature_matrix(
         "feature_space_id": roi_spec["feature_space_id"],
         "representation": roi_spec["representation"],
         "reference_space": roi_spec["reference_space"],
+        "roi_spec_description": roi_spec["description"],
         "roi_ids": list(roi_ids),
         "roi_count": int(len(roi_ids)),
         "n_features": int(x_matrix.shape[1]),
     }
+    if "scientific_readiness" in roi_spec:
+        spatial_compatibility["scientific_readiness"] = roi_spec["scientific_readiness"]
+    if "pending_components" in roi_spec:
+        spatial_compatibility["pending_components"] = roi_spec["pending_components"]
+    if "provenance_manifest" in roi_spec:
+        spatial_compatibility["provenance_manifest"] = roi_spec["provenance_manifest"]
 
     if spatial_report_path is not None:
         Path(spatial_report_path).write_text(
@@ -301,4 +312,3 @@ def load_roi_feature_matrix(
         )
 
     return x_matrix, metadata_df, spatial_compatibility
-

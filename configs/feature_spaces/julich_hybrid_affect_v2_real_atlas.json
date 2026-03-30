@@ -1,0 +1,23 @@
+{
+  "feature_space_id": "julich_hybrid_affect_v2_real_atlas",
+  "representation": "roi_mean_predefined",
+  "description": "Atlas-derived bilateral V1 + primary auditory cortex (Heschl TE1.0/1.1/1.2) masks in beta-grid space for E09. This is a partial repair: atlas-mask component is real; the 29 spherical ROI provenance remains unresolved and is intentionally excluded.",
+  "reference_space": "MNI_152_ICBM_2009c_nonlinear_asymmetric_resampled_to_beta_grid_2mm",
+  "scientific_readiness": "partial_atlas_only_not_full_hybrid",
+  "pending_components": [
+    "29_spherical_rois_radius_12mm_meta_study_provenance_unresolved"
+  ],
+  "provenance_manifest": "configs/feature_spaces/assets/julich_v3_0_3/julich_v303_roi_provenance.json",
+  "rois": [
+    {
+      "roi_id": "julich_v1_bilateral_real_atlas",
+      "type": "mask",
+      "mask_path": "configs/feature_spaces/assets/julich_v3_0_3/masks/julich_v303_v1_bilateral_beta2mm.nii.gz"
+    },
+    {
+      "roi_id": "julich_primary_auditory_te1_bilateral_real_atlas",
+      "type": "mask",
+      "mask_path": "configs/feature_spaces/assets/julich_v3_0_3/masks/julich_v303_pac_te1_bilateral_beta2mm.nii.gz"
+    }
+  ]
+}
