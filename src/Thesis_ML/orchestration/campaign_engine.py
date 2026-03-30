@@ -19,6 +19,7 @@ from Thesis_ML.experiments.compute_scheduler import (
     ComputeRunRequest,
     plan_compute_schedule,
 )
+from Thesis_ML.observability import ExecutionEventBus
 from Thesis_ML.orchestration.contracts import CompiledStudyManifest
 from Thesis_ML.orchestration.decision_reports import (
     write_decision_reports as _write_decision_reports,
@@ -30,6 +31,9 @@ from Thesis_ML.orchestration.execution_bridge import (
     execute_official_jobs as _execute_official_jobs,
 )
 from Thesis_ML.orchestration.execution_bridge import execute_variant as _execute_variant
+from Thesis_ML.orchestration.execution_bridge import (
+    resolve_variant_id as _resolve_variant_id,
+)
 from Thesis_ML.orchestration.execution_bridge import (
     resolve_variant_run_id as _resolve_variant_run_id,
 )
@@ -344,6 +348,32 @@ def run_decision_support_campaign(
     campaign_id = _now_timestamp()
     campaign_root = output_root / "campaigns" / campaign_id
     campaign_root.mkdir(parents=True, exist_ok=False)
+    event_bus: ExecutionEventBus | None = None
+    try:
+        event_bus = ExecutionEventBus(campaign_root=campaign_root, campaign_id=campaign_id)
+    except Exception:
+        event_bus = None
+
+    def _emit_campaign_event(**kwargs: Any) -> None:
+        if event_bus is None:
+            return
+        try:
+            event_bus.emit_event(**kwargs)
+        except Exception:
+            return
+
+    _emit_campaign_event(
+        event_name="campaign_started",
+        scope="campaign",
+        status="running",
+        stage="campaign",
+        message="campaign started",
+        metadata={
+            "selected_experiments": [str(exp["experiment_id"]) for exp in selected_experiments],
+            "experiments_total": int(len(selected_experiments)),
+            "dry_run": bool(dry_run),
+        },
+    )
 
     study_review_summary_path = campaign_root / "study_review_summary.json"
     study_reviews_payload = [review.model_dump(mode="python") for review in registry.study_reviews]
@@ -401,10 +431,25 @@ def run_decision_support_campaign(
 
     global_order_index = 0
     selected_by_id = {str(experiment["experiment_id"]) for experiment in selected_experiments}
+    experiment_phase_by_id: dict[str, str] = {}
+    experiment_started_ids: set[str] = set()
     for phase in phase_batches:
         phase_name = str(phase["phase_name"])
         phase_records: list[dict[str, Any]] = []
         phase_experiment_ids: list[str] = []
+        _emit_campaign_event(
+            event_name="phase_started",
+            scope="phase",
+            status="running",
+            stage="campaign",
+            phase_name=phase_name,
+            message="phase started",
+            metadata={
+                "expected_experiment_ids": [
+                    str(value) for value in phase.get("expected_experiment_ids", [])
+                ],
+            },
+        )
 
         expected_ids = [str(value) for value in phase.get("expected_experiment_ids", [])]
         missing_expected = [value for value in expected_ids if value not in selected_by_id]
@@ -425,6 +470,7 @@ def run_decision_support_campaign(
 
             for experiment in group:
                 exp_id = str(experiment["experiment_id"])
+                experiment_phase_by_id.setdefault(exp_id, phase_name)
                 if exp_id == "E22" and len(list(dataset_scope.get("modalities", []))) <= 1:
                     phase_skip_rows.append(
                         {
@@ -467,11 +513,46 @@ def run_decision_support_campaign(
                         }
                     )
                     continue
+                if exp_id not in experiment_started_ids:
+                    _emit_campaign_event(
+                        event_name="experiment_started",
+                        scope="experiment",
+                        status="running",
+                        stage="campaign",
+                        phase_name=phase_name,
+                        experiment_id=exp_id,
+                        message="experiment started",
+                    )
+                    experiment_started_ids.add(exp_id)
                 for cell in cells:
                     group_cells.append((experiment, cell))
 
             if not group_cells:
                 continue
+
+            for experiment, cell in group_cells:
+                exp_id = str(experiment["experiment_id"])
+                variant_id = _resolve_variant_id(cell)
+                run_id = _resolve_variant_run_id(
+                    experiment_id=exp_id,
+                    variant=cell,
+                    campaign_id=campaign_id,
+                )
+                _emit_campaign_event(
+                    event_name="run_planned",
+                    scope="run",
+                    status="planned",
+                    stage="campaign",
+                    phase_name=phase_name,
+                    experiment_id=exp_id,
+                    variant_id=variant_id,
+                    run_id=run_id,
+                    message="run planned",
+                    metadata={
+                        "supported": bool(cell.get("supported", False)),
+                        "blocked_reason": cell.get("blocked_reason"),
+                    },
+                )
 
             runnable_cells = [
                 (experiment, cell)
@@ -566,6 +647,28 @@ def run_decision_support_campaign(
                         job_builder_blocked[run_id] = str(blocked_reason or "job_build_failed")
                         continue
                     jobs.append(job)
+                    _emit_campaign_event(
+                        event_name="run_dispatched",
+                        scope="run",
+                        status="dispatched",
+                        stage="campaign",
+                        phase_name=phase_name,
+                        experiment_id=str(experiment["experiment_id"]),
+                        variant_id=_resolve_variant_id(cell),
+                        run_id=str(run_id),
+                        message="run dispatched",
+                    )
+                    _emit_campaign_event(
+                        event_name="run_started",
+                        scope="run",
+                        status="running",
+                        stage="campaign",
+                        phase_name=phase_name,
+                        experiment_id=str(experiment["experiment_id"]),
+                        variant_id=_resolve_variant_id(cell),
+                        run_id=str(run_id),
+                        message="run started",
+                    )
 
                 effective_parallelism = 1 if sequential_only_group else int(max_parallel_runs)
 
@@ -582,6 +685,7 @@ def run_decision_support_campaign(
 
             for experiment, cell in group_cells:
                 exp_id = str(experiment["experiment_id"])
+                variant_id = _resolve_variant_id(cell)
                 run_id = _resolve_variant_run_id(
                     experiment_id=exp_id,
                     variant=cell,
@@ -626,12 +730,73 @@ def run_decision_support_campaign(
                     max_parallel_gpu_runs=int(max_parallel_gpu_runs),
                     scheduled_compute_assignment=assignments_by_run_id.get(run_id),
                     job_execution_result=job_execution_override,
+                    progress_callback=(
+                        event_bus.build_progress_callback(
+                            phase_name=phase_name,
+                            experiment_id=exp_id,
+                            variant_id=variant_id,
+                            run_id=run_id,
+                        )
+                        if event_bus is not None
+                        else None
+                    ),
                     artifact_registry_path=artifact_registry_path,
                     code_ref=commit,
                 )
                 experiment_records[exp_id].append(record)
                 phase_records.append(record)
                 all_variant_records.append(record)
+                record_status = str(record.get("status"))
+                if record_status == "completed":
+                    _emit_campaign_event(
+                        event_name="run_finished",
+                        scope="run",
+                        status="completed",
+                        stage="campaign",
+                        phase_name=phase_name,
+                        experiment_id=exp_id,
+                        variant_id=variant_id,
+                        run_id=run_id,
+                        message="run finished",
+                    )
+                elif record_status == "failed":
+                    _emit_campaign_event(
+                        event_name="run_failed",
+                        scope="run",
+                        status="failed",
+                        stage="campaign",
+                        phase_name=phase_name,
+                        experiment_id=exp_id,
+                        variant_id=variant_id,
+                        run_id=run_id,
+                        message="run failed",
+                        metadata={"error": record.get("error")},
+                    )
+                elif record_status == "blocked":
+                    _emit_campaign_event(
+                        event_name="run_blocked",
+                        scope="run",
+                        status="blocked",
+                        stage="campaign",
+                        phase_name=phase_name,
+                        experiment_id=exp_id,
+                        variant_id=variant_id,
+                        run_id=run_id,
+                        message="run blocked",
+                        metadata={"blocked_reason": record.get("blocked_reason")},
+                    )
+                elif record_status == "dry_run":
+                    _emit_campaign_event(
+                        event_name="run_dry_run",
+                        scope="run",
+                        status="dry_run",
+                        stage="campaign",
+                        phase_name=phase_name,
+                        experiment_id=exp_id,
+                        variant_id=variant_id,
+                        run_id=run_id,
+                        message="run dry-run",
+                    )
 
         phase_payload = {
             "campaign_id": campaign_id,
@@ -660,6 +825,18 @@ def run_decision_support_campaign(
                 payload=phase_payload,
             )
             phase_artifact_paths.append(str(path.resolve()))
+        _emit_campaign_event(
+            event_name="phase_finished",
+            scope="phase",
+            status=str(phase_payload["status"]),
+            stage="campaign",
+            phase_name=phase_name,
+            message="phase finished",
+            metadata={
+                "experiment_ids": list(sorted(set(phase_experiment_ids))),
+                "selected_or_completed_cells": list(phase_payload["selected_or_completed_cells"]),
+            },
+        )
 
     phase_skip_summary_payload = {
         "campaign_id": campaign_id,
@@ -679,11 +856,22 @@ def run_decision_support_campaign(
         exp_id = str(experiment["experiment_id"])
         variant_records = list(experiment_records.get(exp_id, []))
         warnings = list(experiment_warnings.get(exp_id, []))
+        experiment_status = _phase_status_from_records(variant_records)
         _write_experiment_outputs(
             experiment=experiment,
             experiment_root=output_root / exp_id / campaign_id,
             variant_records=variant_records,
             warnings=warnings,
+        )
+        _emit_campaign_event(
+            event_name="experiment_finished",
+            scope="experiment",
+            status=experiment_status,
+            stage="campaign",
+            phase_name=experiment_phase_by_id.get(exp_id),
+            experiment_id=exp_id,
+            message="experiment finished",
+            metadata={"warnings": list(warnings)},
         )
         if variant_records and all(row["status"] == "blocked" for row in variant_records):
             blocked_reasons = sorted(
@@ -862,6 +1050,14 @@ def run_decision_support_campaign(
     }
     manifest_path = campaign_root / "campaign_manifest.json"
     manifest_path.write_text(f"{json.dumps(campaign_manifest, indent=2)}\n", encoding="utf-8")
+    _emit_campaign_event(
+        event_name="campaign_finished",
+        scope="campaign",
+        status="finished",
+        stage="campaign",
+        message="campaign finished",
+        metadata={"status_counts": dict(campaign_manifest["status_counts"])},
+    )
 
     return {
         "campaign_id": campaign_id,

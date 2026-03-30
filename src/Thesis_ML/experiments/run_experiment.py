@@ -84,7 +84,7 @@ from Thesis_ML.experiments.official_contracts import (
     validate_official_preflight,
     validate_run_artifact_contract,
 )
-from Thesis_ML.experiments.progress import ProgressCallback, emit_progress
+from Thesis_ML.experiments.progress import ProgressCallback, ProgressEvent, emit_progress
 from Thesis_ML.experiments.provenance import (
     collect_dataset_fingerprint,
     collect_git_provenance,
@@ -176,6 +176,37 @@ def _warning_summary(warnings_payload: list[dict[str, Any]]) -> dict[str, Any]:
         "by_category": by_category,
         "convergence_warning_count": int(by_category.get("ConvergenceWarning", 0)),
     }
+
+
+def _build_local_progress_file_callback(progress_events_path: Path) -> ProgressCallback:
+    def _callback(event: ProgressEvent) -> None:
+        try:
+            if not progress_events_path.parent.exists():
+                return
+            payload = event.to_payload()
+            with progress_events_path.open("a", encoding="utf-8") as handle:
+                handle.write(f"{json.dumps(payload, ensure_ascii=True)}\n")
+        except Exception:
+            return
+
+    return _callback
+
+
+def _multiplex_progress_callbacks(
+    primary: ProgressCallback | None,
+    secondary: ProgressCallback,
+) -> ProgressCallback:
+    if primary is None:
+        return secondary
+
+    def _callback(event: ProgressEvent) -> None:
+        primary(event)
+        try:
+            secondary(event)
+        except Exception:
+            return
+
+    return _callback
 
 
 def _failure_payload(exc: Exception) -> dict[str, Any]:
@@ -845,6 +876,12 @@ def run_experiment(
     if resolved_base_run_id is None:
         resolved_base_run_id = str(resolved_run_id)
     report_dir = reports_root / resolved_run_id
+    progress_events_path = report_dir / "progress_events.jsonl"
+    local_progress_callback = _build_local_progress_file_callback(progress_events_path)
+    progress_callback = _multiplex_progress_callbacks(
+        progress_callback,
+        local_progress_callback,
+    )
     should_reuse_completed_artifacts = bool(resume or reuse_completed_artifacts)
     artifact_registry_path = reports_root / "artifact_registry.sqlite3"
     git_provenance = collect_git_provenance()

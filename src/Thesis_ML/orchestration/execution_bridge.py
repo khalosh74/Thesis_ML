@@ -27,6 +27,7 @@ from Thesis_ML.experiments.parallel_execution import (
     OfficialRunJob,
     execute_official_run_jobs,
 )
+from Thesis_ML.experiments.progress import ProgressCallback
 from Thesis_ML.experiments.run_states import RUN_STATUS_SUCCESS
 from Thesis_ML.experiments.runtime_policies import resolve_run_timeout_policy
 from Thesis_ML.orchestration.reporting import build_dataset_subset_label
@@ -486,6 +487,7 @@ def execute_variant(
     max_parallel_gpu_runs: int = 1,
     scheduled_compute_assignment: dict[str, Any] | None = None,
     job_execution_result: dict[str, Any] | None = None,
+    progress_callback: ProgressCallback | None = None,
     artifact_registry_path: Path | None = None,
     code_ref: str | None = None,
 ) -> dict[str, Any]:
@@ -695,6 +697,7 @@ def execute_variant(
                             if isinstance(scheduled_compute_assignment, dict)
                             else None
                         ),
+                        progress_callback=progress_callback,
                     )
                     status = "completed"
                 except Exception as exc:
