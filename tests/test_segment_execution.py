@@ -162,6 +162,17 @@ def test_full_pipeline_stage_execution_metadata_is_additive(
         row.get("stage") == "tuning" and row.get("status") == "skipped"
         for row in stage_execution["telemetry"]
     )
+    telemetry_by_stage = {str(row.get("stage")): row for row in stage_execution["telemetry"]}
+    assert telemetry_by_stage["dataset_selection"]["details"]["duration_source"] == "section_timing"
+    assert telemetry_by_stage["model_fit"]["details"]["duration_source"] in {
+        "fit_timing_summary.totals_seconds.outer_fold",
+        "section_timing",
+    }
+    assert telemetry_by_stage["tuning"]["details"]["duration_source"] in {
+        "not_applicable",
+        "unavailable_derived_stage",
+        "unavailable",
+    }
     assignment_by_stage = {str(row.get("stage")): row for row in stage_execution["assignments"]}
     assert assignment_by_stage["model_fit"]["executor_id"] == MODEL_FIT_CPU_EXECUTOR_ID
     assert isinstance(assignment_by_stage["model_fit"]["reason"], str)
@@ -236,6 +247,20 @@ def test_linearsvc_tuning_and_permutation_dispatch_through_stage_planner(
     assert assignment_by_stage["model_fit"]["executor_id"] == MODEL_FIT_CPU_EXECUTOR_ID
     assert assignment_by_stage["tuning"]["executor_id"] == SPECIALIZED_LINEARSVC_TUNING_EXECUTOR_ID
     assert assignment_by_stage["permutation"]["executor_id"] == PERMUTATION_REFERENCE_EXECUTOR_ID
+    telemetry_by_stage = {str(row.get("stage")): row for row in stage_execution["telemetry"]}
+    assert (
+        telemetry_by_stage["tuning"]["details"]["duration_source"]
+        == "tuning_summary.timing_totals_seconds.tuned_search_total"
+    )
+    assert (
+        telemetry_by_stage["permutation"]["details"]["duration_source"]
+        == "metrics.permutation_test.permutation_loop_seconds"
+    )
+    stage_timings = result.get("stage_timings_seconds")
+    assert isinstance(stage_timings, dict)
+    assert "model_fit" in stage_timings
+    assert "tuning" in stage_timings
+    assert "permutation" in stage_timings
 
     permutation_payload = result["metrics"].get("permutation_test")
     assert isinstance(permutation_payload, dict)

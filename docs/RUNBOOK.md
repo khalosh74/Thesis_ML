@@ -507,6 +507,9 @@ Release hygiene + performance smoke:
 ```bash
 python scripts/release_hygiene_check.py
 python scripts/performance_smoke.py --output outputs/performance/performance_smoke_summary.json
+python scripts/profile_runtime_baseline.py --mode ci_synthetic
+python scripts/profile_runtime_baseline.py --mode operator_dataset --index-csv <...> --data-root <...> --cache-dir <...>
+python scripts/profile_runtime_baseline.py --mode ci_synthetic --compare-against outputs/performance/baselines/<previous_tag>/baseline_bundle.json
 python scripts/verify_official_artifacts.py --output-dir <official_output_dir>
 python scripts/verify_confirmatory_ready.py --output-dir <confirmatory_output_dir>
 python scripts/verify_official_reproducibility.py --mode protocol --index-csv <...> --data-root <...> --cache-dir <...> --suite confirmatory_primary_within_subject
@@ -520,6 +523,17 @@ python scripts/rc1_release_gate.py --run-ruff --run-pytest --run-performance-smo
 - workbook build/save/load/compile
 - `thesisml-run-comparison` dry-run
 - `thesisml-run-protocol` dry-run
+
+`scripts/profile_runtime_baseline.py` is the Phase 0 canonical baseline bundle runner:
+- purpose: proof-oriented measurement and parity comparison for future performance work
+- `--mode ci_synthetic`: runs the full suite using only shipped assets
+- `--mode operator_dataset`: runs the same suite against an operator dataset
+- cases:
+  - `performance_smoke_existing`
+  - `single_run_ridge_direct` (direct run with process profiling artifacts)
+  - `runtime_profile_precheck`
+  - `decision_support_dry_run`
+- `--compare-against <prior_bundle>` produces scientific-parity and observability-parity comparison output
 
 `mypy` is a required CI gate and includes nibabel boundary modules:
 - `src/Thesis_ML/spm/extract_glm.py`

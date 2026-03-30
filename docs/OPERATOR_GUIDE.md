@@ -268,6 +268,20 @@ Optional lightweight performance snapshot:
 
 ```bash
 python scripts/performance_smoke.py --output outputs/performance/performance_smoke_summary.json
+python scripts/profile_runtime_baseline.py --mode ci_synthetic
+python scripts/profile_runtime_baseline.py --mode operator_dataset --index-csv <...> --data-root <...> --cache-dir <...>
+python scripts/profile_runtime_baseline.py --mode ci_synthetic --compare-against outputs/performance/baselines/<previous_tag>/baseline_bundle.json
 python scripts/verify_official_reproducibility.py --mode protocol --index-csv <...> --data-root <...> --cache-dir <...> --suite confirmatory_primary_within_subject
 python scripts/rc1_release_gate.py --run-ruff --run-pytest --run-performance-smoke
 ```
+
+Phase 0 runtime baselining is advisory proof infrastructure for future performance work:
+- `scripts/performance_smoke.py` is a quick smoke timer for workbook build + protocol/comparison dry-run CLI paths.
+- `scripts/profile_runtime_baseline.py` is the canonical baseline bundle runner that captures comparable artifacts for:
+  - `performance_smoke_existing`
+  - `single_run_ridge_direct` (direct `run_experiment()` with process profiling)
+  - `runtime_profile_precheck`
+  - `decision_support_dry_run`
+- `--mode ci_synthetic` runs only from shipped repository assets (no external dataset dependency).
+- `--mode operator_dataset` runs the same baseline suite against an operator-provided dataset triple (`index_csv`, `data_root`, `cache_dir`).
+- `--compare-against` compares a new bundle to an earlier bundle and reports scientific parity vs observability parity.

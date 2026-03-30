@@ -8,6 +8,11 @@ import numpy as np
 import pandas as pd
 
 import Thesis_ML.verification.campaign_runtime_profile as runtime_profile
+from tests._config_refs import (
+    canonical_v1_protocol_variant_path,
+    grouped_nested_v1_comparison_compat_path,
+    model_family_v1_comparison_variant_path,
+)
 from Thesis_ML.experiments.run_experiment import (
     _build_pipeline,
     _extract_linear_coefficients,
@@ -18,11 +23,6 @@ from Thesis_ML.experiments.sections_impl import execute_model_fit
 from Thesis_ML.experiments.tuning_search_spaces import (
     LINEAR_GROUPED_NESTED_SEARCH_SPACE_ID,
     LINEAR_GROUPED_NESTED_SEARCH_SPACE_VERSION,
-)
-from tests._config_refs import (
-    canonical_v1_protocol_variant_path,
-    grouped_nested_v1_comparison_compat_path,
-    model_family_v1_comparison_variant_path,
 )
 
 
@@ -93,6 +93,9 @@ def test_campaign_runtime_profile_summary_shape_and_positive_eta(
     )
     assert "phase_estimates" in summary
     assert "model_estimates" in summary
+    assert isinstance(summary.get("inputs"), dict)
+    assert isinstance(summary.get("profile_artifact_paths"), list)
+    assert isinstance(summary.get("feature_matrix_memoization"), dict)
 
     assert calls
     for call in calls:

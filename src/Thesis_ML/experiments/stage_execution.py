@@ -160,23 +160,45 @@ def _policy_from_compute_policy(
 def _normalize_stage_duration_map(
     section_timings_seconds: Mapping[str, float] | None,
     stage_timings_seconds: Mapping[str, float] | None,
-) -> dict[StageKey, float]:
+) -> tuple[dict[StageKey, float], dict[StageKey, dict[str, Any]]]:
     stage_durations: dict[StageKey, float] = {}
+    duration_metadata: dict[StageKey, dict[str, Any]] = {}
     if section_timings_seconds is not None:
         for section_name, duration_seconds in section_timings_seconds.items():
             mapped_stage = _SECTION_TO_STAGE.get(str(section_name))
             if mapped_stage is None:
                 continue
             stage_durations[mapped_stage] = float(duration_seconds)
+            duration_metadata[mapped_stage] = {
+                "duration_source": "section_timing",
+                "derived_from": str(section_name),
+            }
     if stage_timings_seconds is not None:
+        for stage_name, duration_seconds in stage_timings_seconds.items():
+            try:
+                mapped_stage = StageKey(str(stage_name))
+            except ValueError:
+                mapped_stage = None
+            if mapped_stage is not None and isinstance(duration_seconds, (int, float)):
+                stage_durations[mapped_stage] = float(duration_seconds)
+                duration_metadata[mapped_stage] = {
+                    "duration_source": "stage_timing_map",
+                    "derived_from": str(stage_name),
+                }
         reporting_duration = 0.0
+        reporting_sources: list[str] = []
         for key in ("metrics_stamping", "config_write", "artifact_registry_update"):
             value = stage_timings_seconds.get(key)
             if isinstance(value, (int, float)):
                 reporting_duration += float(value)
+                reporting_sources.append(str(key))
         if reporting_duration > 0.0:
             stage_durations[StageKey.REPORTING] = reporting_duration
-    return stage_durations
+            duration_metadata[StageKey.REPORTING] = {
+                "duration_source": "run_stage_timings_rollup",
+                "derived_from": list(reporting_sources),
+            }
+    return stage_durations, duration_metadata
 
 
 def _planned_status_for_stage(
@@ -222,6 +244,7 @@ def build_stage_execution_result(
     n_permutations: int,
     section_timings_seconds: Mapping[str, float] | None = None,
     stage_timings_seconds: Mapping[str, float] | None = None,
+    stage_timing_metadata: Mapping[str, Mapping[str, Any]] | None = None,
     reporting_status: StageStatus = "planned",
     actual_estimator_backend_family: str | None = None,
     planned_assignments: Sequence[StageAssignment | Mapping[str, Any]] | None = None,
@@ -279,10 +302,21 @@ def build_stage_execution_result(
         )
     assignments = [assignment_map[stage] for stage in StageKey]
 
-    stage_durations = _normalize_stage_duration_map(
+    stage_durations, stage_duration_metadata = _normalize_stage_duration_map(
         section_timings_seconds=section_timings_seconds,
         stage_timings_seconds=stage_timings_seconds,
     )
+    if stage_timing_metadata is not None:
+        for raw_stage, raw_metadata in stage_timing_metadata.items():
+            try:
+                stage_key = StageKey(str(raw_stage))
+            except ValueError:
+                continue
+            if not isinstance(raw_metadata, Mapping):
+                continue
+            stage_duration_metadata[stage_key] = {
+                str(key): value for key, value in dict(raw_metadata).items()
+            }
 
     telemetry_rows: list[StageExecutionTelemetry] = []
     for stage in StageKey:
@@ -306,6 +340,18 @@ def build_stage_execution_result(
         elif stage in _EVALUATION_DEPENDENT_STAGES:
             details["derived_from"] = StageKey.EVALUATION.value
         duration_seconds = stage_durations.get(stage)
+        metadata_payload = stage_duration_metadata.get(stage)
+        if isinstance(metadata_payload, Mapping):
+            details.update({str(key): value for key, value in metadata_payload.items()})
+        if duration_seconds is None and "duration_source" not in details:
+            if stage in _MODEL_FIT_DEPENDENT_STAGES or stage in _EVALUATION_DEPENDENT_STAGES:
+                details["duration_source"] = "unavailable_derived_stage"
+                details.setdefault(
+                    "fallback_reason",
+                    "no_direct_duration_measurement",
+                )
+            else:
+                details["duration_source"] = "unavailable"
         telemetry_rows.append(
             StageExecutionTelemetry(
                 stage=stage,

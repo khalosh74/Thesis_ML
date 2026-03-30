@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import platform
 import tracemalloc
 import warnings
@@ -49,6 +50,7 @@ from Thesis_ML.experiments.data_reporting import write_official_data_artifacts
 from Thesis_ML.experiments.errors import exception_failure_payload
 from Thesis_ML.experiments.execution_policy import (
     prepare_report_dir,
+    read_run_status,
     write_run_status,
 )
 from Thesis_ML.experiments.feature_space_loading import (
@@ -131,6 +133,7 @@ from Thesis_ML.features.preprocessing import (
     apply_preprocessing_to_pipeline,
     resolve_preprocessing_strategy,
 )
+from Thesis_ML.observability.process_sampler import ProcessSampler
 
 LOGGER = logging.getLogger(__name__)
 
@@ -211,6 +214,74 @@ def _multiplex_progress_callbacks(
 
 def _failure_payload(exc: Exception) -> dict[str, Any]:
     return exception_failure_payload(exc, default_stage="runtime")
+
+
+def _process_profile_artifacts_payload(
+    *,
+    report_dir: Path,
+) -> dict[str, Any]:
+    return {
+        "process_samples_path": str((report_dir / "process_samples.jsonl").resolve()),
+        "process_profile_summary_path": str(
+            (report_dir / "process_profile_summary.json").resolve()
+        ),
+    }
+
+
+def _default_process_profile_summary(
+    *,
+    sample_interval_seconds: float,
+    wall_clock_elapsed_seconds: float,
+    child_pid: int,
+    sampling_errors: list[str],
+) -> dict[str, Any]:
+    return {
+        "sampling_enabled": False,
+        "sample_interval_seconds": float(sample_interval_seconds),
+        "sample_count": 0,
+        "first_sample_at_utc": None,
+        "last_sample_at_utc": None,
+        "wall_clock_elapsed_seconds": float(wall_clock_elapsed_seconds),
+        "peak_rss_mb": 0.0,
+        "peak_vms_mb": 0.0,
+        "peak_thread_count": 0,
+        "mean_cpu_percent": 0.0,
+        "peak_cpu_percent": 0.0,
+        "peak_child_process_count": 0,
+        "peak_read_bytes": 0,
+        "peak_write_bytes": 0,
+        "sampling_errors": list(sampling_errors),
+        "terminated_by_watchdog": False,
+        "termination_method": "normal_exit",
+        "child_pid": int(child_pid),
+    }
+
+
+def _attach_process_profile_to_status_file(
+    *,
+    report_dir: Path,
+    run_id: str,
+    fallback_status: str,
+    process_profile_summary: dict[str, Any],
+    process_profile_artifacts: dict[str, Any],
+) -> None:
+    status_payload = read_run_status(report_dir)
+    if isinstance(status_payload, dict):
+        status_payload["process_profile_summary"] = dict(process_profile_summary)
+        status_payload["process_profile_artifacts"] = dict(process_profile_artifacts)
+        (report_dir / "run_status.json").write_text(
+            f"{json.dumps(status_payload, indent=2)}\n",
+            encoding="utf-8",
+        )
+        return
+    write_run_status(
+        report_dir,
+        run_id=run_id,
+        status=str(fallback_status),
+        message="process profile attached by direct run",
+        process_profile_summary=process_profile_summary,
+        process_profile_artifacts=process_profile_artifacts,
+    )
 
 
 def _resolve_backend_family_from_backend_id(
@@ -453,6 +524,9 @@ def run_experiment(
     projected_runtime_seconds: int | None = None,
     timeout_policy_effective: dict[str, Any] | None = None,
     profiling_context: dict[str, Any] | None = None,
+    process_profile_enabled: bool = False,
+    process_sample_interval_seconds: float = 10.0,
+    process_include_io_counters: bool = True,
     hardware_mode: str = "cpu_only",
     gpu_device_id: int | None = None,
     deterministic_compute: bool = False,
@@ -485,6 +559,17 @@ def run_experiment(
     data_artifact_info: dict[str, Any] = {}
     required_run_artifacts: list[str] = []
     required_run_metadata_fields: list[str] = []
+    process_profile_enabled_resolved = bool(process_profile_enabled)
+    process_sample_interval_seconds_resolved = float(process_sample_interval_seconds)
+    process_include_io_counters_resolved = bool(process_include_io_counters)
+    process_profile_sampler: ProcessSampler | None = None
+    process_profile_finalized = False
+    process_profile_summary: dict[str, Any] | None = None
+    process_profile_artifacts: dict[str, Any] | None = None
+    process_profile_child_pid = int(os.getpid())
+
+    if process_sample_interval_seconds_resolved <= 0.0:
+        raise ValueError("process_sample_interval_seconds must be > 0 when provided.")
 
     if cv is None or not str(cv).strip():
         allowed = ", ".join(_CV_MODES)
@@ -1053,6 +1138,59 @@ def run_experiment(
     interpretability_summary_path = report_dir / "interpretability_summary.json"
     interpretability_fold_artifacts_path = report_dir / "interpretability_fold_explanations.csv"
 
+    def _finalize_process_profile() -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+        nonlocal process_profile_sampler
+        nonlocal process_profile_summary
+        nonlocal process_profile_artifacts
+        nonlocal process_profile_finalized
+        if not process_profile_enabled_resolved:
+            return None, None
+        if process_profile_finalized:
+            return process_profile_summary, process_profile_artifacts
+
+        wall_clock_elapsed_seconds = float(round(perf_counter() - overall_start, 6))
+        sampling_errors: list[str] = []
+        if process_profile_sampler is not None:
+            try:
+                process_profile_sampler.stop()
+                process_profile_summary = process_profile_sampler.finalize(
+                    wall_clock_elapsed_seconds=wall_clock_elapsed_seconds,
+                    terminated_by_watchdog=False,
+                    termination_method="normal_exit",
+                    child_pid=process_profile_child_pid,
+                )
+            except Exception as exc:
+                sampling_errors.append(f"process_profile_finalize_failed: {exc}")
+            finally:
+                process_profile_sampler = None
+
+        if process_profile_summary is None:
+            if not sampling_errors:
+                sampling_errors.append("process_sampler_unavailable")
+            process_profile_summary = _default_process_profile_summary(
+                sample_interval_seconds=process_sample_interval_seconds_resolved,
+                wall_clock_elapsed_seconds=wall_clock_elapsed_seconds,
+                child_pid=process_profile_child_pid,
+                sampling_errors=sampling_errors,
+            )
+            (report_dir / "process_samples.jsonl").parent.mkdir(parents=True, exist_ok=True)
+            (report_dir / "process_samples.jsonl").touch(exist_ok=True)
+            (report_dir / "process_profile_summary.json").write_text(
+                f"{json.dumps(process_profile_summary, indent=2)}\n",
+                encoding="utf-8",
+            )
+        else:
+            (report_dir / "process_samples.jsonl").parent.mkdir(parents=True, exist_ok=True)
+            (report_dir / "process_samples.jsonl").touch(exist_ok=True)
+            (report_dir / "process_profile_summary.json").write_text(
+                f"{json.dumps(process_profile_summary, indent=2)}\n",
+                encoding="utf-8",
+            )
+
+        process_profile_artifacts = _process_profile_artifacts_payload(report_dir=report_dir)
+        process_profile_finalized = True
+        return process_profile_summary, process_profile_artifacts
+
     write_run_status(
         report_dir,
         run_id=resolved_run_id,
@@ -1060,6 +1198,23 @@ def run_experiment(
         message=f"run_mode={run_mode}",
         stage_timings_seconds=stage_timings,
     )
+    if process_profile_enabled_resolved:
+        try:
+            process_profile_sampler = ProcessSampler(
+                pid=process_profile_child_pid,
+                report_dir=report_dir,
+                sample_interval_seconds=process_sample_interval_seconds_resolved,
+                include_io_counters=process_include_io_counters_resolved,
+            )
+            process_profile_sampler.start()
+        except Exception as exc:
+            process_profile_sampler = None
+            process_profile_summary = _default_process_profile_summary(
+                sample_interval_seconds=process_sample_interval_seconds_resolved,
+                wall_clock_elapsed_seconds=0.0,
+                child_pid=process_profile_child_pid,
+                sampling_errors=[f"process_sampler_start_failed: {exc}"],
+            )
     if resolved_framework_mode in {
         FrameworkMode.CONFIRMATORY,
         FrameworkMode.LOCKED_COMPARISON,
@@ -1110,6 +1265,9 @@ def run_experiment(
         except Exception as exc:
             failure = _failure_payload(exc)
             stage_timings["total"] = float(perf_counter() - overall_start)
+            process_profile_summary_payload, process_profile_artifacts_payload = (
+                _finalize_process_profile()
+            )
             write_run_status(
                 report_dir,
                 run_id=resolved_run_id,
@@ -1123,6 +1281,8 @@ def run_experiment(
                 warning_summary=_warning_summary(warnings_payload),
                 stage_timings_seconds=stage_timings,
                 resource_summary=resource_summary,
+                process_profile_summary=process_profile_summary_payload,
+                process_profile_artifacts=process_profile_artifacts_payload,
             )
             raise
         stage_timings["data_artifact_generation"] = float(perf_counter() - data_artifacts_start)
@@ -1286,6 +1446,9 @@ def run_experiment(
     except Exception as exc:
         failure = _failure_payload(exc)
         stage_timings["total"] = float(perf_counter() - overall_start)
+        process_profile_summary_payload, process_profile_artifacts_payload = (
+            _finalize_process_profile()
+        )
         write_run_status(
             report_dir,
             run_id=resolved_run_id,
@@ -1299,6 +1462,8 @@ def run_experiment(
             warning_summary=_warning_summary(warnings_payload),
             stage_timings_seconds=stage_timings,
             resource_summary=resource_summary,
+            process_profile_summary=process_profile_summary_payload,
+            process_profile_artifacts=process_profile_artifacts_payload,
         )
         raise
     artifact_ids = dict(segment_result.artifact_ids)
@@ -1310,6 +1475,27 @@ def run_experiment(
         if isinstance(segment_result.compute_runtime_metadata, dict)
         else None
     )
+    segment_stage_timings_seconds = (
+        {
+            str(key): float(value)
+            for key, value in dict(segment_result.stage_timings_seconds).items()
+            if isinstance(value, (int, float))
+        }
+        if isinstance(segment_result.stage_timings_seconds, dict)
+        else None
+    )
+    segment_stage_timing_metadata = (
+        {
+            str(key): dict(value)
+            for key, value in dict(segment_result.stage_timing_metadata).items()
+            if isinstance(value, dict)
+        }
+        if isinstance(segment_result.stage_timing_metadata, dict)
+        else None
+    )
+    if isinstance(segment_stage_timings_seconds, dict):
+        for stage_key, stage_duration in segment_stage_timings_seconds.items():
+            stage_timings[stage_key] = float(stage_duration)
     actual_estimator_backend_id: str | None = None
     actual_estimator_backend_family: str | None = None
     if compute_runtime_metadata is not None:
@@ -1349,6 +1535,7 @@ def run_experiment(
             else None
         ),
         stage_timings_seconds=stage_timings,
+        stage_timing_metadata=segment_stage_timing_metadata,
         reporting_status="planned",
         actual_estimator_backend_family=actual_estimator_backend_family,
         planned_assignments=planned_stage_assignments,
@@ -1411,6 +1598,9 @@ def run_experiment(
     except Exception as exc:
         failure = _failure_payload(exc)
         stage_timings["total"] = float(perf_counter() - overall_start)
+        process_profile_summary_payload, process_profile_artifacts_payload = (
+            _finalize_process_profile()
+        )
         write_run_status(
             report_dir,
             run_id=resolved_run_id,
@@ -1424,6 +1614,8 @@ def run_experiment(
             warning_summary=warning_summary,
             stage_timings_seconds=stage_timings,
             resource_summary=resource_summary,
+            process_profile_summary=process_profile_summary_payload,
+            process_profile_artifacts=process_profile_artifacts_payload,
         )
         raise
     stage_timings["metrics_stamping"] = float(perf_counter() - metrics_stamp_start)
@@ -1580,6 +1772,9 @@ def run_experiment(
     except Exception as exc:
         failure = _failure_payload(exc)
         stage_timings["total"] = float(perf_counter() - overall_start)
+        process_profile_summary_payload, process_profile_artifacts_payload = (
+            _finalize_process_profile()
+        )
         write_run_status(
             report_dir,
             run_id=resolved_run_id,
@@ -1593,6 +1788,8 @@ def run_experiment(
             warning_summary=warning_summary,
             stage_timings_seconds=stage_timings,
             resource_summary=resource_summary,
+            process_profile_summary=process_profile_summary_payload,
+            process_profile_artifacts=process_profile_artifacts_payload,
         )
         raise
     stage_timings["config_write"] = float(perf_counter() - config_build_start)
@@ -1621,6 +1818,9 @@ def run_experiment(
     except Exception as exc:
         failure = _failure_payload(exc)
         stage_timings["total"] = float(perf_counter() - overall_start)
+        process_profile_summary_payload, process_profile_artifacts_payload = (
+            _finalize_process_profile()
+        )
         write_run_status(
             report_dir,
             run_id=resolved_run_id,
@@ -1634,6 +1834,8 @@ def run_experiment(
             warning_summary=warning_summary,
             stage_timings_seconds=stage_timings,
             resource_summary=resource_summary,
+            process_profile_summary=process_profile_summary_payload,
+            process_profile_artifacts=process_profile_artifacts_payload,
         )
         raise
     artifact_ids[ARTIFACT_TYPE_EXPERIMENT_REPORT] = experiment_report_artifact.artifact_id
@@ -1657,6 +1859,9 @@ def run_experiment(
         except Exception as exc:
             failure = _failure_payload(exc)
             stage_timings["total"] = float(perf_counter() - overall_start)
+            process_profile_summary_payload, process_profile_artifacts_payload = (
+                _finalize_process_profile()
+            )
             write_run_status(
                 report_dir,
                 run_id=resolved_run_id,
@@ -1670,6 +1875,8 @@ def run_experiment(
                 warning_summary=warning_summary,
                 stage_timings_seconds=stage_timings,
                 resource_summary=resource_summary,
+                process_profile_summary=process_profile_summary_payload,
+                process_profile_artifacts=process_profile_artifacts_payload,
             )
             raise
         stage_timings["official_artifact_validation"] = float(
@@ -1677,6 +1884,7 @@ def run_experiment(
         )
 
     stage_timings["total"] = float(perf_counter() - overall_start)
+    process_profile_summary_payload, process_profile_artifacts_payload = _finalize_process_profile()
     run_status = write_run_status(
         report_dir,
         run_id=resolved_run_id,
@@ -1687,6 +1895,8 @@ def run_experiment(
         warning_summary=warning_summary,
         stage_timings_seconds=stage_timings,
         resource_summary=resource_summary,
+        process_profile_summary=process_profile_summary_payload,
+        process_profile_artifacts=process_profile_artifacts_payload,
     )
     emit_progress(
         progress_callback,
@@ -1793,6 +2003,8 @@ def run_experiment(
         dataset_fingerprint=dataset_fingerprint,
         timeout_policy_effective=timeout_policy_effective,
         profiling_context=resolved_profiling_context,
+        process_profile_summary=process_profile_summary_payload,
+        process_profile_artifacts=process_profile_artifacts_payload,
         compute_policy=resolved_compute_policy,
         compute_runtime_metadata=compute_runtime_metadata,
         stage_execution=stage_execution,

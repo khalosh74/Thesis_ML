@@ -80,6 +80,10 @@ def test_stage_execution_models_roundtrip_and_status_derivation() -> None:
     assert telemetry_by_stage["reporting"].status == "planned"
     assert telemetry_by_stage["dataset_selection"].duration_seconds == 0.02
     assert telemetry_by_stage["reporting"].duration_seconds == 0.03
+    assert telemetry_by_stage["dataset_selection"].details["duration_source"] == "section_timing"
+    assert telemetry_by_stage["model_fit"].details["duration_source"] == "section_timing"
+    assert telemetry_by_stage["tuning"].details["duration_source"] == "unavailable_derived_stage"
+    assert telemetry_by_stage["permutation"].details["duration_source"] == "unavailable_derived_stage"
 
 
 def test_stage_execution_bridge_honors_actual_estimator_backend_for_compute_stages() -> None:
@@ -202,3 +206,43 @@ def test_stage_execution_includes_planner_assignment_metadata_in_telemetry() -> 
     model_fit_details = telemetry_by_stage["model_fit"].details
     assert model_fit_details["executor_id"] == "model_fit_cpu_reference_v1"
     assert model_fit_details["equivalence_class"] == "exact_reference_equivalent"
+
+
+def test_stage_execution_merges_stage_timing_metadata_with_duration_provenance() -> None:
+    compute_policy = resolve_compute_policy(
+        framework_mode=FrameworkMode.EXPLORATORY,
+        hardware_mode="cpu_only",
+    )
+    stage_result = build_stage_execution_result(
+        compute_policy=compute_policy,
+        planned_sections=["model_fit", "evaluation"],
+        executed_sections=["model_fit", "evaluation"],
+        reused_sections=[],
+        tuning_enabled=True,
+        n_permutations=3,
+        stage_timings_seconds={"reporting": 0.42},
+        stage_timing_metadata={
+            "tuning": {
+                "duration_source": "unavailable",
+                "derived_from": "tuning_summary",
+                "fallback_reason": "tuning_duration_not_measured",
+            },
+            "permutation": {
+                "duration_source": "metrics.permutation_test.permutation_loop_seconds",
+                "derived_from": "metrics.permutation_test",
+            },
+            "reporting": {
+                "duration_source": "run_stage_timings_rollup",
+                "derived_from": ["metrics_stamping", "config_write"],
+            },
+        },
+    )
+
+    telemetry_by_stage = {row.stage: row for row in stage_result.telemetry}
+    assert telemetry_by_stage["tuning"].details["duration_source"] == "unavailable"
+    assert telemetry_by_stage["tuning"].details["fallback_reason"] == "tuning_duration_not_measured"
+    assert (
+        telemetry_by_stage["permutation"].details["duration_source"]
+        == "metrics.permutation_test.permutation_loop_seconds"
+    )
+    assert telemetry_by_stage["reporting"].details["duration_source"] == "run_stage_timings_rollup"

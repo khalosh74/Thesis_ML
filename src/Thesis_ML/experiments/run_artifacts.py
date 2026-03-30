@@ -777,6 +777,8 @@ def build_run_result_payload(
     dataset_fingerprint: dict[str, Any] | None = None,
     timeout_policy_effective: dict[str, Any] | None = None,
     profiling_context: dict[str, Any] | None = None,
+    process_profile_summary: dict[str, Any] | None = None,
+    process_profile_artifacts: dict[str, Any] | None = None,
     compute_policy: ResolvedComputePolicy | None = None,
     compute_runtime_metadata: dict[str, Any] | None = None,
     stage_execution: StageExecutionMetadata | dict[str, Any] | None = None,
@@ -911,6 +913,16 @@ def build_run_result_payload(
             bool(profiling_context.get("profiling_only", False))
             if isinstance(profiling_context, dict)
             else False
+        ),
+        "process_profile_summary": (
+            dict(process_profile_summary)
+            if isinstance(process_profile_summary, dict)
+            else None
+        ),
+        "process_profile_artifacts": (
+            dict(process_profile_artifacts)
+            if isinstance(process_profile_artifacts, dict)
+            else None
         ),
     }
     stage_execution_data = _stage_execution_payload(stage_execution)

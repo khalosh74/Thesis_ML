@@ -173,6 +173,8 @@ class SegmentExecutionResult:
     interpretability_summary: dict[str, Any] | None
     compute_runtime_metadata: dict[str, Any] | None = None
     section_timings_seconds: dict[str, float] | None = None
+    stage_timings_seconds: dict[str, float] | None = None
+    stage_timing_metadata: dict[str, dict[str, Any]] | None = None
     stage_assignments: list[StageAssignment] | None = None
 
 
@@ -245,6 +247,8 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
     metrics: dict[str, Any] | None = None
     compute_runtime_metadata: dict[str, Any] | None = None
     section_timings_seconds: dict[str, float] = {}
+    stage_timings_seconds: dict[str, float] = {}
+    stage_timing_metadata: dict[str, dict[str, Any]] = {}
     stage_assignment_map: dict[StageKey, StageAssignment] = {}
     for assignment in request.stage_assignments or ():
         normalized_assignment = (
@@ -259,6 +263,35 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
             if not isinstance(executor_id_raw, str) or not executor_id_raw.strip():
                 continue
             stage_fallback_executor_ids[StageKey(str(stage_key_raw))] = executor_id_raw.strip()
+
+    def _record_section_duration(section_name: str, duration_seconds: float) -> None:
+        section_timings_seconds[section_name] = float(duration_seconds)
+        if section_name in stage_timings_seconds:
+            return
+        stage_timings_seconds[section_name] = float(duration_seconds)
+        stage_timing_metadata[section_name] = {
+            "duration_source": "section_timing",
+            "derived_from": str(section_name),
+        }
+
+    def _set_stage_timing(
+        *,
+        stage_name: str,
+        duration_seconds: float | None,
+        duration_source: str,
+        derived_from: str | None = None,
+        fallback_reason: str | None = None,
+    ) -> None:
+        metadata_payload: dict[str, Any] = {
+            "duration_source": str(duration_source),
+        }
+        if derived_from is not None:
+            metadata_payload["derived_from"] = str(derived_from)
+        if fallback_reason is not None:
+            metadata_payload["fallback_reason"] = str(fallback_reason)
+        if duration_seconds is not None:
+            stage_timings_seconds[stage_name] = float(duration_seconds)
+        stage_timing_metadata[stage_name] = metadata_payload
 
     if SectionName.DATASET_SELECTION not in planned_sections and is_after_or_equal(
         planned_sections[-1], SectionName.FEATURE_MATRIX_LOAD
@@ -366,7 +399,10 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
                     artifact_ids["feature_cache"] = reusable_feature_cache.artifact_id
                     reused_sections.append(section.value)
                     executed_sections.append(section.value)
-                    section_timings_seconds[section.value] = float(perf_counter() - section_start)
+                    _record_section_duration(
+                        section_name=section.value,
+                        duration_seconds=float(perf_counter() - section_start),
+                    )
                     _emit_section_event(
                         section_name=section.value,
                         status="reused",
@@ -439,7 +475,10 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
                     artifact_ids["feature_matrix_bundle"] = reusable_feature_matrix.artifact_id
                     reused_sections.append(section.value)
                     executed_sections.append(section.value)
-                    section_timings_seconds[section.value] = float(perf_counter() - section_start)
+                    _record_section_duration(
+                        section_name=section.value,
+                        duration_seconds=float(perf_counter() - section_start),
+                    )
                     _emit_section_event(
                         section_name=section.value,
                         status="reused",
@@ -554,6 +593,67 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
                             "fallback_reason": tuning_fallback_reason,
                         }
                     )
+            fit_timing_totals = (
+                fit_output.fit_timing_summary.get("totals_seconds")
+                if isinstance(fit_output.fit_timing_summary, dict)
+                else None
+            )
+            model_fit_duration = (
+                float(fit_timing_totals.get("outer_fold"))
+                if isinstance(fit_timing_totals, dict)
+                and isinstance(fit_timing_totals.get("outer_fold"), (int, float))
+                else None
+            )
+            if model_fit_duration is not None:
+                _set_stage_timing(
+                    stage_name=StageKey.MODEL_FIT.value,
+                    duration_seconds=model_fit_duration,
+                    duration_source="fit_timing_summary.totals_seconds.outer_fold",
+                    derived_from="fit_timing_summary",
+                )
+            else:
+                _set_stage_timing(
+                    stage_name=StageKey.MODEL_FIT.value,
+                    duration_seconds=stage_timings_seconds.get(StageKey.MODEL_FIT.value),
+                    duration_source="section_timing",
+                    derived_from=SectionName.MODEL_FIT.value,
+                    fallback_reason="fit_timing_summary_missing_outer_fold",
+                )
+
+            tuning_timing_totals = (
+                fit_output.tuning_summary.get("timing_totals_seconds")
+                if isinstance(fit_output.tuning_summary, dict)
+                else None
+            )
+            tuning_duration = (
+                float(tuning_timing_totals.get("tuned_search_total"))
+                if isinstance(tuning_timing_totals, dict)
+                and isinstance(tuning_timing_totals.get("tuned_search_total"), (int, float))
+                else None
+            )
+            if bool(request.tuning_enabled) and tuning_duration is not None:
+                _set_stage_timing(
+                    stage_name=StageKey.TUNING.value,
+                    duration_seconds=tuning_duration,
+                    duration_source="tuning_summary.timing_totals_seconds.tuned_search_total",
+                    derived_from="tuning_summary",
+                )
+            elif bool(request.tuning_enabled):
+                _set_stage_timing(
+                    stage_name=StageKey.TUNING.value,
+                    duration_seconds=None,
+                    duration_source="unavailable",
+                    derived_from="tuning_summary",
+                    fallback_reason="tuning_duration_not_measured",
+                )
+            else:
+                _set_stage_timing(
+                    stage_name=StageKey.TUNING.value,
+                    duration_seconds=None,
+                    duration_source="not_applicable",
+                    derived_from="tuning_policy",
+                    fallback_reason="tuning_disabled",
+                )
         elif section == SectionName.INTERPRETABILITY:
             if fit_output is None:
                 raise ValueError(
@@ -577,7 +677,10 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
                     )
                     reused_sections.append(section.value)
                     executed_sections.append(section.value)
-                    section_timings_seconds[section.value] = float(perf_counter() - section_start)
+                    _record_section_duration(
+                        section_name=section.value,
+                        duration_seconds=float(perf_counter() - section_start),
+                    )
                     _emit_section_event(
                         section_name=section.value,
                         status="reused",
@@ -650,7 +753,10 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
                     artifact_ids[ARTIFACT_TYPE_METRICS_BUNDLE] = reusable_metrics.artifact_id
                     reused_sections.append(section.value)
                     executed_sections.append(section.value)
-                    section_timings_seconds[section.value] = float(perf_counter() - section_start)
+                    _record_section_duration(
+                        section_name=section.value,
+                        duration_seconds=float(perf_counter() - section_start),
+                    )
                     _emit_section_event(
                         section_name=section.value,
                         status="reused",
@@ -768,12 +874,40 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
                             "fallback_reason": fallback_reason.strip(),
                         }
                     )
+            if isinstance(permutation_payload, dict) and isinstance(
+                permutation_payload.get("permutation_loop_seconds"), (int, float)
+            ):
+                _set_stage_timing(
+                    stage_name=StageKey.PERMUTATION.value,
+                    duration_seconds=float(permutation_payload.get("permutation_loop_seconds")),
+                    duration_source="metrics.permutation_test.permutation_loop_seconds",
+                    derived_from="metrics.permutation_test",
+                )
+            elif int(request.n_permutations) > 0:
+                _set_stage_timing(
+                    stage_name=StageKey.PERMUTATION.value,
+                    duration_seconds=None,
+                    duration_source="unavailable",
+                    derived_from="metrics.permutation_test",
+                    fallback_reason="permutation_loop_timing_not_measured",
+                )
+            else:
+                _set_stage_timing(
+                    stage_name=StageKey.PERMUTATION.value,
+                    duration_seconds=None,
+                    duration_source="not_applicable",
+                    derived_from="permutation_policy",
+                    fallback_reason="permutations_disabled",
+                )
             artifact_ids[ARTIFACT_TYPE_METRICS_BUNDLE] = evaluation_output.metrics_artifact_id
         else:
             raise ValueError(f"Unsupported section encountered in execution plan: {section.value}")
 
         executed_sections.append(section.value)
-        section_timings_seconds[section.value] = float(perf_counter() - section_start)
+        _record_section_duration(
+            section_name=section.value,
+            duration_seconds=float(perf_counter() - section_start),
+        )
         _emit_section_event(
             section_name=section.value,
             status="finished",
@@ -792,6 +926,8 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
         interpretability_summary=interpretability_summary,
         compute_runtime_metadata=compute_runtime_metadata,
         section_timings_seconds=section_timings_seconds,
+        stage_timings_seconds=stage_timings_seconds,
+        stage_timing_metadata=stage_timing_metadata,
         stage_assignments=[
             stage_assignment_map[stage] for stage in StageKey if stage in stage_assignment_map
         ],
