@@ -125,6 +125,19 @@ def prepare_report_dir(
         str(status_payload.get("updated_at_utc", "unknown")) if status_payload else "unknown"
     )
 
+    # Timeout watchdog may pre-create the run directory and stream process samples
+    # before the worker enters run_experiment. Treat that state as a fresh run.
+    if status_payload is None:
+        existing_entries = list(report_dir.iterdir())
+        if not existing_entries:
+            return "fresh"
+        allowed_precreated_files = {"process_samples.jsonl", "progress_events.jsonl"}
+        if all(
+            entry.is_file() and entry.name in allowed_precreated_files
+            for entry in existing_entries
+        ):
+            return "fresh"
+
     if force:
         shutil.rmtree(report_dir)
         report_dir.mkdir(parents=True, exist_ok=False)

@@ -250,12 +250,61 @@ def load_features_from_cache(
                         dtype=np.float32,
                     )
                 elif int(current_vector.shape[0]) != int(x_matrix.shape[1]):
-                    raise ValueError(
-                        "Cache feature dimension mismatch across selected groups. "
-                        f"sample_id='{sample_id}', group_id='{group_id}', "
-                        f"cache_path='{cache_path}', expected={x_matrix.shape[1]}, "
-                        f"observed={current_vector.shape[0]}."
+                    provisional_groups = list(selected_cache_groups) + [
+                        {
+                            "group_id": str(group_id),
+                            "cache_path": str(cache_path.resolve()),
+                            "n_selected_samples": int(max(1, selected_in_group)),
+                            "n_features": int(current_vector.shape[0]),
+                            "raw_signature": (
+                                dict(raw_signature)
+                                if isinstance(raw_signature, dict)
+                                else None
+                            ),
+                        }
+                    ]
+                    spatial_report = build_spatial_compatibility_report(
+                        cache_groups=provisional_groups,
+                        affine_atol=affine_atol,
                     )
+                    mismatch_reason = (
+                        "feature_count mismatch "
+                        f"({int(current_vector.shape[0])} != {int(x_matrix.shape[1])})"
+                    )
+                    mismatches = spatial_report.get("mismatches")
+                    if not isinstance(mismatches, list):
+                        mismatches = []
+                    group_mismatch = next(
+                        (
+                            item
+                            for item in mismatches
+                            if isinstance(item, dict)
+                            and str(item.get("group_id")) == str(group_id)
+                        ),
+                        None,
+                    )
+                    if group_mismatch is None:
+                        group_mismatch = {
+                            "group_id": str(group_id),
+                            "cache_path": str(cache_path.resolve()),
+                            "reasons": [],
+                        }
+                        mismatches.append(group_mismatch)
+                    reasons = group_mismatch.get("reasons")
+                    if not isinstance(reasons, list):
+                        reasons = []
+                    if not any("feature_count mismatch" in str(item) for item in reasons):
+                        reasons.append(mismatch_reason)
+                    group_mismatch["reasons"] = reasons
+                    spatial_report["mismatches"] = mismatches
+                    spatial_report["passed"] = False
+                    spatial_report["status"] = "failed"
+                    if spatial_report_path is not None:
+                        spatial_report_path.write_text(
+                            f"{json.dumps(spatial_report, indent=2)}\n",
+                            encoding="utf-8",
+                        )
+                    raise_spatial_compatibility_error(spatial_report)
                 positions = row_positions_by_sample.get(sample_id, [])
                 if not positions:
                     continue

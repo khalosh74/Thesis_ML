@@ -849,7 +849,7 @@ def test_model_fit_tuned_rows_include_search_timing_summary(tmp_path: Path) -> N
         assert float(row["tuned_search_elapsed_seconds"]) >= 0.0
         assert int(row["configured_candidate_count"]) >= int(row["profiled_candidate_count"])
         assert int(row["configured_inner_fold_count"]) >= int(row["profiled_inner_fold_count"])
-        assert row["tuning_executor"] == "gridsearchcv_pipeline_reference_v1"
+        assert row["tuning_executor"] == "ridge_grouped_nested_exact_v1"
         assert bool(row["specialized_linearsvc_tuning_used"]) is False
         assert float(row["cv_mean_fit_time_seconds"]) >= 0.0
         assert float(row["cv_std_fit_time_seconds"]) >= 0.0
