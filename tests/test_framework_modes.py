@@ -193,6 +193,7 @@ def test_official_context_rejects_metric_policy_drift(tmp_path: Path) -> None:
         "subgroup_reporting_enabled": True,
         "subgroup_dimensions": ["label"],
         "subgroup_min_samples_per_group": 1,
+        "primary_metric_aggregation": "mean_fold_scores",
         "metric_policy": {
             "primary_metric": "macro_f1",
             "secondary_metrics": ["balanced_accuracy", "accuracy"],
@@ -248,6 +249,7 @@ def test_confirmatory_context_requires_data_policy(tmp_path: Path) -> None:
         "subgroup_reporting_enabled": True,
         "subgroup_dimensions": ["label"],
         "subgroup_min_samples_per_group": 1,
+        "primary_metric_aggregation": "mean_fold_scores",
         "metric_policy": {
             "primary_metric": "balanced_accuracy",
             "secondary_metrics": ["macro_f1", "accuracy"],

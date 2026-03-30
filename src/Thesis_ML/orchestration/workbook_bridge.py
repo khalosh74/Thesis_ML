@@ -53,16 +53,12 @@ def _build_dataset_subset_label(params: dict[str, Any]) -> str:
     task = str(params.get("filter_task") or "all_tasks").strip() or "all_tasks"
     modality = str(params.get("filter_modality") or "all_modalities").strip() or "all_modalities"
     feature_space = (
-        str(params.get("feature_space") or "whole_brain_masked").strip()
-        or "whole_brain_masked"
+        str(params.get("feature_space") or "whole_brain_masked").strip() or "whole_brain_masked"
     )
     preprocessing_strategy = (
-        str(params.get("preprocessing_strategy") or "model_default").strip()
-        or "model_default"
+        str(params.get("preprocessing_strategy") or "model_default").strip() or "model_default"
     )
-    dimensionality_strategy = (
-        str(params.get("dimensionality_strategy") or "none").strip() or "none"
-    )
+    dimensionality_strategy = str(params.get("dimensionality_strategy") or "none").strip() or "none"
     if train_subject and test_subject:
         subject_part = f"train={train_subject}|test={test_subject}"
     elif subject:
@@ -78,12 +74,8 @@ def _build_dataset_subset_label(params: dict[str, Any]) -> str:
 
 def _feature_set_label(params: dict[str, Any]) -> str:
     feature_space = str(params.get("feature_space") or "whole_brain_masked").strip().lower()
-    preprocessing_strategy = (
-        str(params.get("preprocessing_strategy") or "").strip().lower()
-    )
-    dimensionality_strategy = (
-        str(params.get("dimensionality_strategy") or "none").strip().lower()
-    )
+    preprocessing_strategy = str(params.get("preprocessing_strategy") or "").strip().lower()
+    dimensionality_strategy = str(params.get("dimensionality_strategy") or "none").strip().lower()
     pca_variance_ratio = params.get("pca_variance_ratio")
     pca_n_components = params.get("pca_n_components")
     pca_suffix = ""

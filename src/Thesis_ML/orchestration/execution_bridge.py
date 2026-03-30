@@ -6,7 +6,7 @@ import sys
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from Thesis_ML.artifacts.registry import (
     ARTIFACT_TYPE_EXPERIMENT_REPORT,
@@ -19,12 +19,9 @@ from Thesis_ML.config.methodology import (
     MethodologyPolicy,
     MethodologyPolicyName,
 )
-from Thesis_ML.experiments.compute_policy import resolve_compute_policy
+from Thesis_ML.config.metric_policy import extract_metric_value, validate_metric_name
 from Thesis_ML.experiments.compute_scheduler import (
     ComputeRunAssignment,
-    ComputeRunRequest,
-    materialize_scheduled_compute_policy,
-    plan_compute_schedule,
 )
 from Thesis_ML.experiments.parallel_execution import (
     OfficialRunJob,
@@ -32,7 +29,6 @@ from Thesis_ML.experiments.parallel_execution import (
 )
 from Thesis_ML.experiments.run_states import RUN_STATUS_SUCCESS
 from Thesis_ML.experiments.runtime_policies import resolve_run_timeout_policy
-from Thesis_ML.config.metric_policy import extract_metric_value, validate_metric_name
 from Thesis_ML.orchestration.reporting import build_dataset_subset_label
 from Thesis_ML.orchestration.variant_expansion import variant_label
 
@@ -77,6 +73,15 @@ def _resolve_methodology_params(params: dict[str, Any]) -> dict[str, Any]:
     policy_name = raw_policy_name or MethodologyPolicyName.FIXED_BASELINES_ONLY.value
     class_weight_policy = raw_class_weight or ClassWeightPolicy.NONE.value
     tuning_enabled = policy_name == MethodologyPolicyName.GROUPED_NESTED_TUNING.value
+    resolved_inner_cv_scheme: Literal["grouped_leave_one_group_out"] | None = None
+
+    if raw_tuning_inner_cv is not None:
+        if raw_tuning_inner_cv != "grouped_leave_one_group_out":
+            raise ValueError(
+                "grouped_nested_tuning requires tuning_inner_cv_scheme="
+                "'grouped_leave_one_group_out'."
+            )
+        resolved_inner_cv_scheme = "grouped_leave_one_group_out"
 
     if tuning_enabled:
         required = {
@@ -98,7 +103,7 @@ def _resolve_methodology_params(params: dict[str, Any]) -> dict[str, Any]:
             policy_name=MethodologyPolicyName(policy_name),
             class_weight_policy=ClassWeightPolicy(class_weight_policy),
             tuning_enabled=tuning_enabled,
-            inner_cv_scheme=raw_tuning_inner_cv,
+            inner_cv_scheme=resolved_inner_cv_scheme,
             inner_group_field=raw_tuning_inner_group,
             tuning_search_space_id=raw_tuning_space_id,
             tuning_search_space_version=raw_tuning_space_version,
@@ -284,7 +289,8 @@ def build_variant_run_kwargs(
     if blocked_reason is not None:
         return None, blocked_reason, run_id
 
-    effective_seed = int(variant.get("seed")) if variant.get("seed") is not None else int(seed)
+    resolved_variant_seed = _optional_int(variant.get("seed"))
+    effective_seed = int(resolved_variant_seed) if resolved_variant_seed is not None else int(seed)
     reports_root = experiment_root / "reports"
     reports_root.mkdir(parents=True, exist_ok=True)
     start_section = (
@@ -295,9 +301,10 @@ def build_variant_run_kwargs(
         str(variant.get("base_artifact_id")).strip() if variant.get("base_artifact_id") else None
     )
     reuse_policy = str(variant.get("reuse_policy")).strip() if variant.get("reuse_policy") else None
+    resolved_permutation_override = _optional_int(variant.get("n_permutations_override"))
     effective_n_permutations = (
-        int(variant.get("n_permutations_override"))
-        if variant.get("n_permutations_override") is not None
+        int(resolved_permutation_override)
+        if resolved_permutation_override is not None
         else int(n_permutations)
     )
 
@@ -316,19 +323,25 @@ def build_variant_run_kwargs(
         "filter_modality": (
             str(params["filter_modality"]) if params.get("filter_modality") else None
         ),
-        "feature_space": str(params["feature_space"]) if params.get("feature_space") else "whole_brain_masked",
+        "feature_space": str(params["feature_space"])
+        if params.get("feature_space")
+        else "whole_brain_masked",
         "roi_spec_path": str(params["roi_spec_path"]) if params.get("roi_spec_path") else None,
         "preprocessing_strategy": (
             str(params["preprocessing_strategy"]) if params.get("preprocessing_strategy") else None
         ),
         "dimensionality_strategy": (
-            str(params["dimensionality_strategy"]) if params.get("dimensionality_strategy") else "none"
+            str(params["dimensionality_strategy"])
+            if params.get("dimensionality_strategy")
+            else "none"
         ),
         "pca_n_components": (
             int(params["pca_n_components"]) if params.get("pca_n_components") is not None else None
         ),
         "pca_variance_ratio": (
-            float(params["pca_variance_ratio"]) if params.get("pca_variance_ratio") is not None else None
+            float(params["pca_variance_ratio"])
+            if params.get("pca_variance_ratio") is not None
+            else None
         ),
         "n_permutations": int(effective_n_permutations),
         "methodology_policy_name": methodology_params["methodology_policy_name"],
@@ -437,6 +450,7 @@ def execute_official_jobs(
             module_name == "Thesis_ML.experiments.run_experiment"
             and function_name == "run_experiment"
         ):
+
             def _local_watchdog(**kwargs: Any) -> dict[str, Any]:
                 run_kwargs = dict(kwargs.get("run_kwargs", {}))
                 result = run_experiment_fn(**run_kwargs)
@@ -535,9 +549,10 @@ def execute_variant(
     result: dict[str, Any] | None = None
 
     effective_seed = int(trial_seed) if trial_seed is not None else int(seed)
+    resolved_permutation_override = _optional_int(variant.get("n_permutations_override"))
     effective_n_permutations = (
-        int(variant.get("n_permutations_override"))
-        if variant.get("n_permutations_override") is not None
+        int(resolved_permutation_override)
+        if resolved_permutation_override is not None
         else int(n_permutations)
     )
 

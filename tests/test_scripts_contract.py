@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import sys
 from pathlib import Path
 
 
@@ -16,6 +17,7 @@ def _load_module(script_path: Path):
     spec = importlib.util.spec_from_file_location(script_path.stem, script_path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
 
@@ -65,4 +67,3 @@ def test_script_role_families_are_explicit_and_stable() -> None:
     ]
     assert build_scripts == ["build_publishable_bundle.py"]
     assert replay_scripts == ["replay_official_paths.py"]
-

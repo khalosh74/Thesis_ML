@@ -1413,13 +1413,24 @@ def _compute_subgroup_metrics(
     return subgroup_rows
 
 
-def _fallback_feature_qc_rows_from_matrix(x_matrix: np.ndarray) -> list[dict[str, Any]]:
+def _fallback_feature_qc_rows_from_matrix(
+    x_matrix: np.ndarray,
+    *,
+    sample_ids: list[str] | None = None,
+) -> list[dict[str, Any]]:
     matrix = np.asarray(x_matrix, dtype=np.float64)
     if matrix.ndim != 2:
         raise ValueError("x_matrix must be a 2D matrix for feature QC fallback.")
     rows: list[dict[str, Any]] = []
     for row_index in range(int(matrix.shape[0])):
         vector = np.asarray(matrix[row_index], dtype=np.float64)
+        sample_id = (
+            str(sample_ids[row_index]).strip()
+            if sample_ids is not None and row_index < len(sample_ids)
+            else ""
+        )
+        if not sample_id:
+            sample_id = f"selected_{row_index:06d}"
         qc_payload = compute_sample_feature_qc(
             vector_before_repair=vector,
             vector_after_repair=vector,
@@ -1427,7 +1438,7 @@ def _fallback_feature_qc_rows_from_matrix(x_matrix: np.ndarray) -> list[dict[str
         rows.append(
             {
                 "group_id": "selected_subset",
-                "sample_id": f"selected_{row_index:06d}",
+                "sample_id": sample_id,
                 **qc_payload,
             }
         )
@@ -1441,15 +1452,21 @@ def _selected_feature_qc_rows(
 ) -> list[dict[str, Any]]:
     if metadata_df.empty:
         return _fallback_feature_qc_rows_from_matrix(x_matrix)
+    sample_ids_from_metadata = [
+        str(value).strip()
+        for value in metadata_df.get("sample_id", pd.Series(dtype=str)).tolist()
+    ]
     missing_columns = [
         field_name
         for field_name in FEATURE_QC_SAMPLE_FIELDS
         if field_name not in metadata_df.columns
     ]
     if missing_columns:
-        raise ValueError(
-            "Selected metadata is missing required feature QC columns: "
-            + ", ".join(sorted(missing_columns))
+        # ROI and other non-cache feature spaces can provide valid matrices
+        # without cache-derived per-sample QC columns; derive QC directly.
+        return _fallback_feature_qc_rows_from_matrix(
+            x_matrix,
+            sample_ids=sample_ids_from_metadata,
         )
     rows: list[dict[str, Any]] = []
     for _, row in metadata_df.iterrows():

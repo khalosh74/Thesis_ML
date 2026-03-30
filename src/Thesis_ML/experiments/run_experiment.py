@@ -35,12 +35,6 @@ from Thesis_ML.config.methodology import (
 )
 from Thesis_ML.config.paths import DEFAULT_EXPERIMENT_REPORTS_ROOT
 from Thesis_ML.experiments.cache_loading import load_features_from_cache
-from Thesis_ML.experiments.feature_space_loading import (
-    FEATURE_SPACE_ROI_MEAN_PREDEFINED,
-    FEATURE_SPACE_WHOLE_BRAIN_MASKED,
-    SUPPORTED_FEATURE_SPACES,
-    normalize_feature_space,
-)
 from Thesis_ML.experiments.compute_policy import (
     HARDWARE_MODE_CHOICES,
     resolve_compute_policy,
@@ -56,6 +50,12 @@ from Thesis_ML.experiments.errors import exception_failure_payload
 from Thesis_ML.experiments.execution_policy import (
     prepare_report_dir,
     write_run_status,
+)
+from Thesis_ML.experiments.feature_space_loading import (
+    FEATURE_SPACE_ROI_MEAN_PREDEFINED,
+    FEATURE_SPACE_WHOLE_BRAIN_MASKED,
+    SUPPORTED_FEATURE_SPACES,
+    normalize_feature_space,
 )
 from Thesis_ML.experiments.metrics import (
     compute_interpretability_stability,
@@ -119,17 +119,17 @@ from Thesis_ML.experiments.tuning_search_spaces import (
     LINEAR_GROUPED_NESTED_SEARCH_SPACE_ID,
     LINEAR_GROUPED_NESTED_SEARCH_SPACE_VERSION,
 )
-from Thesis_ML.features.preprocessing import BASELINE_STANDARD_SCALER_RECIPE_ID
+from Thesis_ML.features.dimensionality import (
+    SUPPORTED_DIMENSIONALITY_STRATEGIES,
+    ResolvedDimensionalityConfig,
+    apply_dimensionality_to_pipeline,
+    resolve_dimensionality_config,
+)
 from Thesis_ML.features.preprocessing import (
+    BASELINE_STANDARD_SCALER_RECIPE_ID,
     SUPPORTED_PREPROCESSING_STRATEGIES,
     apply_preprocessing_to_pipeline,
     resolve_preprocessing_strategy,
-)
-from Thesis_ML.features.dimensionality import (
-    ResolvedDimensionalityConfig,
-    SUPPORTED_DIMENSIONALITY_STRATEGIES,
-    apply_dimensionality_to_pipeline,
-    resolve_dimensionality_config,
 )
 
 LOGGER = logging.getLogger(__name__)
@@ -527,9 +527,7 @@ def run_experiment(
         resolved_feature_space == FEATURE_SPACE_ROI_MEAN_PREDEFINED
         and resolved_roi_spec_path is None
     ):
-        raise ValueError(
-            "feature_space='roi_mean_predefined' requires a non-empty roi_spec_path."
-        )
+        raise ValueError("feature_space='roi_mean_predefined' requires a non-empty roi_spec_path.")
     resolved_dimensionality_config = resolve_dimensionality_config(
         dimensionality_strategy=dimensionality_strategy,
         pca_n_components=pca_n_components,
@@ -594,9 +592,11 @@ def run_experiment(
         else emit_feature_qc_artifacts
     )
     context_primary_metric_aggregation = official_context.get("primary_metric_aggregation")
-    if context_primary_metric_aggregation is not None and str(
-        context_primary_metric_aggregation
-    ).strip() != str(primary_metric_aggregation).strip():
+    if (
+        context_primary_metric_aggregation is not None
+        and str(context_primary_metric_aggregation).strip()
+        != str(primary_metric_aggregation).strip()
+    ):
         raise ValueError(
             "Illegal override for official run key 'primary_metric_aggregation'. "
             "Use protocol/comparison spec values only."
@@ -769,10 +769,9 @@ def run_experiment(
     )
     stage_timings["methodology_resolution"] = float(perf_counter() - methodology_start)
     methodology_policy_payload = methodology_policy.model_dump(mode="json")
+    feature_quality_raw = methodology_policy_payload.get("feature_quality")
     feature_quality_policy_payload = (
-        dict(methodology_policy_payload.get("feature_quality"))
-        if isinstance(methodology_policy_payload.get("feature_quality"), dict)
-        else None
+        dict(feature_quality_raw) if isinstance(feature_quality_raw, dict) else None
     )
 
     compute_policy_start = perf_counter()
@@ -1856,8 +1855,7 @@ def _build_parser() -> argparse.ArgumentParser:
         type=float,
         default=None,
         help=(
-            "Optional PCA explained-variance ratio in (0, 1] when "
-            "--dimensionality-strategy pca."
+            "Optional PCA explained-variance ratio in (0, 1] when --dimensionality-strategy pca."
         ),
     )
     parser.add_argument(

@@ -53,7 +53,7 @@ from Thesis_ML.features.preprocessing import BASELINE_STANDARD_SCALER_RECIPE_ID
 from Thesis_ML.orchestration.contracts import ReusePolicy, SectionName
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class SegmentExecutionRequest:
     index_csv: Path
     data_root: Path

@@ -294,17 +294,21 @@ def main(
         if workbook_path is None
         else None
     )
+    if workbook_path is None and registry_path is None:
+        raise ValueError("registry_path resolution failed while workbook mode is not selected.")
+    resolved_registry_path = Path(registry_path) if registry_path is not None else None
     index_csv = Path(args.index_csv)
     data_root = Path(args.data_root)
     cache_dir = Path(args.cache_dir)
     output_root = Path(args.output_root)
     workbook_output_dir = Path(args.workbook_output_dir) if args.workbook_output_dir else None
 
-    registry = (
-        read_registry_manifest_fn(Path(registry_path))
-        if workbook_path is None
-        else read_workbook_manifest_fn(workbook_path)
-    )
+    if workbook_path is None:
+        if resolved_registry_path is None:
+            raise ValueError("registry_path resolution failed while workbook mode is not selected.")
+        registry = read_registry_manifest_fn(resolved_registry_path)
+    else:
+        registry = read_workbook_manifest_fn(workbook_path)
     try:
         if workbook_path is not None:
             result = run_workbook_decision_support_campaign_fn(
@@ -338,8 +342,12 @@ def main(
                 phase_plan=str(args.phase_plan),
             )
         else:
+            if resolved_registry_path is None:
+                raise ValueError(
+                    "registry_path resolution failed while workbook mode is not selected."
+                )
             result = run_decision_support_campaign_fn(
-                registry_path=Path(registry_path),
+                registry_path=resolved_registry_path,
                 index_csv=index_csv,
                 data_root=data_root,
                 cache_dir=cache_dir,

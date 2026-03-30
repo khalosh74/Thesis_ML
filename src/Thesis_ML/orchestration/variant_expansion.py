@@ -5,6 +5,13 @@ from typing import Any
 
 from Thesis_ML.orchestration.search_space import expand_variant_search_space
 
+_RUN_EXPERIMENT_SUPPORTED_CV_MODES: set[str] = {
+    "loso_session",
+    "within_subject_loso_session",
+    "frozen_cross_person_transfer",
+    "record_random_split",
+}
+
 
 def _optional_int(value: Any) -> int | None:
     if value in (None, ""):
@@ -395,9 +402,7 @@ def _expand_e12_permutation_cells(
     if int(n_permutations) <= 0:
         return (
             [],
-            [
-                "E12 requires --n-permutations > 0 to materialize permutation chunks."
-            ],
+            ["E12 requires --n-permutations > 0 to materialize permutation chunks."],
         )
 
     chunk_size = 50
@@ -489,19 +494,13 @@ def _expand_e23_omitted_session_cells(
             continue
         params = dict(base.get("params", {}))
         subject_values = (
-            [str(params.get("subject"))]
-            if params.get("subject")
-            else list(default_subjects)
+            [str(params.get("subject"))] if params.get("subject") else list(default_subjects)
         )
         task_values = (
-            [str(params.get("filter_task"))]
-            if params.get("filter_task")
-            else list(default_tasks)
+            [str(params.get("filter_task"))] if params.get("filter_task") else list(default_tasks)
         )
         filter_modality = (
-            str(params.get("filter_modality")).strip()
-            if params.get("filter_modality")
-            else None
+            str(params.get("filter_modality")).strip() if params.get("filter_modality") else None
         )
         for subject in subject_values:
             for task in task_values:
@@ -523,6 +522,13 @@ def _expand_e23_omitted_session_cells(
                     row_params["filter_task"] = str(task)
                     row_params["omitted_session"] = str(omitted_session)
                     row["params"] = row_params
+                    cv_mode = str(row_params.get("cv", "")).strip()
+                    if cv_mode not in _RUN_EXPERIMENT_SUPPORTED_CV_MODES:
+                        row["supported"] = False
+                        row["blocked_reason"] = (
+                            "E23 omitted-session cell is blocked: "
+                            f"cv mode '{cv_mode}' is not supported by thesisml-run-experiment."
+                        )
                     row["factor_settings"]["omitted_session"] = str(omitted_session)
                     row["design_metadata"].update(
                         {

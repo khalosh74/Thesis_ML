@@ -98,6 +98,15 @@ def _utc_timestamp() -> str:
     return datetime.now(UTC).replace(microsecond=0).isoformat()
 
 
+def _optional_int(value: Any) -> int | None:
+    if value in (None, ""):
+        return None
+    try:
+        return int(str(value))
+    except Exception:
+        return None
+
+
 def _git_commit() -> str | None:
     try:
         process = subprocess.run(
@@ -138,7 +147,10 @@ _PHASE_BLUEPRINT_AUTO: list[dict[str, Any]] = [
     {"phase_name": "Stage 1 target/scope lock", "groups": [["E01"], ["E02", "E03"]]},
     {"phase_name": "Stage 2 split/transfer lock", "groups": [["E04"], ["E05"]]},
     {"phase_name": "Stage 3 model lock", "groups": [["E06"], ["E07"], ["E08"]]},
-    {"phase_name": "Stage 4 representation/preprocessing lock", "groups": [["E09"], ["E10"], ["E11"]]},
+    {
+        "phase_name": "Stage 4 representation/preprocessing lock",
+        "groups": [["E09"], ["E10"], ["E11"]],
+    },
     {"phase_name": "Freeze final confirmatory pipeline", "groups": []},
     {"phase_name": "Confirmatory", "groups": [["E16", "E17"]]},
     {"phase_name": "Blocking robustness", "groups": [["E12", "E13", "E20"]]},
@@ -169,12 +181,12 @@ def _build_phase_batches(
 ) -> list[dict[str, Any]]:
     selected_by_id = {str(exp["experiment_id"]): exp for exp in selected_experiments}
     if phase_plan == "flat":
-        groups = [[selected_by_id[key]] for key in selected_by_id]
+        flat_groups = [[selected_by_id[key]] for key in selected_by_id]
         return [
             {
                 "phase_name": "Flat selected sequence",
                 "phase_order_index": 0,
-                "groups": groups,
+                "groups": flat_groups,
                 "expected_experiment_ids": sorted(selected_by_id.keys()),
             }
         ]
@@ -498,13 +510,9 @@ def run_decision_support_campaign(
                 schedule = plan_compute_schedule(
                     run_requests=run_requests,
                     base_compute_policy=base_compute_policy,
-                    max_parallel_runs=(
-                        1 if sequential_only_group else int(max_parallel_runs)
-                    ),
+                    max_parallel_runs=(1 if sequential_only_group else int(max_parallel_runs)),
                     max_parallel_gpu_runs=(
-                        0
-                        if sequential_only_group
-                        else int(max_parallel_gpu_runs)
+                        0 if sequential_only_group else int(max_parallel_gpu_runs)
                     ),
                 )
                 assignments_by_run_id = {
@@ -514,10 +522,14 @@ def run_decision_support_campaign(
                 jobs = []
                 for order_index, (experiment, cell, run_id) in enumerate(request_cells):
                     assignment_payload = assignments_by_run_id.get(run_id)
-                    assigned_order_index = (
-                        int(assignment_payload.get("order_index"))
+                    assigned_order_index_override = (
+                        _optional_int(assignment_payload.get("order_index"))
                         if isinstance(assignment_payload, dict)
-                        and assignment_payload.get("order_index") is not None
+                        else None
+                    )
+                    assigned_order_index = (
+                        int(assigned_order_index_override)
+                        if assigned_order_index_override is not None
                         else int(order_index)
                     )
                     assignment = (
@@ -534,7 +546,9 @@ def run_decision_support_campaign(
                         experiment=experiment,
                         variant=cell,
                         campaign_id=campaign_id,
-                        experiment_root=output_root / str(experiment["experiment_id"]) / campaign_id,
+                        experiment_root=output_root
+                        / str(experiment["experiment_id"])
+                        / campaign_id,
                         index_csv=index_csv,
                         data_root=data_root,
                         cache_dir=cache_dir,
@@ -561,7 +575,9 @@ def run_decision_support_campaign(
                     run_experiment_fn=run_experiment_fn,
                 )
                 job_results_by_run_id = {
-                    str(payload["run_id"]): payload for payload in job_payloads if "run_id" in payload
+                    str(payload["run_id"]): payload
+                    for payload in job_payloads
+                    if "run_id" in payload
                 }
 
             for experiment, cell in group_cells:
@@ -632,9 +648,7 @@ def run_decision_support_campaign(
                 for record in phase_records
             ],
             "skipped_experiments": [
-                row
-                for row in phase_skip_rows
-                if str(row.get("phase_name")) == phase_name
+                row for row in phase_skip_rows if str(row.get("phase_name")) == phase_name
             ],
             "decision_note": None,
         }

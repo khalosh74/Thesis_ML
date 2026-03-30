@@ -8,7 +8,6 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from Thesis_ML.experiments import segment_execution as segment_execution_module
 from Thesis_ML.artifacts.registry import (
     ARTIFACT_TYPE_FEATURE_CACHE,
     ARTIFACT_TYPE_FEATURE_MATRIX_BUNDLE,
@@ -17,6 +16,7 @@ from Thesis_ML.artifacts.registry import (
     list_artifacts_for_run,
 )
 from Thesis_ML.data.index_dataset import build_dataset_index
+from Thesis_ML.experiments import segment_execution as segment_execution_module
 from Thesis_ML.experiments.run_experiment import run_experiment
 from Thesis_ML.experiments.segment_execution import plan_section_path
 from Thesis_ML.experiments.stage_registry import (
@@ -243,7 +243,10 @@ def test_linearsvc_tuning_and_permutation_dispatch_through_stage_planner(
     assert permutation_payload.get("execution_mode") == "grouped_nested_tuning_reference"
     assert permutation_payload.get("tuning_reapplied_under_null") is True
     assert permutation_payload.get("null_matches_confirmatory_setup") is True
-    assert permutation_payload.get("null_tuning_search_space_id") == LINEAR_GROUPED_NESTED_SEARCH_SPACE_ID
+    assert (
+        permutation_payload.get("null_tuning_search_space_id")
+        == LINEAR_GROUPED_NESTED_SEARCH_SPACE_ID
+    )
     assert (
         permutation_payload.get("null_tuning_search_space_version")
         == LINEAR_GROUPED_NESTED_SEARCH_SPACE_VERSION
@@ -283,15 +286,12 @@ def test_segment_execution_threads_tuning_metadata_into_evaluation_input(
 
     section_input = captured.get("section_input")
     assert section_input is not None
-    assert getattr(section_input, "tuning_enabled") is True
-    assert getattr(section_input, "tuning_search_space_id") == LINEAR_GROUPED_NESTED_SEARCH_SPACE_ID
-    assert (
-        getattr(section_input, "tuning_search_space_version")
-        == LINEAR_GROUPED_NESTED_SEARCH_SPACE_VERSION
-    )
-    assert getattr(section_input, "tuning_inner_cv_scheme") == "grouped_leave_one_group_out"
-    assert getattr(section_input, "tuning_inner_group_field") == "session"
-    tuning_assignment = getattr(section_input, "tuning_assignment")
+    assert section_input.tuning_enabled is True
+    assert section_input.tuning_search_space_id == LINEAR_GROUPED_NESTED_SEARCH_SPACE_ID
+    assert section_input.tuning_search_space_version == LINEAR_GROUPED_NESTED_SEARCH_SPACE_VERSION
+    assert section_input.tuning_inner_cv_scheme == "grouped_leave_one_group_out"
+    assert section_input.tuning_inner_group_field == "session"
+    tuning_assignment = section_input.tuning_assignment
     assert tuning_assignment is not None
     assert tuning_assignment.executor_id == SPECIALIZED_LINEARSVC_TUNING_EXECUTOR_ID
 

@@ -894,7 +894,7 @@ class ThesisProtocol(_ProtocolModel):
 
         claim_by_id = {claim.claim_id: claim for claim in self.claims}
         suite_by_id = {suite.suite_id: suite for suite in self.official_run_suites}
-        suite_ids = set(suite_by_id.keys())
+        suite_id_set = set(suite_by_id.keys())
 
         primary_claims = [claim for claim in self.claims if claim.role == ClaimRole.PRIMARY]
         if len(primary_claims) != 1:
@@ -921,7 +921,7 @@ class ThesisProtocol(_ProtocolModel):
 
         for claim in self.claims:
             for suite_id in claim.suite_ids:
-                if suite_id not in suite_ids:
+                if suite_id not in suite_id_set:
                     raise ValueError(
                         f"claim '{claim.claim_id}' references unknown suite_id '{suite_id}'"
                     )

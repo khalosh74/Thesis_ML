@@ -59,6 +59,11 @@ def test_e23_materialization_expands_omitted_sessions() -> None:
     assert len(cells) == 3
     omitted = sorted(str(cell["design_metadata"]["omitted_session"]) for cell in cells)
     assert omitted == ["ses-01", "ses-01", "ses-02"]
+    assert all(bool(cell["supported"]) is False for cell in cells)
+    assert all(
+        "not supported by thesisml-run-experiment" in str(cell.get("blocked_reason", ""))
+        for cell in cells
+    )
 
 
 def test_e24_materialization_marks_cells_as_sequential_only() -> None:
