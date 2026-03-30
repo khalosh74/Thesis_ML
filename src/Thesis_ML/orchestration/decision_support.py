@@ -26,10 +26,16 @@ def _sync_runtime_hooks() -> None:
 def run_decision_support_campaign(
     *args: Any,
     runtime_profile_summary: Any | None = None,
+    quiet_progress: bool | None = None,
+    progress_interval_seconds: float | None = None,
     **kwargs: Any,
 ) -> dict[str, Any]:
     if runtime_profile_summary is not None:
         kwargs["runtime_profile_summary"] = runtime_profile_summary
+    if quiet_progress is not None:
+        kwargs["quiet_progress"] = bool(quiet_progress)
+    if progress_interval_seconds is not None:
+        kwargs["progress_interval_seconds"] = float(progress_interval_seconds)
     _sync_runtime_hooks()
     return _campaign_runner.run_decision_support_campaign(*args, **kwargs)
 
@@ -37,10 +43,16 @@ def run_decision_support_campaign(
 def run_workbook_decision_support_campaign(
     *args: Any,
     runtime_profile_summary: Any | None = None,
+    quiet_progress: bool | None = None,
+    progress_interval_seconds: float | None = None,
     **kwargs: Any,
 ) -> dict[str, Any]:
     if runtime_profile_summary is not None:
         kwargs["runtime_profile_summary"] = runtime_profile_summary
+    if quiet_progress is not None:
+        kwargs["quiet_progress"] = bool(quiet_progress)
+    if progress_interval_seconds is not None:
+        kwargs["progress_interval_seconds"] = float(progress_interval_seconds)
     _sync_runtime_hooks()
     return _campaign_runner.run_workbook_decision_support_campaign(*args, **kwargs)
 

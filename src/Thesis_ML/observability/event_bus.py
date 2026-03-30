@@ -40,12 +40,14 @@ class ExecutionEventBus:
         keep_recent_events: int = 50,
         eta_estimator: Any | None = None,
         anomaly_engine: Any | None = None,
+        console_reporter: Any | None = None,
     ) -> None:
         self.campaign_root = Path(campaign_root)
         self.campaign_id = str(campaign_id)
         self.keep_recent_events = int(keep_recent_events)
         self.eta_estimator = eta_estimator
         self.anomaly_engine = anomaly_engine
+        self.console_reporter = console_reporter
         self.execution_events_path = self.campaign_root / "execution_events.jsonl"
         self.live_status_path = self.campaign_root / "campaign_live_status.json"
         self.campaign_root.mkdir(parents=True, exist_ok=True)
@@ -121,6 +123,11 @@ class ExecutionEventBus:
                     anomaly_payload,
                 )
             write_live_status_atomic(self.live_status_path, self._live_status)
+            if self.console_reporter is not None:
+                try:
+                    self.console_reporter.handle_event(event_payload, dict(self._live_status))
+                except Exception:
+                    pass
         except Exception:
             return event_payload
         return event_payload

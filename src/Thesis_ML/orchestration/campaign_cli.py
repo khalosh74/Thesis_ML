@@ -183,6 +183,17 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--quiet-progress",
+        action="store_true",
+        help="Suppress periodic heartbeat lines while keeping final completion/error output.",
+    )
+    parser.add_argument(
+        "--progress-interval-seconds",
+        type=float,
+        default=15.0,
+        help="Heartbeat summary interval in seconds for live console progress output.",
+    )
+    parser.add_argument(
         "--write-back-workbook",
         action="store_true",
         help="When --workbook is used, write machine/trial outputs back to a versioned workbook copy.",
@@ -276,6 +287,10 @@ def print_stage1_commands(args: argparse.Namespace) -> None:
         base.extend(["--phase-plan", str(args.phase_plan)])
     if args.runtime_profile_summary:
         base.extend(["--runtime-profile-summary", str(args.runtime_profile_summary)])
+    if bool(args.quiet_progress):
+        base.append("--quiet-progress")
+    if float(args.progress_interval_seconds) != 15.0:
+        base.extend(["--progress-interval-seconds", str(args.progress_interval_seconds)])
 
     command = _command_to_text(base)
     print("Stage 1 command:")
@@ -354,6 +369,8 @@ def main(
                 allow_backend_fallback=bool(args.allow_backend_fallback),
                 phase_plan=str(args.phase_plan),
                 runtime_profile_summary=runtime_profile_summary_path,
+                quiet_progress=bool(args.quiet_progress),
+                progress_interval_seconds=float(args.progress_interval_seconds),
             )
         else:
             if resolved_registry_path is None:
@@ -387,6 +404,8 @@ def main(
                 allow_backend_fallback=bool(args.allow_backend_fallback),
                 phase_plan=str(args.phase_plan),
                 runtime_profile_summary=runtime_profile_summary_path,
+                quiet_progress=bool(args.quiet_progress),
+                progress_interval_seconds=float(args.progress_interval_seconds),
             )
     except RuntimeError as exc:
         print_registry_status(registry)

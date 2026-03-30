@@ -26,7 +26,12 @@ from Thesis_ML.experiments.model_catalog import (
 from Thesis_ML.experiments.model_catalog import (
     projected_runtime_seconds as resolve_projected_runtime_seconds,
 )
-from Thesis_ML.observability import AnomalyEngine, EtaEstimator, ExecutionEventBus
+from Thesis_ML.observability import (
+    AnomalyEngine,
+    ConsoleReporter,
+    EtaEstimator,
+    ExecutionEventBus,
+)
 from Thesis_ML.orchestration.contracts import CompiledStudyManifest
 from Thesis_ML.orchestration.decision_reports import (
     write_decision_reports as _write_decision_reports,
@@ -64,6 +69,9 @@ from Thesis_ML.orchestration.reporting import (
 )
 from Thesis_ML.orchestration.reporting import (
     write_stage_summaries as _write_stage_summaries,
+)
+from Thesis_ML.orchestration.reporting import (
+    write_campaign_execution_report as _write_campaign_execution_report,
 )
 from Thesis_ML.orchestration.result_aggregation import (
     aggregate_variant_records,
@@ -431,6 +439,8 @@ def run_decision_support_campaign(
     allow_backend_fallback: bool = False,
     phase_plan: str = "auto",
     runtime_profile_summary: Path | None = None,
+    quiet_progress: bool = False,
+    progress_interval_seconds: float = 15.0,
     run_experiment_fn: Callable[..., dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     if run_experiment_fn is None:
@@ -486,6 +496,14 @@ def run_decision_support_campaign(
         )
     except Exception:
         eta_estimator = None
+    console_reporter: ConsoleReporter | None = None
+    try:
+        console_reporter = ConsoleReporter(
+            interval_seconds=float(progress_interval_seconds),
+            quiet=bool(quiet_progress),
+        )
+    except Exception:
+        console_reporter = None
     event_bus: ExecutionEventBus | None = None
     try:
         event_bus = ExecutionEventBus(
@@ -493,6 +511,7 @@ def run_decision_support_campaign(
             campaign_id=campaign_id,
             eta_estimator=eta_estimator,
             anomaly_engine=anomaly_engine,
+            console_reporter=console_reporter,
         )
     except Exception:
         event_bus = None
@@ -542,6 +561,8 @@ def run_decision_support_campaign(
         raise ValueError("max_parallel_gpu_runs must be >= 0.")
     if int(max_parallel_gpu_runs) > int(max_parallel_runs):
         raise ValueError("max_parallel_gpu_runs cannot exceed max_parallel_runs.")
+    if float(progress_interval_seconds) <= 0.0:
+        raise ValueError("progress_interval_seconds must be > 0.")
     phase_plan_value = _resolve_phase_plan(phase_plan)
     optuna_enabled = search_mode_value == "optuna"
     base_compute_policy = resolve_compute_policy(
@@ -1187,6 +1208,8 @@ def run_decision_support_campaign(
                 "gpu_device_id": int(gpu_device_id) if gpu_device_id is not None else None,
                 "deterministic_compute": bool(deterministic_compute),
                 "allow_backend_fallback": bool(allow_backend_fallback),
+                "quiet_progress": bool(quiet_progress),
+                "progress_interval_seconds": float(progress_interval_seconds),
                 "selected_experiments": [str(exp["experiment_id"]) for exp in selected_experiments],
             }
         ),
@@ -1248,6 +1271,19 @@ def run_decision_support_campaign(
         except Exception:
             anomaly_report_path = None
 
+    execution_report_md_path: str | None = None
+    execution_report_json_path: str | None = None
+    try:
+        execution_report_md, execution_report_json = _write_campaign_execution_report(
+            campaign_root=campaign_root,
+            campaign_id=campaign_id,
+        )
+        execution_report_md_path = str(execution_report_md.resolve())
+        execution_report_json_path = str(execution_report_json.resolve())
+    except Exception:
+        execution_report_md_path = None
+        execution_report_json_path = None
+
     campaign_manifest = {
         "campaign_id": campaign_id,
         "created_at": _utc_timestamp(),
@@ -1264,6 +1300,8 @@ def run_decision_support_campaign(
         "gpu_device_id": int(gpu_device_id) if gpu_device_id is not None else None,
         "deterministic_compute": bool(deterministic_compute),
         "allow_backend_fallback": bool(allow_backend_fallback),
+        "quiet_progress": bool(quiet_progress),
+        "progress_interval_seconds": float(progress_interval_seconds),
         "search_mode": search_mode_value,
         "optuna_trials": int(optuna_trials) if optuna_trials is not None else None,
         "search_space_ids": sorted(search_space_map.keys()),
@@ -1285,6 +1323,8 @@ def run_decision_support_campaign(
             "runtime_history": str(history_path.resolve()),
             "anomalies": str((campaign_root / "anomalies.jsonl").resolve()),
             "anomaly_report": anomaly_report_path,
+            "campaign_execution_report_md": execution_report_md_path,
+            "campaign_execution_report_json": execution_report_json_path,
             "workbook_output_path": (
                 str(workbook_output_path.resolve()) if workbook_output_path is not None else None
             ),
@@ -1320,6 +1360,8 @@ def run_decision_support_campaign(
         "runtime_history_path": str(history_path.resolve()),
         "anomalies_path": str((campaign_root / "anomalies.jsonl").resolve()),
         "anomaly_report_path": anomaly_report_path,
+        "campaign_execution_report_md_path": execution_report_md_path,
+        "campaign_execution_report_json_path": execution_report_json_path,
         "selected_experiments": [str(exp["experiment_id"]) for exp in selected_experiments],
         "status_counts": _status_snapshot(all_variant_records),
         "blocked_experiments": blocked_experiments,
@@ -1360,6 +1402,8 @@ def run_workbook_decision_support_campaign(
     allow_backend_fallback: bool = False,
     phase_plan: str = "auto",
     runtime_profile_summary: Path | None = None,
+    quiet_progress: bool = False,
+    progress_interval_seconds: float = 15.0,
     run_experiment_fn: Callable[..., dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     workbook_manifest = read_workbook_manifest(workbook_path)
@@ -1395,6 +1439,8 @@ def run_workbook_decision_support_campaign(
         allow_backend_fallback=allow_backend_fallback,
         phase_plan=phase_plan,
         runtime_profile_summary=runtime_profile_summary,
+        quiet_progress=bool(quiet_progress),
+        progress_interval_seconds=float(progress_interval_seconds),
         run_experiment_fn=run_experiment_fn,
     )
 
