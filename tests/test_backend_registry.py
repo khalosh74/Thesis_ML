@@ -29,6 +29,7 @@ from Thesis_ML.experiments.compute_policy import (
     ResolvedComputePolicy,
 )
 from Thesis_ML.experiments.model_factory import build_pipeline, make_model
+from Thesis_ML.experiments.model_registry import get_model_spec
 
 
 def _resolved_cpu_policy(
@@ -391,3 +392,11 @@ def test_xgboost_gpu_support_resolution_unavailable_reports_reason(
 
     with pytest.raises(ValueError, match="xgboost_gpu_missing_for_test"):
         resolve_backend_constructor("xgboost", _resolved_torch_policy())
+
+
+def test_model_registry_prefers_specialized_ridge_tuning_with_generic_fallback() -> None:
+    ridge_spec = get_model_spec("ridge")
+    logreg_spec = get_model_spec("logreg")
+
+    assert tuple(ridge_spec.tuning_route) == ("ridge_specialized", "generic")
+    assert tuple(logreg_spec.tuning_route) == ("logreg_specialized", "generic")

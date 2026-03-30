@@ -39,6 +39,7 @@ StageRouteToken = Literal[
     "control_skip",
     "linearsvc_specialized",
     "logreg_specialized",
+    "ridge_specialized",
     "reference",
     "ridge_gpu_preferred",
 ]
@@ -253,7 +254,7 @@ def _build_registry() -> dict[str, ModelSpec]:
                 decision_function_outputs=True,
             ),
             model_fit_route=("torch_ridge", "cpu_reference"),
-            tuning_route=("generic",),
+            tuning_route=("ridge_specialized", "generic"),
             permutation_route=("ridge_gpu_preferred", "reference"),
             notes="Linear baseline with stable runtime envelope.",
         ),

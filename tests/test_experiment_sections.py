@@ -28,10 +28,16 @@ from Thesis_ML.experiments.run_experiment import (
     run_experiment,
 )
 from Thesis_ML.experiments.stage_registry import PERMUTATION_REFERENCE_EXECUTOR_ID
+from Thesis_ML.experiments.stage_registry import (
+    SPECIALIZED_RIDGE_TUNING_EXECUTOR_ID,
+    TUNING_GENERIC_EXECUTOR_ID,
+)
+from Thesis_ML.experiments.stage_execution import StageAssignment, StageBackendFamily, StageKey
 from Thesis_ML.experiments.tuning_search_spaces import (
     LINEAR_GROUPED_NESTED_SEARCH_SPACE_ID,
     LINEAR_GROUPED_NESTED_SEARCH_SPACE_VERSION,
 )
+from Thesis_ML.verification.backend_parity import compare_tuned_null_parity
 from Thesis_ML.features.feature_qc import FEATURE_QC_SAMPLE_FIELDS
 from Thesis_ML.experiments.sections import (
     DatasetSelectionInput,
@@ -80,6 +86,7 @@ def _build_grouped_nested_evaluation_input(
     tmp_path: Path,
     evidence_run_role: str = "primary",
     n_permutations: int = 2,
+    model: str = "linearsvc",
 ) -> EvaluationInput:
     report_dir = tmp_path / f"eval_{evidence_run_role}"
     report_dir.mkdir(parents=True, exist_ok=True)
@@ -177,7 +184,7 @@ def _build_grouped_nested_evaluation_input(
         artifact_registry_path=tmp_path / "artifact_registry.sqlite3",
         upstream_feature_matrix_artifact_id="feature_matrix_bundle_test",
         metrics_path=report_dir / "metrics.json",
-        model="linearsvc",
+        model=str(model),
         target_column="coarse_affect",
         cv_mode="within_subject_loso_session",
         seed=23,
@@ -1126,6 +1133,55 @@ def test_grouped_nested_tuned_permutation_reapplies_tuning_under_null(
     assert permutation_payload["null_inner_cv_scheme"] == "grouped_leave_one_group_out"
     assert permutation_payload["null_inner_group_field"] == "session"
     assert permutation_payload["permutation_executor_id"] == PERMUTATION_REFERENCE_EXECUTOR_ID
+
+
+def test_grouped_nested_tuned_permutation_ridge_specialized_matches_generic_null_path(
+    tmp_path: Path,
+) -> None:
+    specialized_input = _build_grouped_nested_evaluation_input(
+        tmp_path=tmp_path,
+        evidence_run_role="ridge_specialized",
+        n_permutations=3,
+        model="ridge",
+    )
+    specialized_result = evaluation(specialized_input)
+    specialized_payload = specialized_result.metrics.get("permutation_test")
+    assert isinstance(specialized_payload, dict)
+    assert specialized_payload.get("null_tuning_executor_id") == SPECIALIZED_RIDGE_TUNING_EXECUTOR_ID
+
+    generic_input = _build_grouped_nested_evaluation_input(
+        tmp_path=tmp_path,
+        evidence_run_role="ridge_generic",
+        n_permutations=3,
+        model="ridge",
+    ).model_copy(
+        update={
+            "tuning_assignment": StageAssignment(
+                stage=StageKey.TUNING,
+                backend_family=StageBackendFamily.SKLEARN_CPU,
+                compute_lane="cpu",
+                source="stage_planner_v1",
+                reason="test_force_generic_null_tuning",
+                executor_id=TUNING_GENERIC_EXECUTOR_ID,
+                equivalence_class="exact_reference_equivalent",
+                official_admitted=True,
+                fallback_used=False,
+                fallback_reason=None,
+            ),
+            "tuning_fallback_executor_id": None,
+        }
+    )
+    generic_result = evaluation(generic_input)
+    generic_payload = generic_result.metrics.get("permutation_test")
+    assert isinstance(generic_payload, dict)
+    assert generic_payload.get("null_tuning_executor_id") == TUNING_GENERIC_EXECUTOR_ID
+
+    parity = compare_tuned_null_parity(
+        reference_payload=generic_payload,
+        candidate_payload=specialized_payload,
+        category="exact",
+    )
+    assert parity.passed is True
 
 
 def test_untuned_baseline_still_uses_reference_permutation_path(

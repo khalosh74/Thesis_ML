@@ -16,6 +16,7 @@ from Thesis_ML.experiments.stage_registry import (
     MODEL_FIT_XGBOOST_GPU_EXECUTOR_ID,
     PERMUTATION_REFERENCE_EXECUTOR_ID,
     PERMUTATION_RIDGE_GPU_PREFERRED_EXECUTOR_ID,
+    SPECIALIZED_RIDGE_TUNING_EXECUTOR_ID,
     SPECIALIZED_LOGREG_TUNING_EXECUTOR_ID,
     TUNING_GENERIC_EXECUTOR_ID,
 )
@@ -145,7 +146,10 @@ def test_stage_planner_cpu_only_ridge_uses_cpu_fallback_for_gpu_preferred_stages
         assignments[StageKey.PERMUTATION.value]["executor_id"] == PERMUTATION_REFERENCE_EXECUTOR_ID
     )
     assert assignments[StageKey.PERMUTATION.value]["fallback_used"] is True
-    assert assignments[StageKey.TUNING.value]["executor_id"] == TUNING_GENERIC_EXECUTOR_ID
+    assert (
+        assignments[StageKey.TUNING.value]["executor_id"]
+        == SPECIALIZED_RIDGE_TUNING_EXECUTOR_ID
+    )
 
 
 def test_stage_planner_gpu_only_ridge_prefers_torch_gpu_executors() -> None:
@@ -166,6 +170,11 @@ def test_stage_planner_gpu_only_ridge_prefers_torch_gpu_executors() -> None:
         == PERMUTATION_RIDGE_GPU_PREFERRED_EXECUTOR_ID
     )
     assert assignments[StageKey.PERMUTATION.value]["fallback_used"] is False
+    assert assignments[StageKey.TUNING.value]["executor_id"] == TUNING_GENERIC_EXECUTOR_ID
+    assert assignments[StageKey.TUNING.value]["fallback_used"] is True
+    assert "specialized_ridge_requires_sklearn_cpu_backend" in str(
+        assignments[StageKey.TUNING.value]["fallback_reason"]
+    )
 
 
 def test_stage_planner_gpu_only_logreg_falls_from_cpu_preference_to_torch() -> None:
@@ -228,6 +237,10 @@ def test_stage_planner_max_both_cpu_lane_keeps_conservative_cpu_behavior() -> No
     assert assignments[StageKey.MODEL_FIT.value]["executor_id"] == MODEL_FIT_CPU_EXECUTOR_ID
     assert assignments[StageKey.MODEL_FIT.value]["compute_lane"] == "cpu"
     assert (
+        assignments[StageKey.TUNING.value]["executor_id"]
+        == SPECIALIZED_RIDGE_TUNING_EXECUTOR_ID
+    )
+    assert (
         assignments[StageKey.PERMUTATION.value]["executor_id"] == PERMUTATION_REFERENCE_EXECUTOR_ID
     )
 
@@ -252,6 +265,8 @@ def test_stage_planner_low_gpu_memory_downgrades_gpu_permutation_executor() -> N
     assert "gpu_memory_below_stage_soft_limit" in str(
         assignments[StageKey.PERMUTATION.value]["fallback_reason"]
     )
+    assert assignments[StageKey.TUNING.value]["executor_id"] == TUNING_GENERIC_EXECUTOR_ID
+    assert assignments[StageKey.TUNING.value]["fallback_used"] is True
 
 
 def test_stage_planner_enforces_official_admissibility_for_executor_selection() -> None:

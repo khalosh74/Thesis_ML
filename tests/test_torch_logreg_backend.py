@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import pickle
 from types import SimpleNamespace
 
 import numpy as np
@@ -261,3 +262,59 @@ def test_torch_logreg_rejects_invalid_gpu_device_id(
 
     with pytest.raises(RuntimeError, match="outside visible CUDA range"):
         estimator.fit(x_matrix, labels)
+
+
+def test_torch_logreg_reuses_device_parameter_cache_for_repeated_scoring(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_torch = _FakeTorch()
+    _patch_fake_torch(monkeypatch, fake_torch)
+    x_matrix, labels = _binary_dataset()
+
+    estimator = torch_logreg.TorchLogisticRegression(
+        class_weight="balanced",
+        gpu_device_id=0,
+        max_iter=500,
+        learning_rate=0.2,
+    )
+    estimator.fit(x_matrix, labels)
+    assert int(getattr(estimator, "_device_parameter_cache_build_count_", -1)) == 0
+
+    decision_first = np.asarray(estimator.decision_function(x_matrix), dtype=np.float64)
+    proba_first = np.asarray(estimator.predict_proba(x_matrix), dtype=np.float64)
+    pred_first = np.asarray(estimator.predict(x_matrix)).astype(str, copy=False)
+
+    assert int(getattr(estimator, "_device_parameter_cache_build_count_", -1)) == 1
+
+    decision_second = np.asarray(estimator.decision_function(x_matrix), dtype=np.float64)
+    proba_second = np.asarray(estimator.predict_proba(x_matrix), dtype=np.float64)
+    pred_second = np.asarray(estimator.predict(x_matrix)).astype(str, copy=False)
+
+    assert int(getattr(estimator, "_device_parameter_cache_build_count_", -1)) == 1
+    np.testing.assert_allclose(decision_first, decision_second, atol=1e-12, rtol=1e-12)
+    np.testing.assert_allclose(proba_first, proba_second, atol=1e-12, rtol=1e-12)
+    np.testing.assert_array_equal(pred_first, pred_second)
+
+
+def test_torch_logreg_device_cache_does_not_break_serialization(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_torch = _FakeTorch()
+    _patch_fake_torch(monkeypatch, fake_torch)
+    x_matrix, labels = _binary_dataset()
+
+    estimator = torch_logreg.TorchLogisticRegression(
+        class_weight="balanced",
+        gpu_device_id=0,
+        max_iter=500,
+        learning_rate=0.2,
+    )
+    estimator.fit(x_matrix, labels)
+    baseline_predictions = np.asarray(estimator.predict(x_matrix)).astype(str, copy=False)
+    _ = estimator.decision_function(x_matrix)
+    assert int(getattr(estimator, "_device_parameter_cache_build_count_", -1)) == 1
+
+    restored = pickle.loads(pickle.dumps(estimator))
+    restored_predictions = np.asarray(restored.predict(x_matrix)).astype(str, copy=False)
+    np.testing.assert_array_equal(restored_predictions, baseline_predictions)
+    assert int(getattr(restored, "_device_parameter_cache_build_count_", -1)) == 1

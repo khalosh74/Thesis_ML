@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 from sklearn.linear_model import LogisticRegression
+from sklearn.linear_model import RidgeClassifier
 from sklearn.model_selection import LeaveOneGroupOut, ParameterGrid
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
@@ -12,6 +13,7 @@ from Thesis_ML.experiments.compute_policy import ResolvedComputePolicy
 from Thesis_ML.experiments.stage_execution import StageKey
 from Thesis_ML.experiments.stage_registry import (
     MODEL_FIT_TORCH_LOGREG_EXECUTOR_ID,
+    SPECIALIZED_RIDGE_TUNING_EXECUTOR_ID,
     SPECIALIZED_LINEARSVC_TUNING_EXECUTOR_ID,
     SPECIALIZED_LOGREG_TUNING_EXECUTOR_ID,
     TUNING_GENERIC_EXECUTOR_ID,
@@ -46,6 +48,15 @@ def _linearsvc_pipeline() -> Pipeline:
         steps=[
             ("scaler", StandardScaler(with_mean=True, with_std=True)),
             ("model", LinearSVC(dual=True, max_iter=5000, random_state=19)),
+        ]
+    )
+
+
+def _ridge_pipeline() -> Pipeline:
+    return Pipeline(
+        steps=[
+            ("scaler", StandardScaler(with_mean=True, with_std=True)),
+            ("model", RidgeClassifier()),
         ]
     )
 
@@ -105,10 +116,42 @@ def _grouped_binary_dataset() -> tuple[np.ndarray, np.ndarray, np.ndarray]:
 
 def test_stage_registry_lists_known_tuning_executors() -> None:
     tuning_executors = {spec.executor_id for spec in iter_stage_executors(StageKey.TUNING)}
+    assert SPECIALIZED_RIDGE_TUNING_EXECUTOR_ID in tuning_executors
     assert SPECIALIZED_LINEARSVC_TUNING_EXECUTOR_ID in tuning_executors
     assert SPECIALIZED_LOGREG_TUNING_EXECUTOR_ID in tuning_executors
     assert TUNING_GENERIC_EXECUTOR_ID in tuning_executors
     assert TUNING_SKIPPED_CONTROL_EXECUTOR_ID in tuning_executors
+
+
+def test_stage_registry_ridge_specialized_executes_when_supported() -> None:
+    x_matrix, y, groups = _grouped_binary_dataset()
+    pipeline = _ridge_pipeline()
+    inner_splits = list(LeaveOneGroupOut().split(x_matrix, y, groups))
+    param_grid = {"model__alpha": [0.1, 1.0, 10.0]}
+    candidate_params = list(ParameterGrid(param_grid))
+
+    payload = run_tuning_executor(
+        executor_id=SPECIALIZED_RIDGE_TUNING_EXECUTOR_ID,
+        fallback_executor_id=TUNING_GENERIC_EXECUTOR_ID,
+        pipeline_template=pipeline,
+        x_outer_train=x_matrix,
+        y_outer_train=y,
+        inner_groups=groups,
+        inner_splits=inner_splits,
+        param_grid=param_grid,
+        candidate_params=candidate_params,
+        configured_candidate_count=len(candidate_params),
+        configured_inner_fold_count=len(inner_splits),
+        profiled_candidate_count=len(candidate_params),
+        profiled_inner_fold_count=len(inner_splits),
+        primary_metric_name="balanced_accuracy",
+    )
+
+    assert payload["tuning_executor"] == SPECIALIZED_RIDGE_TUNING_EXECUTOR_ID
+    assert payload["specialized_ridge_tuning_used"] is True
+    assert payload["specialized_linearsvc_tuning_used"] is False
+    assert payload["specialized_logreg_tuning_used"] is False
+    assert payload["tuning_executor_fallback_reason"] is None
 
 
 def test_stage_registry_xgboost_tuning_uses_generic_executor_only() -> None:
@@ -216,4 +259,33 @@ def test_stage_registry_logreg_specialized_falls_back_to_generic_when_unsupporte
 
     assert payload["tuning_executor"] == TUNING_GENERIC_EXECUTOR_ID
     assert payload["specialized_logreg_tuning_used"] is False
+    assert isinstance(payload["tuning_executor_fallback_reason"], str)
+
+
+def test_stage_registry_ridge_specialized_falls_back_to_generic_when_unsupported() -> None:
+    x_matrix, y, groups = _grouped_binary_dataset()
+    pipeline = _ridge_pipeline()
+    inner_splits = list(LeaveOneGroupOut().split(x_matrix, y, groups))
+    param_grid = {"model__alpha": [0.1, 1.0], "model__fit_intercept": [True]}
+    candidate_params = list(ParameterGrid(param_grid))
+
+    payload = run_tuning_executor(
+        executor_id=SPECIALIZED_RIDGE_TUNING_EXECUTOR_ID,
+        fallback_executor_id=TUNING_GENERIC_EXECUTOR_ID,
+        pipeline_template=pipeline,
+        x_outer_train=x_matrix,
+        y_outer_train=y,
+        inner_groups=groups,
+        inner_splits=inner_splits,
+        param_grid=param_grid,
+        candidate_params=candidate_params,
+        configured_candidate_count=len(candidate_params),
+        configured_inner_fold_count=len(inner_splits),
+        profiled_candidate_count=len(candidate_params),
+        profiled_inner_fold_count=len(inner_splits),
+        primary_metric_name="balanced_accuracy",
+    )
+
+    assert payload["tuning_executor"] == TUNING_GENERIC_EXECUTOR_ID
+    assert payload["specialized_ridge_tuning_used"] is False
     assert isinstance(payload["tuning_executor_fallback_reason"], str)

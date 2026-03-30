@@ -12,6 +12,7 @@ from sklearn.preprocessing import StandardScaler
 
 import Thesis_ML.experiments.metrics as metrics_module
 from Thesis_ML.experiments.metrics import classification_metric_score, evaluate_permutations
+from Thesis_ML.verification.backend_parity import compare_permutation_parity
 
 
 def _toy_permutation_inputs() -> tuple[np.ndarray, np.ndarray, list[tuple[np.ndarray, np.ndarray]]]:
@@ -602,6 +603,12 @@ def test_ridge_gpu_batched_dual_matches_generic_cached_path_for_binary_case(monk
 
     assert specialized_payload["execution_mode"] == "ridge_gpu_batched_dual"
     assert generic_payload["execution_mode"] == "cached_scaled_hybrid_gpu"
+    parity = compare_permutation_parity(
+        reference_payload=generic_payload,
+        candidate_payload=specialized_payload,
+        category="exact",
+    )
+    assert parity.passed is True
     np.testing.assert_allclose(
         specialized_payload["null_scores"],
         generic_payload["null_scores"],

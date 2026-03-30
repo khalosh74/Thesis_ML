@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 from sklearn.linear_model import RidgeClassifier
 
+from Thesis_ML.experiments.backends import ridge_exact_kernels
 from Thesis_ML.experiments.backends import torch_ridge
 
 
@@ -321,3 +322,34 @@ def test_torch_ridge_multiclass_prediction_parity_is_reasonable(
     cpu_predictions = np.asarray(cpu_estimator.predict(x_matrix))
     agreement = float(np.mean(torch_predictions == cpu_predictions))
     assert agreement >= 0.95
+
+
+def test_ridge_exact_kernel_alpha_batch_matches_sklearn_ridge_predictions() -> None:
+    x_matrix, labels = _binary_dataset()
+    sample_weights = np.ones(x_matrix.shape[0], dtype=np.float64)
+    alphas = np.asarray([0.1, 1.0, 10.0], dtype=np.float64)
+
+    state = ridge_exact_kernels.build_ridge_exact_alpha_factorization_state(
+        x_train=x_matrix,
+        y_train=labels,
+        fit_intercept=True,
+        sample_weights=sample_weights,
+    )
+    weight_batch, intercept_batch = ridge_exact_kernels.solve_ridge_exact_alpha_batch(
+        state=state,
+        alphas=alphas,
+    )
+    prediction_batch, _ = ridge_exact_kernels.predict_ridge_labels_for_alpha_batch(
+        x_eval=x_matrix,
+        weight_batch=weight_batch,
+        intercept_batch=intercept_batch,
+        classes=state.classes,
+        binary_mode=state.binary_mode,
+    )
+
+    for alpha_index, alpha_value in enumerate(alphas.tolist()):
+        reference = RidgeClassifier(alpha=float(alpha_value), fit_intercept=True)
+        reference.fit(x_matrix, labels)
+        reference_predictions = np.asarray(reference.predict(x_matrix)).astype(str, copy=False)
+        candidate_predictions = np.asarray(prediction_batch[alpha_index]).astype(str, copy=False)
+        np.testing.assert_array_equal(candidate_predictions, reference_predictions)

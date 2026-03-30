@@ -26,6 +26,11 @@ from Thesis_ML.experiments.logreg_tuning import (
     is_specialized_logreg_grouped_nested_supported,
     run_specialized_logreg_grouped_nested_tuning,
 )
+from Thesis_ML.experiments.ridge_tuning import (
+    SPECIALIZED_RIDGE_TUNING_EXECUTOR_ID,
+    is_specialized_ridge_grouped_nested_supported,
+    run_specialized_ridge_grouped_nested_tuning,
+)
 from Thesis_ML.experiments.stage_execution import (
     StageBackendFamily,
     StageExecutorEquivalence,
@@ -128,6 +133,18 @@ def _support_logreg_specialized_cpu(
     backend_family = str(policy.assigned_backend_family or policy.effective_backend_family).strip()
     if backend_family == StageBackendFamily.TORCH_GPU.value:
         return False, "specialized_logreg_requires_sklearn_cpu_backend"
+    return True, None
+
+
+def _support_ridge_specialized_cpu(
+    context: StageExecutorSelectionContext,
+) -> tuple[bool, str | None]:
+    policy = context.compute_policy
+    if policy is None:
+        return True, None
+    backend_family = str(policy.assigned_backend_family or policy.effective_backend_family).strip()
+    if backend_family == StageBackendFamily.TORCH_GPU.value:
+        return False, "specialized_ridge_requires_sklearn_cpu_backend"
     return True, None
 
 
@@ -304,6 +321,99 @@ def _execute_tuning_generic_entrypoint(
         "best_params_json": json.dumps(search.best_params_, sort_keys=True),
         "tuning_executor": TUNING_GENERIC_EXECUTOR_ID,
         "tuning_executor_fallback_reason": tuning_executor_fallback_reason,
+        "specialized_ridge_tuning_used": False,
+        "specialized_linearsvc_tuning_used": False,
+        "specialized_logreg_tuning_used": False,
+        "tuning_progress_event_count": None,
+        "tuning_progress_total_units": None,
+    }
+
+
+def _execute_tuning_ridge_specialized_entrypoint(
+    *,
+    pipeline_template: Pipeline,
+    x_outer_train: np.ndarray,
+    y_outer_train: np.ndarray,
+    inner_groups: np.ndarray,
+    param_grid: dict[str, Any],
+    configured_candidate_count: int,
+    configured_inner_fold_count: int,
+    profiled_candidate_count: int,
+    profiled_inner_fold_count: int,
+    primary_metric_name: str,
+    **_: Any,
+) -> dict[str, Any]:
+    supported, reason = is_specialized_ridge_grouped_nested_supported(
+        model_name="ridge",
+        pipeline_template=pipeline_template,
+        param_grid=param_grid,
+    )
+    if not supported:
+        raise ValueError(str(reason or "specialized_ridge_not_supported"))
+
+    specialized_result = run_specialized_ridge_grouped_nested_tuning(
+        pipeline_template=clone(pipeline_template),
+        x_train=x_outer_train,
+        y_train=y_outer_train,
+        inner_groups=inner_groups,
+        param_grid=param_grid,
+        primary_metric_name=primary_metric_name,
+        profile_inner_folds=(
+            int(profiled_inner_fold_count)
+            if int(profiled_inner_fold_count) < int(configured_inner_fold_count)
+            else None
+        ),
+        profile_tuning_candidates=(
+            int(profiled_candidate_count)
+            if int(profiled_candidate_count) < int(configured_candidate_count)
+            else None
+        ),
+    )
+    return {
+        "estimator": specialized_result.best_estimator,
+        "tuned_search_elapsed_seconds": float(specialized_result.tuned_search_elapsed_seconds),
+        "tuned_search_candidate_count": int(specialized_result.profiled_candidate_count),
+        "tuned_search_configured_candidate_count": int(
+            specialized_result.configured_candidate_count
+        ),
+        "tuned_search_profiled_candidate_count": int(specialized_result.profiled_candidate_count),
+        "tuned_search_configured_inner_fold_count": int(
+            specialized_result.configured_inner_fold_count
+        ),
+        "tuned_search_profiled_inner_fold_count": int(specialized_result.profiled_inner_fold_count),
+        "tuning_extrapolation_applied": bool(specialized_result.tuning_extrapolation_applied),
+        "measured_inner_tuning_seconds": float(specialized_result.measured_inner_tuning_seconds),
+        "estimated_full_inner_tuning_seconds": float(
+            specialized_result.estimated_full_inner_tuning_seconds
+        ),
+        "estimated_full_tuned_search_seconds": float(
+            specialized_result.estimated_full_tuned_search_seconds
+        ),
+        "tuning_split_scale_seconds": float(specialized_result.split_scale_seconds),
+        "tuning_candidate_fit_seconds": float(specialized_result.candidate_fit_seconds),
+        "tuning_candidate_predict_seconds": float(specialized_result.candidate_predict_seconds),
+        "tuning_refit_elapsed_seconds": float(specialized_result.refit_elapsed_seconds),
+        "cv_mean_fit_time_seconds": _safe_float_from_cv_results(
+            specialized_result.cv_results,
+            "mean_fit_time",
+        ),
+        "cv_std_fit_time_seconds": _safe_float_from_cv_results(
+            specialized_result.cv_results,
+            "std_fit_time",
+        ),
+        "cv_mean_score_time_seconds": _safe_float_from_cv_results(
+            specialized_result.cv_results,
+            "mean_score_time",
+        ),
+        "cv_std_score_time_seconds": _safe_float_from_cv_results(
+            specialized_result.cv_results,
+            "std_score_time",
+        ),
+        "best_score": float(specialized_result.best_score),
+        "best_params_json": json.dumps(specialized_result.best_params, sort_keys=True),
+        "tuning_executor": str(specialized_result.executor_id),
+        "tuning_executor_fallback_reason": None,
+        "specialized_ridge_tuning_used": True,
         "specialized_linearsvc_tuning_used": False,
         "specialized_logreg_tuning_used": False,
         "tuning_progress_event_count": None,
@@ -395,6 +505,7 @@ def _execute_tuning_linearsvc_specialized_entrypoint(
         "best_params_json": json.dumps(specialized_result.best_params, sort_keys=True),
         "tuning_executor": str(specialized_result.executor_id),
         "tuning_executor_fallback_reason": None,
+        "specialized_ridge_tuning_used": False,
         "specialized_linearsvc_tuning_used": True,
         "specialized_logreg_tuning_used": False,
         "tuning_progress_event_count": None,
@@ -490,6 +601,7 @@ def _execute_tuning_logreg_specialized_entrypoint(
         "best_params_json": json.dumps(specialized_result.best_params, sort_keys=True),
         "tuning_executor": str(specialized_result.executor_id),
         "tuning_executor_fallback_reason": None,
+        "specialized_ridge_tuning_used": False,
         "specialized_linearsvc_tuning_used": False,
         "specialized_logreg_tuning_used": True,
         "tuning_progress_event_count": int(specialized_result.progress_event_count),
@@ -501,6 +613,7 @@ def _execute_tuning_skipped_control_entrypoint() -> dict[str, Any]:
     return {
         "tuning_executor": "skipped_control_model",
         "tuning_executor_fallback_reason": None,
+        "specialized_ridge_tuning_used": False,
         "specialized_linearsvc_tuning_used": False,
         "specialized_logreg_tuning_used": False,
         "tuning_progress_event_count": None,
@@ -688,6 +801,19 @@ def _build_registry() -> tuple[StageExecutorSpec, ...]:
             official_admitted=True,
             support_predicate=_support_always,
             execute=_execute_tuning_generic_entrypoint,
+        ),
+        StageExecutorSpec(
+            executor_id=SPECIALIZED_RIDGE_TUNING_EXECUTOR_ID,
+            stage_key=StageKey.TUNING,
+            backend_family=StageBackendFamily.SKLEARN_CPU,
+            supported_model_names=_models_for_route(
+                route_field="tuning_route",
+                route_token="ridge_specialized",
+            ),
+            equivalence_class="exact_reference_equivalent",
+            official_admitted=True,
+            support_predicate=_support_ridge_specialized_cpu,
+            execute=_execute_tuning_ridge_specialized_entrypoint,
         ),
         StageExecutorSpec(
             executor_id=SPECIALIZED_LINEARSVC_TUNING_EXECUTOR_ID,
@@ -955,6 +1081,7 @@ __all__ = [
     "PERMUTATION_RIDGE_GPU_PREFERRED_EXECUTOR_ID",
     "PREPROCESS_CPU_EXECUTOR_ID",
     "REPORTING_CPU_EXECUTOR_ID",
+    "SPECIALIZED_RIDGE_TUNING_EXECUTOR_ID",
     "SPECIALIZED_LINEARSVC_TUNING_EXECUTOR_ID",
     "SPECIALIZED_LOGREG_TUNING_EXECUTOR_ID",
     "SPATIAL_VALIDATION_CPU_EXECUTOR_ID",

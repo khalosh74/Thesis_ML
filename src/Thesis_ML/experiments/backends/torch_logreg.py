@@ -190,7 +190,68 @@ class TorchLogisticRegression(BaseEstimator, ClassifierMixin):
         self.deterministic_compute = bool(deterministic_compute)
         self.backend_id = str(backend_id)
 
+    def _invalidate_device_prediction_cache(self) -> None:
+        self._device_parameter_cache_ = None
+        self._device_parameter_cache_build_count_ = 0
+
+    def _resolve_device_parameter_cache(
+        self,
+        *,
+        torch: Any,
+        device: Any,
+        device_name: str,
+    ) -> tuple[Any, Any | None]:
+        coef_array = np.asarray(self.coef_, dtype=np.float64)
+        intercept_array = np.asarray(self.intercept_, dtype=np.float64).reshape(1, -1)
+        coef_source_id = id(self.coef_)
+        intercept_source_id = id(self.intercept_)
+
+        cache = getattr(self, "_device_parameter_cache_", None)
+        if isinstance(cache, dict):
+            if (
+                str(cache.get("device_name")) == str(device_name)
+                and int(cache.get("coef_source_id", -1)) == int(coef_source_id)
+                and int(cache.get("intercept_source_id", -1)) == int(intercept_source_id)
+                and tuple(cache.get("coef_shape", ())) == tuple(coef_array.shape)
+                and tuple(cache.get("intercept_shape", ())) == tuple(intercept_array.shape)
+            ):
+                return cache["coef_tensor"], cache["intercept_tensor"]
+
+        coef_tensor = _as_torch_float_tensor(torch, coef_array, device=device)
+        intercept_tensor = (
+            _as_torch_float_tensor(torch, intercept_array, device=device)
+            if int(intercept_array.size) > 0
+            else None
+        )
+        self._device_parameter_cache_ = {
+            "device_name": str(device_name),
+            "coef_source_id": int(coef_source_id),
+            "intercept_source_id": int(intercept_source_id),
+            "coef_shape": tuple(coef_array.shape),
+            "intercept_shape": tuple(intercept_array.shape),
+            "coef_tensor": coef_tensor,
+            "intercept_tensor": intercept_tensor,
+        }
+        cache_builds = int(getattr(self, "_device_parameter_cache_build_count_", 0)) + 1
+        self._device_parameter_cache_build_count_ = int(cache_builds)
+        metadata = getattr(self, "backend_runtime_metadata_", None)
+        if isinstance(metadata, dict):
+            metadata["device_parameter_cache_build_count"] = int(cache_builds)
+        return coef_tensor, intercept_tensor
+
+    def __getstate__(self) -> dict[str, Any]:
+        state = dict(self.__dict__)
+        state.pop("_device_parameter_cache_", None)
+        state.pop("_device_parameter_cache_build_count_", None)
+        return state
+
+    def __setstate__(self, state: dict[str, Any]) -> None:
+        self.__dict__.update(state)
+        self._device_parameter_cache_ = None
+        self._device_parameter_cache_build_count_ = 0
+
     def fit(self, x_matrix: np.ndarray, y_labels: np.ndarray) -> TorchLogisticRegression:
+        self._invalidate_device_prediction_cache()
         x_array = np.asarray(x_matrix, dtype=np.float64)
         y_array = np.asarray(y_labels)
 
@@ -325,6 +386,7 @@ class TorchLogisticRegression(BaseEstimator, ClassifierMixin):
             "device_transfer_seconds": transfer_elapsed,
             "torch_deterministic_enforced": bool(deterministic_enforced),
             "torch_deterministic_limitations": deterministic_limitations,
+            "device_parameter_cache_build_count": 0,
         }
         return self
 
@@ -344,18 +406,13 @@ class TorchLogisticRegression(BaseEstimator, ClassifierMixin):
         device_name = str(getattr(self, "_torch_device_name_", f"cuda:{int(self.gpu_device_id)}"))
         device = torch.device(device_name) if hasattr(torch, "device") else device_name
         x_tensor = _as_torch_float_tensor(torch, x_array, device=device)
-        coef_tensor = _as_torch_float_tensor(
-            torch,
-            np.asarray(self.coef_, dtype=np.float64),
+        coef_tensor, intercept_tensor = self._resolve_device_parameter_cache(
+            torch=torch,
             device=device,
+            device_name=device_name,
         )
         score_tensor = x_tensor @ coef_tensor.T
-        if np.asarray(self.intercept_).size:
-            intercept_tensor = _as_torch_float_tensor(
-                torch,
-                np.asarray(self.intercept_, dtype=np.float64).reshape(1, -1),
-                device=device,
-            )
+        if intercept_tensor is not None and np.asarray(self.intercept_).size:
             score_tensor = score_tensor + intercept_tensor
         score_array = _to_numpy_array(score_tensor).astype(np.float64, copy=False)
         if bool(getattr(self, "_binary_mode_", False)):

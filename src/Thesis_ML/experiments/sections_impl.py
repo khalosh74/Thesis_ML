@@ -23,6 +23,7 @@ from Thesis_ML.experiments.stage_execution import StageAssignment
 from Thesis_ML.experiments.stage_registry import (
     MODEL_FIT_CPU_EXECUTOR_ID,
     PERMUTATION_REFERENCE_EXECUTOR_ID,
+    SPECIALIZED_RIDGE_TUNING_EXECUTOR_ID,
     SPECIALIZED_LINEARSVC_TUNING_EXECUTOR_ID,
     SPECIALIZED_LOGREG_TUNING_EXECUTOR_ID,
     TUNING_GENERIC_EXECUTOR_ID,
@@ -232,6 +233,12 @@ def execute_model_fit(section_input: ModelFitInput) -> dict[str, Any]:
         and methodology_policy_name == "grouped_nested_tuning"
     ):
         default_tuning_executor_id = SPECIALIZED_LINEARSVC_TUNING_EXECUTOR_ID
+    if (
+        str(section_input.model).strip().lower() == "ridge"
+        and bool(tuning_enabled)
+        and methodology_policy_name == "grouped_nested_tuning"
+    ):
+        default_tuning_executor_id = SPECIALIZED_RIDGE_TUNING_EXECUTOR_ID
     tuning_executor_id = _assignment_executor_id(
         section_input.tuning_assignment,
         default_executor_id=default_tuning_executor_id,
@@ -244,6 +251,7 @@ def execute_model_fit(section_input: ModelFitInput) -> dict[str, Any]:
             TUNING_GENERIC_EXECUTOR_ID
             if tuning_executor_id
             in {
+                SPECIALIZED_RIDGE_TUNING_EXECUTOR_ID,
                 SPECIALIZED_LINEARSVC_TUNING_EXECUTOR_ID,
                 SPECIALIZED_LOGREG_TUNING_EXECUTOR_ID,
             }
@@ -1575,6 +1583,8 @@ def _resolve_grouped_nested_tuning_executor(
     )
     if model_name == "linearsvc":
         default_tuning_executor_id = SPECIALIZED_LINEARSVC_TUNING_EXECUTOR_ID
+    if model_name == "ridge":
+        default_tuning_executor_id = SPECIALIZED_RIDGE_TUNING_EXECUTOR_ID
     tuning_executor_id = _assignment_executor_id(
         section_input.tuning_assignment,
         default_executor_id=default_tuning_executor_id,
@@ -1587,6 +1597,7 @@ def _resolve_grouped_nested_tuning_executor(
             TUNING_GENERIC_EXECUTOR_ID
             if tuning_executor_id
             in {
+                SPECIALIZED_RIDGE_TUNING_EXECUTOR_ID,
                 SPECIALIZED_LINEARSVC_TUNING_EXECUTOR_ID,
                 SPECIALIZED_LOGREG_TUNING_EXECUTOR_ID,
             }

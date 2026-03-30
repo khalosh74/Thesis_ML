@@ -277,6 +277,7 @@ def main() -> int:
 
     summary: dict[str, Any] = {
         "benchmark": "torch_ridge_backend",
+        "equivalence_category": "exact",
         "alpha": float(args.alpha),
         "seed": int(args.seed),
         "repeats": int(args.repeats),

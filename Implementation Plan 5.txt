@@ -1,0 +1,342 @@
+You are implementing Phase 5 only for this repository.
+
+<mode>
+Code mode.
+Make the changes directly in the repo.
+Do not do overhead work.
+Do not refactor unrelated code.
+Do not rename existing modules, scripts, tests, artifact filenames, or public estimator attributes unless explicitly required below.
+Do not change scientific behavior, protocol logic, comparison logic, CV logic, inferential rules, scheduler behavior, GPU admission behavior, timeout-policy behavior, cache semantics, or model/backend routing outside the explicit Phase 5 changes below.
+Keep changes minimal, backend-focused, and proof-driven.
+Prefer exact equivalence where mathematically justified.
+Where exact equivalence is not realistically provable, keep behavior explicitly near-exact, rollout-gated, and conservative.
+Do not silently broaden optimized support envelopes.
+</mode>
+
+<objective>
+Implement Phase 5 as backend-level exact or near-exact optimizations.
+
+The exact target is:
+1. Extend exact ridge specialization beyond the current permutation niche.
+2. Add a specialized grouped-nested ridge tuning executor with support gating.
+3. Use the specialized ridge tuning kernel inside tuned-null permutation flows when support conditions pass.
+4. Consolidate ridge exact-kernel logic so permutation and tuning do not duplicate incompatible algebra.
+5. Optimize torch logistic regression scoring/prediction to reduce repeated device-transfer overhead without changing public estimator behavior.
+6. Keep routing conservative and proof-gated through model/stage registry support predicates.
+7. Add backend parity helpers, tests, and benchmarks that separate exact from near-exact claims.
+
+This phase must optimize backend/kernel execution only.
+It must not change scientific policy or workflow semantics.
+</objective>
+
+<repository-grounding>
+Ground the implementation in these existing files and flows:
+
+Ridge backend / exact permutation support:
+- src/Thesis_ML/experiments/backends/torch_ridge.py
+- src/Thesis_ML/experiments/metrics.py
+
+Tuning and null-loop integration:
+- src/Thesis_ML/experiments/sections_impl.py
+- src/Thesis_ML/experiments/stage_registry.py
+- src/Thesis_ML/experiments/model_registry.py
+
+Logistic regression backend and specialized tuning:
+- src/Thesis_ML/experiments/backends/torch_logreg.py
+- src/Thesis_ML/experiments/logreg_tuning.py
+
+Tests and benchmark surface already relevant:
+- tests/test_torch_ridge_backend.py
+- tests/test_torch_logreg_backend.py
+- tests/test_permutation_engine.py
+- tests/test_backend_registry.py
+- scripts/benchmark_torch_ridge_backend.py
+
+Current safe opportunities visible in the repo:
+- ridge already has exact-specialized GPU permutation support
+- tuned-null grouped-nested ridge currently pays heavy repeated retuning cost in sections_impl.py
+- torch_logreg still pays repeated device-transfer costs during scoring/prediction
+- stage/model registry already has a routing architecture for specialized executors
+</repository-grounding>
+
+<deliverables>
+Create new files if needed:
+- src/Thesis_ML/experiments/ridge_tuning.py
+- src/Thesis_ML/experiments/backends/ridge_exact_kernels.py
+- src/Thesis_ML/verification/backend_parity.py
+
+Modify these files as needed:
+- src/Thesis_ML/experiments/backends/torch_ridge.py
+- src/Thesis_ML/experiments/metrics.py
+- src/Thesis_ML/experiments/sections_impl.py
+- src/Thesis_ML/experiments/backends/torch_logreg.py
+- src/Thesis_ML/experiments/stage_registry.py
+- src/Thesis_ML/experiments/model_registry.py
+
+Extend benchmarks if needed:
+- scripts/benchmark_torch_ridge_backend.py
+- optionally add a small specialized-tuning benchmark script only if necessary
+
+Add or extend tests for:
+- ridge specialized tuning parity
+- ridge tuned-null parity
+- torch_logreg near-exact scoring/prediction parity
+- backend/stage registry routing and fallback behavior
+
+Do not broaden the scope beyond this phase.
+</deliverables>
+
+<implementation-requirements>
+1. Define and enforce exact vs near-exact proof categories
+
+Implement this distinction explicitly in code/tests/docs/comments where relevant:
+
+Exact means:
+- same selected samples
+- same folds
+- same preprocessing transform
+- same model family and hyperparameter choice
+- same predictions
+- same metric outputs
+- same null-score sequence when deterministic and feasible
+
+Near-exact means:
+- same selected samples and folds
+- same model family and hyperparameter choice
+- same claim-level decisions
+- same prediction labels or extremely high agreement
+- metric differences bounded by explicit tolerance under deterministic seeds
+
+For this phase:
+- ridge optimizations should target exact equivalence
+- torch_logreg optimizations should be treated as near-exact unless exact proof is clearly established
+
+Do not blur these categories.
+</implementation-requirements>
+
+<implementation-requirements>
+2. Add a backend parity helper
+
+Create src/Thesis_ML/verification/backend_parity.py.
+
+It should provide reusable comparison helpers for:
+- estimator fit/predict parity
+- tuning parity
+- permutation parity
+- tuned-null parity
+
+It must compare, as appropriate:
+- best params
+- fold-level predictions
+- pooled predictions
+- metric payloads
+- permutation payloads
+- timing metadata separately from scientific outputs
+
+Do not overbuild this.
+Make it useful for both tests and benchmark scripts.
+</implementation-requirements>
+
+<implementation-requirements>
+3. Create a shared exact ridge kernel layer
+
+Create src/Thesis_ML/experiments/backends/ridge_exact_kernels.py.
+
+Move or factor shared exact ridge algebra into this layer so that permutation and future tuning code reuse the same mathematical core rather than duplicating logic.
+
+This helper layer should support exact reuse for:
+- fold-state construction
+- factorization/state reuse
+- batched alpha evaluation where mathematically valid
+- batched permutation solve helpers where shared
+
+Do not change public scientific behavior.
+Keep exactness as the primary goal.
+</implementation-requirements>
+
+<implementation-requirements>
+4. Add a specialized grouped-nested ridge tuning executor
+
+Create src/Thesis_ML/experiments/ridge_tuning.py with a support-gated specialized tuning path, similar in architectural role to existing specialized linearsvc/logreg tuning executors.
+
+Implement functions along the lines of:
+- is_specialized_ridge_grouped_nested_supported(...)
+- run_specialized_ridge_grouped_nested_tuning(...)
+
+Requirements:
+- support only the exact/simple preprocessing and model envelope that is mathematically safe
+- compute fold-local scaling exactly once per inner split
+- avoid redundant reconstruction across alpha candidates when exact reuse is possible
+- return the same best-params / summary semantics expected by the existing tuning flow
+- refit the winning estimator once at the end
+- provide precise rejection/fallback reasons when unsupported
+
+Do not broaden support aggressively.
+If unsupported, fall back cleanly to the existing generic/reference path.
+</implementation-requirements>
+
+<implementation-requirements>
+5. Integrate the ridge specialized tuner into stage/model routing
+
+In src/Thesis_ML/experiments/stage_registry.py:
+- add a specialized ridge tuning executor entry
+- add a support predicate
+- add a clean fallback path and explicit executor id
+
+In src/Thesis_ML/experiments/model_registry.py:
+- update ridge tuning route to prefer the specialized ridge tuner when supported
+- keep fallback explicit
+- do not change unrelated model routing
+
+Routing must remain conservative and support-gated.
+</implementation-requirements>
+
+<implementation-requirements>
+6. Use the specialized ridge tuning path inside tuned-null permutation execution
+
+In src/Thesis_ML/experiments/sections_impl.py, modify the tuned-null permutation path so that when the support envelope passes for ridge:
+- the null-time tuning loop uses the specialized ridge tuning executor
+- retuning under the null is preserved
+- inferential semantics are unchanged
+
+Important:
+Do not remove null retuning.
+Do not freeze hyperparameters under the null.
+Only replace the expensive kernel with an exact-specialized equivalent when support conditions pass.
+Fallback must remain the current reference/generic behavior when unsupported.
+</implementation-requirements>
+
+<implementation-requirements>
+7. Keep ridge permutation exact and consolidate code paths
+
+In src/Thesis_ML/experiments/metrics.py and src/Thesis_ML/experiments/backends/torch_ridge.py:
+- refactor shared exact ridge permutation/factorization logic into ridge_exact_kernels.py where practical
+- preserve the current exact-specialized ridge permutation semantics
+- keep runtime metadata/reporting behavior intact
+
+Do not regress the currently working ridge GPU permutation path.
+</implementation-requirements>
+
+<implementation-requirements>
+8. Optimize torch_logreg scoring/prediction conservatively
+
+In src/Thesis_ML/experiments/backends/torch_logreg.py:
+- cache device-resident fitted parameter tensors after fit
+- avoid recreating coef/intercept tensors on every scoring/prediction call
+- reduce repeated host->device transfer for repeated decision/probability/prediction calls where safe
+- keep public sklearn-style fitted state unchanged and serializable
+- keep any device cache ephemeral/rebuildable rather than becoming required serialized state
+
+If practical, add an internal fast path for repeated prediction/scoring on the same matrix without changing public behavior.
+
+Important:
+- do not promote torch_logreg permutation to an optimized route in this phase
+- do not replace the existing conservative logreg tuning path with a torch-backed tuner in this phase
+- keep logreg tuning conservative unless a stronger proof is already present in the repo
+</implementation-requirements>
+
+<implementation-requirements>
+9. Keep rollout and routing conservative
+
+Implement or preserve support predicates and precise rejection reasons for every optimized executor.
+
+Recommended rollout posture for this phase:
+- ridge exact optimizations may become eligible for broader use only after parity passes
+- torch_logreg backend optimizations remain near-exact and conservative
+- do not silently promote near-exact logreg paths into more official/claim-bearing roles in this task
+
+Make the routing behavior explicit in registry code and tests.
+</implementation-requirements>
+
+<tests>
+Strengthen and add tests.
+
+Add a new ridge tuning test file if needed:
+- tests/test_ridge_tuning.py
+
+It should verify:
+1. specialized grouped-nested ridge tuning returns the same best params as the generic/reference tuner on deterministic cases
+2. fold-level scores/predictions match
+3. refit estimator predictions match
+4. fallback occurs cleanly when support conditions fail
+
+Extend tests/test_permutation_engine.py to verify:
+- ridge tuned-null specialized execution matches the current reference path on deterministic cases
+- p-values and null-score payloads match
+- fallback behavior remains correct
+
+Extend tests/test_torch_ridge_backend.py to verify:
+- shared exact-kernel helpers preserve expected solver semantics
+- ridge exact-specialized paths still behave correctly
+- runtime metadata remains intact
+
+Extend tests/test_torch_logreg_backend.py to verify:
+- repeated scoring/prediction calls do not rebuild unnecessary device state in the optimized path
+- predictions/probabilities remain within tolerance versus the pre-optimization behavior
+- public fitted attributes/serialization behavior remain unchanged
+
+Extend tests/test_backend_registry.py and any routing tests to verify:
+- ridge tuning now prefers the specialized executor when supported
+- unsupported cases fall back to generic cleanly
+- logreg routing remains conservative
+
+Add at least one workflow-level parity test that runs a small deterministic ridge grouped-nested case through:
+- generic/reference path
+- specialized path
+and compares:
+- best params
+- predictions
+- metrics
+- tuning summary semantics
+
+Do not weaken existing tests.
+</tests>
+
+<acceptance-criteria>
+The task is complete only if all of the following are true:
+
+1. Ridge has a support-gated specialized grouped-nested tuning path.
+2. Ridge tuned-null permutation can use the specialized tuning kernel when supported without changing scientific outputs.
+3. Ridge exact-kernel logic is consolidated rather than duplicated across permutation and tuning code.
+4. torch_logreg scoring/prediction avoids unnecessary repeated device-transfer work while preserving public estimator behavior.
+5. Exact paths pass exact or near-zero-tolerance parity on deterministic cases.
+6. Near-exact paths pass explicit tolerance/agreement gates and remain conservatively routed.
+7. Existing relevant tests still pass.
+8. New backend-parity/tuning/permutation/routing tests pass.
+9. No protocol logic, CV semantics, inferential policy, or claim-evaluation behavior changed.
+</acceptance-criteria>
+
+<implementation-order>
+Work in this exact order:
+1. Add backend parity helpers and deterministic ridge parity fixtures.
+2. Create the shared ridge exact-kernel layer.
+3. Implement the specialized grouped-nested ridge tuning executor.
+4. Integrate ridge tuning routing in stage_registry/model_registry.
+5. Wire ridge tuned-null execution in sections_impl.py to use the specialized tuner when supported.
+6. Refactor ridge permutation code to share exact kernels where appropriate.
+7. Optimize torch_logreg scoring/prediction conservatively.
+8. Add/extend tests and benchmarks.
+9. Update any minimal docs/comments only if needed.
+
+Do not reorder this plan unless blocked by imports or failing tests.
+</implementation-order>
+
+<non-goals>
+Do not:
+- remove or weaken null retuning
+- freeze hyperparameters under the null
+- redesign scheduler/admission/cache/observability layers
+- optimize model backends beyond the scope above
+- promote torch_logreg into official-exact status without proof
+- change protocol/comparison scientific behavior
+- perform repo-wide cleanup
+</non-goals>
+
+<final-output>
+When done, provide:
+1. a concise summary of files changed
+2. the exact ridge/logreg backend behavior added or changed
+3. any additive routing/support-predicate/schema changes
+4. tests run and results
+5. any remaining Phase-5-only risks or follow-up notes
+</final-output>
