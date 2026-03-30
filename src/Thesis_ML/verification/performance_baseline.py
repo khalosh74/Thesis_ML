@@ -768,6 +768,11 @@ def build_case_result_from_run_payload(
             "run_id": str(run_payload.get("run_id")),
             "framework_mode": str(run_payload.get("framework_mode")),
             "status": str(run_status_payload.get("status", "unknown")),
+            "worker_execution_mode": (
+                str(run_payload.get("worker_execution_mode"))
+                if run_payload.get("worker_execution_mode") not in (None, "")
+                else None
+            ),
         },
     )
 

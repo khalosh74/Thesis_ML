@@ -48,6 +48,7 @@ from Thesis_ML.experiments.segment_execution_helpers import (
     require_callable,
     resolve_base_artifact,
 )
+from Thesis_ML.experiments.stage_observability import StageBoundaryRecorder
 from Thesis_ML.experiments.stage_execution import StageAssignment, StageKey
 from Thesis_ML.features.preprocessing import BASELINE_STANDARD_SCALER_RECIPE_ID
 from Thesis_ML.orchestration.contracts import ReusePolicy, SectionName
@@ -160,6 +161,7 @@ class SegmentExecutionRequest:
     evaluate_permutations_fn: Callable[..., dict[str, Any]] | None = None
     stage_assignments: tuple[StageAssignment, ...] | None = None
     stage_fallback_executor_ids: dict[str, str] | None = None
+    stage_observer: StageBoundaryRecorder | None = None
 
 
 @dataclass(frozen=True)
@@ -176,6 +178,88 @@ class SegmentExecutionResult:
     stage_timings_seconds: dict[str, float] | None = None
     stage_timing_metadata: dict[str, dict[str, Any]] | None = None
     stage_assignments: list[StageAssignment] | None = None
+
+
+_SECTION_TO_STAGE_KEY: dict[SectionName, StageKey] = {
+    SectionName.DATASET_SELECTION: StageKey.DATASET_SELECTION,
+    SectionName.FEATURE_CACHE_BUILD: StageKey.FEATURE_CACHE_BUILD,
+    SectionName.FEATURE_MATRIX_LOAD: StageKey.FEATURE_MATRIX_LOAD,
+    SectionName.SPATIAL_VALIDATION: StageKey.SPATIAL_VALIDATION,
+    SectionName.MODEL_FIT: StageKey.MODEL_FIT,
+    SectionName.EVALUATION: StageKey.EVALUATION,
+}
+
+
+def _stage_assignment_metadata(assignment: StageAssignment | None) -> dict[str, Any]:
+    if assignment is None:
+        return {}
+    payload: dict[str, Any] = {
+        "planned_backend_family": str(assignment.backend_family),
+        "planned_compute_lane": (
+            str(assignment.compute_lane) if assignment.compute_lane is not None else None
+        ),
+        "planned_executor_id": (
+            str(assignment.executor_id) if assignment.executor_id is not None else None
+        ),
+        "official_admitted": assignment.official_admitted,
+        "assignment_source": str(assignment.source),
+        "fallback_expected": bool(assignment.fallback_used),
+    }
+    if assignment.fallback_reason is not None:
+        payload["fallback_reason"] = str(assignment.fallback_reason)
+    return payload
+
+
+def _stage_observed_metadata(
+    *,
+    assignment: StageAssignment | None,
+    fallback_reason: str | None = None,
+    fallback_used: bool | None = None,
+    execution_mode: str | None = None,
+    observed_backend_family: str | None = None,
+    observed_compute_lane: str | None = None,
+    observed_executor_id: str | None = None,
+) -> dict[str, Any]:
+    payload = _stage_assignment_metadata(assignment)
+    payload["observed_backend_family"] = (
+        str(observed_backend_family)
+        if observed_backend_family is not None
+        else (
+            str(assignment.backend_family)
+            if assignment is not None and assignment.backend_family is not None
+            else None
+        )
+    )
+    payload["observed_compute_lane"] = (
+        str(observed_compute_lane)
+        if observed_compute_lane is not None
+        else (
+            str(assignment.compute_lane)
+            if assignment is not None and assignment.compute_lane is not None
+            else None
+        )
+    )
+    payload["observed_executor_id"] = (
+        str(observed_executor_id)
+        if observed_executor_id is not None
+        else (
+            str(assignment.executor_id)
+            if assignment is not None and assignment.executor_id is not None
+            else None
+        )
+    )
+    payload["fallback_used"] = (
+        bool(fallback_used)
+        if fallback_used is not None
+        else (bool(assignment.fallback_used) if assignment is not None else False)
+    )
+    if fallback_reason is not None:
+        payload["fallback_reason"] = str(fallback_reason)
+    elif assignment is not None and assignment.fallback_reason is not None:
+        payload["fallback_reason"] = str(assignment.fallback_reason)
+    if execution_mode is not None:
+        payload["execution_mode"] = str(execution_mode)
+    return payload
 
 
 def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutionResult:
@@ -263,6 +347,22 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
             if not isinstance(executor_id_raw, str) or not executor_id_raw.strip():
                 continue
             stage_fallback_executor_ids[StageKey(str(stage_key_raw))] = executor_id_raw.strip()
+    stage_observer = request.stage_observer
+
+    def _section_stage_key(section_name: SectionName) -> StageKey | None:
+        return _SECTION_TO_STAGE_KEY.get(section_name)
+
+    def _primary_artifacts_for_section(section_name: SectionName) -> list[str]:
+        if section_name == SectionName.FEATURE_CACHE_BUILD:
+            artifact_id = artifact_ids.get("feature_cache")
+            return [str(artifact_id)] if isinstance(artifact_id, str) and artifact_id else []
+        if section_name == SectionName.FEATURE_MATRIX_LOAD:
+            artifact_id = artifact_ids.get("feature_matrix_bundle")
+            return [str(artifact_id)] if isinstance(artifact_id, str) and artifact_id else []
+        if section_name == SectionName.EVALUATION:
+            artifact_id = artifact_ids.get(ARTIFACT_TYPE_METRICS_BUNDLE)
+            return [str(artifact_id)] if isinstance(artifact_id, str) and artifact_id else []
+        return []
 
     def _record_section_duration(section_name: str, duration_seconds: float) -> None:
         section_timings_seconds[section_name] = float(duration_seconds)
@@ -357,6 +457,15 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
     for section in planned_sections:
         section_number = int(len(executed_sections) + 1)
         section_start = perf_counter()
+        stage_key = _section_stage_key(section)
+        stage_assignment = (
+            stage_assignment_map.get(stage_key) if isinstance(stage_key, StageKey) else None
+        )
+        if stage_observer is not None and isinstance(stage_key, StageKey):
+            stage_observer.stage_started(
+                stage_key,
+                metadata=_stage_assignment_metadata(stage_assignment),
+            )
         _emit_section_event(
             section_name=section.value,
             status="starting",
@@ -410,6 +519,14 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
                         total_units=float(total_sections),
                         message=f"reused section {section.value}",
                     )
+                    if stage_observer is not None and isinstance(stage_key, StageKey):
+                        stage_observer.stage_reused(
+                            stage_key,
+                            metadata={
+                                **_stage_observed_metadata(assignment=stage_assignment),
+                                "primary_artifacts": _primary_artifacts_for_section(section),
+                            },
+                        )
                     continue
 
             cache_output = feature_cache_build(
@@ -486,6 +603,14 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
                         total_units=float(total_sections),
                         message=f"reused section {section.value}",
                     )
+                    if stage_observer is not None and isinstance(stage_key, StageKey):
+                        stage_observer.stage_reused(
+                            stage_key,
+                            metadata={
+                                **_stage_observed_metadata(assignment=stage_assignment),
+                                "primary_artifacts": _primary_artifacts_for_section(section),
+                            },
+                        )
                     continue
             matrix_output = feature_matrix_load(
                 FeatureMatrixLoadInput(
@@ -579,8 +704,8 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
                 else None
             )
             tuning_assignment = stage_assignment_map.get(StageKey.TUNING)
+            tuning_fallback_reason: str | None = None
             if tuning_assignment is not None:
-                tuning_fallback_reason: str | None = None
                 for row in fit_output.tuning_records:
                     fallback_reason = row.get("tuning_executor_fallback_reason")
                     if isinstance(fallback_reason, str) and fallback_reason.strip():
@@ -654,6 +779,50 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
                     derived_from="tuning_policy",
                     fallback_reason="tuning_disabled",
                 )
+            if stage_observer is not None:
+                preprocess_assignment = stage_assignment_map.get(StageKey.PREPROCESS)
+                stage_observer.stage_finished(
+                    StageKey.PREPROCESS,
+                    metadata={
+                        **_stage_observed_metadata(assignment=preprocess_assignment),
+                        "derived_from_stage": StageKey.MODEL_FIT.value,
+                        "status_source": "derived_from_model_fit",
+                    },
+                    status="executed",
+                )
+                tuning_assignment_effective = stage_assignment_map.get(StageKey.TUNING)
+                if bool(request.tuning_enabled):
+                    stage_observer.stage_finished(
+                        StageKey.TUNING,
+                        metadata={
+                            **_stage_observed_metadata(
+                                assignment=tuning_assignment_effective,
+                                fallback_reason=tuning_fallback_reason,
+                                fallback_used=(
+                                    bool(tuning_assignment_effective.fallback_used)
+                                    if tuning_assignment_effective is not None
+                                    else None
+                                ),
+                            ),
+                            "derived_from_stage": StageKey.MODEL_FIT.value,
+                            "status_source": "derived_from_model_fit",
+                        },
+                        status="executed",
+                    )
+                else:
+                    stage_observer.stage_skipped(
+                        StageKey.TUNING,
+                        metadata={
+                            **_stage_observed_metadata(
+                                assignment=tuning_assignment_effective,
+                                fallback_used=False,
+                            ),
+                            "derived_from_stage": StageKey.MODEL_FIT.value,
+                            "status_source": "derived_from_model_fit",
+                        },
+                        reason="tuning_disabled",
+                        derived_from_stage=StageKey.MODEL_FIT,
+                    )
         elif section == SectionName.INTERPRETABILITY:
             if fit_output is None:
                 raise ValueError(
@@ -688,6 +857,14 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
                         total_units=float(total_sections),
                         message=f"reused section {section.value}",
                     )
+                    if stage_observer is not None and isinstance(stage_key, StageKey):
+                        stage_observer.stage_reused(
+                            stage_key,
+                            metadata={
+                                **_stage_observed_metadata(assignment=stage_assignment),
+                                "primary_artifacts": _primary_artifacts_for_section(section),
+                            },
+                        )
                     continue
             interpretability_output = interpretability(
                 InterpretabilityInput(
@@ -764,6 +941,72 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
                         total_units=float(total_sections),
                         message=f"reused section {section.value}",
                     )
+                    if stage_observer is not None and isinstance(stage_key, StageKey):
+                        stage_observer.stage_reused(
+                            stage_key,
+                            metadata={
+                                **_stage_observed_metadata(assignment=stage_assignment),
+                                "primary_artifacts": _primary_artifacts_for_section(section),
+                            },
+                        )
+                        permutation_assignment_effective = stage_assignment_map.get(
+                            StageKey.PERMUTATION
+                        )
+                        if int(request.n_permutations) > 0:
+                            permutation_payload = (
+                                metrics.get("permutation_test")
+                                if isinstance(metrics, dict)
+                                else None
+                            )
+                            permutation_execution_mode = (
+                                str(permutation_payload.get("execution_mode"))
+                                if isinstance(permutation_payload, dict)
+                                and isinstance(permutation_payload.get("execution_mode"), str)
+                                and str(permutation_payload.get("execution_mode")).strip()
+                                else None
+                            )
+                            permutation_backend_family = (
+                                str(permutation_payload.get("backend_family"))
+                                if isinstance(permutation_payload, dict)
+                                and isinstance(permutation_payload.get("backend_family"), str)
+                                and str(permutation_payload.get("backend_family")).strip()
+                                else None
+                            )
+                            permutation_executor_id = (
+                                str(permutation_payload.get("permutation_executor_id"))
+                                if isinstance(permutation_payload, dict)
+                                and isinstance(permutation_payload.get("permutation_executor_id"), str)
+                                and str(permutation_payload.get("permutation_executor_id")).strip()
+                                else None
+                            )
+                            stage_observer.stage_reused(
+                                StageKey.PERMUTATION,
+                                metadata={
+                                    **_stage_observed_metadata(
+                                        assignment=permutation_assignment_effective,
+                                        execution_mode=permutation_execution_mode,
+                                        observed_backend_family=permutation_backend_family,
+                                        observed_executor_id=permutation_executor_id,
+                                    ),
+                                    "derived_from_stage": StageKey.EVALUATION.value,
+                                    "status_source": "derived_from_evaluation",
+                                },
+                                derived_from_stage=StageKey.EVALUATION,
+                            )
+                        else:
+                            stage_observer.stage_skipped(
+                                StageKey.PERMUTATION,
+                                metadata={
+                                    **_stage_observed_metadata(
+                                        assignment=permutation_assignment_effective,
+                                        fallback_used=False,
+                                    ),
+                                    "derived_from_stage": StageKey.EVALUATION.value,
+                                    "status_source": "derived_from_evaluation",
+                                },
+                                reason="permutations_disabled",
+                                derived_from_stage=StageKey.EVALUATION,
+                            )
                     continue
             evaluation_output = evaluation(
                 EvaluationInput(
@@ -899,6 +1142,74 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
                     derived_from="permutation_policy",
                     fallback_reason="permutations_disabled",
                 )
+            if stage_observer is not None:
+                permutation_assignment_effective = stage_assignment_map.get(StageKey.PERMUTATION)
+                permutation_execution_mode = (
+                    str(permutation_payload.get("execution_mode"))
+                    if isinstance(permutation_payload, dict)
+                    and isinstance(permutation_payload.get("execution_mode"), str)
+                    and str(permutation_payload.get("execution_mode")).strip()
+                    else None
+                )
+                permutation_backend_family = (
+                    str(permutation_payload.get("backend_family"))
+                    if isinstance(permutation_payload, dict)
+                    and isinstance(permutation_payload.get("backend_family"), str)
+                    and str(permutation_payload.get("backend_family")).strip()
+                    else None
+                )
+                permutation_executor_id = (
+                    str(permutation_payload.get("permutation_executor_id"))
+                    if isinstance(permutation_payload, dict)
+                    and isinstance(permutation_payload.get("permutation_executor_id"), str)
+                    and str(permutation_payload.get("permutation_executor_id")).strip()
+                    else None
+                )
+                permutation_fallback_reason = (
+                    str(permutation_payload.get("permutation_executor_fallback_reason"))
+                    if isinstance(permutation_payload, dict)
+                    and isinstance(
+                        permutation_payload.get("permutation_executor_fallback_reason"),
+                        str,
+                    )
+                    and str(permutation_payload.get("permutation_executor_fallback_reason")).strip()
+                    else None
+                )
+                if int(request.n_permutations) > 0:
+                    stage_observer.stage_finished(
+                        StageKey.PERMUTATION,
+                        metadata={
+                            **_stage_observed_metadata(
+                                assignment=permutation_assignment_effective,
+                                fallback_reason=permutation_fallback_reason,
+                                fallback_used=(
+                                    bool(permutation_assignment_effective.fallback_used)
+                                    if permutation_assignment_effective is not None
+                                    else None
+                                ),
+                                execution_mode=permutation_execution_mode,
+                                observed_backend_family=permutation_backend_family,
+                                observed_executor_id=permutation_executor_id,
+                            ),
+                            "derived_from_stage": StageKey.EVALUATION.value,
+                            "status_source": "derived_from_evaluation",
+                        },
+                        status="executed",
+                    )
+                else:
+                    stage_observer.stage_skipped(
+                        StageKey.PERMUTATION,
+                        metadata={
+                            **_stage_observed_metadata(
+                                assignment=permutation_assignment_effective,
+                                fallback_used=False,
+                            ),
+                            "derived_from_stage": StageKey.EVALUATION.value,
+                            "status_source": "derived_from_evaluation",
+                        },
+                        reason="permutations_disabled",
+                        derived_from_stage=StageKey.EVALUATION,
+                    )
             artifact_ids[ARTIFACT_TYPE_METRICS_BUNDLE] = evaluation_output.metrics_artifact_id
         else:
             raise ValueError(f"Unsupported section encountered in execution plan: {section.value}")
@@ -915,6 +1226,31 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
             total_units=float(total_sections),
             message=f"finished section {section.value}",
         )
+        if stage_observer is not None and isinstance(stage_key, StageKey):
+            observed_backend_family: str | None = None
+            observed_executor_id: str | None = None
+            if section == SectionName.MODEL_FIT and isinstance(compute_runtime_metadata, dict):
+                backend_family_candidate = compute_runtime_metadata.get(
+                    "actual_estimator_backend_family"
+                ) or compute_runtime_metadata.get("backend_family")
+                if isinstance(backend_family_candidate, str) and backend_family_candidate.strip():
+                    observed_backend_family = backend_family_candidate.strip()
+                backend_id_candidate = compute_runtime_metadata.get("actual_estimator_backend_id")
+                if isinstance(backend_id_candidate, str) and backend_id_candidate.strip():
+                    observed_executor_id = backend_id_candidate.strip()
+            stage_assignment = stage_assignment_map.get(stage_key)
+            stage_observer.stage_finished(
+                stage_key,
+                metadata={
+                    **_stage_observed_metadata(
+                        assignment=stage_assignment,
+                        observed_backend_family=observed_backend_family,
+                        observed_executor_id=observed_executor_id,
+                    ),
+                    "primary_artifacts": _primary_artifacts_for_section(section),
+                },
+                status="executed",
+            )
 
     return SegmentExecutionResult(
         planned_sections=[section.value for section in planned_sections],

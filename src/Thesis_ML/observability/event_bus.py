@@ -32,6 +32,47 @@ def _json_safe(value: Any) -> Any:
         return repr(value)
 
 
+def _normalize_stage_metadata(
+    *,
+    metadata: dict[str, Any] | None,
+    stage: str | None,
+    run_id: str | None,
+) -> dict[str, Any]:
+    payload = {str(key): value for key, value in dict(metadata or {}).items()}
+    if run_id is not None and "run_id" not in payload:
+        payload["run_id"] = str(run_id)
+
+    if "stage_key" not in payload:
+        section = payload.get("section")
+        if isinstance(section, str) and section.strip():
+            payload["stage_key"] = section.strip()
+
+    if "assigned_compute_lane" not in payload and "planned_compute_lane" in payload:
+        payload["assigned_compute_lane"] = payload.get("planned_compute_lane")
+    if "assigned_backend_family" not in payload and "planned_backend_family" in payload:
+        payload["assigned_backend_family"] = payload.get("planned_backend_family")
+    if "planned_executor_id" not in payload and "assigned_executor_id" in payload:
+        payload["planned_executor_id"] = payload.get("assigned_executor_id")
+    if "observed_backend_family" not in payload and "actual_estimator_backend_family" in payload:
+        payload["observed_backend_family"] = payload.get("actual_estimator_backend_family")
+    if "observed_executor_id" not in payload and "actual_estimator_backend_id" in payload:
+        payload["observed_executor_id"] = payload.get("actual_estimator_backend_id")
+    if "observed_compute_lane" not in payload and "assigned_compute_lane" in payload:
+        payload["observed_compute_lane"] = payload.get("assigned_compute_lane")
+
+    if "fallback_used" in payload:
+        fallback_used = payload.get("fallback_used")
+        if isinstance(fallback_used, str):
+            payload["fallback_used"] = fallback_used.strip().lower() in {"1", "true", "yes", "on"}
+        elif not isinstance(fallback_used, bool):
+            payload["fallback_used"] = bool(fallback_used)
+
+    if stage is not None and str(stage) == "stage":
+        payload.setdefault("event_scope_stage", "stage")
+
+    return payload
+
+
 class ExecutionEventBus:
     def __init__(
         self,
@@ -73,6 +114,11 @@ class ExecutionEventBus:
     ) -> dict[str, Any]:
         eta_payload: dict[str, Any] | None = None
         anomaly_payload: dict[str, Any] | None = None
+        normalized_metadata = _normalize_stage_metadata(
+            metadata=metadata,
+            stage=(None if stage is None else str(stage)),
+            run_id=(None if run_id is None else str(run_id)),
+        )
         event_payload = {
             "event_name": str(event_name),
             "scope": str(scope),
@@ -87,7 +133,7 @@ class ExecutionEventBus:
             "experiment_id": None if experiment_id is None else str(experiment_id),
             "variant_id": None if variant_id is None else str(variant_id),
             "run_id": None if run_id is None else str(run_id),
-            "metadata": _json_safe(dict(metadata or {})),
+            "metadata": _json_safe(normalized_metadata),
         }
         if self.eta_estimator is not None:
             try:

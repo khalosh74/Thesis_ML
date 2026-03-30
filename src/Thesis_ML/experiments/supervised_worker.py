@@ -2,12 +2,10 @@ from __future__ import annotations
 
 import argparse
 import json
-import traceback
 from pathlib import Path
 from typing import Any
 
-from Thesis_ML.experiments.errors import exception_failure_payload
-from Thesis_ML.experiments.run_experiment import run_experiment
+from Thesis_ML.experiments.timeout_watchdog import execute_supervised_worker_payload
 
 
 def _write_json(path: Path, payload: dict[str, Any]) -> None:
@@ -48,44 +46,9 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     run_kwargs = payload.get("run_kwargs")
-    if not isinstance(run_kwargs, dict):
-        _write_json(
-            output_path,
-            {
-                "ok": False,
-                "error": "Invalid worker input payload; expected 'run_kwargs' object.",
-                "failure_payload": {
-                    "error_code": "worker_input_invalid",
-                    "error_type": "ValueError",
-                    "failure_stage": "watchdog_worker",
-                    "error_details": {},
-                },
-            },
-        )
-        return 2
-
-    try:
-        result = run_experiment(**run_kwargs)
-    except Exception as exc:  # pragma: no cover - exercised via watchdog tests
-        _write_json(
-            output_path,
-            {
-                "ok": False,
-                "error": str(exc),
-                "failure_payload": exception_failure_payload(exc, default_stage="runtime"),
-                "traceback": traceback.format_exc(),
-            },
-        )
-        return 1
-
-    _write_json(
-        output_path,
-        {
-            "ok": True,
-            "result": result,
-        },
-    )
-    return 0
+    worker_payload = execute_supervised_worker_payload(run_kwargs=run_kwargs)  # type: ignore[arg-type]
+    _write_json(output_path, worker_payload)
+    return 0 if bool(worker_payload.get("ok", False)) else 1
 
 
 if __name__ == "__main__":  # pragma: no cover - CLI entrypoint

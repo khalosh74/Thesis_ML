@@ -101,6 +101,12 @@ def _base_run_kwargs(prepared_dataset: dict[str, Path]) -> dict[str, object]:
     }
 
 
+def _read_jsonl(path: Path) -> list[dict[str, object]]:
+    return [
+        json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()
+    ]
+
+
 def test_plan_section_path_feature_matrix_to_evaluation() -> None:
     path = plan_section_path(start_section="feature_matrix_load", end_section="evaluation")
     assert [section.value for section in path] == [
@@ -185,6 +191,65 @@ def test_full_pipeline_stage_execution_metadata_is_additive(
     assert isinstance(metrics_payload.get("stage_execution"), dict)
     assert config_payload.get("preprocessing_kind") == "standard_scaler"
     assert metrics_payload.get("preprocessing_kind") == "standard_scaler"
+
+
+def test_segment_execution_emits_stage_boundary_artifacts(prepared_dataset: dict[str, Path]) -> None:
+    result = run_experiment(
+        **_base_run_kwargs(prepared_dataset),
+        run_id="segment_stage_boundary_artifacts",
+        n_permutations=0,
+        tuning_enabled=False,
+    )
+    report_dir = Path(result["report_dir"])
+    stage_events_path = report_dir / "stage_events.jsonl"
+    stage_observed_path = report_dir / "stage_observed_evidence.json"
+    assert stage_events_path.exists()
+    assert stage_observed_path.exists()
+
+    events = _read_jsonl(stage_events_path)
+    assert any(str(event.get("event_type")) == "stage_started" for event in events)
+    assert any(str(event.get("event_type")) == "stage_finished" for event in events)
+    assert any(str(event.get("stage_key")) == "model_fit" for event in events)
+    assert any(str(event.get("stage_key")) == "reporting" for event in events)
+
+    observed_payload = json.loads(stage_observed_path.read_text(encoding="utf-8"))
+    assert observed_payload["schema_version"] == "stage-observed-evidence-v1"
+    rows = {
+        str(row.get("stage_key")): row
+        for row in observed_payload.get("stages", [])
+        if isinstance(row, dict)
+    }
+    assert rows["model_fit"]["observed_status"] == "executed"
+    assert rows["tuning"]["observed_status"] == "skipped"
+    assert rows["permutation"]["observed_status"] == "skipped"
+    assert rows["reporting"]["observed_status"] == "executed"
+
+
+def test_segment_execution_reused_stage_is_reflected_in_observed_evidence(
+    prepared_dataset: dict[str, Path],
+) -> None:
+    run_experiment(
+        **_base_run_kwargs(prepared_dataset),
+        run_id="segment_stage_reuse_base",
+    )
+    reused_result = run_experiment(
+        **_base_run_kwargs(prepared_dataset),
+        run_id="segment_stage_reuse_followup",
+        start_section="feature_cache_build",
+        end_section="feature_cache_build",
+        reuse_completed_artifacts=True,
+    )
+    observed_payload = json.loads(
+        (Path(reused_result["report_dir"]) / "stage_observed_evidence.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    observed_rows = {
+        str(row.get("stage_key")): row
+        for row in observed_payload.get("stages", [])
+        if isinstance(row, dict)
+    }
+    assert observed_rows["feature_cache_build"]["observed_status"] in {"reused", "executed"}
 
 
 def test_segment_execution_feature_matrix_to_evaluation(

@@ -158,3 +158,105 @@ def test_campaign_observability_reflects_completed_and_blocked_counts(tmp_path: 
     )
     assert live_payload["counts"]["runs_completed"] >= 1
     assert live_payload["counts"]["runs_blocked"] >= 1
+
+
+def test_campaign_observability_writes_stage_evidence_summaries(tmp_path: Path) -> None:
+    registry_path = tmp_path / "registry.json"
+    index_csv = tmp_path / "index.csv"
+    _write_registry(registry_path)
+    _write_index(index_csv)
+
+    def _stub_run_experiment_with_stage_evidence(**kwargs: object) -> dict[str, object]:
+        run_id = str(kwargs.get("run_id"))
+        reports_root = Path(str(kwargs.get("reports_root")))
+        report_dir = reports_root / run_id
+        report_dir.mkdir(parents=True, exist_ok=True)
+        config_path = report_dir / "config.json"
+        config_path.write_text(
+            json.dumps(
+                {
+                    "stage_execution": {
+                        "policy": {
+                            "source": "run_level_compute_policy_bridge_v1",
+                            "hardware_mode_requested": "cpu_only",
+                            "hardware_mode_effective": "cpu_only",
+                            "requested_backend_family": "sklearn_cpu",
+                            "effective_backend_family": "sklearn_cpu",
+                            "assigned_compute_lane": "cpu",
+                            "deterministic_compute": False,
+                        },
+                        "assignments": [],
+                        "telemetry": [
+                            {
+                                "stage": "model_fit",
+                                "status": "executed",
+                                "duration_seconds": 1.0,
+                                "duration_source": "section_timing",
+                                "resource_coverage": "partial",
+                                "evidence_quality": "medium",
+                                "fallback_used": False,
+                                "planned_backend_family": "sklearn_cpu",
+                                "observed_backend_family": "sklearn_cpu",
+                                "planned_compute_lane": "cpu",
+                                "observed_compute_lane": "cpu",
+                                "backend_match": True,
+                                "lane_match": True,
+                                "executor_match": True,
+                            }
+                        ],
+                    }
+                },
+                indent=2,
+            )
+            + "\\n",
+            encoding="utf-8",
+        )
+        metrics_path = report_dir / "metrics.json"
+        metrics_path.write_text(
+            json.dumps(
+                {
+                    "balanced_accuracy": 0.5,
+                    "macro_f1": 0.5,
+                    "accuracy": 0.5,
+                    "n_folds": 2,
+                },
+                indent=2,
+            )
+            + "\\n",
+            encoding="utf-8",
+        )
+        return {
+            "run_id": run_id,
+            "report_dir": str(report_dir),
+            "config_path": str(config_path),
+            "metrics_path": str(metrics_path),
+            "fold_metrics_path": str(report_dir / "fold_metrics.csv"),
+            "fold_splits_path": str(report_dir / "fold_splits.csv"),
+            "predictions_path": str(report_dir / "predictions.csv"),
+            "spatial_compatibility_report_path": str(report_dir / "spatial.json"),
+            "metrics": {
+                "balanced_accuracy": 0.5,
+                "macro_f1": 0.5,
+                "accuracy": 0.5,
+                "n_folds": 2,
+            },
+        }
+
+    result = campaign_engine.run_decision_support_campaign(
+        registry_path=registry_path,
+        index_csv=index_csv,
+        data_root=tmp_path / "Data",
+        cache_dir=tmp_path / "cache",
+        output_root=tmp_path / "outputs",
+        experiment_id=None,
+        stage=None,
+        run_all=True,
+        seed=42,
+        n_permutations=0,
+        dry_run=False,
+        run_experiment_fn=_stub_run_experiment_with_stage_evidence,
+    )
+    campaign_root = Path(result["campaign_root"])
+    assert (campaign_root / "stage_execution_summary.json").exists()
+    assert (campaign_root / "stage_resource_summary.csv").exists()
+    assert (campaign_root / "backend_fallback_summary.json").exists()

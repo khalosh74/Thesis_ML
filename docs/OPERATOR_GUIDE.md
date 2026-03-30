@@ -120,6 +120,10 @@ Official metric policy:
   `data_quality_report.json`, `class_balance_report.csv`, `missingness_report.csv`,
   `leakage_audit.json`, `external_dataset_card.json`, `external_dataset_summary.json`,
   `external_validation_compatibility.json`
+- additive stage observability artifacts are emitted for run-level plan-vs-observed evidence:
+  `stage_events.jsonl`, `stage_observed_evidence.json`
+- with process profiling enabled, stage-scoped resource attribution is available in
+  `stage_resource_attribution.json`
 
 Governance references:
 - `docs/PRIVACY_AND_DATA_HANDLING.md`

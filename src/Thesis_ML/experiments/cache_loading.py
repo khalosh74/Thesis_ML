@@ -77,6 +77,23 @@ def _validate_sample_qc_fields(
         )
 
 
+def _derive_requested_group_ids(index_df: pd.DataFrame) -> set[str] | None:
+    if "subject_session_bas" in index_df.columns:
+        return set(index_df["subject_session_bas"].astype(str))
+    if "group_id" in index_df.columns:
+        return set(index_df["group_id"].astype(str))
+    required = {"subject", "session", "bas"}
+    if required <= set(index_df.columns):
+        return set(
+            index_df["subject"].astype(str)
+            + "_"
+            + index_df["session"].astype(str)
+            + "_"
+            + index_df["bas"].astype(str)
+        )
+    return None
+
+
 def load_features_from_cache(
     index_df: pd.DataFrame,
     cache_manifest_path: Path,
@@ -116,9 +133,18 @@ def load_features_from_cache(
             f"duplicates={duplicates[:10]}"
         )
 
-    selected_ids = set(index_df["sample_id"].astype(str))
-    feature_map: dict[str, np.ndarray] = {}
-    metadata_map: dict[str, dict[str, Any]] = {}
+    requested_sample_ids = index_df["sample_id"].astype(str).tolist()
+    row_positions_by_sample: dict[str, list[int]] = {}
+    for row_index, sample_id in enumerate(requested_sample_ids):
+        row_positions_by_sample.setdefault(sample_id, []).append(int(row_index))
+    selected_ids = set(row_positions_by_sample)
+    requested_group_ids = _derive_requested_group_ids(index_df)
+    if requested_group_ids:
+        manifest = manifest.loc[manifest["group_id"].astype(str).isin(requested_group_ids)]
+
+    x_matrix: np.ndarray | None = None
+    metadata_rows: list[dict[str, Any] | None] = [None] * int(len(index_df))
+    filled_flags = np.zeros(int(len(index_df)), dtype=bool)
     sample_source_map: dict[str, dict[str, Any]] = {}
     selected_cache_groups: list[dict[str, Any]] = []
 
@@ -187,7 +213,13 @@ def load_features_from_cache(
                     previous_cache_path = str(existing_entry["cache_path"])
                     previous_metadata_json = str(existing_entry["metadata_json"])
                     previous_beta_path = str(existing_entry["beta_path"])
-                    previous_vector = np.asarray(existing_entry["vector"], dtype=np.float32)
+                    previous_row_index = int(existing_entry["first_row_index"])
+                    if x_matrix is None:
+                        raise ValueError(
+                            "Internal cache loading state error: x_matrix not initialized for "
+                            f"sample_id='{sample_id}'."
+                        )
+                    previous_vector = np.asarray(x_matrix[previous_row_index], dtype=np.float32)
 
                     differences: list[str] = []
                     if previous_metadata_json != metadata_json:
@@ -212,14 +244,31 @@ def load_features_from_cache(
                         f"differences={differences or ['none']}."
                     )
 
-                feature_map[sample_id] = current_vector
-                metadata_map[sample_id] = metadata_payload
+                if x_matrix is None:
+                    x_matrix = np.empty(
+                        (int(len(index_df)), int(current_vector.shape[0])),
+                        dtype=np.float32,
+                    )
+                elif int(current_vector.shape[0]) != int(x_matrix.shape[1]):
+                    raise ValueError(
+                        "Cache feature dimension mismatch across selected groups. "
+                        f"sample_id='{sample_id}', group_id='{group_id}', "
+                        f"cache_path='{cache_path}', expected={x_matrix.shape[1]}, "
+                        f"observed={current_vector.shape[0]}."
+                    )
+                positions = row_positions_by_sample.get(sample_id, [])
+                if not positions:
+                    continue
+                for position in positions:
+                    x_matrix[position, :] = current_vector
+                    metadata_rows[position] = dict(metadata_payload)
+                    filled_flags[position] = True
                 sample_source_map[sample_id] = {
                     "group_id": str(group_id),
                     "cache_path": str(cache_path.resolve()),
                     "metadata_json": metadata_json,
                     "beta_path": canonical_beta_path,
-                    "vector": current_vector.copy(),
+                    "first_row_index": int(positions[0]),
                 }
                 selected_in_group += 1
 
@@ -246,20 +295,8 @@ def load_features_from_cache(
     if not spatial_report["passed"]:
         raise_spatial_compatibility_error(spatial_report)
 
-    vectors: list[np.ndarray] = []
-    metadata_rows: list[dict[str, Any]] = []
-    missing_samples: list[str] = []
-
-    for _, row in index_df.iterrows():
-        sample_id = str(row["sample_id"])
-        if sample_id not in feature_map:
-            missing_samples.append(sample_id)
-            continue
-        vectors.append(feature_map[sample_id])
-        merged = dict(metadata_map[sample_id])
-        merged.update(row.to_dict())
-        metadata_rows.append(merged)
-
+    missing_positions = np.flatnonzero(~filled_flags).tolist()
+    missing_samples = [requested_sample_ids[int(position)] for position in missing_positions]
     if missing_samples:
         preview = ", ".join(missing_samples[:5])
         raise ValueError(
@@ -267,6 +304,20 @@ def load_features_from_cache(
             f"First missing sample_id values: {preview}"
         )
 
-    x_matrix = np.vstack(vectors).astype(np.float32, copy=False)
-    metadata_df = pd.DataFrame(metadata_rows)
+    if x_matrix is None:
+        raise ValueError("No requested samples were loaded from cache.")
+
+    merged_metadata_rows: list[dict[str, Any]] = []
+    for row_index, (_, index_row) in enumerate(index_df.iterrows()):
+        metadata_payload = metadata_rows[row_index]
+        if metadata_payload is None:
+            sample_id = requested_sample_ids[row_index]
+            raise ValueError(
+                f"Internal cache loading state error: metadata missing for sample_id='{sample_id}'."
+            )
+        merged = dict(metadata_payload)
+        merged.update(index_row.to_dict())
+        merged_metadata_rows.append(merged)
+
+    metadata_df = pd.DataFrame(merged_metadata_rows)
     return x_matrix, metadata_df, spatial_report

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib
 import json
+import shutil
 from pathlib import Path
 from typing import Literal
 
@@ -282,6 +283,219 @@ def test_feature_cache(tmp_path: Path) -> None:
     assert loaded_x.shape == x_matrix.shape
     assert loaded_metadata_df.shape[0] == 2
     assert set(FEATURE_QC_SAMPLE_FIELDS) <= set(loaded_metadata_df.columns)
+
+
+def test_feature_cache_process_backend_matches_serial_outputs(tmp_path: Path) -> None:
+    data_root = tmp_path / "Data"
+    _create_glm_session(
+        glm_dir=data_root / "sub-001" / "ses-01" / "BAS2",
+        labels=[
+            "run-1_passive_anger_audio",
+            "run-1_passive_happiness_video",
+        ],
+    )
+    _create_glm_session(
+        glm_dir=data_root / "sub-002" / "ses-01" / "BAS2",
+        labels=[
+            "run-1_emo_anxiety_audio",
+            "run-1_emo_neutral_video",
+        ],
+    )
+    out_csv = tmp_path / "dataset_index.csv"
+    build_dataset_index(data_root=data_root, out_csv=out_csv)
+
+    cache_dir = tmp_path / "cache"
+    serial_manifest_path = build_feature_cache(
+        index_csv=out_csv,
+        data_root=data_root,
+        cache_dir=cache_dir,
+        max_workers=1,
+        parallel_backend="serial",
+    )
+    serial_manifest = pd.read_csv(serial_manifest_path)
+    serial_manifest_relative = serial_manifest.copy()
+    serial_manifest_relative["cache_path"] = serial_manifest_relative["cache_path"].map(
+        lambda value: str(Path(str(value)).relative_to(cache_dir))
+    )
+
+    serial_payloads: dict[str, dict[str, object]] = {}
+    for _, row in serial_manifest.iterrows():
+        cache_path = Path(str(row["cache_path"]))
+        with np.load(cache_path, allow_pickle=False) as npz:
+            serial_payloads[str(row["group_id"])] = {
+                "relative_path": str(cache_path.relative_to(cache_dir)),
+                "X": np.asarray(npz["X"], dtype=np.float32).copy(),
+                "y": np.asarray(npz["y"]).copy(),
+                "metadata_json": str(npz["metadata_json"].item()),
+                "spatial_signature_json": str(npz["spatial_signature_json"].item()),
+                "cache_input_signature_json": str(npz["cache_input_signature_json"].item()),
+                "group_qc_summary_json": str(npz["group_qc_summary_json"].item()),
+            }
+
+    shutil.rmtree(cache_dir)
+
+    process_manifest_path = build_feature_cache(
+        index_csv=out_csv,
+        data_root=data_root,
+        cache_dir=cache_dir,
+        max_workers=2,
+        parallel_backend="process",
+    )
+    process_manifest = pd.read_csv(process_manifest_path)
+    process_manifest_relative = process_manifest.copy()
+    process_manifest_relative["cache_path"] = process_manifest_relative["cache_path"].map(
+        lambda value: str(Path(str(value)).relative_to(cache_dir))
+    )
+
+    pd.testing.assert_frame_equal(serial_manifest_relative, process_manifest_relative)
+
+    for _, row in process_manifest.iterrows():
+        group_id = str(row["group_id"])
+        cache_path = Path(str(row["cache_path"]))
+        expected = serial_payloads[group_id]
+        assert str(cache_path.relative_to(cache_dir)) == str(expected["relative_path"])
+        with np.load(cache_path, allow_pickle=False) as npz:
+            assert np.array_equal(np.asarray(npz["X"], dtype=np.float32), expected["X"])
+            assert np.array_equal(np.asarray(npz["y"]), expected["y"])
+            assert str(npz["metadata_json"].item()) == str(expected["metadata_json"])
+            assert str(npz["spatial_signature_json"].item()) == str(
+                expected["spatial_signature_json"]
+            )
+            assert str(npz["cache_input_signature_json"].item()) == str(
+                expected["cache_input_signature_json"]
+            )
+            assert str(npz["group_qc_summary_json"].item()) == str(expected["group_qc_summary_json"])
+
+
+def test_feature_cache_process_backend_preserves_skip_existing_and_force(tmp_path: Path) -> None:
+    data_root = tmp_path / "Data"
+    _create_glm_session(
+        glm_dir=data_root / "sub-001" / "ses-01" / "BAS2",
+        labels=[
+            "run-1_passive_anger_audio",
+            "run-1_passive_happiness_video",
+        ],
+    )
+    out_csv = tmp_path / "dataset_index.csv"
+    build_dataset_index(data_root=data_root, out_csv=out_csv)
+
+    cache_dir = tmp_path / "cache"
+    build_feature_cache(
+        index_csv=out_csv,
+        data_root=data_root,
+        cache_dir=cache_dir,
+        max_workers=2,
+        parallel_backend="process",
+    )
+    skip_manifest_path = build_feature_cache(
+        index_csv=out_csv,
+        data_root=data_root,
+        cache_dir=cache_dir,
+        max_workers=2,
+        parallel_backend="process",
+    )
+    skip_manifest = pd.read_csv(skip_manifest_path)
+    assert len(skip_manifest) == 1
+    assert bool(skip_manifest.loc[0, "skipped_existing"]) is True
+    assert skip_manifest.loc[0, "cache_validation_status"] == "matched_current_signature"
+
+    force_manifest_path = build_feature_cache(
+        index_csv=out_csv,
+        data_root=data_root,
+        cache_dir=cache_dir,
+        force=True,
+        max_workers=2,
+        parallel_backend="process",
+    )
+    force_manifest = pd.read_csv(force_manifest_path)
+    assert len(force_manifest) == 1
+    assert bool(force_manifest.loc[0, "skipped_existing"]) is False
+    assert force_manifest.loc[0, "cache_validation_status"] == "force_rebuild"
+    assert force_manifest.loc[0, "cache_rebuild_reason"] == "force_rebuild"
+
+
+def test_load_features_from_cache_subsets_manifest_and_preserves_order(tmp_path: Path) -> None:
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    cache_path_a = cache_dir / "group_a.npz"
+    cache_path_unused = cache_dir / "group_unused.npz"
+
+    metadata_rows_a = [
+        {"sample_id": "s1", "beta_path": "beta_0001.nii"},
+        {"sample_id": "s2", "beta_path": "beta_0002.nii"},
+    ]
+    np.savez_compressed(
+        cache_path_a,
+        X=np.asarray([[1.0, 2.0], [3.0, 4.0]], dtype=np.float32),
+        y=np.asarray(["anger", "happiness"], dtype=np.str_),
+        metadata_json=np.array(json.dumps(metadata_rows_a)),
+        group_id=np.array("sub-001_ses-01_BAS2"),
+        spatial_signature_json=np.array(
+            json.dumps(
+                {
+                    "signature_version": 1,
+                    "image_shape": [3, 3, 3],
+                    "affine": np.eye(4, dtype=np.float64).tolist(),
+                    "voxel_size": [1.0, 1.0, 1.0],
+                    "mask_voxel_count": 2,
+                    "feature_count": 2,
+                    "mask_sha256": "a" * 64,
+                }
+            )
+        ),
+    )
+    np.savez_compressed(
+        cache_path_unused,
+        X=np.asarray([[9.0, 9.0]], dtype=np.float32),
+        y=np.asarray(["anger"], dtype=np.str_),
+        metadata_json=np.array(json.dumps([])),
+        group_id=np.array("sub-999_ses-99_BAS9"),
+        spatial_signature_json=np.array(
+            json.dumps(
+                {
+                    "signature_version": 1,
+                    "image_shape": [3, 3, 3],
+                    "affine": np.eye(4, dtype=np.float64).tolist(),
+                    "voxel_size": [1.0, 1.0, 1.0],
+                    "mask_voxel_count": 2,
+                    "feature_count": 2,
+                    "mask_sha256": "a" * 64,
+                }
+            )
+        ),
+    )
+
+    manifest = pd.DataFrame(
+        [
+            {"group_id": "sub-001_ses-01_BAS2", "cache_path": str(cache_path_a.resolve())},
+            {"group_id": "sub-999_ses-99_BAS9", "cache_path": str(cache_path_unused.resolve())},
+        ]
+    )
+    manifest_path = cache_dir / "cache_manifest.csv"
+    manifest.to_csv(manifest_path, index=False)
+
+    index_df = pd.DataFrame(
+        [
+            {"sample_id": "s2", "subject": "sub-001", "session": "ses-01", "bas": "BAS2"},
+            {"sample_id": "s1", "subject": "sub-001", "session": "ses-01", "bas": "BAS2"},
+            {"sample_id": "s1", "subject": "sub-001", "session": "ses-01", "bas": "BAS2"},
+        ]
+    )
+
+    x_matrix, metadata_df, spatial_report = load_features_from_cache(
+        index_df=index_df,
+        cache_manifest_path=manifest_path,
+    )
+
+    assert x_matrix.dtype == np.float32
+    assert x_matrix.shape == (3, 2)
+    assert np.array_equal(
+        x_matrix,
+        np.asarray([[3.0, 4.0], [1.0, 2.0], [1.0, 2.0]], dtype=np.float32),
+    )
+    assert metadata_df["sample_id"].astype(str).tolist() == ["s2", "s1", "s1"]
+    assert spatial_report["passed"] is True
+    assert int(spatial_report["n_groups_checked"]) == 1
 
 
 def test_feature_cache_passes_with_matching_non_identity_affine(tmp_path: Path) -> None:

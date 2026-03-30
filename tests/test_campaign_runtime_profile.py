@@ -107,6 +107,70 @@ def test_campaign_runtime_profile_summary_shape_and_positive_eta(
         assert int(profiling_context.get("max_outer_folds", 0)) == 1
 
 
+def test_campaign_runtime_profile_includes_stage_evidence_summaries(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    def _fake_run_experiment(**kwargs: Any) -> dict[str, Any]:
+        run_id = str(kwargs["run_id"])
+        report_dir = Path(kwargs["reports_root"]) / run_id
+        return {
+            "run_id": run_id,
+            "report_dir": str(report_dir),
+            "run_status_path": str(report_dir / "run_status.json"),
+            "stage_timings_seconds": {"total": 6.0},
+            "stage_execution": {
+                "policy": {
+                    "source": "run_level_compute_policy_bridge_v1",
+                    "hardware_mode_requested": "cpu_only",
+                    "hardware_mode_effective": "cpu_only",
+                    "requested_backend_family": "sklearn_cpu",
+                    "effective_backend_family": "sklearn_cpu",
+                    "assigned_compute_lane": "cpu",
+                    "deterministic_compute": False,
+                },
+                "assignments": [],
+                "telemetry": [
+                    {
+                        "stage": "model_fit",
+                        "status": "executed",
+                        "duration_seconds": 5.0,
+                        "duration_source": "section_timing",
+                        "resource_coverage": "partial",
+                        "evidence_quality": "medium",
+                        "fallback_used": False,
+                        "planned_backend_family": "sklearn_cpu",
+                        "observed_backend_family": "sklearn_cpu",
+                        "planned_compute_lane": "cpu",
+                        "observed_compute_lane": "cpu",
+                        "backend_match": True,
+                        "lane_match": True,
+                        "executor_match": True,
+                    }
+                ],
+            },
+            "metrics": {"n_folds": 1, "primary_metric_value": 0.5},
+        }
+
+    monkeypatch.setattr(runtime_profile, "run_experiment", _fake_run_experiment)
+
+    summary = runtime_profile.verify_campaign_runtime_profile(
+        index_csv=_demo_index_csv(),
+        data_root=_repo_root() / "demo_data" / "synthetic_v1" / "data_root",
+        cache_dir=_repo_root() / "demo_data" / "synthetic_v1" / "cache",
+        confirmatory_protocol=_confirmatory_protocol(),
+        comparison_specs=_comparison_specs(),
+        profile_root=tmp_path / "runtime_profiles",
+    )
+
+    assert isinstance(summary.get("stage_execution_summary"), dict)
+    assert int(summary["stage_execution_summary"]["n_stage_rows"]) > 0
+    assert Path(summary["stage_execution_summary_path"]).exists()
+    assert Path(summary["stage_resource_summary_path"]).exists()
+    assert Path(summary["backend_fallback_summary_path"]).exists()
+    assert isinstance(summary.get("backend_fallback_summary"), dict)
+
+
 def test_campaign_runtime_profile_emits_runtime_warnings_and_recommendations(
     tmp_path: Path,
     monkeypatch,

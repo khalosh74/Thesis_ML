@@ -246,3 +246,89 @@ def test_stage_execution_merges_stage_timing_metadata_with_duration_provenance()
         == "metrics.permutation_test.permutation_loop_seconds"
     )
     assert telemetry_by_stage["reporting"].details["duration_source"] == "run_stage_timings_rollup"
+
+
+def test_stage_execution_joins_planned_and_observed_stage_evidence() -> None:
+    compute_policy = resolve_compute_policy(
+        framework_mode=FrameworkMode.EXPLORATORY,
+        hardware_mode="cpu_only",
+    )
+    stage_result = build_stage_execution_result(
+        compute_policy=compute_policy,
+        planned_sections=["model_fit", "evaluation"],
+        executed_sections=["model_fit", "evaluation"],
+        reused_sections=[],
+        tuning_enabled=True,
+        n_permutations=2,
+        planned_assignments=[
+            StageAssignment(
+                stage=StageKey.MODEL_FIT,
+                backend_family=StageBackendFamily.SKLEARN_CPU,
+                compute_lane="cpu",
+                source="stage_planner_v1",
+                reason="phase4_test_assignment",
+                executor_id="model_fit_cpu_reference_v1",
+                official_admitted=True,
+                fallback_used=False,
+            ),
+        ],
+        observed_stage_evidence={
+            "model_fit": {
+                "observed_status": "executed",
+                "status_source": "stage_events",
+                "observed_backend_family": "torch_gpu",
+                "observed_compute_lane": "gpu",
+                "observed_executor_id": "torch_ridge_gpu_v2",
+                "fallback_used": True,
+                "fallback_reason": "runtime_backend_fallback",
+                "started_at_utc": "2026-01-01T00:00:00+00:00",
+                "ended_at_utc": "2026-01-01T00:00:04+00:00",
+                "primary_artifacts": ["fit_timing_summary.json"],
+            }
+        },
+        stage_resource_attribution={
+            "model_fit": {
+                "resource_coverage": "partial",
+                "evidence_quality": "low",
+                "mean_cpu_percent": 13.0,
+                "peak_cpu_percent": 21.0,
+            }
+        },
+    )
+
+    telemetry_by_stage = {row.stage: row for row in stage_result.telemetry}
+    model_fit = telemetry_by_stage["model_fit"]
+    assert model_fit.planned_backend_family == "sklearn_cpu"
+    assert model_fit.observed_backend_family == "torch_gpu"
+    assert model_fit.backend_match is False
+    assert model_fit.lane_match is False
+    assert model_fit.executor_match is False
+    assert model_fit.planning_match is False
+    assert model_fit.fallback_expected is False
+    assert model_fit.fallback_used is True
+    assert model_fit.fallback_reason == "runtime_backend_fallback"
+    assert model_fit.duration_source in {"observed_stage_interval", "observed_stage_evidence"}
+    assert model_fit.resource_coverage == "partial"
+    assert model_fit.evidence_quality == "low"
+    assert model_fit.mean_cpu_percent == 13.0
+    assert model_fit.status_source == "stage_events"
+
+
+def test_stage_execution_marks_missing_when_observed_layer_enabled_but_stage_unobserved() -> None:
+    compute_policy = resolve_compute_policy(
+        framework_mode=FrameworkMode.EXPLORATORY,
+        hardware_mode="cpu_only",
+    )
+    stage_result = build_stage_execution_result(
+        compute_policy=compute_policy,
+        planned_sections=["model_fit", "evaluation"],
+        executed_sections=["model_fit", "evaluation"],
+        reused_sections=[],
+        tuning_enabled=False,
+        n_permutations=0,
+        observed_stage_evidence={},
+    )
+    telemetry_by_stage = {row.stage: row for row in stage_result.telemetry}
+    model_fit = telemetry_by_stage["model_fit"]
+    assert model_fit.status == "missing"
+    assert model_fit.missing_observed_evidence is True

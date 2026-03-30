@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+from collections import Counter
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
@@ -37,12 +38,21 @@ from Thesis_ML.orchestration.decision_reports import (
     write_decision_reports as _write_decision_reports,
 )
 from Thesis_ML.orchestration.execution_bridge import (
+    apply_feature_matrix_reuse_variant as _apply_feature_matrix_reuse_variant,
+)
+from Thesis_ML.orchestration.execution_bridge import (
     build_variant_official_job as _build_variant_official_job,
+)
+from Thesis_ML.orchestration.execution_bridge import (
+    extract_feature_matrix_artifact_id as _extract_feature_matrix_artifact_id,
 )
 from Thesis_ML.orchestration.execution_bridge import (
     execute_official_jobs as _execute_official_jobs,
 )
 from Thesis_ML.orchestration.execution_bridge import execute_variant as _execute_variant
+from Thesis_ML.orchestration.execution_bridge import (
+    plan_sibling_feature_matrix_reuse as _plan_sibling_feature_matrix_reuse,
+)
 from Thesis_ML.orchestration.execution_bridge import (
     resolve_variant_id as _resolve_variant_id,
 )
@@ -62,6 +72,9 @@ from Thesis_ML.orchestration.reporting import (
     summarize_by_experiment as _summarize_by_experiment,
 )
 from Thesis_ML.orchestration.reporting import (
+    write_campaign_execution_report as _write_campaign_execution_report,
+)
+from Thesis_ML.orchestration.reporting import (
     write_experiment_outputs as _write_experiment_outputs,
 )
 from Thesis_ML.orchestration.reporting import (
@@ -69,9 +82,6 @@ from Thesis_ML.orchestration.reporting import (
 )
 from Thesis_ML.orchestration.reporting import (
     write_stage_summaries as _write_stage_summaries,
-)
-from Thesis_ML.orchestration.reporting import (
-    write_campaign_execution_report as _write_campaign_execution_report,
 )
 from Thesis_ML.orchestration.result_aggregation import (
     aggregate_variant_records,
@@ -133,6 +143,211 @@ def _safe_float(value: Any) -> float | None:
         return float(value)
     except Exception:
         return None
+
+
+def _safe_load_json(path: Path) -> dict[str, Any] | None:
+    if not path.exists():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _extract_stage_execution_payload(record: dict[str, Any]) -> dict[str, Any] | None:
+    stage_execution = record.get("stage_execution")
+    if isinstance(stage_execution, dict):
+        return dict(stage_execution)
+    config_path_raw = record.get("config_path")
+    if not isinstance(config_path_raw, str) or not config_path_raw:
+        return None
+    config_payload = _safe_load_json(Path(config_path_raw))
+    if not isinstance(config_payload, dict):
+        return None
+    stage_execution_payload = config_payload.get("stage_execution")
+    if isinstance(stage_execution_payload, dict):
+        return dict(stage_execution_payload)
+    return None
+
+
+def _build_stage_evidence_rows(variant_records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for record in variant_records:
+        stage_execution = _extract_stage_execution_payload(record)
+        if not isinstance(stage_execution, dict):
+            continue
+        telemetry_rows = stage_execution.get("telemetry")
+        if not isinstance(telemetry_rows, list):
+            continue
+        run_id = str(record.get("run_id") or "")
+        experiment_id = str(record.get("experiment_id") or "")
+        variant_id = str(record.get("variant_id") or "")
+        for telemetry in telemetry_rows:
+            if not isinstance(telemetry, dict):
+                continue
+            stage_key = str(telemetry.get("stage") or "")
+            if not stage_key:
+                continue
+            rows.append(
+                {
+                    "experiment_id": experiment_id,
+                    "variant_id": variant_id,
+                    "run_id": run_id,
+                    "stage_key": stage_key,
+                    "status": str(telemetry.get("status") or ""),
+                    "duration_seconds": _safe_float(telemetry.get("duration_seconds")),
+                    "duration_source": telemetry.get("duration_source"),
+                    "resource_coverage": telemetry.get("resource_coverage"),
+                    "evidence_quality": telemetry.get("evidence_quality"),
+                    "fallback_used": bool(telemetry.get("fallback_used", False)),
+                    "fallback_reason": telemetry.get("fallback_reason"),
+                    "planned_backend_family": telemetry.get("planned_backend_family"),
+                    "observed_backend_family": telemetry.get("observed_backend_family"),
+                    "planned_compute_lane": telemetry.get("planned_compute_lane"),
+                    "observed_compute_lane": telemetry.get("observed_compute_lane"),
+                    "planning_match": telemetry.get("planning_match"),
+                    "backend_match": telemetry.get("backend_match"),
+                    "lane_match": telemetry.get("lane_match"),
+                    "executor_match": telemetry.get("executor_match"),
+                    "mean_cpu_percent": _safe_float(telemetry.get("mean_cpu_percent")),
+                    "peak_cpu_percent": _safe_float(telemetry.get("peak_cpu_percent")),
+                    "peak_rss_mb": _safe_float(telemetry.get("peak_rss_mb")),
+                    "peak_vms_mb": _safe_float(telemetry.get("peak_vms_mb")),
+                    "read_bytes_delta": telemetry.get("read_bytes_delta"),
+                    "write_bytes_delta": telemetry.get("write_bytes_delta"),
+                    "peak_gpu_memory_mb": _safe_float(telemetry.get("peak_gpu_memory_mb")),
+                    "peak_gpu_utilization_percent": _safe_float(
+                        telemetry.get("peak_gpu_utilization_percent")
+                    ),
+                }
+            )
+    return rows
+
+
+def _write_stage_evidence_summaries(
+    *,
+    campaign_root: Path,
+    variant_records: list[dict[str, Any]],
+) -> dict[str, str]:
+    stage_rows = _build_stage_evidence_rows(variant_records)
+
+    stage_totals: dict[str, float] = {}
+    stage_counts: Counter[str] = Counter()
+    stage_missing: Counter[str] = Counter()
+    stage_fallbacks: Counter[str] = Counter()
+    stage_coverage: dict[str, Counter[str]] = {}
+    for row in stage_rows:
+        stage_key = str(row.get("stage_key") or "")
+        if not stage_key:
+            continue
+        stage_counts[stage_key] += 1
+        duration_seconds = _safe_float(row.get("duration_seconds"))
+        if duration_seconds is not None:
+            stage_totals[stage_key] = float(stage_totals.get(stage_key, 0.0)) + float(
+                duration_seconds
+            )
+        if str(row.get("status")) == "missing":
+            stage_missing[stage_key] += 1
+        if bool(row.get("fallback_used", False)):
+            stage_fallbacks[stage_key] += 1
+        coverage = str(row.get("resource_coverage") or "none")
+        stage_coverage.setdefault(stage_key, Counter())[coverage] += 1
+
+    dominant_stages = sorted(
+        [
+            {
+                "stage_key": stage_key,
+                "total_duration_seconds": float(total_duration),
+                "observation_count": int(stage_counts.get(stage_key, 0)),
+            }
+            for stage_key, total_duration in stage_totals.items()
+        ],
+        key=lambda item: float(item["total_duration_seconds"]),
+        reverse=True,
+    )
+    fallback_hotspots = sorted(
+        [
+            {
+                "stage_key": stage_key,
+                "fallback_count": int(count),
+                "observation_count": int(stage_counts.get(stage_key, 0)),
+            }
+            for stage_key, count in stage_fallbacks.items()
+            if int(count) > 0
+        ],
+        key=lambda item: int(item["fallback_count"]),
+        reverse=True,
+    )
+
+    stage_execution_summary = {
+        "schema_version": "stage-execution-summary-v1",
+        "generated_at_utc": _utc_timestamp(),
+        "n_stage_rows": int(len(stage_rows)),
+        "stage_totals": {
+            stage_key: {
+                "observation_count": int(stage_counts.get(stage_key, 0)),
+                "missing_count": int(stage_missing.get(stage_key, 0)),
+                "fallback_count": int(stage_fallbacks.get(stage_key, 0)),
+                "total_duration_seconds": float(stage_totals.get(stage_key, 0.0)),
+                "resource_coverage_counts": {
+                    str(key): int(value)
+                    for key, value in sorted(stage_coverage.get(stage_key, Counter()).items())
+                },
+            }
+            for stage_key in sorted(stage_counts)
+        },
+        "dominant_stages": dominant_stages[:10],
+        "fallback_hotspots": fallback_hotspots[:10],
+    }
+    stage_execution_summary_path = campaign_root / "stage_execution_summary.json"
+    stage_execution_summary_path.write_text(
+        f"{json.dumps(stage_execution_summary, indent=2)}\\n",
+        encoding="utf-8",
+    )
+
+    stage_resource_summary_path = campaign_root / "stage_resource_summary.csv"
+    import pandas as pd
+
+    pd.DataFrame(stage_rows).to_csv(stage_resource_summary_path, index=False)
+
+    backend_fallback_summary = {
+        "schema_version": "backend-fallback-summary-v1",
+        "generated_at_utc": _utc_timestamp(),
+        "rows": [
+            {
+                "stage_key": str(row.get("stage_key") or ""),
+                "run_id": str(row.get("run_id") or ""),
+                "experiment_id": str(row.get("experiment_id") or ""),
+                "variant_id": str(row.get("variant_id") or ""),
+                "planned_backend_family": row.get("planned_backend_family"),
+                "observed_backend_family": row.get("observed_backend_family"),
+                "planned_compute_lane": row.get("planned_compute_lane"),
+                "observed_compute_lane": row.get("observed_compute_lane"),
+                "fallback_used": bool(row.get("fallback_used", False)),
+                "fallback_reason": row.get("fallback_reason"),
+                "backend_match": row.get("backend_match"),
+                "lane_match": row.get("lane_match"),
+                "executor_match": row.get("executor_match"),
+            }
+            for row in stage_rows
+            if bool(row.get("fallback_used", False))
+            or row.get("backend_match") is False
+            or row.get("lane_match") is False
+            or row.get("executor_match") is False
+        ],
+    }
+    backend_fallback_summary_path = campaign_root / "backend_fallback_summary.json"
+    backend_fallback_summary_path.write_text(
+        f"{json.dumps(backend_fallback_summary, indent=2)}\\n",
+        encoding="utf-8",
+    )
+
+    return {
+        "stage_execution_summary": str(stage_execution_summary_path.resolve()),
+        "stage_resource_summary": str(stage_resource_summary_path.resolve()),
+        "backend_fallback_summary": str(backend_fallback_summary_path.resolve()),
+    }
 
 
 def _resolve_tuning_enabled(params: dict[str, Any]) -> bool:
@@ -760,6 +975,7 @@ def run_decision_support_campaign(
             assignments_by_run_id: dict[str, dict[str, Any]] = {}
             job_results_by_run_id: dict[str, dict[str, Any]] = {}
             job_builder_blocked: dict[str, str] = {}
+            cells_for_execution_by_run_id: dict[str, dict[str, Any]] = {}
             sequential_only_group = _is_sequential_only_group(
                 group_experiment_ids=group_ids,
                 cells=[cell for _, cell in group_cells],
@@ -767,8 +983,11 @@ def run_decision_support_campaign(
 
             if not dry_run and runnable_cells:
                 run_requests: list[ComputeRunRequest] = []
-                request_cells: list[tuple[dict[str, Any], dict[str, Any], str]] = []
-                for experiment, cell in runnable_cells:
+                request_cells: list[tuple[dict[str, Any], dict[str, Any], str, int]] = []
+                run_id_by_group_index: dict[int, str] = {}
+                for group_index, (experiment, cell) in enumerate(group_cells):
+                    if not bool(cell.get("supported", False)):
+                        continue
                     exp_id = str(experiment["experiment_id"])
                     run_id = _resolve_variant_run_id(
                         experiment_id=exp_id,
@@ -782,7 +1001,9 @@ def run_decision_support_campaign(
                             model_name=str(cell.get("params", {}).get("model", "")),
                         )
                     )
-                    request_cells.append((experiment, cell, str(run_id)))
+                    run_id_by_group_index[int(group_index)] = str(run_id)
+                    request_cells.append((experiment, cell, str(run_id), int(group_index)))
+                    cells_for_execution_by_run_id[str(run_id)] = dict(cell)
                     global_order_index += 1
 
                 schedule = plan_compute_schedule(
@@ -797,88 +1018,160 @@ def run_decision_support_campaign(
                     str(assignment.run_id): assignment.to_payload() for assignment in schedule
                 }
 
-                jobs = []
-                for order_index, (experiment, cell, run_id) in enumerate(request_cells):
-                    assignment_payload = assignments_by_run_id.get(run_id)
-                    assigned_order_index_override = (
-                        _optional_int(assignment_payload.get("order_index"))
-                        if isinstance(assignment_payload, dict)
-                        else None
-                    )
-                    assigned_order_index = (
-                        int(assigned_order_index_override)
-                        if assigned_order_index_override is not None
-                        else int(order_index)
-                    )
-                    assignment = (
-                        None
-                        if assignment_payload is None
-                        else ComputeRunAssignment.from_payload(
-                            dict(assignment_payload),
-                            default_order_index=int(assigned_order_index),
-                            default_run_id=str(run_id),
-                            default_model_name=str(cell.get("params", {}).get("model", "")),
-                        )
-                    )
-                    job, blocked_reason, _ = _build_variant_official_job(
-                        experiment=experiment,
-                        variant=cell,
-                        campaign_id=campaign_id,
-                        experiment_root=output_root
-                        / str(experiment["experiment_id"])
-                        / campaign_id,
-                        index_csv=index_csv,
-                        data_root=data_root,
-                        cache_dir=cache_dir,
-                        seed=seed,
-                        n_permutations=n_permutations,
-                        phase_name=phase_name,
-                        order_index=int(assigned_order_index),
-                        hardware_mode=hardware_mode,
-                        gpu_device_id=gpu_device_id,
-                        deterministic_compute=bool(deterministic_compute),
-                        allow_backend_fallback=bool(allow_backend_fallback),
-                        scheduled_compute_assignment=assignment,
-                    )
-                    if job is None:
-                        job_builder_blocked[run_id] = str(blocked_reason or "job_build_failed")
-                        continue
-                    jobs.append(job)
-                    _emit_campaign_event(
-                        event_name="run_dispatched",
-                        scope="run",
-                        status="dispatched",
-                        stage="campaign",
-                        phase_name=phase_name,
-                        experiment_id=str(experiment["experiment_id"]),
-                        variant_id=_resolve_variant_id(cell),
-                        run_id=str(run_id),
-                        message="run dispatched",
-                    )
-                    _emit_campaign_event(
-                        event_name="run_started",
-                        scope="run",
-                        status="running",
-                        stage="campaign",
-                        phase_name=phase_name,
-                        experiment_id=str(experiment["experiment_id"]),
-                        variant_id=_resolve_variant_id(cell),
-                        run_id=str(run_id),
-                        message="run started",
-                    )
-
-                effective_parallelism = 1 if sequential_only_group else int(max_parallel_runs)
-
-                job_payloads = _execute_official_jobs(
-                    jobs=jobs,
-                    max_parallel_runs=effective_parallelism,
-                    run_experiment_fn=run_experiment_fn,
-                )
-                job_results_by_run_id = {
-                    str(payload["run_id"]): payload
-                    for payload in job_payloads
-                    if "run_id" in payload
+                request_cells_by_run_id = {
+                    str(run_id): (experiment, cell, group_index)
+                    for experiment, cell, run_id, group_index in request_cells
                 }
+                reuse_dependency_by_group_index = _plan_sibling_feature_matrix_reuse(
+                    variants=[cell for _, cell in group_cells],
+                    cache_dir=cache_dir,
+                )
+                reuse_dependency_by_run_id: dict[str, str] = {}
+                for dependent_index, anchor_index in reuse_dependency_by_group_index.items():
+                    dependent_run_id = run_id_by_group_index.get(int(dependent_index))
+                    anchor_run_id = run_id_by_group_index.get(int(anchor_index))
+                    if dependent_run_id is None or anchor_run_id is None:
+                        continue
+                    if dependent_run_id == anchor_run_id:
+                        continue
+                    reuse_dependency_by_run_id[str(dependent_run_id)] = str(anchor_run_id)
+
+                def _dispatch_requested_runs(
+                    *,
+                    requested_run_ids: set[str],
+                    variant_overrides: dict[str, dict[str, Any]] | None = None,
+                ) -> None:
+                    if not requested_run_ids:
+                        return
+
+                    jobs: list[Any] = []
+                    for order_index, (experiment, cell, run_id, _) in enumerate(request_cells):
+                        if run_id not in requested_run_ids:
+                            continue
+                        variant_for_job = (
+                            dict(variant_overrides[run_id])
+                            if isinstance(variant_overrides, dict) and run_id in variant_overrides
+                            else dict(cell)
+                        )
+                        cells_for_execution_by_run_id[run_id] = dict(variant_for_job)
+                        assignment_payload = assignments_by_run_id.get(run_id)
+                        assigned_order_index_override = (
+                            _optional_int(assignment_payload.get("order_index"))
+                            if isinstance(assignment_payload, dict)
+                            else None
+                        )
+                        assigned_order_index = (
+                            int(assigned_order_index_override)
+                            if assigned_order_index_override is not None
+                            else int(order_index)
+                        )
+                        assignment = (
+                            None
+                            if assignment_payload is None
+                            else ComputeRunAssignment.from_payload(
+                                dict(assignment_payload),
+                                default_order_index=int(assigned_order_index),
+                                default_run_id=str(run_id),
+                                default_model_name=str(
+                                    variant_for_job.get("params", {}).get("model", "")
+                                ),
+                            )
+                        )
+                        job, blocked_reason, _ = _build_variant_official_job(
+                            experiment=experiment,
+                            variant=variant_for_job,
+                            campaign_id=campaign_id,
+                            experiment_root=output_root
+                            / str(experiment["experiment_id"])
+                            / campaign_id,
+                            index_csv=index_csv,
+                            data_root=data_root,
+                            cache_dir=cache_dir,
+                            seed=seed,
+                            n_permutations=n_permutations,
+                            phase_name=phase_name,
+                            order_index=int(assigned_order_index),
+                            hardware_mode=hardware_mode,
+                            gpu_device_id=gpu_device_id,
+                            deterministic_compute=bool(deterministic_compute),
+                            allow_backend_fallback=bool(allow_backend_fallback),
+                            scheduled_compute_assignment=assignment,
+                            worker_execution_mode="native_worker",
+                        )
+                        if job is None:
+                            job_builder_blocked[run_id] = str(blocked_reason or "job_build_failed")
+                            continue
+                        jobs.append(job)
+                        _emit_campaign_event(
+                            event_name="run_dispatched",
+                            scope="run",
+                            status="dispatched",
+                            stage="campaign",
+                            phase_name=phase_name,
+                            experiment_id=str(experiment["experiment_id"]),
+                            variant_id=_resolve_variant_id(variant_for_job),
+                            run_id=str(run_id),
+                            message="run dispatched",
+                        )
+                        _emit_campaign_event(
+                            event_name="run_started",
+                            scope="run",
+                            status="running",
+                            stage="campaign",
+                            phase_name=phase_name,
+                            experiment_id=str(experiment["experiment_id"]),
+                            variant_id=_resolve_variant_id(variant_for_job),
+                            run_id=str(run_id),
+                            message="run started",
+                        )
+
+                    if not jobs:
+                        return
+                    effective_parallelism = 1 if sequential_only_group else int(max_parallel_runs)
+                    effective_gpu_parallelism = (
+                        0 if sequential_only_group else int(max_parallel_gpu_runs)
+                    )
+                    job_payloads = _execute_official_jobs(
+                        jobs=jobs,
+                        max_parallel_runs=effective_parallelism,
+                        max_parallel_gpu_runs=effective_gpu_parallelism,
+                        run_experiment_fn=run_experiment_fn,
+                    )
+                    for payload in job_payloads:
+                        if "run_id" not in payload:
+                            continue
+                        job_results_by_run_id[str(payload["run_id"])] = payload
+
+                dependent_run_ids = set(reuse_dependency_by_run_id.keys())
+                first_wave_run_ids = {
+                    str(run_id)
+                    for _, _, run_id, _ in request_cells
+                    if str(run_id) not in dependent_run_ids
+                }
+                _dispatch_requested_runs(requested_run_ids=first_wave_run_ids)
+
+                if dependent_run_ids:
+                    second_wave_overrides: dict[str, dict[str, Any]] = {}
+                    for dependent_run_id, anchor_run_id in reuse_dependency_by_run_id.items():
+                        anchor_result = job_results_by_run_id.get(str(anchor_run_id))
+                        base_feature_matrix_id = _extract_feature_matrix_artifact_id(anchor_result)
+                        if base_feature_matrix_id is None:
+                            continue
+                        request_row = request_cells_by_run_id.get(str(dependent_run_id))
+                        if request_row is None:
+                            continue
+                        _, original_variant, _ = request_row
+                        second_wave_overrides[str(dependent_run_id)] = (
+                            _apply_feature_matrix_reuse_variant(
+                                variant=original_variant,
+                                base_artifact_id=str(base_feature_matrix_id),
+                                source_run_id=str(anchor_run_id),
+                            )
+                        )
+                    _dispatch_requested_runs(
+                        requested_run_ids=dependent_run_ids,
+                        variant_overrides=second_wave_overrides,
+                    )
 
             for experiment, cell in group_cells:
                 exp_id = str(experiment["experiment_id"])
@@ -889,7 +1182,8 @@ def run_decision_support_campaign(
                     campaign_id=campaign_id,
                 )
 
-                cell_for_record = dict(cell)
+                planned_cell = cells_for_execution_by_run_id.get(run_id, cell)
+                cell_for_record = dict(planned_cell)
                 if run_id in job_builder_blocked:
                     cell_for_record["supported"] = False
                     cell_for_record["blocked_reason"] = str(job_builder_blocked[run_id])
@@ -1183,6 +1477,10 @@ def run_decision_support_campaign(
         campaign_root=campaign_root,
         variant_records=all_variant_records,
     )
+    stage_evidence_summary_paths = _write_stage_evidence_summaries(
+        campaign_root=campaign_root,
+        variant_records=all_variant_records,
+    )
 
     summary_df = _summarize_by_experiment(
         experiments=selected_experiments,
@@ -1343,6 +1641,21 @@ def run_decision_support_campaign(
             "result_aggregation": str(aggregation_path.resolve()),
             "summary_outputs_export": str(summary_output_path.resolve()),
             "stage_summaries": [str(path.resolve()) for path in stage_summary_paths],
+            "stage_execution_summary": (
+                stage_evidence_summary_paths.get("stage_execution_summary")
+                if isinstance(stage_evidence_summary_paths, dict)
+                else None
+            ),
+            "stage_resource_summary": (
+                stage_evidence_summary_paths.get("stage_resource_summary")
+                if isinstance(stage_evidence_summary_paths, dict)
+                else None
+            ),
+            "backend_fallback_summary": (
+                stage_evidence_summary_paths.get("backend_fallback_summary")
+                if isinstance(stage_evidence_summary_paths, dict)
+                else None
+            ),
             "stage_decision_notes": [str(path.resolve()) for path in stage_decision_paths],
             "phase_artifacts": list(phase_artifact_paths),
             "phase_skip_summary": str(phase_skip_summary_path.resolve()),
@@ -1383,6 +1696,21 @@ def run_decision_support_campaign(
         "result_aggregation_path": str(aggregation_path.resolve()),
         "summary_outputs_export_path": str(summary_output_path.resolve()),
         "phase_skip_summary_path": str(phase_skip_summary_path.resolve()),
+        "stage_execution_summary_path": (
+            stage_evidence_summary_paths.get("stage_execution_summary")
+            if isinstance(stage_evidence_summary_paths, dict)
+            else None
+        ),
+        "stage_resource_summary_path": (
+            stage_evidence_summary_paths.get("stage_resource_summary")
+            if isinstance(stage_evidence_summary_paths, dict)
+            else None
+        ),
+        "backend_fallback_summary_path": (
+            stage_evidence_summary_paths.get("backend_fallback_summary")
+            if isinstance(stage_evidence_summary_paths, dict)
+            else None
+        ),
         "eta_state_path": str((campaign_root / "eta_state.json").resolve()),
         "eta_calibration_path": eta_calibration_path,
         "runtime_history_path": str(history_path.resolve()),

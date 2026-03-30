@@ -103,3 +103,32 @@ def test_event_bus_recent_events_is_bounded(tmp_path: Path) -> None:
     recent_events = list(live_payload["recent_events"])
     assert len(recent_events) == 3
     assert recent_events[-1]["run_id"] == "r5"
+
+
+def test_event_bus_normalizes_stage_metadata_keys(tmp_path: Path) -> None:
+    campaign_root = tmp_path / "campaigns" / "c3"
+    bus = ExecutionEventBus(campaign_root=campaign_root, campaign_id="c3")
+    bus.emit_event(
+        event_name="stage_update",
+        scope="run",
+        status="running",
+        stage="stage",
+        run_id="r1",
+        metadata={
+            "section": "model_fit",
+            "planned_compute_lane": "cpu",
+            "planned_backend_family": "sklearn_cpu",
+            "actual_estimator_backend_family": "torch_gpu",
+            "actual_estimator_backend_id": "torch_ridge_gpu_v2",
+            "fallback_used": "true",
+        },
+    )
+    events = _read_jsonl(campaign_root / "execution_events.jsonl")
+    metadata = dict(events[-1]["metadata"])
+    assert metadata["run_id"] == "r1"
+    assert metadata["stage_key"] == "model_fit"
+    assert metadata["assigned_compute_lane"] == "cpu"
+    assert metadata["assigned_backend_family"] == "sklearn_cpu"
+    assert metadata["observed_backend_family"] == "torch_gpu"
+    assert metadata["observed_executor_id"] == "torch_ridge_gpu_v2"
+    assert metadata["fallback_used"] is True

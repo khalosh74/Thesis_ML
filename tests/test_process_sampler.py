@@ -49,10 +49,15 @@ def test_process_sampler_writes_samples_and_summary(tmp_path: Path) -> None:
     assert all("pid" in row for row in samples)
     assert all("cpu_percent" in row for row in samples)
     assert all("rss_mb" in row for row in samples)
+    assert all("gpu_sampling_enabled" in row for row in samples)
+    assert all("gpu_sampling_reason" in row for row in samples)
 
     loaded_summary = json.loads(summary_path.read_text(encoding="utf-8"))
     assert loaded_summary["sample_count"] >= 1
     assert loaded_summary["child_pid"] == int(process.pid)
     assert loaded_summary["termination_method"] == "normal_exit"
     assert loaded_summary["sampling_enabled"] in {True, False}
+    assert loaded_summary["gpu_sampling_enabled"] in {True, False}
+    assert isinstance(loaded_summary["gpu_sampling_reason"], str)
+    assert "gpu_sample_count" in loaded_summary
     assert summary["sample_count"] == loaded_summary["sample_count"]

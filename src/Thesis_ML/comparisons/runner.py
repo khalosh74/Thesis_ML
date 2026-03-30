@@ -38,6 +38,7 @@ from Thesis_ML.experiments.model_admission import (
 from Thesis_ML.experiments.parallel_execution import (
     OfficialRunJob,
     execute_official_run_jobs,
+    resolve_official_job_resource_lane_hint,
 )
 from Thesis_ML.experiments.run_states import (
     RUN_STATUS_FAILED,
@@ -135,6 +136,16 @@ def _resolve_official_comparison_schedule_assignments(
         gpu_model_allowlist=_official_locked_comparison_max_both_gpu_models(),
     )
     return {str(assignment.run_id): assignment.to_payload() for assignment in schedule}
+
+
+def _resolve_official_comparison_max_parallel_gpu_runs_effective(
+    *,
+    compute_policy: ResolvedComputePolicy,
+) -> int:
+    requested_mode = str(compute_policy.hardware_mode_requested).strip().lower()
+    if requested_mode in {GPU_ONLY, MAX_BOTH}:
+        return int(_OFFICIAL_LOCKED_COMPARISON_MAX_PARALLEL_GPU_RUNS)
+    return 0
 
 
 def _comparison_output_dir(comparison: ComparisonSpec, reports_root: Path | str) -> Path:
@@ -573,6 +584,11 @@ def execute_compiled_comparison(
         compiled_manifest=compiled_manifest,
         compute_policy=resolved_compute_policy,
     )
+    resolved_max_parallel_gpu_runs_effective = (
+        _resolve_official_comparison_max_parallel_gpu_runs_effective(
+            compute_policy=resolved_compute_policy
+        )
+    )
 
     run_results: list[ComparisonRunResult] = []
     run_index_rows: list[dict[str, Any]] = []
@@ -850,6 +866,12 @@ def execute_compiled_comparison(
                         "suite_id": None,
                         "variant_id": spec.variant_id,
                     },
+                    resource_lane_hint=resolve_official_job_resource_lane_hint(
+                        hardware_mode=hardware_mode,
+                        scheduled_compute_assignment=scheduled_assignment_payload,
+                    ),
+                    scheduled_compute_assignment=scheduled_assignment_payload,
+                    worker_execution_mode="subprocess_worker",
                 )
             )
             job_metadata_by_order[order_index] = {
@@ -896,6 +918,7 @@ def execute_compiled_comparison(
     dispatch_results = execute_official_run_jobs(
         jobs=dispatch_jobs,
         max_parallel_runs=resolved_max_parallel_runs,
+        max_parallel_gpu_runs=resolved_max_parallel_gpu_runs_effective,
         watchdog_executor=execute_run_with_timeout_watchdog,
     )
     for dispatched in dispatch_results:
@@ -1118,6 +1141,7 @@ def execute_compiled_comparison(
         "n_skipped_due_to_policy": int(n_skipped_due_to_policy),
         "n_planned": int(n_planned),
         "max_parallel_runs_effective": int(resolved_max_parallel_runs),
+        "max_parallel_gpu_runs_effective": int(resolved_max_parallel_gpu_runs_effective),
         "stage_timings_seconds": {key: round(value, 6) for key, value in stage_timings.items()},
         "artifact_paths": artifact_paths,
         "artifact_verification": artifact_verification,

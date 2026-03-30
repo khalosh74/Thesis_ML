@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any, Literal
 
@@ -11,7 +12,7 @@ from Thesis_ML.experiments.compute_policy import (
     extract_compute_policy_payload,
 )
 
-StageStatus = Literal["planned", "executed", "reused", "skipped", "not_planned"]
+StageStatus = Literal["planned", "executed", "reused", "skipped", "not_planned", "missing"]
 ComputeLane = Literal["cpu", "gpu"]
 StageExecutionPolicySource = Literal["run_level_compute_policy_bridge_v1"]
 StageAssignmentSource = Literal["run_level_default_assignment_v1", "stage_planner_v1"]
@@ -74,6 +75,42 @@ class StageExecutionTelemetry(_StageModel):
     stage: StageKey
     status: StageStatus
     duration_seconds: float | None = None
+    planned_backend_family: StageBackendFamily | None = None
+    planned_compute_lane: ComputeLane | None = None
+    planned_executor_id: str | None = None
+    official_admitted: bool | None = None
+    assignment_source: str | None = None
+    observed_backend_family: StageBackendFamily | None = None
+    observed_compute_lane: ComputeLane | None = None
+    observed_executor_id: str | None = None
+    fallback_used: bool | None = None
+    fallback_reason: str | None = None
+    execution_mode: str | None = None
+    started_at_utc: str | None = None
+    ended_at_utc: str | None = None
+    duration_source: str | None = None
+    resource_coverage: str | None = None
+    evidence_quality: str | None = None
+    mean_cpu_percent: float | None = None
+    peak_cpu_percent: float | None = None
+    peak_rss_mb: float | None = None
+    peak_vms_mb: float | None = None
+    peak_thread_count: int | None = None
+    read_bytes_delta: int | None = None
+    write_bytes_delta: int | None = None
+    peak_gpu_memory_mb: float | None = None
+    peak_gpu_utilization_percent: float | None = None
+    mean_gpu_utilization_percent: float | None = None
+    primary_artifacts: list[str] = Field(default_factory=list)
+    status_source: str | None = None
+    derived_from_stage: StageKey | None = None
+    planning_match: bool | None = None
+    backend_match: bool | None = None
+    lane_match: bool | None = None
+    executor_match: bool | None = None
+    fallback_expected: bool | None = None
+    observed_evidence_present: bool = False
+    missing_observed_evidence: bool = False
     details: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")
@@ -135,6 +172,106 @@ def _default_compute_lane_for_backend(backend_family: StageBackendFamily) -> Com
         if backend_family in {StageBackendFamily.TORCH_GPU, StageBackendFamily.XGBOOST_GPU}
         else "cpu"
     )
+
+
+def _parse_utc_timestamp(value: Any) -> datetime | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    text = value.strip()
+    if text.endswith("Z"):
+        text = f"{text[:-1]}+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
+
+
+def _coerce_float(value: Any) -> float | None:
+    if isinstance(value, (int, float)):
+        return float(value)
+    return None
+
+
+def _duration_from_interval(
+    *,
+    started_at_utc: str | None,
+    ended_at_utc: str | None,
+) -> float | None:
+    start = _parse_utc_timestamp(started_at_utc)
+    end = _parse_utc_timestamp(ended_at_utc)
+    if start is None or end is None:
+        return None
+    return max(0.0, float((end - start).total_seconds()))
+
+
+def _normalize_observed_stage_evidence(
+    value: Mapping[str, Mapping[str, Any]] | None,
+) -> dict[StageKey, dict[str, Any]]:
+    if value is None:
+        return {}
+    normalized: dict[StageKey, dict[str, Any]] = {}
+    for raw_key, raw_payload in dict(value).items():
+        if not isinstance(raw_payload, Mapping):
+            continue
+        try:
+            stage_key = StageKey(str(raw_key))
+        except ValueError:
+            continue
+        normalized[stage_key] = {str(key): item for key, item in dict(raw_payload).items()}
+    return normalized
+
+
+def _normalize_stage_resource_map(
+    value: Mapping[str, Mapping[str, Any]] | None,
+) -> dict[StageKey, dict[str, Any]]:
+    if value is None:
+        return {}
+    normalized: dict[StageKey, dict[str, Any]] = {}
+    for raw_key, raw_payload in dict(value).items():
+        if not isinstance(raw_payload, Mapping):
+            continue
+        try:
+            stage_key = StageKey(str(raw_key))
+        except ValueError:
+            continue
+        normalized[stage_key] = {str(key): item for key, item in dict(raw_payload).items()}
+    return normalized
+
+
+def _coerce_stage_status(value: Any) -> StageStatus | None:
+    if not isinstance(value, str):
+        return None
+    candidate = value.strip().lower()
+    if candidate in {"planned", "executed", "reused", "skipped", "not_planned", "missing"}:
+        return candidate  # type: ignore[return-value]
+    if candidate == "started":
+        return "planned"
+    return None
+
+
+def _evidence_quality_for_stage(
+    *,
+    status: StageStatus,
+    observed_present: bool,
+    duration_seconds: float | None,
+    resource_coverage: str | None,
+) -> str:
+    if status == "not_planned":
+        return "high"
+    if not observed_present:
+        if status in {"executed", "reused"}:
+            return "low"
+        return "medium"
+    if resource_coverage == "high":
+        return "high"
+    if resource_coverage == "partial":
+        return "medium"
+    if duration_seconds is not None:
+        return "medium"
+    return "low"
 
 
 def _policy_from_compute_policy(
@@ -248,6 +385,8 @@ def build_stage_execution_result(
     reporting_status: StageStatus = "planned",
     actual_estimator_backend_family: str | None = None,
     planned_assignments: Sequence[StageAssignment | Mapping[str, Any]] | None = None,
+    observed_stage_evidence: Mapping[str, Mapping[str, Any]] | None = None,
+    stage_resource_attribution: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> StageExecutionResult:
     policy = _policy_from_compute_policy(compute_policy)
     effective_compute_backend = (
@@ -318,6 +457,10 @@ def build_stage_execution_result(
                 str(key): value for key, value in dict(raw_metadata).items()
             }
 
+    observed_stage_map = _normalize_observed_stage_evidence(observed_stage_evidence)
+    stage_resource_map = _normalize_stage_resource_map(stage_resource_attribution)
+    observed_evidence_enabled = observed_stage_evidence is not None
+
     telemetry_rows: list[StageExecutionTelemetry] = []
     for stage in StageKey:
         assignment = assignment_map[stage]
@@ -328,6 +471,32 @@ def build_stage_execution_result(
             n_permutations=int(n_permutations),
             reporting_status=reporting_status,
         )
+        observed_payload = dict(observed_stage_map.get(stage, {}))
+        resource_payload = dict(stage_resource_map.get(stage, {}))
+        if not resource_payload and isinstance(observed_payload.get("resource_summary"), Mapping):
+            resource_payload = {
+                str(key): value
+                for key, value in dict(observed_payload["resource_summary"]).items()
+            }
+        observed_status = _coerce_stage_status(
+            observed_payload.get("observed_status") or observed_payload.get("status")
+        )
+        status_source = "planned_section_status"
+        if observed_status is not None:
+            status = observed_status
+            status_source = str(observed_payload.get("status_source") or "observed_stage_evidence")
+
+        started_at_utc = (
+            str(observed_payload.get("started_at_utc"))
+            if isinstance(observed_payload.get("started_at_utc"), str)
+            else None
+        )
+        ended_at_utc = (
+            str(observed_payload.get("ended_at_utc"))
+            if isinstance(observed_payload.get("ended_at_utc"), str)
+            else None
+        )
+
         details: dict[str, Any] = {}
         if assignment.executor_id is not None:
             details["executor_id"] = str(assignment.executor_id)
@@ -335,30 +504,242 @@ def build_stage_execution_result(
             details["equivalence_class"] = str(assignment.equivalence_class)
         if assignment.fallback_reason is not None:
             details["fallback_reason"] = str(assignment.fallback_reason)
+        details["planned_backend_family"] = str(assignment.backend_family)
+        details["planned_compute_lane"] = (
+            str(assignment.compute_lane) if assignment.compute_lane is not None else None
+        )
+        details["planned_executor_id"] = (
+            str(assignment.executor_id) if assignment.executor_id is not None else None
+        )
+        details["official_admitted"] = assignment.official_admitted
+        details["assignment_source"] = str(assignment.source)
         if stage in _MODEL_FIT_DEPENDENT_STAGES:
             details["derived_from"] = StageKey.MODEL_FIT.value
         elif stage in _EVALUATION_DEPENDENT_STAGES:
             details["derived_from"] = StageKey.EVALUATION.value
+
         duration_seconds = stage_durations.get(stage)
         metadata_payload = stage_duration_metadata.get(stage)
         if isinstance(metadata_payload, Mapping):
             details.update({str(key): value for key, value in metadata_payload.items()})
-        if duration_seconds is None and "duration_source" not in details:
+        duration_source: str | None = (
+            str(details.get("duration_source"))
+            if isinstance(details.get("duration_source"), str)
+            else None
+        )
+        observed_duration = _coerce_float(observed_payload.get("duration_seconds"))
+        if duration_seconds is None and observed_duration is not None:
+            duration_seconds = observed_duration
+            if duration_source is None:
+                duration_source = "observed_stage_evidence"
+        if duration_seconds is None:
+            interval_duration = _duration_from_interval(
+                started_at_utc=started_at_utc,
+                ended_at_utc=ended_at_utc,
+            )
+            if interval_duration is not None:
+                duration_seconds = interval_duration
+                if duration_source is None:
+                    duration_source = "observed_stage_interval"
+        if duration_source is None and isinstance(observed_payload.get("duration_source"), str):
+            duration_source = str(observed_payload.get("duration_source"))
+        if duration_source is None:
             if stage in _MODEL_FIT_DEPENDENT_STAGES or stage in _EVALUATION_DEPENDENT_STAGES:
-                details["duration_source"] = "unavailable_derived_stage"
-                details.setdefault(
-                    "fallback_reason",
-                    "no_direct_duration_measurement",
-                )
+                duration_source = "unavailable_derived_stage"
+                details.setdefault("fallback_reason", "no_direct_duration_measurement")
             else:
-                details["duration_source"] = "unavailable"
+                duration_source = "unavailable"
+        details["duration_source"] = duration_source
+
+        observed_backend_candidate = observed_payload.get("observed_backend_family")
+        if not isinstance(observed_backend_candidate, str) and stage == StageKey.MODEL_FIT:
+            observed_backend_candidate = actual_estimator_backend_family
+        observed_backend_family = (
+            _coerce_backend_family(observed_backend_candidate)
+            if isinstance(observed_backend_candidate, str) and observed_backend_candidate.strip()
+            else None
+        )
+        observed_compute_lane = (
+            str(observed_payload.get("observed_compute_lane"))
+            if isinstance(observed_payload.get("observed_compute_lane"), str)
+            and str(observed_payload.get("observed_compute_lane")).strip()
+            else None
+        )
+        observed_executor_id = (
+            str(observed_payload.get("observed_executor_id"))
+            if isinstance(observed_payload.get("observed_executor_id"), str)
+            and str(observed_payload.get("observed_executor_id")).strip()
+            else None
+        )
+        fallback_used = (
+            bool(observed_payload.get("fallback_used"))
+            if isinstance(observed_payload.get("fallback_used"), bool)
+            else bool(assignment.fallback_used)
+        )
+        fallback_reason = (
+            str(observed_payload.get("fallback_reason"))
+            if isinstance(observed_payload.get("fallback_reason"), str)
+            and str(observed_payload.get("fallback_reason")).strip()
+            else (str(assignment.fallback_reason) if assignment.fallback_reason else None)
+        )
+        execution_mode = (
+            str(observed_payload.get("execution_mode"))
+            if isinstance(observed_payload.get("execution_mode"), str)
+            and str(observed_payload.get("execution_mode")).strip()
+            else None
+        )
+        primary_artifacts = (
+            [str(item) for item in observed_payload.get("primary_artifacts", []) if str(item).strip()]
+            if isinstance(observed_payload.get("primary_artifacts"), list)
+            else []
+        )
+
+        resource_coverage = (
+            str(resource_payload.get("resource_coverage"))
+            if isinstance(resource_payload.get("resource_coverage"), str)
+            and str(resource_payload.get("resource_coverage")).strip()
+            else (
+                str(observed_payload.get("resource_coverage"))
+                if isinstance(observed_payload.get("resource_coverage"), str)
+                and str(observed_payload.get("resource_coverage")).strip()
+                else None
+            )
+        )
+        observed_present = bool(
+            observed_payload
+            and (
+                started_at_utc is not None
+                or ended_at_utc is not None
+                or observed_status is not None
+                or observed_backend_family is not None
+                or observed_executor_id is not None
+            )
+        )
+        missing_observed_evidence = bool(
+            observed_evidence_enabled and status in {"executed", "reused"} and not observed_present
+        )
+        if missing_observed_evidence:
+            status = "missing"
+            status_source = "missing_observed_evidence"
+
+        backend_match = (
+            bool(observed_backend_family == assignment.backend_family)
+            if observed_backend_family is not None
+            else None
+        )
+        lane_match = (
+            bool(observed_compute_lane == assignment.compute_lane)
+            if observed_compute_lane is not None and assignment.compute_lane is not None
+            else None
+        )
+        executor_match = (
+            bool(observed_executor_id == assignment.executor_id)
+            if observed_executor_id is not None and assignment.executor_id is not None
+            else None
+        )
+        match_components = [
+            match for match in (backend_match, lane_match, executor_match) if match is not None
+        ]
+        planning_match = bool(all(match_components)) if match_components else None
+        fallback_expected = bool(assignment.fallback_used)
+        derived_from_stage: StageKey | None = None
+        derived_from_stage_raw = observed_payload.get("derived_from_stage")
+        if isinstance(derived_from_stage_raw, str):
+            try:
+                derived_from_stage = StageKey(str(derived_from_stage_raw))
+            except ValueError:
+                derived_from_stage = None
+        elif stage in _MODEL_FIT_DEPENDENT_STAGES:
+            derived_from_stage = StageKey.MODEL_FIT
+        elif stage in _EVALUATION_DEPENDENT_STAGES:
+            derived_from_stage = StageKey.EVALUATION
+
+        evidence_quality = (
+            str(observed_payload.get("evidence_quality"))
+            if isinstance(observed_payload.get("evidence_quality"), str)
+            and str(observed_payload.get("evidence_quality")).strip()
+            else (
+                str(resource_payload.get("evidence_quality"))
+                if isinstance(resource_payload.get("evidence_quality"), str)
+                and str(resource_payload.get("evidence_quality")).strip()
+                else _evidence_quality_for_stage(
+                    status=status,
+                    observed_present=observed_present,
+                    duration_seconds=duration_seconds,
+                    resource_coverage=resource_coverage,
+                )
+            )
+        )
+
+        if resource_payload:
+            details["resource_summary"] = dict(resource_payload)
+        details["status_source"] = status_source
+        details["observed_evidence_present"] = observed_present
+        details["missing_observed_evidence"] = missing_observed_evidence
+        details["resource_coverage"] = resource_coverage
+        details["planning_match"] = planning_match
+        details["backend_match"] = backend_match
+        details["lane_match"] = lane_match
+        details["executor_match"] = executor_match
+        details["fallback_expected"] = fallback_expected
+
         telemetry_rows.append(
             StageExecutionTelemetry(
                 stage=stage,
                 status=status,
-                duration_seconds=(
-                    float(duration_seconds) if duration_seconds is not None else None
+                duration_seconds=(float(duration_seconds) if duration_seconds is not None else None),
+                planned_backend_family=assignment.backend_family,
+                planned_compute_lane=assignment.compute_lane,
+                planned_executor_id=assignment.executor_id,
+                official_admitted=assignment.official_admitted,
+                assignment_source=str(assignment.source),
+                observed_backend_family=observed_backend_family,
+                observed_compute_lane=observed_compute_lane,
+                observed_executor_id=observed_executor_id,
+                fallback_used=fallback_used,
+                fallback_reason=fallback_reason,
+                execution_mode=execution_mode,
+                started_at_utc=started_at_utc,
+                ended_at_utc=ended_at_utc,
+                duration_source=duration_source,
+                resource_coverage=resource_coverage,
+                evidence_quality=evidence_quality,
+                mean_cpu_percent=_coerce_float(resource_payload.get("mean_cpu_percent")),
+                peak_cpu_percent=_coerce_float(resource_payload.get("peak_cpu_percent")),
+                peak_rss_mb=_coerce_float(resource_payload.get("peak_rss_mb")),
+                peak_vms_mb=_coerce_float(resource_payload.get("peak_vms_mb")),
+                peak_thread_count=(
+                    int(resource_payload.get("peak_thread_count"))
+                    if isinstance(resource_payload.get("peak_thread_count"), int)
+                    else None
                 ),
+                read_bytes_delta=(
+                    int(resource_payload.get("read_bytes_delta"))
+                    if isinstance(resource_payload.get("read_bytes_delta"), int)
+                    else None
+                ),
+                write_bytes_delta=(
+                    int(resource_payload.get("write_bytes_delta"))
+                    if isinstance(resource_payload.get("write_bytes_delta"), int)
+                    else None
+                ),
+                peak_gpu_memory_mb=_coerce_float(resource_payload.get("peak_gpu_memory_mb")),
+                peak_gpu_utilization_percent=_coerce_float(
+                    resource_payload.get("peak_gpu_utilization_percent")
+                ),
+                mean_gpu_utilization_percent=_coerce_float(
+                    resource_payload.get("mean_gpu_utilization_percent")
+                ),
+                primary_artifacts=primary_artifacts,
+                status_source=status_source,
+                derived_from_stage=derived_from_stage,
+                planning_match=planning_match,
+                backend_match=backend_match,
+                lane_match=lane_match,
+                executor_match=executor_match,
+                fallback_expected=fallback_expected,
+                observed_evidence_present=observed_present,
+                missing_observed_evidence=missing_observed_evidence,
                 details=details,
             )
         )

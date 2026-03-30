@@ -90,6 +90,88 @@ def _write_registry(path: Path) -> None:
     path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
 
+def _write_reuse_registry(path: Path) -> None:
+    payload = {
+        "schema_version": "test",
+        "experiments": [
+            {
+                "experiment_id": "E06",
+                "title": "Model family lock",
+                "stage": "Stage 3 - Model lock",
+                "decision_id": "D03",
+                "manipulated_factor": "model",
+                "primary_metric": "balanced_accuracy",
+                "variant_templates": [
+                    {
+                        "template_id": "ridge_variant",
+                        "supported": True,
+                        "params": {
+                            "target": "coarse_affect",
+                            "model": "ridge",
+                            "cv": "within_subject_loso_session",
+                            "subject": "sub-001",
+                        },
+                    },
+                    {
+                        "template_id": "balanced_variant",
+                        "supported": True,
+                        "n_permutations_override": 3,
+                        "params": {
+                            "target": "coarse_affect",
+                            "model": "ridge",
+                            "cv": "within_subject_loso_session",
+                            "subject": "sub-001",
+                        },
+                    },
+                ],
+            }
+        ],
+    }
+    path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+
+
+def _write_non_reuse_registry(path: Path, roi_spec_path: Path) -> None:
+    payload = {
+        "schema_version": "test",
+        "experiments": [
+            {
+                "experiment_id": "E06",
+                "title": "Representation lock",
+                "stage": "Stage 3 - Model lock",
+                "decision_id": "D03",
+                "manipulated_factor": "feature_space",
+                "primary_metric": "balanced_accuracy",
+                "variant_templates": [
+                    {
+                        "template_id": "whole_brain_variant",
+                        "supported": True,
+                        "params": {
+                            "target": "coarse_affect",
+                            "model": "ridge",
+                            "cv": "within_subject_loso_session",
+                            "subject": "sub-001",
+                            "feature_space": "whole_brain_masked",
+                        },
+                    },
+                    {
+                        "template_id": "roi_variant",
+                        "supported": True,
+                        "params": {
+                            "target": "coarse_affect",
+                            "model": "ridge",
+                            "cv": "within_subject_loso_session",
+                            "subject": "sub-001",
+                            "feature_space": "roi_masked",
+                            "roi_spec_path": str(roi_spec_path),
+                        },
+                    },
+                ],
+            }
+        ],
+    }
+    path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+
+
 def _success_payload_for_jobs(jobs: list[OfficialRunJob]) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for job in jobs:
@@ -156,13 +238,21 @@ def test_native_dispatch_uses_official_jobs_for_same_phase_group(
 
     captured: list[dict[str, Any]] = []
 
-    def _fake_execute_official_jobs(*, jobs: list[OfficialRunJob], max_parallel_runs: int, run_experiment_fn=None):
+    def _fake_execute_official_jobs(
+        *,
+        jobs: list[OfficialRunJob],
+        max_parallel_runs: int,
+        max_parallel_gpu_runs: int,
+        run_experiment_fn=None,
+    ):
         captured.append(
             {
                 "jobs": jobs,
                 "max_parallel_runs": int(max_parallel_runs),
+                "max_parallel_gpu_runs": int(max_parallel_gpu_runs),
                 "run_ids": [str(job.run_id) for job in jobs],
                 "experiment_ids": [str(job.run_identity.get("experiment_id")) for job in jobs],
+                "worker_execution_modes": [str(job.worker_execution_mode) for job in jobs],
             }
         )
         return _success_payload_for_jobs(jobs)
@@ -182,14 +272,17 @@ def test_native_dispatch_uses_official_jobs_for_same_phase_group(
         n_permutations=0,
         dry_run=False,
         max_parallel_runs=3,
+        max_parallel_gpu_runs=2,
         run_experiment_fn=_stub_run_experiment,
     )
 
     assert captured
     first_dispatch = captured[0]
     assert first_dispatch["max_parallel_runs"] == 3
+    assert first_dispatch["max_parallel_gpu_runs"] == 2
     assert all(isinstance(job, OfficialRunJob) for job in first_dispatch["jobs"])
     assert {"E02", "E03"} <= set(first_dispatch["experiment_ids"])
+    assert set(first_dispatch["worker_execution_modes"]) == {"native_worker"}
 
 
 def test_e24_dispatch_forces_serial_execution(
@@ -201,11 +294,17 @@ def test_e24_dispatch_forces_serial_execution(
     _write_registry(registry_path)
     _write_index(index_csv)
 
-    captured_parallelism: list[int] = []
+    captured_parallelism: list[tuple[int, int]] = []
 
-    def _fake_execute_official_jobs(*, jobs: list[OfficialRunJob], max_parallel_runs: int, run_experiment_fn=None):
+    def _fake_execute_official_jobs(
+        *,
+        jobs: list[OfficialRunJob],
+        max_parallel_runs: int,
+        max_parallel_gpu_runs: int,
+        run_experiment_fn=None,
+    ):
         if any(str(job.run_identity.get("experiment_id")) == "E24" for job in jobs):
-            captured_parallelism.append(int(max_parallel_runs))
+            captured_parallelism.append((int(max_parallel_runs), int(max_parallel_gpu_runs)))
         return _success_payload_for_jobs(jobs)
 
     monkeypatch.setattr(campaign_engine, "_execute_official_jobs", _fake_execute_official_jobs)
@@ -223,7 +322,152 @@ def test_e24_dispatch_forces_serial_execution(
         n_permutations=0,
         dry_run=False,
         max_parallel_runs=4,
+        max_parallel_gpu_runs=2,
         run_experiment_fn=_stub_run_experiment,
     )
 
-    assert captured_parallelism == [1]
+    assert captured_parallelism == [(1, 0)]
+
+
+def test_campaign_reuse_fan_out_starts_dependent_runs_from_shared_feature_matrix(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    registry_path = tmp_path / "registry_reuse.json"
+    index_csv = tmp_path / "index.csv"
+    _write_reuse_registry(registry_path)
+    _write_index(index_csv)
+
+    captured_dispatches: list[list[OfficialRunJob]] = []
+
+    def _fake_execute_official_jobs(
+        *,
+        jobs: list[OfficialRunJob],
+        max_parallel_runs: int,
+        max_parallel_gpu_runs: int,
+        run_experiment_fn=None,
+    ):
+        captured_dispatches.append(list(jobs))
+        rows: list[dict[str, Any]] = []
+        for job in jobs:
+            run_id = str(job.run_id)
+            rows.append(
+                {
+                    "run_id": run_id,
+                    "watchdog_result": {
+                        "status": "success",
+                        "run_payload": {
+                            "run_id": run_id,
+                            "report_dir": f"/tmp/{run_id}",
+                            "config_path": f"/tmp/{run_id}/config.json",
+                            "metrics_path": f"/tmp/{run_id}/metrics.json",
+                            "fold_metrics_path": f"/tmp/{run_id}/fold_metrics.csv",
+                            "fold_splits_path": f"/tmp/{run_id}/fold_splits.csv",
+                            "predictions_path": f"/tmp/{run_id}/predictions.csv",
+                            "spatial_compatibility_report_path": f"/tmp/{run_id}/spatial.json",
+                            "artifact_ids": {
+                                "feature_cache": f"fc_{run_id}",
+                                "feature_matrix_bundle": f"fm_{run_id}",
+                            },
+                            "metrics": {
+                                "balanced_accuracy": 0.6,
+                                "macro_f1": 0.58,
+                                "accuracy": 0.62,
+                                "n_folds": 2,
+                            },
+                        },
+                    },
+                    "execution_error": None,
+                }
+            )
+        return rows
+
+    monkeypatch.setattr(campaign_engine, "_execute_official_jobs", _fake_execute_official_jobs)
+
+    result = campaign_engine.run_decision_support_campaign(
+        registry_path=registry_path,
+        index_csv=index_csv,
+        data_root=tmp_path / "Data",
+        cache_dir=tmp_path / "cache",
+        output_root=tmp_path / "outputs",
+        experiment_id="E06",
+        stage=None,
+        run_all=False,
+        seed=42,
+        n_permutations=0,
+        dry_run=False,
+        max_parallel_runs=4,
+        max_parallel_gpu_runs=0,
+        run_experiment_fn=_stub_run_experiment,
+    )
+
+    assert len(captured_dispatches) == 2
+    assert len(captured_dispatches[0]) == 1
+    assert len(captured_dispatches[1]) == 1
+
+    anchor_job = captured_dispatches[0][0]
+    dependent_job = captured_dispatches[1][0]
+    assert dependent_job.run_kwargs["start_section"] == "spatial_validation"
+    assert dependent_job.run_kwargs["base_artifact_id"] == f"fm_{anchor_job.run_id}"
+    assert dependent_job.run_kwargs["reuse_policy"] == "require_explicit_base"
+
+    campaign_id = Path(str(result["campaign_root"])).name
+    manifests_dir = tmp_path / "outputs" / "E06" / campaign_id / "run_manifests"
+    payloads = [
+        json.loads(path.read_text(encoding="utf-8"))
+        for path in sorted(manifests_dir.glob("*.json"))
+    ]
+    assert any(
+        str(row.get("config_used", {}).get("start_section")) == "spatial_validation"
+        and str(row.get("config_used", {}).get("base_artifact_id", "")).startswith("fm_")
+        for row in payloads
+    )
+
+
+def test_campaign_reuse_planner_does_not_coalesce_different_feature_spaces(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    registry_path = tmp_path / "registry_no_reuse.json"
+    index_csv = tmp_path / "index.csv"
+    roi_spec_path = tmp_path / "roi_spec.json"
+    roi_spec_path.write_text(json.dumps({"name": "roi_a", "voxels": [1, 2, 3]}), encoding="utf-8")
+    _write_non_reuse_registry(registry_path, roi_spec_path)
+    _write_index(index_csv)
+
+    captured_dispatches: list[list[OfficialRunJob]] = []
+
+    def _fake_execute_official_jobs(
+        *,
+        jobs: list[OfficialRunJob],
+        max_parallel_runs: int,
+        max_parallel_gpu_runs: int,
+        run_experiment_fn=None,
+    ):
+        captured_dispatches.append(list(jobs))
+        return _success_payload_for_jobs(jobs)
+
+    monkeypatch.setattr(campaign_engine, "_execute_official_jobs", _fake_execute_official_jobs)
+
+    campaign_engine.run_decision_support_campaign(
+        registry_path=registry_path,
+        index_csv=index_csv,
+        data_root=tmp_path / "Data",
+        cache_dir=tmp_path / "cache",
+        output_root=tmp_path / "outputs",
+        experiment_id="E06",
+        stage=None,
+        run_all=False,
+        seed=42,
+        n_permutations=0,
+        dry_run=False,
+        max_parallel_runs=4,
+        max_parallel_gpu_runs=0,
+        run_experiment_fn=_stub_run_experiment,
+    )
+
+    assert captured_dispatches
+    dispatched_jobs = captured_dispatches[0]
+    assert len(dispatched_jobs) == 2
+    assert all(job.run_kwargs["start_section"] == "dataset_selection" for job in dispatched_jobs)
+    assert all(job.run_kwargs["base_artifact_id"] is None for job in dispatched_jobs)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from collections import Counter
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from hashlib import sha1
@@ -25,6 +26,7 @@ from Thesis_ML.experiments.tuning_search_spaces import get_search_space
 from Thesis_ML.protocols.compiler import compile_protocol
 from Thesis_ML.protocols.loader import load_protocol
 from Thesis_ML.protocols.models import CompiledRunSpec
+from Thesis_ML.verification.stage_execution_verifier import verify_stage_execution_evidence
 
 
 @dataclass(frozen=True)
@@ -151,6 +153,133 @@ def _issue(code: str, message: str, *, details: dict[str, Any] | None = None) ->
     if details:
         payload["details"] = dict(details)
     return payload
+
+
+def _extract_stage_rows_from_run_result(
+    *,
+    run_result: dict[str, Any],
+    cohort_id: str,
+    phase: str,
+    source_run_id: str,
+) -> list[dict[str, Any]]:
+    stage_execution = run_result.get("stage_execution")
+    if not isinstance(stage_execution, dict):
+        config_path = run_result.get("config_path")
+        if isinstance(config_path, str) and config_path:
+            config_candidate = Path(config_path)
+            if config_candidate.exists():
+                config_payload = json.loads(config_candidate.read_text(encoding="utf-8"))
+                if isinstance(config_payload, dict):
+                    stage_execution = config_payload.get("stage_execution")
+    if not isinstance(stage_execution, dict):
+        return []
+    telemetry_rows = stage_execution.get("telemetry")
+    if not isinstance(telemetry_rows, list):
+        return []
+    rows: list[dict[str, Any]] = []
+    for telemetry in telemetry_rows:
+        if not isinstance(telemetry, dict):
+            continue
+        stage_key = str(telemetry.get("stage") or "")
+        if not stage_key:
+            continue
+        rows.append(
+            {
+                "cohort_id": str(cohort_id),
+                "phase": str(phase),
+                "source_run_id": str(source_run_id),
+                "stage_key": stage_key,
+                "status": str(telemetry.get("status") or ""),
+                "duration_seconds": (
+                    float(telemetry["duration_seconds"])
+                    if isinstance(telemetry.get("duration_seconds"), (int, float))
+                    else None
+                ),
+                "duration_source": telemetry.get("duration_source"),
+                "resource_coverage": telemetry.get("resource_coverage"),
+                "evidence_quality": telemetry.get("evidence_quality"),
+                "fallback_used": bool(telemetry.get("fallback_used", False)),
+                "fallback_reason": telemetry.get("fallback_reason"),
+                "planned_backend_family": telemetry.get("planned_backend_family"),
+                "observed_backend_family": telemetry.get("observed_backend_family"),
+                "planned_compute_lane": telemetry.get("planned_compute_lane"),
+                "observed_compute_lane": telemetry.get("observed_compute_lane"),
+                "backend_match": telemetry.get("backend_match"),
+                "lane_match": telemetry.get("lane_match"),
+                "executor_match": telemetry.get("executor_match"),
+            }
+        )
+    return rows
+
+
+def _stage_evidence_summary_payload(stage_rows: list[dict[str, Any]]) -> dict[str, Any]:
+    stage_totals: dict[str, float] = {}
+    stage_counts: Counter[str] = Counter()
+    stage_missing: Counter[str] = Counter()
+    stage_fallbacks: Counter[str] = Counter()
+    stage_coverage: dict[str, Counter[str]] = {}
+    for row in stage_rows:
+        stage_key = str(row.get("stage_key") or "")
+        if not stage_key:
+            continue
+        stage_counts[stage_key] += 1
+        duration_seconds = row.get("duration_seconds")
+        if isinstance(duration_seconds, (int, float)):
+            stage_totals[stage_key] = float(stage_totals.get(stage_key, 0.0)) + float(
+                duration_seconds
+            )
+        if str(row.get("status")) == "missing":
+            stage_missing[stage_key] += 1
+        if bool(row.get("fallback_used", False)):
+            stage_fallbacks[stage_key] += 1
+        coverage = str(row.get("resource_coverage") or "none")
+        stage_coverage.setdefault(stage_key, Counter())[coverage] += 1
+
+    dominant_stages = sorted(
+        [
+            {
+                "stage_key": stage_key,
+                "total_duration_seconds": float(total_duration),
+                "observation_count": int(stage_counts.get(stage_key, 0)),
+            }
+            for stage_key, total_duration in stage_totals.items()
+        ],
+        key=lambda item: float(item["total_duration_seconds"]),
+        reverse=True,
+    )
+    fallback_hotspots = sorted(
+        [
+            {
+                "stage_key": stage_key,
+                "fallback_count": int(count),
+                "observation_count": int(stage_counts.get(stage_key, 0)),
+            }
+            for stage_key, count in stage_fallbacks.items()
+            if int(count) > 0
+        ],
+        key=lambda item: int(item["fallback_count"]),
+        reverse=True,
+    )
+    return {
+        "schema_version": "runtime-profile-stage-evidence-summary-v1",
+        "generated_at_utc": _utc_now(),
+        "n_stage_rows": int(len(stage_rows)),
+        "stage_totals": {
+            stage_key: {
+                "observation_count": int(stage_counts.get(stage_key, 0)),
+                "missing_count": int(stage_missing.get(stage_key, 0)),
+                "fallback_count": int(stage_fallbacks.get(stage_key, 0)),
+                "total_duration_seconds": float(stage_totals.get(stage_key, 0.0)),
+                "resource_coverage_counts": {
+                    str(key): int(value)
+                    for key, value in sorted(stage_coverage.get(stage_key, Counter()).items())
+                },
+            }
+            for stage_key in sorted(stage_counts)
+        },
+        "dominant_stages": dominant_stages[:10],
+        "fallback_hotspots": fallback_hotspots[:10],
+    }
 
 
 def _coerce_enum(value: Any) -> str:
@@ -605,6 +734,8 @@ def verify_campaign_runtime_profile(
     phase_runs: dict[str, int] = {"confirmatory": 0, "comparison": 0}
     model_totals: dict[str, float] = {}
     profile_artifact_paths: list[str] = []
+    stage_evidence_rows: list[dict[str, Any]] = []
+    stage_verifier_findings: list[dict[str, Any]] = []
     profiling_runs_executed = 0
     fallback_estimates_used = 0
 
@@ -967,6 +1098,43 @@ def verify_campaign_runtime_profile(
                         )
                         if isinstance(tuning_extrapolation_flag, bool):
                             tuning_extrapolation_applied = bool(tuning_extrapolation_flag)
+                stage_evidence_rows.extend(
+                    _extract_stage_rows_from_run_result(
+                        run_result=run_result,
+                        cohort_id=cohort_id,
+                        phase=str(representative.phase),
+                        source_run_id=str(run.run_id),
+                    )
+                )
+                observed_stage_evidence_payload: dict[str, Any] | None = None
+                if isinstance(report_dir, str) and report_dir:
+                    observed_candidate = Path(report_dir) / "stage_observed_evidence.json"
+                    if observed_candidate.exists():
+                        try:
+                            observed_stage_evidence_payload = json.loads(
+                                observed_candidate.read_text(encoding="utf-8")
+                            )
+                        except Exception:
+                            observed_stage_evidence_payload = None
+                verifier_result = verify_stage_execution_evidence(
+                    stage_execution=run_result.get("stage_execution"),
+                    observed_stage_evidence=observed_stage_evidence_payload,
+                    run_status={"status": "completed"},
+                    process_profile_summary=run_result.get("process_profile_summary"),
+                )
+                verifier_findings = verifier_result.get("findings")
+                if isinstance(verifier_findings, list):
+                    for finding in verifier_findings:
+                        if not isinstance(finding, dict):
+                            continue
+                        stage_verifier_findings.append(
+                            {
+                                "cohort_id": str(cohort_id),
+                                "phase": str(representative.phase),
+                                "source_run_id": str(run.run_id),
+                                **finding,
+                            }
+                        )
             if measured_outer_folds <= 0:
                 measured_outer_folds = 1
         except Exception as exc:
@@ -1241,6 +1409,69 @@ def verify_campaign_runtime_profile(
         and (profiling_runs_executed > 0 or fallback_estimates_used > 0)
     )
 
+    stage_evidence_summary = _stage_evidence_summary_payload(stage_evidence_rows)
+    stage_execution_summary_path = profile_root_path / "stage_execution_summary.json"
+    stage_execution_summary_path.write_text(
+        f"{json.dumps(stage_evidence_summary, indent=2)}\n",
+        encoding="utf-8",
+    )
+    stage_resource_summary_path = profile_root_path / "stage_resource_summary.csv"
+    pd.DataFrame(stage_evidence_rows).to_csv(stage_resource_summary_path, index=False)
+    backend_fallback_summary = {
+        "schema_version": "runtime-profile-backend-fallback-summary-v1",
+        "generated_at_utc": _utc_now(),
+        "rows": [
+            {
+                "cohort_id": row.get("cohort_id"),
+                "phase": row.get("phase"),
+                "source_run_id": row.get("source_run_id"),
+                "stage_key": row.get("stage_key"),
+                "planned_backend_family": row.get("planned_backend_family"),
+                "observed_backend_family": row.get("observed_backend_family"),
+                "planned_compute_lane": row.get("planned_compute_lane"),
+                "observed_compute_lane": row.get("observed_compute_lane"),
+                "fallback_used": bool(row.get("fallback_used", False)),
+                "fallback_reason": row.get("fallback_reason"),
+                "backend_match": row.get("backend_match"),
+                "lane_match": row.get("lane_match"),
+                "executor_match": row.get("executor_match"),
+            }
+            for row in stage_evidence_rows
+            if bool(row.get("fallback_used", False))
+            or row.get("backend_match") is False
+            or row.get("lane_match") is False
+            or row.get("executor_match") is False
+        ],
+    }
+    backend_fallback_summary_path = profile_root_path / "backend_fallback_summary.json"
+    backend_fallback_summary_path.write_text(
+        f"{json.dumps(backend_fallback_summary, indent=2)}\n",
+        encoding="utf-8",
+    )
+    verifier_code_counts = Counter(str(item.get("code") or "unknown") for item in stage_verifier_findings)
+    stage_verifier_summary = {
+        "schema_version": "runtime-profile-stage-verifier-v1",
+        "generated_at_utc": _utc_now(),
+        "finding_count": int(len(stage_verifier_findings)),
+        "finding_counts_by_code": {
+            str(key): int(value) for key, value in sorted(verifier_code_counts.items())
+        },
+        "findings": stage_verifier_findings,
+    }
+    stage_verifier_summary_path = profile_root_path / "stage_execution_verifier_findings.json"
+    stage_verifier_summary_path.write_text(
+        f"{json.dumps(stage_verifier_summary, indent=2)}\n",
+        encoding="utf-8",
+    )
+    profile_artifact_paths.extend(
+        [
+            str(stage_execution_summary_path.resolve()),
+            str(stage_resource_summary_path.resolve()),
+            str(backend_fallback_summary_path.resolve()),
+            str(stage_verifier_summary_path.resolve()),
+        ]
+    )
+
     emit_progress(
         progress_callback,
         stage="campaign",
@@ -1328,6 +1559,13 @@ def verify_campaign_runtime_profile(
             ],
         },
         "feature_matrix_memoization": feature_matrix_memoizer.summary_payload(),
+        "stage_execution_summary": stage_evidence_summary,
+        "backend_fallback_summary": backend_fallback_summary,
+        "stage_execution_summary_path": str(stage_execution_summary_path.resolve()),
+        "stage_resource_summary_path": str(stage_resource_summary_path.resolve()),
+        "backend_fallback_summary_path": str(backend_fallback_summary_path.resolve()),
+        "stage_verifier_summary": stage_verifier_summary,
+        "stage_verifier_summary_path": str(stage_verifier_summary_path.resolve()),
         "profile_artifact_paths": sorted(set(profile_artifact_paths)),
         "issues": issues,
     }

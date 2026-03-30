@@ -112,7 +112,12 @@ from Thesis_ML.experiments.segment_execution import (
     execute_section_segment,
 )
 from Thesis_ML.experiments.spatial_validation import SPATIAL_AFFINE_ATOL
-from Thesis_ML.experiments.stage_execution import build_stage_execution_result
+from Thesis_ML.experiments.stage_observability import (
+    StageBoundaryRecorder,
+    load_stage_observed_evidence,
+    merge_stage_resource_attribution,
+)
+from Thesis_ML.experiments.stage_execution import StageKey, build_stage_execution_result
 from Thesis_ML.experiments.stage_planner import (
     StagePlanningResult,
     plan_stage_execution,
@@ -250,6 +255,13 @@ def _default_process_profile_summary(
         "peak_child_process_count": 0,
         "peak_read_bytes": 0,
         "peak_write_bytes": 0,
+        "gpu_sampling_enabled": False,
+        "gpu_sampling_reason": "process_sampler_unavailable",
+        "gpu_device_id": None,
+        "gpu_sample_count": 0,
+        "peak_gpu_memory_mb": 0.0,
+        "mean_gpu_utilization_percent": 0.0,
+        "peak_gpu_utilization_percent": 0.0,
         "sampling_errors": list(sampling_errors),
         "terminated_by_watchdog": False,
         "termination_method": "normal_exit",
@@ -301,6 +313,39 @@ def _resolve_backend_family_from_backend_id(
     if "torch" in normalized or "gpu" in normalized:
         return "torch_gpu"
     return "sklearn_cpu"
+
+
+def _stage_assignment_metadata_payload(assignment: Any | None) -> dict[str, Any]:
+    if assignment is None:
+        return {}
+    payload: dict[str, Any] = {
+        "planned_backend_family": (
+            str(getattr(assignment, "backend_family"))
+            if getattr(assignment, "backend_family", None) is not None
+            else None
+        ),
+        "planned_compute_lane": (
+            str(getattr(assignment, "compute_lane"))
+            if getattr(assignment, "compute_lane", None) is not None
+            else None
+        ),
+        "planned_executor_id": (
+            str(getattr(assignment, "executor_id"))
+            if getattr(assignment, "executor_id", None) is not None
+            else None
+        ),
+        "official_admitted": getattr(assignment, "official_admitted", None),
+        "assignment_source": (
+            str(getattr(assignment, "source"))
+            if getattr(assignment, "source", None) is not None
+            else None
+        ),
+        "fallback_expected": bool(getattr(assignment, "fallback_used", False)),
+    }
+    fallback_reason = getattr(assignment, "fallback_reason", None)
+    if fallback_reason is not None:
+        payload["fallback_reason"] = str(fallback_reason)
+    return payload
 
 
 def _make_model(
@@ -567,6 +612,8 @@ def run_experiment(
     process_profile_summary: dict[str, Any] | None = None
     process_profile_artifacts: dict[str, Any] | None = None
     process_profile_child_pid = int(os.getpid())
+    stage_observer: StageBoundaryRecorder | None = None
+    stage_resource_attribution_payload: dict[str, Any] | None = None
 
     if process_sample_interval_seconds_resolved <= 0.0:
         raise ValueError("process_sample_interval_seconds must be > 0 when provided.")
@@ -1108,6 +1155,11 @@ def run_experiment(
         force=bool(force),
         resume=bool(resume),
     )
+    stage_observer = StageBoundaryRecorder(
+        report_dir=report_dir,
+        run_id=str(resolved_run_id),
+        progress_callback=progress_callback,
+    )
 
     fold_metrics_path = report_dir / "fold_metrics.csv"
     fold_splits_path = report_dir / "fold_splits.csv"
@@ -1143,6 +1195,7 @@ def run_experiment(
         nonlocal process_profile_summary
         nonlocal process_profile_artifacts
         nonlocal process_profile_finalized
+        nonlocal stage_resource_attribution_payload
         if not process_profile_enabled_resolved:
             return None, None
         if process_profile_finalized:
@@ -1188,6 +1241,33 @@ def run_experiment(
             )
 
         process_profile_artifacts = _process_profile_artifacts_payload(report_dir=report_dir)
+        if stage_observer is not None:
+            process_profile_artifacts["stage_events_path"] = str(
+                stage_observer.stage_events_path.resolve()
+            )
+            process_profile_artifacts["stage_observed_evidence_path"] = str(
+                stage_observer.stage_observed_evidence_path.resolve()
+            )
+            try:
+                stage_resource_attribution_payload = merge_stage_resource_attribution(
+                    report_dir=report_dir,
+                    process_profile_summary=(
+                        process_profile_summary if isinstance(process_profile_summary, dict) else None
+                    ),
+                )
+                stage_resource_attribution_path = report_dir / "stage_resource_attribution.json"
+                stage_resource_attribution_path.write_text(
+                    f"{json.dumps(stage_resource_attribution_payload, indent=2)}\n",
+                    encoding="utf-8",
+                )
+                process_profile_artifacts["stage_resource_attribution_path"] = str(
+                    stage_resource_attribution_path.resolve()
+                )
+            except Exception as exc:
+                if isinstance(process_profile_summary, dict):
+                    sampling_errors = process_profile_summary.setdefault("sampling_errors", [])
+                    if isinstance(sampling_errors, list):
+                        sampling_errors.append(f"stage_resource_attribution_failed: {exc}")
         process_profile_finalized = True
         return process_profile_summary, process_profile_artifacts
 
@@ -1431,6 +1511,7 @@ def run_experiment(
                         stage_fallback_executor_ids=dict(
                             stage_planning_result.runtime_fallback_executor_ids
                         ),
+                        stage_observer=stage_observer,
                     )
                 )
             finally:
@@ -1522,6 +1603,31 @@ def run_experiment(
         and bool(segment_result.stage_assignments)
         else list(stage_planning_result.assignments)
     )
+    reporting_assignment = next(
+        (
+            assignment
+            for assignment in planned_stage_assignments
+            if str(getattr(assignment, "stage", "")) == StageKey.REPORTING.value
+        ),
+        None,
+    )
+    if stage_observer is not None:
+        stage_observer.stage_started(
+            StageKey.REPORTING,
+            metadata={
+                **_stage_assignment_metadata_payload(reporting_assignment),
+                "observed_backend_family": "sklearn_cpu",
+                "observed_compute_lane": "cpu",
+                "observed_executor_id": (
+                    str(getattr(reporting_assignment, "executor_id"))
+                    if reporting_assignment is not None
+                    and getattr(reporting_assignment, "executor_id", None) is not None
+                    else None
+                ),
+                "status_source": "reporting_stage_start",
+            },
+        )
+    observed_stage_evidence = load_stage_observed_evidence(report_dir=report_dir)
     stage_execution = build_stage_execution_result(
         compute_policy=resolved_compute_policy,
         planned_sections=segment_result.planned_sections,
@@ -1539,6 +1645,8 @@ def run_experiment(
         reporting_status="planned",
         actual_estimator_backend_family=actual_estimator_backend_family,
         planned_assignments=planned_stage_assignments,
+        observed_stage_evidence=observed_stage_evidence,
+        stage_resource_attribution=stage_resource_attribution_payload,
     )
     identity = resolve_run_identity(
         protocol_context=resolved_protocol_context,
@@ -1596,6 +1704,19 @@ def run_experiment(
             stage_execution=stage_execution,
         )
     except Exception as exc:
+        if stage_observer is not None:
+            stage_observer.stage_finished(
+                StageKey.REPORTING,
+                metadata={
+                    **_stage_assignment_metadata_payload(reporting_assignment),
+                    "observed_backend_family": "sklearn_cpu",
+                    "observed_compute_lane": "cpu",
+                    "fallback_used": False,
+                    "fallback_reason": f"reporting_exception: {exc}",
+                    "status_source": "reporting_stage_error",
+                },
+                status="failed",
+            )
         failure = _failure_payload(exc)
         stage_timings["total"] = float(perf_counter() - overall_start)
         process_profile_summary_payload, process_profile_artifacts_payload = (
@@ -1770,6 +1891,19 @@ def run_experiment(
         )
         config_path.write_text(f"{json.dumps(config, indent=2)}\n", encoding="utf-8")
     except Exception as exc:
+        if stage_observer is not None:
+            stage_observer.stage_finished(
+                StageKey.REPORTING,
+                metadata={
+                    **_stage_assignment_metadata_payload(reporting_assignment),
+                    "observed_backend_family": "sklearn_cpu",
+                    "observed_compute_lane": "cpu",
+                    "fallback_used": False,
+                    "fallback_reason": f"reporting_exception: {exc}",
+                    "status_source": "reporting_stage_error",
+                },
+                status="failed",
+            )
         failure = _failure_payload(exc)
         stage_timings["total"] = float(perf_counter() - overall_start)
         process_profile_summary_payload, process_profile_artifacts_payload = (
@@ -1816,6 +1950,19 @@ def run_experiment(
             status="created",
         )
     except Exception as exc:
+        if stage_observer is not None:
+            stage_observer.stage_finished(
+                StageKey.REPORTING,
+                metadata={
+                    **_stage_assignment_metadata_payload(reporting_assignment),
+                    "observed_backend_family": "sklearn_cpu",
+                    "observed_compute_lane": "cpu",
+                    "fallback_used": False,
+                    "fallback_reason": f"reporting_exception: {exc}",
+                    "status_source": "reporting_stage_error",
+                },
+                status="failed",
+            )
         failure = _failure_payload(exc)
         stage_timings["total"] = float(perf_counter() - overall_start)
         process_profile_summary_payload, process_profile_artifacts_payload = (
@@ -1840,6 +1987,31 @@ def run_experiment(
         raise
     artifact_ids[ARTIFACT_TYPE_EXPERIMENT_REPORT] = experiment_report_artifact.artifact_id
     stage_timings["artifact_registry_update"] = float(perf_counter() - registry_update_start)
+    if stage_observer is not None:
+        stage_observer.stage_finished(
+            StageKey.REPORTING,
+            metadata={
+                **_stage_assignment_metadata_payload(reporting_assignment),
+                "observed_backend_family": "sklearn_cpu",
+                "observed_compute_lane": "cpu",
+                "observed_executor_id": (
+                    str(getattr(reporting_assignment, "executor_id"))
+                    if reporting_assignment is not None
+                    and getattr(reporting_assignment, "executor_id", None) is not None
+                    else None
+                ),
+                "primary_artifacts": [
+                    str(value)
+                    for value in [
+                        artifact_ids.get(ARTIFACT_TYPE_METRICS_BUNDLE),
+                        artifact_ids.get(ARTIFACT_TYPE_EXPERIMENT_REPORT),
+                    ]
+                    if isinstance(value, str) and value
+                ],
+                "status_source": "reporting_stage_finish",
+            },
+            status="executed",
+        )
 
     if resolved_framework_mode in {
         FrameworkMode.CONFIRMATORY,
@@ -1885,6 +2057,33 @@ def run_experiment(
 
     stage_timings["total"] = float(perf_counter() - overall_start)
     process_profile_summary_payload, process_profile_artifacts_payload = _finalize_process_profile()
+    final_observed_stage_evidence = load_stage_observed_evidence(report_dir=report_dir)
+    final_stage_resource_summary = (
+        stage_resource_attribution_payload.get("stage_resource_summaries")
+        if isinstance(stage_resource_attribution_payload, dict)
+        and isinstance(stage_resource_attribution_payload.get("stage_resource_summaries"), dict)
+        else None
+    )
+    stage_execution = build_stage_execution_result(
+        compute_policy=resolved_compute_policy,
+        planned_sections=segment_result.planned_sections,
+        executed_sections=segment_result.executed_sections,
+        reused_sections=segment_result.reused_sections,
+        tuning_enabled=bool(methodology_policy.tuning_enabled),
+        n_permutations=int(n_permutations),
+        section_timings_seconds=(
+            segment_result.section_timings_seconds
+            if isinstance(segment_result.section_timings_seconds, dict)
+            else None
+        ),
+        stage_timings_seconds=stage_timings,
+        stage_timing_metadata=segment_stage_timing_metadata,
+        reporting_status="executed",
+        actual_estimator_backend_family=actual_estimator_backend_family,
+        planned_assignments=planned_stage_assignments,
+        observed_stage_evidence=final_observed_stage_evidence,
+        stage_resource_attribution=final_stage_resource_summary,
+    )
     run_status = write_run_status(
         report_dir,
         run_id=resolved_run_id,

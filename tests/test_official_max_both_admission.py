@@ -5,6 +5,10 @@ from typing import Any
 
 import pytest
 
+from tests._config_refs import (
+    canonical_v1_protocol_variant_path,
+    model_family_v1_comparison_variant_path,
+)
 from Thesis_ML.comparisons.loader import load_comparison_spec
 from Thesis_ML.comparisons.runner import compile_and_run_comparison
 from Thesis_ML.config.framework_mode import FrameworkMode
@@ -16,10 +20,6 @@ from Thesis_ML.experiments.compute_scheduler import (
 )
 from Thesis_ML.protocols.loader import load_protocol
 from Thesis_ML.protocols.runner import compile_and_run_protocol
-from tests._config_refs import (
-    canonical_v1_protocol_variant_path,
-    model_family_v1_comparison_variant_path,
-)
 
 
 def _repo_root() -> Path:
@@ -171,6 +171,173 @@ def test_official_locked_comparison_max_both_assigns_gpu_lane_only_to_ridge(
     assert all(
         row["compute_policy"]["assigned_backend_family"] == "sklearn_cpu" for row in linearsvc_rows
     )
+
+
+def test_official_locked_comparison_max_both_runtime_gpu_admission_cap(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    dataset_paths = _demo_dataset_paths()
+    spec = load_comparison_spec(_comparison_spec_path())
+
+    monkeypatch.setattr(
+        "Thesis_ML.experiments.compute_policy.detect_compute_capabilities",
+        lambda requested_device_id=None: _gpu_capability_snapshot(
+            device_id=0 if requested_device_id is None else int(requested_device_id)
+        ),
+    )
+    monkeypatch.setattr(
+        "Thesis_ML.comparisons.runner.verify_official_artifacts",
+        lambda **_: {"passed": True, "issues": []},
+    )
+
+    captured: dict[str, Any] = {
+        "max_gpu_running": 0,
+        "gpu_lane_job_count": 0,
+        "cpu_lane_job_count": 0,
+        "max_parallel_gpu_runs": None,
+    }
+
+    def _fake_execute_official_run_jobs(
+        *,
+        jobs: list[Any],
+        max_parallel_runs: int,
+        max_parallel_gpu_runs: int,
+        watchdog_executor=None,
+    ) -> list[dict[str, Any]]:
+        pending = sorted(jobs, key=lambda job: (int(job.order_index), str(job.run_id)))
+        running: list[tuple[Any, str]] = []
+        rows: list[dict[str, Any]] = []
+        captured["max_parallel_gpu_runs"] = int(max_parallel_gpu_runs)
+
+        while pending or running:
+            admitted_any = False
+            gpu_queue_blocked = False
+            scan_index = 0
+            while scan_index < len(pending) and len(running) < int(max_parallel_runs):
+                job = pending[scan_index]
+                lane = str(job.resource_lane_hint)
+                running_gpu = sum(1 for _, running_lane in running if running_lane == "gpu")
+                if lane == "gpu":
+                    if gpu_queue_blocked:
+                        scan_index += 1
+                        continue
+                    if running_gpu >= int(max_parallel_gpu_runs):
+                        gpu_queue_blocked = True
+                        scan_index += 1
+                        continue
+
+                running.append((job, lane))
+                if lane == "gpu":
+                    captured["gpu_lane_job_count"] = int(captured["gpu_lane_job_count"]) + 1
+                else:
+                    captured["cpu_lane_job_count"] = int(captured["cpu_lane_job_count"]) + 1
+                captured["max_gpu_running"] = max(int(captured["max_gpu_running"]), running_gpu + (1 if lane == "gpu" else 0))
+                pending.pop(scan_index)
+                admitted_any = True
+
+            if not running:
+                if pending and not admitted_any:
+                    raise AssertionError("runtime admission deadlocked with pending jobs")
+                continue
+
+            completion_index = next(
+                (
+                    index
+                    for index, (_, lane) in enumerate(running)
+                    if lane == "cpu"
+                ),
+                0,
+            )
+            completed_job, _ = running.pop(completion_index)
+            run_id = str(completed_job.run_id)
+            run_kwargs = dict(completed_job.run_kwargs)
+            model_name = str(run_kwargs.get("model", ""))
+            report_dir = tmp_path / "fake_reports" / run_id
+            report_dir.mkdir(parents=True, exist_ok=True)
+            base_policy = resolve_compute_policy(
+                framework_mode=FrameworkMode.LOCKED_COMPARISON,
+                hardware_mode=str(run_kwargs.get("hardware_mode", "cpu_only")),
+                gpu_device_id=(
+                    int(run_kwargs["gpu_device_id"])
+                    if run_kwargs.get("gpu_device_id") is not None
+                    else None
+                ),
+                deterministic_compute=bool(run_kwargs.get("deterministic_compute", False)),
+                allow_backend_fallback=bool(run_kwargs.get("allow_backend_fallback", False)),
+            )
+            scheduled_assignment_raw = run_kwargs.get("scheduled_compute_assignment")
+            if isinstance(scheduled_assignment_raw, dict):
+                assignment = ComputeRunAssignment.from_payload(
+                    scheduled_assignment_raw,
+                    default_order_index=int(completed_job.order_index),
+                    default_run_id=run_id,
+                    default_model_name=model_name,
+                )
+                resolved_policy = materialize_scheduled_compute_policy(
+                    base_compute_policy=base_policy,
+                    assignment=assignment,
+                )
+            else:
+                resolved_policy = base_policy
+
+            rows.append(
+                {
+                    "order_index": int(completed_job.order_index),
+                    "run_id": run_id,
+                    "started_at_utc": "2026-01-01T00:00:00+00:00",
+                    "ended_at_utc": "2026-01-01T00:00:01+00:00",
+                    "admitted_at_utc": "2026-01-01T00:00:00+00:00",
+                    "completed_at_utc": "2026-01-01T00:00:01+00:00",
+                    "resource_lane_hint": str(completed_job.resource_lane_hint),
+                    "gpu_slot_required": bool(str(completed_job.resource_lane_hint) == "gpu"),
+                    "max_parallel_gpu_runs_effective": int(max_parallel_gpu_runs),
+                    "watchdog_result": {
+                        "status": "success",
+                        "run_payload": {
+                            "report_dir": str(report_dir),
+                            "config_path": str(report_dir / "config.json"),
+                            "metrics_path": str(report_dir / "metrics.json"),
+                            "metrics": {
+                                "balanced_accuracy": 0.5,
+                                "macro_f1": 0.5,
+                                "accuracy": 0.5,
+                                "n_folds": 1,
+                                "primary_metric_name": "balanced_accuracy",
+                                "primary_metric_value": 0.5,
+                            },
+                            "compute_policy": resolved_policy.to_payload(),
+                        },
+                    },
+                    "execution_error": None,
+                }
+            )
+
+        return rows
+
+    monkeypatch.setattr(
+        "Thesis_ML.comparisons.runner.execute_official_run_jobs",
+        _fake_execute_official_run_jobs,
+    )
+
+    result = compile_and_run_comparison(
+        comparison=spec,
+        index_csv=dataset_paths["index_csv"],
+        data_root=dataset_paths["data_root"],
+        cache_dir=dataset_paths["cache_dir"],
+        reports_root=tmp_path / "comparison_reports",
+        variant_ids=["ridge", "logreg", "linearsvc"],
+        dry_run=False,
+        hardware_mode="max_both",
+        deterministic_compute=True,
+        max_parallel_runs=3,
+    )
+
+    assert int(result["n_failed"]) == 0
+    assert int(captured["max_parallel_gpu_runs"]) == 1
+    assert int(captured["max_gpu_running"]) <= 1
+    assert int(captured["gpu_lane_job_count"]) >= 1
+    assert int(captured["cpu_lane_job_count"]) >= 1
 
 
 def test_official_locked_comparison_max_both_requires_deterministic_compute(

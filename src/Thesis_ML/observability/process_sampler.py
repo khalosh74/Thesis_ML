@@ -12,6 +12,11 @@ try:  # pragma: no cover - environment dependent import guard
 except Exception:  # pragma: no cover - environment dependent import guard
     psutil = None  # type: ignore[assignment]
 
+try:  # pragma: no cover - environment dependent import guard
+    import torch
+except Exception:  # pragma: no cover - environment dependent import guard
+    torch = None  # type: ignore[assignment]
+
 
 def _utc_now() -> str:
     return datetime.now(UTC).replace(microsecond=0).isoformat()
@@ -38,6 +43,7 @@ class ProcessSampler:
         report_dir: Path,
         sample_interval_seconds: float = 10.0,
         include_io_counters: bool = True,
+        include_gpu_telemetry: bool = True,
     ) -> None:
         self.pid = int(pid)
         self.report_dir = Path(report_dir)
@@ -45,6 +51,7 @@ class ProcessSampler:
         if self.sample_interval_seconds <= 0:
             self.sample_interval_seconds = 10.0
         self.include_io_counters = bool(include_io_counters)
+        self.include_gpu_telemetry = bool(include_gpu_telemetry)
         self.samples_path = self.report_dir / "process_samples.jsonl"
         self.summary_path = self.report_dir / "process_profile_summary.json"
 
@@ -63,8 +70,41 @@ class ProcessSampler:
         self._peak_child_process_count = 0
         self._peak_read_bytes = 0
         self._peak_write_bytes = 0
+        self._gpu_sampling_enabled = False
+        self._gpu_sampling_reason = "gpu_telemetry_disabled"
+        self._gpu_device_id: int | None = None
+        self._gpu_sample_count = 0
+        self._peak_gpu_memory_mb = 0.0
+        self._gpu_utilization_sum = 0.0
+        self._peak_gpu_utilization_percent = 0.0
         self._sampling_errors: list[str] = []
         self._process = None
+        self._resolve_gpu_sampling()
+
+    def _resolve_gpu_sampling(self) -> None:
+        if not self.include_gpu_telemetry:
+            self._gpu_sampling_enabled = False
+            self._gpu_sampling_reason = "disabled_by_config"
+            self._gpu_device_id = None
+            return
+        if torch is None:
+            self._gpu_sampling_enabled = False
+            self._gpu_sampling_reason = "torch_not_available"
+            self._gpu_device_id = None
+            return
+        try:
+            if not bool(torch.cuda.is_available()):
+                self._gpu_sampling_enabled = False
+                self._gpu_sampling_reason = "cuda_not_available"
+                self._gpu_device_id = None
+                return
+            self._gpu_device_id = int(torch.cuda.current_device())
+            self._gpu_sampling_enabled = True
+            self._gpu_sampling_reason = "torch_cuda_runtime"
+        except Exception as exc:
+            self._gpu_sampling_enabled = False
+            self._gpu_sampling_reason = f"gpu_probe_failed:{exc}"
+            self._gpu_device_id = None
 
     def _record_sampling_error(self, message: str) -> None:
         text = str(message).strip()
@@ -92,6 +132,8 @@ class ProcessSampler:
         child_process_count = int(sample_payload.get("child_process_count") or 0)
         read_bytes = int(sample_payload.get("read_bytes") or 0)
         write_bytes = int(sample_payload.get("write_bytes") or 0)
+        gpu_memory_mb = sample_payload.get("gpu_memory_mb")
+        gpu_utilization_percent = sample_payload.get("gpu_utilization_percent")
         self._cpu_sum += cpu_percent
         self._peak_cpu_percent = max(self._peak_cpu_percent, cpu_percent)
         self._peak_rss_mb = max(self._peak_rss_mb, rss_mb)
@@ -103,6 +145,15 @@ class ProcessSampler:
         )
         self._peak_read_bytes = max(self._peak_read_bytes, read_bytes)
         self._peak_write_bytes = max(self._peak_write_bytes, write_bytes)
+        if isinstance(gpu_memory_mb, (int, float)):
+            self._gpu_sample_count += 1
+            self._peak_gpu_memory_mb = max(self._peak_gpu_memory_mb, float(gpu_memory_mb))
+        if isinstance(gpu_utilization_percent, (int, float)):
+            self._gpu_utilization_sum += float(gpu_utilization_percent)
+            self._peak_gpu_utilization_percent = max(
+                self._peak_gpu_utilization_percent,
+                float(gpu_utilization_percent),
+            )
 
     def _build_fallback_sample(
         self,
@@ -124,6 +175,11 @@ class ProcessSampler:
             "read_bytes": 0,
             "write_bytes": 0,
             "child_process_count": 0,
+            "gpu_sampling_enabled": bool(self._gpu_sampling_enabled),
+            "gpu_sampling_reason": str(self._gpu_sampling_reason),
+            "gpu_device_id": int(self._gpu_device_id) if self._gpu_device_id is not None else None,
+            "gpu_memory_mb": None,
+            "gpu_utilization_percent": None,
             "sample_error": sample_error,
             "status_note": status_note,
         }
@@ -168,6 +224,25 @@ class ProcessSampler:
             except Exception as exc:  # pragma: no cover - OS specific
                 child_process_count = 0
                 self._record_sampling_error(f"children_unavailable: {exc}")
+            gpu_memory_mb: float | None = None
+            gpu_utilization_percent: float | None = None
+            if self._gpu_sampling_enabled and torch is not None:
+                try:
+                    device_id = (
+                        int(self._gpu_device_id)
+                        if self._gpu_device_id is not None
+                        else int(torch.cuda.current_device())
+                    )
+                    gpu_memory_mb = float(torch.cuda.memory_allocated(device_id)) / (
+                        1024.0 * 1024.0
+                    )
+                    utilization_fn = getattr(torch.cuda, "utilization", None)
+                    if callable(utilization_fn):
+                        utilization_value = utilization_fn(device_id)
+                        if isinstance(utilization_value, (int, float)):
+                            gpu_utilization_percent = float(utilization_value)
+                except Exception as exc:  # pragma: no cover - environment specific
+                    self._record_sampling_error(f"gpu_sample_unavailable: {exc}")
             self._append_sample(
                 {
                     "timestamp_utc": _utc_now(),
@@ -181,6 +256,21 @@ class ProcessSampler:
                     "read_bytes": int(read_bytes),
                     "write_bytes": int(write_bytes),
                     "child_process_count": int(child_process_count),
+                    "gpu_sampling_enabled": bool(self._gpu_sampling_enabled),
+                    "gpu_sampling_reason": str(self._gpu_sampling_reason),
+                    "gpu_device_id": (
+                        int(self._gpu_device_id) if self._gpu_device_id is not None else None
+                    ),
+                    "gpu_memory_mb": (
+                        float(round(gpu_memory_mb, 6))
+                        if isinstance(gpu_memory_mb, (int, float))
+                        else None
+                    ),
+                    "gpu_utilization_percent": (
+                        float(round(gpu_utilization_percent, 6))
+                        if isinstance(gpu_utilization_percent, (int, float))
+                        else None
+                    ),
                     "sample_error": None,
                     "status_note": status_note,
                 }
@@ -230,6 +320,11 @@ class ProcessSampler:
         child_pid: int | None = None,
     ) -> dict[str, Any]:
         mean_cpu = float(self._cpu_sum / self._sample_count) if self._sample_count > 0 else 0.0
+        mean_gpu_utilization_percent = (
+            float(self._gpu_utilization_sum / self._gpu_sample_count)
+            if self._gpu_sample_count > 0
+            else 0.0
+        )
         summary = {
             "sampling_enabled": bool(self._sampling_enabled),
             "sample_interval_seconds": float(self.sample_interval_seconds),
@@ -245,6 +340,13 @@ class ProcessSampler:
             "peak_child_process_count": int(self._peak_child_process_count),
             "peak_read_bytes": int(self._peak_read_bytes),
             "peak_write_bytes": int(self._peak_write_bytes),
+            "gpu_sampling_enabled": bool(self._gpu_sampling_enabled),
+            "gpu_sampling_reason": str(self._gpu_sampling_reason),
+            "gpu_device_id": int(self._gpu_device_id) if self._gpu_device_id is not None else None,
+            "gpu_sample_count": int(self._gpu_sample_count),
+            "peak_gpu_memory_mb": float(round(self._peak_gpu_memory_mb, 6)),
+            "mean_gpu_utilization_percent": float(round(mean_gpu_utilization_percent, 6)),
+            "peak_gpu_utilization_percent": float(round(self._peak_gpu_utilization_percent, 6)),
             "sampling_errors": list(self._sampling_errors),
             "terminated_by_watchdog": bool(terminated_by_watchdog),
             "termination_method": str(termination_method),

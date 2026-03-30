@@ -183,6 +183,18 @@ Additive fit/search timing outputs:
 - `best_params_per_fold.csv` now includes tuned-search timing summary columns.
 - `fit_timing_summary.json` is written per run and referenced from `config.json`, `metrics.json`, and run result payloads.
 
+Stage observability artifacts (additive evidence layer):
+
+- direct runs now emit stage boundary and observed evidence artifacts:
+  - `stage_events.jsonl`
+  - `stage_observed_evidence.json`
+- when process profiling is enabled, per-stage resource attribution is merged and persisted in:
+  - `stage_resource_attribution.json`
+- campaign-level decision-support exports now include:
+  - `stage_execution_summary.json`
+  - `stage_resource_summary.csv`
+  - `backend_fallback_summary.json`
+
 Campaign manifest and per-phase machine-readable artifacts:
 
 - `outputs/campaign/<CampaignTag>/campaign_manifest.json`

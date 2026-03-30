@@ -7,8 +7,9 @@ import hashlib
 import json
 import logging
 import re
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 import nibabel as nib
 import numpy as np
@@ -438,12 +439,163 @@ def _build_cache_input_signature(
     }
 
 
+def _build_or_validate_cache_group(
+    *,
+    group_id: str,
+    group_rows: pd.DataFrame,
+    data_root: Path,
+    cache_dir: Path,
+    force: bool,
+) -> dict[str, object]:
+    group_rows = group_rows.reset_index(drop=True)
+    target_path = _cache_path_for_group(cache_dir, group_rows)
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+
+    mask_path = _resolve_single_group_mask_path(
+        group_rows=group_rows,
+        data_root=data_root,
+        group_id=group_id,
+    )
+
+    mask_bool, spatial_signature = _load_mask_and_signature(mask_path)
+    mask_affine = np.asarray(spatial_signature["affine"], dtype=np.float64)
+
+    current_cache_input_signature = _build_cache_input_signature(
+        group_rows=group_rows,
+        data_root=data_root,
+        group_id=group_id,
+        mask_path=mask_path,
+        spatial_signature=spatial_signature,
+    )
+
+    cache_validation_status = "new_cache"
+    cache_rebuild_reason: object = pd.NA
+
+    if target_path.exists() and not force:
+        existing_metadata = _read_existing_cache_metadata(target_path)
+        existing_spatial_signature = existing_metadata["spatial_signature"]
+        existing_cache_input_signature = existing_metadata["cache_input_signature"]
+        existing_group_qc_summary = existing_metadata["group_qc_summary"]
+
+        cache_matches, validation_reason = _validate_existing_cache_against_current(
+            existing_spatial_signature=existing_spatial_signature,
+            existing_cache_input_signature=existing_cache_input_signature,
+            existing_group_qc_summary=existing_group_qc_summary,
+            current_spatial_signature=spatial_signature,
+            current_cache_input_signature=current_cache_input_signature,
+        )
+
+        if cache_matches:
+            return {
+                "group_id": str(group_id),
+                "cache_path": str(target_path.resolve()),
+                "n_samples": int(len(group_rows)),
+                "n_voxels": int(spatial_signature["feature_count"]),
+                "skipped_existing": True,
+                "cache_validation_status": validation_reason,
+                "cache_rebuild_reason": pd.NA,
+                **_signature_manifest_fields(existing_spatial_signature),
+                **_cache_input_manifest_fields(existing_cache_input_signature),
+                **_group_qc_manifest_fields(existing_group_qc_summary),
+            }
+
+        cache_validation_status = "rebuild_after_validation"
+        cache_rebuild_reason = validation_reason
+
+    elif target_path.exists() and force:
+        cache_validation_status = "force_rebuild"
+        cache_rebuild_reason = "force_rebuild"
+
+    vectors: list[np.ndarray] = []
+    sample_qc_rows: list[dict[str, Any]] = []
+    beta_path_column = (
+        CANONICAL_BETA_PATH_COLUMN
+        if CANONICAL_BETA_PATH_COLUMN in group_rows.columns
+        else "beta_path"
+    )
+    for _, row in group_rows.iterrows():
+        beta_path = Path(str(row[beta_path_column])).resolve()
+        raw_vector, repaired_vector = _extract_masked_vectors(
+            beta_path=beta_path,
+            mask_bool=mask_bool,
+            mask_path=mask_path,
+            mask_affine=mask_affine,
+        )
+        vectors.append(repaired_vector)
+        sample_qc_rows.append(
+            {
+                "group_id": str(group_id),
+                "sample_id": str(row["sample_id"]),
+                **compute_sample_feature_qc(
+                    vector_before_repair=raw_vector,
+                    vector_after_repair=repaired_vector,
+                ),
+            }
+        )
+
+    x_matrix = np.vstack(vectors).astype(np.float32, copy=False)
+    if int(spatial_signature["mask_voxel_count"]) != int(x_matrix.shape[1]):
+        raise ValueError(
+            "Mask voxel count does not match extracted feature count for "
+            "group "
+            f"'{group_id}': {spatial_signature['mask_voxel_count']} != {x_matrix.shape[1]}"
+        )
+    spatial_signature["feature_count"] = int(x_matrix.shape[1])
+    y = (
+        group_rows["emotion"]
+        .fillna(group_rows["regressor_label"])
+        .astype(str)
+        .to_numpy(dtype=np.str_)
+    )
+    if len(sample_qc_rows) != int(len(group_rows)):
+        raise ValueError(
+            f"Feature QC row count mismatch for group '{group_id}': "
+            f"{len(sample_qc_rows)} != {len(group_rows)}"
+        )
+    metadata_records = merge_qc_into_metadata_records(
+        metadata_records=group_rows.to_dict(orient="records"),
+        sample_qc_rows=sample_qc_rows,
+    )
+    group_qc_summary = summarize_group_feature_qc(sample_qc_rows)
+    if str(group_qc_summary.get("group_id", "")) != str(group_id):
+        raise ValueError(
+            f"Feature QC summary group_id mismatch: {group_qc_summary.get('group_id')!r} != {group_id!r}"
+        )
+    metadata_json = json.dumps(metadata_records)
+
+    np.savez_compressed(
+        target_path,
+        X=x_matrix,
+        y=y,
+        metadata_json=np.array(metadata_json),
+        group_id=np.array(str(group_id)),
+        spatial_signature_json=np.array(_canonical_json(spatial_signature)),
+        cache_input_signature_json=np.array(_canonical_json(current_cache_input_signature)),
+        group_qc_summary_json=np.array(_canonical_json(group_qc_summary)),
+    )
+
+    return {
+        "group_id": str(group_id),
+        "cache_path": str(target_path.resolve()),
+        "n_samples": int(x_matrix.shape[0]),
+        "n_voxels": int(x_matrix.shape[1]),
+        "skipped_existing": False,
+        "cache_validation_status": cache_validation_status,
+        "cache_rebuild_reason": cache_rebuild_reason,
+        **_signature_manifest_fields(spatial_signature),
+        **_cache_input_manifest_fields(current_cache_input_signature),
+        **_group_qc_manifest_fields(group_qc_summary),
+    }
+
+
 def build_feature_cache(
     index_csv: Path,
     data_root: Path,
     cache_dir: Path,
     group_key: str = "subject_session_bas",
     force: bool = False,
+    max_workers: int = 1,
+    parallel_backend: Literal["serial", "process"] = "serial",
 ) -> Path:
     """
     Build cache files of masked beta vectors grouped by BAS/session.
@@ -458,6 +610,11 @@ def build_feature_cache(
         raise FileNotFoundError(f"index_csv does not exist: {index_csv}")
     if not data_root.exists():
         raise FileNotFoundError(f"data_root does not exist: {data_root}")
+    if int(max_workers) <= 0:
+        raise ValueError("max_workers must be >= 1.")
+    backend = str(parallel_backend).strip().lower()
+    if backend not in {"serial", "process"}:
+        raise ValueError("parallel_backend must be one of: serial, process")
 
     index_df = pd.read_csv(index_csv)
     index_df = with_coarse_affect(
@@ -528,153 +685,48 @@ def build_feature_cache(
     cache_dir.mkdir(parents=True, exist_ok=True)
     manifest_rows: list[dict[str, object]] = []
 
-    for group_id, group_rows in index_df.groupby(group_key, sort=True):
-        group_rows = group_rows.reset_index(drop=True)
-        target_path = _cache_path_for_group(cache_dir, group_rows)
-        target_path.parent.mkdir(parents=True, exist_ok=True)
+    grouped_rows = [
+        (str(group_id), group_rows.reset_index(drop=True))
+        for group_id, group_rows in index_df.groupby(group_key, sort=True)
+    ]
 
-        mask_path = _resolve_single_group_mask_path(
-            group_rows=group_rows,
-            data_root=data_root,
-            group_id=group_id,
-        )
-
-        mask_bool, spatial_signature = _load_mask_and_signature(mask_path)
-        mask_affine = np.asarray(spatial_signature["affine"], dtype=np.float64)
-
-        current_cache_input_signature = _build_cache_input_signature(
-            group_rows=group_rows,
-            data_root=data_root,
-            group_id=group_id,
-            mask_path=mask_path,
-            spatial_signature=spatial_signature,
-        )
-
-        cache_validation_status = "new_cache"
-        cache_rebuild_reason: object = pd.NA
-
-        if target_path.exists() and not force:
-            existing_metadata = _read_existing_cache_metadata(target_path)
-            existing_spatial_signature = existing_metadata["spatial_signature"]
-            existing_cache_input_signature = existing_metadata["cache_input_signature"]
-            existing_group_qc_summary = existing_metadata["group_qc_summary"]
-
-            cache_matches, validation_reason = _validate_existing_cache_against_current(
-                existing_spatial_signature=existing_spatial_signature,
-                existing_cache_input_signature=existing_cache_input_signature,
-                existing_group_qc_summary=existing_group_qc_summary,
-                current_spatial_signature=spatial_signature,
-                current_cache_input_signature=current_cache_input_signature,
-            )
-
-            if cache_matches:
-                manifest_rows.append(
-                    {
-                        "group_id": str(group_id),
-                        "cache_path": str(target_path.resolve()),
-                        "n_samples": int(len(group_rows)),
-                        "n_voxels": int(spatial_signature["feature_count"]),
-                        "skipped_existing": True,
-                        "cache_validation_status": validation_reason,
-                        "cache_rebuild_reason": pd.NA,
-                        **_signature_manifest_fields(existing_spatial_signature),
-                        **_cache_input_manifest_fields(existing_cache_input_signature),
-                        **_group_qc_manifest_fields(existing_group_qc_summary),
-                    }
+    if backend == "process" and int(max_workers) > 1 and len(grouped_rows) > 1:
+        with ProcessPoolExecutor(max_workers=int(max_workers)) as executor:
+            futures = [
+                executor.submit(
+                    _build_or_validate_cache_group,
+                    group_id=group_id,
+                    group_rows=group_rows,
+                    data_root=data_root,
+                    cache_dir=cache_dir,
+                    force=force,
                 )
-                continue
-
-            cache_validation_status = "rebuild_after_validation"
-            cache_rebuild_reason = validation_reason
-
-        elif target_path.exists() and force:
-            cache_validation_status = "force_rebuild"
-            cache_rebuild_reason = "force_rebuild"
-
-        vectors: list[np.ndarray] = []
-        sample_qc_rows: list[dict[str, Any]] = []
-        for _, row in group_rows.iterrows():
-            beta_path_column = (
-                CANONICAL_BETA_PATH_COLUMN
-                if CANONICAL_BETA_PATH_COLUMN in group_rows.columns
-                else "beta_path"
+                for group_id, group_rows in grouped_rows
+            ]
+            try:
+                for future in as_completed(futures):
+                    manifest_rows.append(future.result())
+            except Exception:
+                for future in futures:
+                    future.cancel()
+                raise
+    else:
+        for group_id, group_rows in grouped_rows:
+            manifest_rows.append(
+                _build_or_validate_cache_group(
+                    group_id=group_id,
+                    group_rows=group_rows,
+                    data_root=data_root,
+                    cache_dir=cache_dir,
+                    force=force,
+                )
             )
-            beta_path = Path(str(row[beta_path_column])).resolve()
-            raw_vector, repaired_vector = _extract_masked_vectors(
-                beta_path=beta_path,
-                mask_bool=mask_bool,
-                mask_path=mask_path,
-                mask_affine=mask_affine,
-            )
-            vectors.append(repaired_vector)
-            sample_qc_rows.append(
-                {
-                    "group_id": str(group_id),
-                    "sample_id": str(row["sample_id"]),
-                    **compute_sample_feature_qc(
-                        vector_before_repair=raw_vector,
-                        vector_after_repair=repaired_vector,
-                    ),
-                }
-            )
-
-        x_matrix = np.vstack(vectors).astype(np.float32, copy=False)
-        if int(spatial_signature["mask_voxel_count"]) != int(x_matrix.shape[1]):
-            raise ValueError(
-                "Mask voxel count does not match extracted feature count for "
-                "group "
-                f"'{group_id}': {spatial_signature['mask_voxel_count']} != {x_matrix.shape[1]}"
-            )
-        spatial_signature["feature_count"] = int(x_matrix.shape[1])
-        y = (
-            group_rows["emotion"]
-            .fillna(group_rows["regressor_label"])
-            .astype(str)
-            .to_numpy(dtype=np.str_)
-        )
-        if len(sample_qc_rows) != int(len(group_rows)):
-            raise ValueError(
-                f"Feature QC row count mismatch for group '{group_id}': "
-                f"{len(sample_qc_rows)} != {len(group_rows)}"
-            )
-        metadata_records = merge_qc_into_metadata_records(
-            metadata_records=group_rows.to_dict(orient="records"),
-            sample_qc_rows=sample_qc_rows,
-        )
-        group_qc_summary = summarize_group_feature_qc(sample_qc_rows)
-        if str(group_qc_summary.get("group_id", "")) != str(group_id):
-            raise ValueError(
-                f"Feature QC summary group_id mismatch: {group_qc_summary.get('group_id')!r} != {group_id!r}"
-            )
-        metadata_json = json.dumps(metadata_records)
-
-        np.savez_compressed(
-            target_path,
-            X=x_matrix,
-            y=y,
-            metadata_json=np.array(metadata_json),
-            group_id=np.array(str(group_id)),
-            spatial_signature_json=np.array(_canonical_json(spatial_signature)),
-            cache_input_signature_json=np.array(_canonical_json(current_cache_input_signature)),
-            group_qc_summary_json=np.array(_canonical_json(group_qc_summary)),
-        )
-
-        manifest_rows.append(
-            {
-                "group_id": str(group_id),
-                "cache_path": str(target_path.resolve()),
-                "n_samples": int(x_matrix.shape[0]),
-                "n_voxels": int(x_matrix.shape[1]),
-                "skipped_existing": False,
-                "cache_validation_status": cache_validation_status,
-                "cache_rebuild_reason": cache_rebuild_reason,
-                **_signature_manifest_fields(spatial_signature),
-                **_cache_input_manifest_fields(current_cache_input_signature),
-                **_group_qc_manifest_fields(group_qc_summary),
-            }
-        )
 
     manifest = pd.DataFrame(manifest_rows)
+    if not manifest.empty:
+        manifest = manifest.sort_values(["group_id", "cache_path"], kind="mergesort").reset_index(
+            drop=True
+        )
     manifest_path = cache_dir / "cache_manifest.csv"
     manifest.to_csv(manifest_path, index=False)
     LOGGER.info("Feature cache manifest written: %s", manifest_path)
@@ -696,6 +748,18 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Rebuild existing cache files.",
     )
+    parser.add_argument(
+        "--max-workers",
+        type=int,
+        default=1,
+        help="Maximum number of worker processes for group-parallel cache build.",
+    )
+    parser.add_argument(
+        "--parallel-backend",
+        choices=("serial", "process"),
+        default="serial",
+        help="Cache build parallel backend.",
+    )
     return parser
 
 
@@ -710,6 +774,8 @@ def main(argv: list[str] | None = None) -> int:
         cache_dir=Path(args.cache_dir),
         group_key=args.group_key,
         force=args.force,
+        max_workers=int(args.max_workers),
+        parallel_backend=str(args.parallel_backend),
     )
 
     manifest = pd.read_csv(manifest_path)

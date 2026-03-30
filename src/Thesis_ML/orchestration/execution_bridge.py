@@ -26,6 +26,7 @@ from Thesis_ML.experiments.compute_scheduler import (
 from Thesis_ML.experiments.parallel_execution import (
     OfficialRunJob,
     execute_official_run_jobs,
+    resolve_official_job_resource_lane_hint,
 )
 from Thesis_ML.experiments.progress import ProgressCallback
 from Thesis_ML.experiments.run_states import RUN_STATUS_SUCCESS
@@ -247,6 +248,124 @@ def resolve_variant_run_id(
     return f"ds_{experiment_id}_{run_token}_{campaign_id}"
 
 
+def _build_feature_matrix_upstream_identity(
+    *,
+    variant: dict[str, Any],
+    cache_dir: Path,
+) -> dict[str, Any] | None:
+    if not bool(variant.get("supported", False)):
+        return None
+    start_section = _optional_str(variant.get("start_section"))
+    if start_section is not None and start_section != "dataset_selection":
+        return None
+    end_section = _optional_str(variant.get("end_section"))
+    if end_section is not None and end_section != "evaluation":
+        return None
+    if _optional_str(variant.get("base_artifact_id")) is not None:
+        return None
+    reuse_policy = _optional_str(variant.get("reuse_policy"))
+    if reuse_policy == "disallow":
+        return None
+
+    params = dict(variant.get("params", {}))
+    target = _optional_str(params.get("target"))
+    cv_mode = _optional_str(params.get("cv"))
+    if target is None or cv_mode is None:
+        return None
+
+    raw_feature_space = _optional_str(params.get("feature_space"))
+    feature_space = (
+        str(raw_feature_space) if raw_feature_space is not None else "whole_brain_masked"
+    )
+    raw_roi_spec_path = _optional_str(params.get("roi_spec_path"))
+    resolved_roi_spec_path = (
+        str(Path(raw_roi_spec_path).resolve()) if raw_roi_spec_path is not None else None
+    )
+
+    return {
+        "target": str(target),
+        "cv_mode": str(cv_mode),
+        "subject": _optional_str(params.get("subject")),
+        "train_subject": _optional_str(params.get("train_subject")),
+        "test_subject": _optional_str(params.get("test_subject")),
+        "filter_task": _optional_str(params.get("filter_task")),
+        "filter_modality": _optional_str(params.get("filter_modality")),
+        "feature_space": str(feature_space),
+        "roi_spec_path": resolved_roi_spec_path,
+        "cache_manifest_path": str((Path(cache_dir) / "cache_manifest.csv").resolve()),
+    }
+
+
+def plan_sibling_feature_matrix_reuse(
+    *,
+    variants: list[dict[str, Any]],
+    cache_dir: Path,
+) -> dict[int, int]:
+    grouped_indexes: dict[str, list[int]] = {}
+    for index, variant in enumerate(variants):
+        upstream_identity = _build_feature_matrix_upstream_identity(
+            variant=variant,
+            cache_dir=cache_dir,
+        )
+        if upstream_identity is None:
+            continue
+        key = compute_config_hash(upstream_identity)
+        grouped_indexes.setdefault(key, []).append(int(index))
+
+    dependency_map: dict[int, int] = {}
+    for indexes in grouped_indexes.values():
+        if len(indexes) <= 1:
+            continue
+        anchor_index = int(indexes[0])
+        for dependent_index in indexes[1:]:
+            dependency_map[int(dependent_index)] = anchor_index
+    return dependency_map
+
+
+def apply_feature_matrix_reuse_variant(
+    *,
+    variant: dict[str, Any],
+    base_artifact_id: str,
+    source_run_id: str | None = None,
+) -> dict[str, Any]:
+    updated_variant = dict(variant)
+    updated_variant["start_section"] = "spatial_validation"
+    updated_variant["base_artifact_id"] = str(base_artifact_id)
+    updated_variant["reuse_policy"] = "require_explicit_base"
+
+    design_metadata = (
+        dict(updated_variant.get("design_metadata", {}))
+        if isinstance(updated_variant.get("design_metadata"), dict)
+        else {}
+    )
+    design_metadata["upstream_reuse"] = {
+        "mode": "shared_feature_matrix_bundle",
+        "base_artifact_id": str(base_artifact_id),
+        "source_run_id": str(source_run_id) if source_run_id else None,
+        "start_section": "spatial_validation",
+    }
+    updated_variant["design_metadata"] = design_metadata
+    return updated_variant
+
+
+def extract_feature_matrix_artifact_id(job_result: dict[str, Any] | None) -> str | None:
+    if not isinstance(job_result, dict):
+        return None
+    watchdog_result = job_result.get("watchdog_result")
+    if not isinstance(watchdog_result, dict):
+        return None
+    watchdog_status = str(watchdog_result.get("status", "")).strip().lower()
+    if watchdog_status not in {"success", RUN_STATUS_SUCCESS}:
+        return None
+    run_payload = watchdog_result.get("run_payload")
+    if not isinstance(run_payload, dict):
+        return None
+    artifact_ids = run_payload.get("artifact_ids")
+    if not isinstance(artifact_ids, dict):
+        return None
+    return _optional_str(artifact_ids.get("feature_matrix_bundle"))
+
+
 def _resolve_run_kwargs_methodology_params(
     *,
     params: dict[str, Any],
@@ -391,6 +510,7 @@ def build_variant_official_job(
     deterministic_compute: bool,
     allow_backend_fallback: bool,
     scheduled_compute_assignment: ComputeRunAssignment | None = None,
+    worker_execution_mode: str = "native_worker",
 ) -> tuple[OfficialRunJob | None, str | None, str]:
     run_kwargs, blocked_reason, run_id = build_variant_run_kwargs(
         experiment=experiment,
@@ -423,6 +543,11 @@ def build_variant_official_job(
         "cell_id": variant.get("cell_id"),
         "repeat_id": variant.get("repeat_id"),
     }
+    scheduled_assignment_payload = (
+        scheduled_compute_assignment.to_payload()
+        if scheduled_compute_assignment is not None
+        else None
+    )
     return (
         OfficialRunJob(
             order_index=int(order_index),
@@ -431,6 +556,12 @@ def build_variant_official_job(
             timeout_policy=timeout_policy,
             phase_name=str(phase_name),
             run_identity=run_identity,
+            resource_lane_hint=resolve_official_job_resource_lane_hint(
+                hardware_mode=str(hardware_mode),
+                scheduled_compute_assignment=scheduled_assignment_payload,
+            ),
+            scheduled_compute_assignment=scheduled_assignment_payload,
+            worker_execution_mode=str(worker_execution_mode),
         ),
         None,
         run_id,
@@ -441,6 +572,7 @@ def execute_official_jobs(
     *,
     jobs: list[OfficialRunJob],
     max_parallel_runs: int,
+    max_parallel_gpu_runs: int,
     run_experiment_fn: Callable[..., dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     watchdog_executor = None
@@ -462,6 +594,7 @@ def execute_official_jobs(
     return execute_official_run_jobs(
         jobs=jobs,
         max_parallel_runs=max_parallel_runs,
+        max_parallel_gpu_runs=max_parallel_gpu_runs,
         watchdog_executor=watchdog_executor,
     )
 
@@ -967,12 +1100,15 @@ def execute_variant(
 
 
 __all__ = [
+    "apply_feature_matrix_reuse_variant",
     "build_command",
     "build_variant_official_job",
     "build_variant_run_kwargs",
     "command_to_text",
+    "extract_feature_matrix_artifact_id",
     "execute_official_jobs",
     "execute_variant",
+    "plan_sibling_feature_matrix_reuse",
     "resolve_variant_id",
     "resolve_variant_run_id",
 ]
