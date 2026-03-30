@@ -47,8 +47,13 @@ def run_experiment(**kwargs: Any) -> dict[str, Any]:
 
 
 def run_decision_support_campaign(
-    *, run_experiment_fn: Any | None = None, **kwargs: Any
+    *,
+    run_experiment_fn: Any | None = None,
+    runtime_profile_summary: Any | None = None,
+    **kwargs: Any,
 ) -> dict[str, Any]:
+    if runtime_profile_summary is not None:
+        kwargs["runtime_profile_summary"] = runtime_profile_summary
     return _engine_run_decision_support_campaign(
         run_experiment_fn=run_experiment_fn or run_experiment,
         **kwargs,
@@ -58,8 +63,11 @@ def run_decision_support_campaign(
 def run_workbook_decision_support_campaign(
     *,
     run_experiment_fn: Any | None = None,
+    runtime_profile_summary: Any | None = None,
     **kwargs: Any,
 ) -> dict[str, Any]:
+    if runtime_profile_summary is not None:
+        kwargs["runtime_profile_summary"] = runtime_profile_summary
     return _engine_run_workbook_decision_support_campaign(
         run_experiment_fn=run_experiment_fn or run_experiment,
         **kwargs,

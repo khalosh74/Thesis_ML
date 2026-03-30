@@ -53,6 +53,8 @@ def initial_live_status(campaign_id: str) -> dict[str, Any]:
         "eta_p80_seconds": None,
         "eta_confidence": None,
         "eta_source": None,
+        "campaign_eta": None,
+        "phase_eta": None,
         "anomalies": [],
     }
 
@@ -166,6 +168,36 @@ def apply_event_to_live_status(
         "runs_blocked": int(counts.get("runs_blocked", 0)),
         "runs_dry_run": int(counts.get("runs_dry_run", 0)),
     }
+    return state
+
+
+def merge_eta_payload_into_live_status(
+    state: dict[str, Any],
+    eta_payload: dict[str, Any] | None,
+) -> dict[str, Any]:
+    if not isinstance(eta_payload, dict):
+        return state
+    campaign_eta = eta_payload.get("campaign_eta")
+    phase_eta = eta_payload.get("phase_eta")
+    if isinstance(campaign_eta, dict):
+        state["campaign_eta"] = dict(campaign_eta)
+        state["eta_p50_seconds"] = campaign_eta.get("eta_p50_seconds")
+        state["eta_p80_seconds"] = campaign_eta.get("eta_p80_seconds")
+        state["eta_confidence"] = campaign_eta.get("eta_confidence")
+        state["eta_source"] = campaign_eta.get("eta_source")
+    else:
+        if "eta_p50_seconds" in eta_payload:
+            state["eta_p50_seconds"] = eta_payload.get("eta_p50_seconds")
+        if "eta_p80_seconds" in eta_payload:
+            state["eta_p80_seconds"] = eta_payload.get("eta_p80_seconds")
+        if "eta_confidence" in eta_payload:
+            state["eta_confidence"] = eta_payload.get("eta_confidence")
+        if "eta_source" in eta_payload:
+            state["eta_source"] = eta_payload.get("eta_source")
+    if isinstance(phase_eta, dict):
+        state["phase_eta"] = dict(phase_eta)
+    if "current_phase" in eta_payload and eta_payload.get("current_phase") is not None:
+        state["current_phase"] = eta_payload.get("current_phase")
     return state
 
 

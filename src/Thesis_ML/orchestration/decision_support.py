@@ -23,12 +23,24 @@ def _sync_runtime_hooks() -> None:
     _campaign_runner.run_experiment = run_experiment
 
 
-def run_decision_support_campaign(*args: Any, **kwargs: Any) -> dict[str, Any]:
+def run_decision_support_campaign(
+    *args: Any,
+    runtime_profile_summary: Any | None = None,
+    **kwargs: Any,
+) -> dict[str, Any]:
+    if runtime_profile_summary is not None:
+        kwargs["runtime_profile_summary"] = runtime_profile_summary
     _sync_runtime_hooks()
     return _campaign_runner.run_decision_support_campaign(*args, **kwargs)
 
 
-def run_workbook_decision_support_campaign(*args: Any, **kwargs: Any) -> dict[str, Any]:
+def run_workbook_decision_support_campaign(
+    *args: Any,
+    runtime_profile_summary: Any | None = None,
+    **kwargs: Any,
+) -> dict[str, Any]:
+    if runtime_profile_summary is not None:
+        kwargs["runtime_profile_summary"] = runtime_profile_summary
     _sync_runtime_hooks()
     return _campaign_runner.run_workbook_decision_support_campaign(*args, **kwargs)
 

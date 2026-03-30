@@ -9,6 +9,7 @@ from Thesis_ML.experiments.progress import ProgressEvent
 from Thesis_ML.observability.live_status import (
     apply_event_to_live_status,
     initial_live_status,
+    merge_eta_payload_into_live_status,
     write_live_status_atomic,
 )
 
@@ -36,10 +37,12 @@ class ExecutionEventBus:
         campaign_root: Path,
         campaign_id: str,
         keep_recent_events: int = 50,
+        eta_estimator: Any | None = None,
     ) -> None:
         self.campaign_root = Path(campaign_root)
         self.campaign_id = str(campaign_id)
         self.keep_recent_events = int(keep_recent_events)
+        self.eta_estimator = eta_estimator
         self.execution_events_path = self.campaign_root / "execution_events.jsonl"
         self.live_status_path = self.campaign_root / "campaign_live_status.json"
         self.campaign_root.mkdir(parents=True, exist_ok=True)
@@ -63,6 +66,7 @@ class ExecutionEventBus:
         run_id: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        eta_payload: dict[str, Any] | None = None
         event_payload = {
             "event_name": str(event_name),
             "scope": str(scope),
@@ -79,6 +83,13 @@ class ExecutionEventBus:
             "run_id": None if run_id is None else str(run_id),
             "metadata": _json_safe(dict(metadata or {})),
         }
+        if self.eta_estimator is not None:
+            try:
+                eta_result = self.eta_estimator.ingest_event(event_payload)
+                if isinstance(eta_result, dict):
+                    eta_payload = dict(eta_result)
+            except Exception:
+                eta_payload = None
         try:
             with self.execution_events_path.open("a", encoding="utf-8") as handle:
                 handle.write(f"{json.dumps(event_payload, ensure_ascii=True)}\n")
@@ -87,6 +98,11 @@ class ExecutionEventBus:
                 event_payload,
                 keep_recent_events=self.keep_recent_events,
             )
+            if eta_payload is not None:
+                self._live_status = merge_eta_payload_into_live_status(
+                    self._live_status,
+                    eta_payload,
+                )
             write_live_status_atomic(self.live_status_path, self._live_status)
         except Exception:
             return event_payload

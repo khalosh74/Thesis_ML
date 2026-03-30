@@ -175,6 +175,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="Operational scheduler phase plan selection (default: auto).",
     )
     parser.add_argument(
+        "--runtime-profile-summary",
+        default=None,
+        help=(
+            "Optional runtime profile summary JSON from verify_campaign_runtime_profile.py "
+            "used to seed adaptive ETA estimates."
+        ),
+    )
+    parser.add_argument(
         "--write-back-workbook",
         action="store_true",
         help="When --workbook is used, write machine/trial outputs back to a versioned workbook copy.",
@@ -266,6 +274,8 @@ def print_stage1_commands(args: argparse.Namespace) -> None:
         base.append("--allow-backend-fallback")
     if str(args.phase_plan).strip().lower() != "auto":
         base.extend(["--phase-plan", str(args.phase_plan)])
+    if args.runtime_profile_summary:
+        base.extend(["--runtime-profile-summary", str(args.runtime_profile_summary)])
 
     command = _command_to_text(base)
     print("Stage 1 command:")
@@ -301,6 +311,9 @@ def main(
     data_root = Path(args.data_root)
     cache_dir = Path(args.cache_dir)
     output_root = Path(args.output_root)
+    runtime_profile_summary_path = (
+        Path(args.runtime_profile_summary) if args.runtime_profile_summary else None
+    )
     workbook_output_dir = Path(args.workbook_output_dir) if args.workbook_output_dir else None
 
     if workbook_path is None:
@@ -340,6 +353,7 @@ def main(
                 deterministic_compute=bool(args.deterministic_compute),
                 allow_backend_fallback=bool(args.allow_backend_fallback),
                 phase_plan=str(args.phase_plan),
+                runtime_profile_summary=runtime_profile_summary_path,
             )
         else:
             if resolved_registry_path is None:
@@ -372,6 +386,7 @@ def main(
                 deterministic_compute=bool(args.deterministic_compute),
                 allow_backend_fallback=bool(args.allow_backend_fallback),
                 phase_plan=str(args.phase_plan),
+                runtime_profile_summary=runtime_profile_summary_path,
             )
     except RuntimeError as exc:
         print_registry_status(registry)

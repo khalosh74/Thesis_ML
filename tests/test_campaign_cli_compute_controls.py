@@ -22,6 +22,8 @@ def _campaign_result_payload(tmp_path: Path) -> dict[str, object]:
 
 def test_campaign_cli_forwards_compute_controls_to_campaign_runner(tmp_path: Path) -> None:
     captured: dict[str, object] = {}
+    runtime_summary = tmp_path / "runtime_profile_summary.json"
+    runtime_summary.write_text("{}", encoding="utf-8")
 
     def _stub_read_registry_manifest(_: Path):
         return object()
@@ -48,6 +50,8 @@ def test_campaign_cli_forwards_compute_controls_to_campaign_runner(tmp_path: Pat
             "--allow-backend-fallback",
             "--phase-plan",
             "auto",
+            "--runtime-profile-summary",
+            str(runtime_summary),
             "--output-root",
             str(tmp_path / "outputs"),
         ],
@@ -64,3 +68,4 @@ def test_campaign_cli_forwards_compute_controls_to_campaign_runner(tmp_path: Pat
     assert captured["deterministic_compute"] is True
     assert captured["allow_backend_fallback"] is True
     assert captured["phase_plan"] == "auto"
+    assert captured["runtime_profile_summary"] == runtime_summary

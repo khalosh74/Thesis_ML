@@ -836,6 +836,30 @@ def execute_variant(
         )
         orchestrator_artifact_id = orchestrator_artifact.artifact_id
 
+    result_framework_mode = (
+        str(result.get("framework_mode"))
+        if isinstance(result, dict) and result.get("framework_mode")
+        else None
+    )
+    result_model_cost_tier = (
+        str(result.get("model_cost_tier"))
+        if isinstance(result, dict) and result.get("model_cost_tier")
+        else None
+    )
+    result_projected_runtime_seconds = (
+        _safe_float(result.get("projected_runtime_seconds")) if isinstance(result, dict) else None
+    )
+    result_stage_timings_seconds = (
+        dict(result.get("stage_timings_seconds"))
+        if isinstance(result, dict) and isinstance(result.get("stage_timings_seconds"), dict)
+        else None
+    )
+    result_tuning_enabled = (
+        bool(result.get("tuning_enabled"))
+        if isinstance(result, dict) and result.get("tuning_enabled") is not None
+        else None
+    )
+
     record = {
         "experiment_id": experiment_id,
         "title": str(experiment.get("title", "")),
@@ -863,6 +887,12 @@ def execute_variant(
         "dimensionality_strategy": params.get("dimensionality_strategy"),
         "pca_n_components": params.get("pca_n_components"),
         "pca_variance_ratio": params.get("pca_variance_ratio"),
+        "framework_mode": result_framework_mode,
+        "model_cost_tier": result_model_cost_tier,
+        "projected_runtime_seconds": result_projected_runtime_seconds,
+        "stage_timings_seconds": result_stage_timings_seconds,
+        "tuning_enabled": result_tuning_enabled,
+        "n_permutations": int(effective_n_permutations),
         "start_section": start_section,
         "end_section": end_section,
         "base_artifact_id": base_artifact_id,

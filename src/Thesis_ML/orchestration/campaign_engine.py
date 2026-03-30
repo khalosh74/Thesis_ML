@@ -13,13 +13,20 @@ from Thesis_ML.artifacts.registry import (
     register_artifact,
 )
 from Thesis_ML.config.framework_mode import FrameworkMode
+from Thesis_ML.config.methodology import MethodologyPolicyName
 from Thesis_ML.experiments.compute_policy import resolve_compute_policy
 from Thesis_ML.experiments.compute_scheduler import (
     ComputeRunAssignment,
     ComputeRunRequest,
     plan_compute_schedule,
 )
-from Thesis_ML.observability import ExecutionEventBus
+from Thesis_ML.experiments.model_catalog import (
+    get_model_cost_entry,
+)
+from Thesis_ML.experiments.model_catalog import (
+    projected_runtime_seconds as resolve_projected_runtime_seconds,
+)
+from Thesis_ML.observability import EtaEstimator, ExecutionEventBus
 from Thesis_ML.orchestration.contracts import CompiledStudyManifest
 from Thesis_ML.orchestration.decision_reports import (
     write_decision_reports as _write_decision_reports,
@@ -109,6 +116,115 @@ def _optional_int(value: Any) -> int | None:
         return int(str(value))
     except Exception:
         return None
+
+
+def _safe_float(value: Any) -> float | None:
+    if value in (None, ""):
+        return None
+    try:
+        return float(value)
+    except Exception:
+        return None
+
+
+def _resolve_tuning_enabled(params: dict[str, Any]) -> bool:
+    methodology = str(params.get("methodology_policy_name") or "").strip().lower()
+    if methodology == MethodologyPolicyName.GROUPED_NESTED_TUNING.value:
+        return True
+    explicit = params.get("tuning_enabled")
+    if isinstance(explicit, bool):
+        return bool(explicit)
+    if explicit is None:
+        return False
+    return str(explicit).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _resolve_planned_projected_runtime_seconds(
+    *,
+    params: dict[str, Any],
+    n_permutations: int,
+) -> float | None:
+    explicit_projected = _safe_float(params.get("projected_runtime_seconds"))
+    if explicit_projected is not None and explicit_projected > 0.0:
+        return float(explicit_projected)
+    model_name = str(params.get("model") or "").strip().lower()
+    if not model_name:
+        return None
+    try:
+        projected = resolve_projected_runtime_seconds(
+            model_name=model_name,
+            framework_mode=FrameworkMode.EXPLORATORY,
+            methodology_policy=str(params.get("methodology_policy_name") or "").strip() or None,
+            tuning_enabled=_resolve_tuning_enabled(params),
+        )
+    except Exception:
+        return None
+    if int(n_permutations) > 0:
+        projected = int(projected) + int(max(0, int(n_permutations)))
+    return float(max(1, int(projected)))
+
+
+def _build_eta_planning_metadata(
+    *,
+    campaign_id: str,
+    phase_name: str,
+    experiment_id: str,
+    run_id: str,
+    params: dict[str, Any],
+    effective_n_permutations: int,
+) -> dict[str, Any]:
+    model_name = str(params.get("model") or "").strip().lower()
+    model_cost_tier: str | None = None
+    if model_name:
+        try:
+            model_cost_tier = str(get_model_cost_entry(model_name).cost_tier.value)
+        except Exception:
+            model_cost_tier = None
+    return {
+        "campaign_id": str(campaign_id),
+        "phase_name": str(phase_name),
+        "experiment_id": str(experiment_id),
+        "run_id": str(run_id),
+        "framework_mode": FrameworkMode.EXPLORATORY.value,
+        "model": model_name if model_name else None,
+        "model_cost_tier": model_cost_tier,
+        "feature_space": (
+            str(params.get("feature_space"))
+            if params.get("feature_space") not in (None, "")
+            else "whole_brain_masked"
+        ),
+        "preprocessing_strategy": (
+            str(params.get("preprocessing_strategy"))
+            if params.get("preprocessing_strategy") not in (None, "")
+            else "none"
+        ),
+        "dimensionality_strategy": (
+            str(params.get("dimensionality_strategy"))
+            if params.get("dimensionality_strategy") not in (None, "")
+            else "none"
+        ),
+        "tuning_enabled": bool(_resolve_tuning_enabled(params)),
+        "cv_mode": str(params.get("cv")) if params.get("cv") not in (None, "") else None,
+        "n_permutations": int(max(0, int(effective_n_permutations))),
+        "subject": str(params.get("subject")) if params.get("subject") else None,
+        "train_subject": str(params.get("train_subject")) if params.get("train_subject") else None,
+        "test_subject": str(params.get("test_subject")) if params.get("test_subject") else None,
+        "task": str(params.get("filter_task")) if params.get("filter_task") else None,
+        "modality": str(params.get("filter_modality")) if params.get("filter_modality") else None,
+        "projected_runtime_seconds": _resolve_planned_projected_runtime_seconds(
+            params=params,
+            n_permutations=int(max(0, int(effective_n_permutations))),
+        ),
+    }
+
+
+def _extract_actual_runtime_seconds(record: dict[str, Any]) -> float | None:
+    stage_timings = record.get("stage_timings_seconds")
+    if isinstance(stage_timings, dict):
+        total = _safe_float(stage_timings.get("total"))
+        if total is not None and total > 0.0:
+            return float(total)
+    return None
 
 
 def _git_commit() -> str | None:
@@ -314,6 +430,7 @@ def run_decision_support_campaign(
     deterministic_compute: bool = False,
     allow_backend_fallback: bool = False,
     phase_plan: str = "auto",
+    runtime_profile_summary: Path | None = None,
     run_experiment_fn: Callable[..., dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     if run_experiment_fn is None:
@@ -348,9 +465,26 @@ def run_decision_support_campaign(
     campaign_id = _now_timestamp()
     campaign_root = output_root / "campaigns" / campaign_id
     campaign_root.mkdir(parents=True, exist_ok=False)
+    history_path = campaign_root.parent / "runtime_history.jsonl"
+    eta_estimator: EtaEstimator | None = None
+    try:
+        eta_estimator = EtaEstimator(
+            campaign_root=campaign_root,
+            campaign_id=campaign_id,
+            history_path=history_path,
+            runtime_profile_summary_path=(
+                Path(runtime_profile_summary) if runtime_profile_summary is not None else None
+            ),
+        )
+    except Exception:
+        eta_estimator = None
     event_bus: ExecutionEventBus | None = None
     try:
-        event_bus = ExecutionEventBus(campaign_root=campaign_root, campaign_id=campaign_id)
+        event_bus = ExecutionEventBus(
+            campaign_root=campaign_root,
+            campaign_id=campaign_id,
+            eta_estimator=eta_estimator,
+        )
     except Exception:
         event_bus = None
 
@@ -538,6 +672,23 @@ def run_decision_support_campaign(
                     variant=cell,
                     campaign_id=campaign_id,
                 )
+                params_for_eta = (
+                    dict(cell.get("params", {})) if isinstance(cell.get("params"), dict) else {}
+                )
+                resolved_permutation_override = _optional_int(cell.get("n_permutations_override"))
+                effective_n_permutations = (
+                    int(resolved_permutation_override)
+                    if resolved_permutation_override is not None
+                    else int(n_permutations)
+                )
+                eta_planning_metadata = _build_eta_planning_metadata(
+                    campaign_id=campaign_id,
+                    phase_name=phase_name,
+                    experiment_id=exp_id,
+                    run_id=run_id,
+                    params=params_for_eta,
+                    effective_n_permutations=int(effective_n_permutations),
+                )
                 _emit_campaign_event(
                     event_name="run_planned",
                     scope="run",
@@ -551,6 +702,7 @@ def run_decision_support_campaign(
                     metadata={
                         "supported": bool(cell.get("supported", False)),
                         "blocked_reason": cell.get("blocked_reason"),
+                        **eta_planning_metadata,
                     },
                 )
 
@@ -747,6 +899,47 @@ def run_decision_support_campaign(
                 phase_records.append(record)
                 all_variant_records.append(record)
                 record_status = str(record.get("status"))
+                terminal_params = (
+                    dict(cell_for_record.get("params", {}))
+                    if isinstance(cell_for_record.get("params"), dict)
+                    else {}
+                )
+                terminal_override = _optional_int(cell_for_record.get("n_permutations_override"))
+                terminal_n_permutations = (
+                    int(terminal_override) if terminal_override is not None else int(n_permutations)
+                )
+                eta_terminal_metadata = _build_eta_planning_metadata(
+                    campaign_id=campaign_id,
+                    phase_name=phase_name,
+                    experiment_id=exp_id,
+                    run_id=run_id,
+                    params=terminal_params,
+                    effective_n_permutations=int(terminal_n_permutations),
+                )
+                eta_terminal_metadata["actual_runtime_seconds"] = _extract_actual_runtime_seconds(
+                    record
+                )
+                if record.get("framework_mode") not in (None, ""):
+                    eta_terminal_metadata["framework_mode"] = str(record.get("framework_mode"))
+                if record.get("model_cost_tier") not in (None, ""):
+                    eta_terminal_metadata["model_cost_tier"] = str(record.get("model_cost_tier"))
+                projected_runtime = _safe_float(record.get("projected_runtime_seconds"))
+                if projected_runtime is not None and projected_runtime > 0.0:
+                    eta_terminal_metadata["projected_runtime_seconds"] = float(projected_runtime)
+                if record.get("cv") not in (None, ""):
+                    eta_terminal_metadata["cv_mode"] = str(record.get("cv"))
+                if record.get("feature_space") not in (None, ""):
+                    eta_terminal_metadata["feature_space"] = str(record.get("feature_space"))
+                if record.get("preprocessing_strategy") not in (None, ""):
+                    eta_terminal_metadata["preprocessing_strategy"] = str(
+                        record.get("preprocessing_strategy")
+                    )
+                if record.get("dimensionality_strategy") not in (None, ""):
+                    eta_terminal_metadata["dimensionality_strategy"] = str(
+                        record.get("dimensionality_strategy")
+                    )
+                if record.get("tuning_enabled") is not None:
+                    eta_terminal_metadata["tuning_enabled"] = bool(record.get("tuning_enabled"))
                 if record_status == "completed":
                     _emit_campaign_event(
                         event_name="run_finished",
@@ -758,6 +951,7 @@ def run_decision_support_campaign(
                         variant_id=variant_id,
                         run_id=run_id,
                         message="run finished",
+                        metadata=eta_terminal_metadata,
                     )
                 elif record_status == "failed":
                     _emit_campaign_event(
@@ -770,7 +964,10 @@ def run_decision_support_campaign(
                         variant_id=variant_id,
                         run_id=run_id,
                         message="run failed",
-                        metadata={"error": record.get("error")},
+                        metadata={
+                            "error": record.get("error"),
+                            **eta_terminal_metadata,
+                        },
                     )
                 elif record_status == "blocked":
                     _emit_campaign_event(
@@ -783,7 +980,10 @@ def run_decision_support_campaign(
                         variant_id=variant_id,
                         run_id=run_id,
                         message="run blocked",
-                        metadata={"blocked_reason": record.get("blocked_reason")},
+                        metadata={
+                            "blocked_reason": record.get("blocked_reason"),
+                            **eta_terminal_metadata,
+                        },
                     )
                 elif record_status == "dry_run":
                     _emit_campaign_event(
@@ -796,6 +996,7 @@ def run_decision_support_campaign(
                         variant_id=variant_id,
                         run_id=run_id,
                         message="run dry-run",
+                        metadata=eta_terminal_metadata,
                     )
 
         phase_payload = {
@@ -1008,6 +1209,14 @@ def run_decision_support_campaign(
             output_dir=workbook_output_dir,
         )
 
+    eta_calibration_path: str | None = None
+    if eta_estimator is not None:
+        try:
+            eta_estimator.finalize()
+            eta_calibration_path = str((campaign_root / "campaign_eta_calibration.json").resolve())
+        except Exception:
+            eta_calibration_path = None
+
     campaign_manifest = {
         "campaign_id": campaign_id,
         "created_at": _utc_timestamp(),
@@ -1040,6 +1249,9 @@ def run_decision_support_campaign(
             "stage_decision_notes": [str(path.resolve()) for path in stage_decision_paths],
             "phase_artifacts": list(phase_artifact_paths),
             "phase_skip_summary": str(phase_skip_summary_path.resolve()),
+            "eta_state": str((campaign_root / "eta_state.json").resolve()),
+            "eta_calibration": eta_calibration_path,
+            "runtime_history": str(history_path.resolve()),
             "workbook_output_path": (
                 str(workbook_output_path.resolve()) if workbook_output_path is not None else None
             ),
@@ -1070,6 +1282,9 @@ def run_decision_support_campaign(
         "result_aggregation_path": str(aggregation_path.resolve()),
         "summary_outputs_export_path": str(summary_output_path.resolve()),
         "phase_skip_summary_path": str(phase_skip_summary_path.resolve()),
+        "eta_state_path": str((campaign_root / "eta_state.json").resolve()),
+        "eta_calibration_path": eta_calibration_path,
+        "runtime_history_path": str(history_path.resolve()),
         "selected_experiments": [str(exp["experiment_id"]) for exp in selected_experiments],
         "status_counts": _status_snapshot(all_variant_records),
         "blocked_experiments": blocked_experiments,
@@ -1109,6 +1324,7 @@ def run_workbook_decision_support_campaign(
     deterministic_compute: bool = False,
     allow_backend_fallback: bool = False,
     phase_plan: str = "auto",
+    runtime_profile_summary: Path | None = None,
     run_experiment_fn: Callable[..., dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     workbook_manifest = read_workbook_manifest(workbook_path)
@@ -1143,6 +1359,7 @@ def run_workbook_decision_support_campaign(
         deterministic_compute=deterministic_compute,
         allow_backend_fallback=allow_backend_fallback,
         phase_plan=phase_plan,
+        runtime_profile_summary=runtime_profile_summary,
         run_experiment_fn=run_experiment_fn,
     )
 
