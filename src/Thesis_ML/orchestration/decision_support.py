@@ -28,6 +28,8 @@ def run_decision_support_campaign(
     runtime_profile_summary: Any | None = None,
     quiet_progress: bool | None = None,
     progress_interval_seconds: float | None = None,
+    progress_ui: str | None = None,
+    progress_detail: str | None = None,
     **kwargs: Any,
 ) -> dict[str, Any]:
     if runtime_profile_summary is not None:
@@ -36,6 +38,10 @@ def run_decision_support_campaign(
         kwargs["quiet_progress"] = bool(quiet_progress)
     if progress_interval_seconds is not None:
         kwargs["progress_interval_seconds"] = float(progress_interval_seconds)
+    if progress_ui is not None:
+        kwargs["progress_ui"] = str(progress_ui)
+    if progress_detail is not None:
+        kwargs["progress_detail"] = str(progress_detail)
     _sync_runtime_hooks()
     return _campaign_runner.run_decision_support_campaign(*args, **kwargs)
 
@@ -45,6 +51,8 @@ def run_workbook_decision_support_campaign(
     runtime_profile_summary: Any | None = None,
     quiet_progress: bool | None = None,
     progress_interval_seconds: float | None = None,
+    progress_ui: str | None = None,
+    progress_detail: str | None = None,
     **kwargs: Any,
 ) -> dict[str, Any]:
     if runtime_profile_summary is not None:
@@ -53,6 +61,10 @@ def run_workbook_decision_support_campaign(
         kwargs["quiet_progress"] = bool(quiet_progress)
     if progress_interval_seconds is not None:
         kwargs["progress_interval_seconds"] = float(progress_interval_seconds)
+    if progress_ui is not None:
+        kwargs["progress_ui"] = str(progress_ui)
+    if progress_detail is not None:
+        kwargs["progress_detail"] = str(progress_detail)
     _sync_runtime_hooks()
     return _campaign_runner.run_workbook_decision_support_campaign(*args, **kwargs)
 

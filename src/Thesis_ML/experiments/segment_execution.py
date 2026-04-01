@@ -86,6 +86,7 @@ class SegmentExecutionRequest:
     config_filename: str
     report_dir: Path
     artifact_registry_path: Path
+    artifact_registry_fallback_paths: tuple[Path, ...] = ()
     code_ref: str | None
     affine_atol: float
     fold_metrics_path: Path

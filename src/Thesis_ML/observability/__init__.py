@@ -3,7 +3,14 @@ from Thesis_ML.observability.anomalies import (
     append_anomaly,
     build_anomaly_id,
 )
-from Thesis_ML.observability.console_reporter import ConsoleReporter
+from Thesis_ML.observability.console_reporter import (
+    PROGRESS_DETAIL_CHOICES,
+    PROGRESS_UI_CHOICES,
+    ConsoleReporter,
+    LegacyLineReporter,
+    RichLiveReporter,
+    build_progress_reporter,
+)
 from Thesis_ML.observability.eta import (
     EtaEstimator,
     append_runtime_history,
@@ -23,6 +30,11 @@ from Thesis_ML.observability.process_sampler import ProcessSampler
 __all__ = [
     "ExecutionEventBus",
     "ConsoleReporter",
+    "LegacyLineReporter",
+    "RichLiveReporter",
+    "build_progress_reporter",
+    "PROGRESS_UI_CHOICES",
+    "PROGRESS_DETAIL_CHOICES",
     "AnomalyEngine",
     "EtaEstimator",
     "append_anomaly",

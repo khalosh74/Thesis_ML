@@ -254,7 +254,7 @@ class AnomalyEngine:
         event_metadata = dict(metadata) if isinstance(metadata, dict) else {}
         error_text = event_metadata.get("error")
 
-        if event_name == "run_failed" or status == "failed":
+        if event_name == "run_failed":
             anomaly = self._emit(
                 severity="error",
                 category="runtime",
@@ -267,7 +267,7 @@ class AnomalyEngine:
                 evidence={"status": status, "error": error_text},
                 recommended_action="Inspect run_status.json and stderr artifacts for failure root cause.",
                 blocking=True,
-                dedup_group="run_failed",
+                dedup_group=f"run_failed::{run_id or '__na__'}",
             )
             if anomaly is not None:
                 emitted.append(anomaly)

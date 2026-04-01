@@ -29,10 +29,10 @@ from Thesis_ML.experiments.model_catalog import (
 )
 from Thesis_ML.observability import (
     AnomalyEngine,
-    ConsoleReporter,
     EtaEstimator,
     ExecutionEventBus,
 )
+from Thesis_ML.observability.console_reporter import build_progress_reporter
 from Thesis_ML.orchestration.contracts import CompiledStudyManifest
 from Thesis_ML.orchestration.decision_reports import (
     write_decision_reports as _write_decision_reports,
@@ -47,6 +47,9 @@ from Thesis_ML.orchestration.execution_bridge import (
     execute_official_jobs as _execute_official_jobs,
 )
 from Thesis_ML.orchestration.execution_bridge import execute_variant as _execute_variant
+from Thesis_ML.orchestration.execution_bridge import (
+    extract_artifact_registry_path as _extract_artifact_registry_path,
+)
 from Thesis_ML.orchestration.execution_bridge import (
     extract_feature_matrix_artifact_id as _extract_feature_matrix_artifact_id,
 )
@@ -812,6 +815,8 @@ def run_decision_support_campaign(
     runtime_profile_summary: Path | None = None,
     quiet_progress: bool = False,
     progress_interval_seconds: float = 15.0,
+    progress_ui: str = "auto",
+    progress_detail: str = "experiment_stage",
     run_experiment_fn: Callable[..., dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     if run_experiment_fn is None:
@@ -867,14 +872,16 @@ def run_decision_support_campaign(
         )
     except Exception:
         eta_estimator = None
-    console_reporter: ConsoleReporter | None = None
+    progress_reporter: Any | None = None
     try:
-        console_reporter = ConsoleReporter(
+        progress_reporter = build_progress_reporter(
             interval_seconds=float(progress_interval_seconds),
             quiet=bool(quiet_progress),
+            progress_ui=str(progress_ui),
+            progress_detail=str(progress_detail),
         )
     except Exception:
-        console_reporter = None
+        progress_reporter = None
     event_bus: ExecutionEventBus | None = None
     try:
         event_bus = ExecutionEventBus(
@@ -882,7 +889,7 @@ def run_decision_support_campaign(
             campaign_id=campaign_id,
             eta_estimator=eta_estimator,
             anomaly_engine=anomaly_engine,
-            console_reporter=console_reporter,
+            console_reporter=progress_reporter,
         )
     except Exception:
         event_bus = None
@@ -1328,6 +1335,7 @@ def run_decision_support_campaign(
                     for dependent_run_id, anchor_run_id in reuse_dependency_by_run_id.items():
                         anchor_result = job_results_by_run_id.get(str(anchor_run_id))
                         base_feature_matrix_id = _extract_feature_matrix_artifact_id(anchor_result)
+                        source_registry_path = _extract_artifact_registry_path(anchor_result)
                         if base_feature_matrix_id is None:
                             continue
                         request_row = request_cells_by_run_id.get(str(dependent_run_id))
@@ -1339,6 +1347,7 @@ def run_decision_support_campaign(
                                 variant=original_variant,
                                 base_artifact_id=str(base_feature_matrix_id),
                                 source_run_id=str(anchor_run_id),
+                                source_registry_path=source_registry_path,
                             )
                         )
                     _dispatch_requested_runs(
@@ -1715,6 +1724,8 @@ def run_decision_support_campaign(
                 "allow_backend_fallback": bool(allow_backend_fallback),
                 "quiet_progress": bool(quiet_progress),
                 "progress_interval_seconds": float(progress_interval_seconds),
+                "progress_ui": str(progress_ui),
+                "progress_detail": str(progress_detail),
                 "selected_experiments": [str(exp["experiment_id"]) for exp in selected_experiments],
             }
         ),
@@ -1807,6 +1818,8 @@ def run_decision_support_campaign(
         "allow_backend_fallback": bool(allow_backend_fallback),
         "quiet_progress": bool(quiet_progress),
         "progress_interval_seconds": float(progress_interval_seconds),
+        "progress_ui": str(progress_ui),
+        "progress_detail": str(progress_detail),
         "search_mode": search_mode_value,
         "optuna_trials": int(optuna_trials) if optuna_trials is not None else None,
         "search_space_ids": sorted(search_space_map.keys()),
@@ -1973,6 +1986,8 @@ def run_workbook_decision_support_campaign(
     runtime_profile_summary: Path | None = None,
     quiet_progress: bool = False,
     progress_interval_seconds: float = 15.0,
+    progress_ui: str = "auto",
+    progress_detail: str = "experiment_stage",
     run_experiment_fn: Callable[..., dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     workbook_manifest = read_workbook_manifest(workbook_path)
@@ -2010,6 +2025,8 @@ def run_workbook_decision_support_campaign(
         runtime_profile_summary=runtime_profile_summary,
         quiet_progress=bool(quiet_progress),
         progress_interval_seconds=float(progress_interval_seconds),
+        progress_ui=str(progress_ui),
+        progress_detail=str(progress_detail),
         run_experiment_fn=run_experiment_fn,
     )
 

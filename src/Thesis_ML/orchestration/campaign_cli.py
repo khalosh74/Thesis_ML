@@ -13,6 +13,10 @@ from Thesis_ML.config.paths import (
 )
 from Thesis_ML.config.runtime_selection import resolve_runtime_config_path
 from Thesis_ML.experiments.compute_policy import HARDWARE_MODE_CHOICES
+from Thesis_ML.observability.console_reporter import (
+    PROGRESS_DETAIL_CHOICES,
+    PROGRESS_UI_CHOICES,
+)
 from Thesis_ML.orchestration.contracts import CompiledStudyManifest
 from Thesis_ML.orchestration.execution_bridge import command_to_text as _command_to_text
 from Thesis_ML.orchestration.experiment_selection import (
@@ -194,6 +198,25 @@ def build_parser() -> argparse.ArgumentParser:
         help="Heartbeat summary interval in seconds for live console progress output.",
     )
     parser.add_argument(
+        "--progress-ui",
+        default="auto",
+        choices=list(PROGRESS_UI_CHOICES),
+        help=(
+            "Progress UX renderer mode. auto=prefer rich live bar in interactive terminals; "
+            "legacy=current line-by-line reporter; bar=request rich live bar with fallback."
+        ),
+    )
+    parser.add_argument(
+        "--progress-detail",
+        default="experiment_stage",
+        choices=list(PROGRESS_DETAIL_CHOICES),
+        help=(
+            "Progress detail feed level. summary=heartbeat only; "
+            "experiment_stage=experiment completions + stage boundary completions; "
+            "verbose=additional run lifecycle events."
+        ),
+    )
+    parser.add_argument(
         "--write-back-workbook",
         action="store_true",
         help="When --workbook is used, write machine/trial outputs back to a versioned workbook copy.",
@@ -291,6 +314,10 @@ def print_stage1_commands(args: argparse.Namespace) -> None:
         base.append("--quiet-progress")
     if float(args.progress_interval_seconds) != 15.0:
         base.extend(["--progress-interval-seconds", str(args.progress_interval_seconds)])
+    if str(args.progress_ui).strip().lower() != "auto":
+        base.extend(["--progress-ui", str(args.progress_ui)])
+    if str(args.progress_detail).strip().lower() != "experiment_stage":
+        base.extend(["--progress-detail", str(args.progress_detail)])
 
     command = _command_to_text(base)
     print("Stage 1 command:")
@@ -371,6 +398,8 @@ def main(
                 runtime_profile_summary=runtime_profile_summary_path,
                 quiet_progress=bool(args.quiet_progress),
                 progress_interval_seconds=float(args.progress_interval_seconds),
+                progress_ui=str(args.progress_ui),
+                progress_detail=str(args.progress_detail),
             )
         else:
             if resolved_registry_path is None:
@@ -406,6 +435,8 @@ def main(
                 runtime_profile_summary=runtime_profile_summary_path,
                 quiet_progress=bool(args.quiet_progress),
                 progress_interval_seconds=float(args.progress_interval_seconds),
+                progress_ui=str(args.progress_ui),
+                progress_detail=str(args.progress_detail),
             )
     except RuntimeError as exc:
         print_registry_status(registry)

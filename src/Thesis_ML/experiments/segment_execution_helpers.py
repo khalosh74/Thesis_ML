@@ -12,6 +12,7 @@ from Thesis_ML.artifacts.registry import (
     find_latest_compatible_artifact,
     get_artifact,
     list_artifacts_for_run,
+    register_artifact,
 )
 from Thesis_ML.orchestration.contracts import ReusePolicy, SectionName
 
@@ -117,6 +118,38 @@ def resolve_base_artifact(
             registry_path=request.artifact_registry_path,
             artifact_id=request.base_artifact_id,
         )
+        if record is None:
+            fallback_paths = tuple(
+                Path(path)
+                for path in getattr(request, "artifact_registry_fallback_paths", ()) or ()
+                if path is not None
+            )
+            for fallback_path in fallback_paths:
+                try:
+                    if fallback_path.resolve() == Path(request.artifact_registry_path).resolve():
+                        continue
+                except Exception:
+                    continue
+                fallback_record = get_artifact(
+                    registry_path=fallback_path,
+                    artifact_id=request.base_artifact_id,
+                )
+                if fallback_record is None:
+                    continue
+                record = register_artifact(
+                    registry_path=request.artifact_registry_path,
+                    artifact_type=fallback_record.artifact_type,
+                    run_id=fallback_record.run_id,
+                    upstream_artifact_ids=list(fallback_record.upstream_artifact_ids),
+                    config_hash=fallback_record.config_hash,
+                    code_ref=fallback_record.code_ref,
+                    path=fallback_record.path,
+                    status=fallback_record.status,
+                    artifact_schema_version=fallback_record.artifact_schema_version,
+                    artifact_id=fallback_record.artifact_id,
+                    created_at=fallback_record.created_at,
+                )
+                break
         if record is None:
             raise ValueError(
                 f"Base artifact '{request.base_artifact_id}' was not found in registry."

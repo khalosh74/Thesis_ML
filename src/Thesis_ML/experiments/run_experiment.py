@@ -564,6 +564,7 @@ def run_experiment(
     end_section: str | None = None,
     base_artifact_id: str | None = None,
     reuse_policy: str | None = None,
+    artifact_registry_fallback_paths: list[Path | str] | None = None,
     force: bool = False,
     resume: bool = False,
     reuse_completed_artifacts: bool = False,
@@ -1020,6 +1021,22 @@ def run_experiment(
     )
     should_reuse_completed_artifacts = bool(resume or reuse_completed_artifacts)
     artifact_registry_path = reports_root / "artifact_registry.sqlite3"
+    primary_registry_resolved = artifact_registry_path.resolve()
+    fallback_registry_paths: list[Path] = []
+    fallback_seen: set[str] = set()
+    for raw_fallback in artifact_registry_fallback_paths or []:
+        try:
+            candidate_path = Path(raw_fallback).resolve()
+        except Exception:
+            continue
+        if candidate_path == primary_registry_resolved:
+            continue
+        candidate_key = str(candidate_path)
+        if candidate_key in fallback_seen:
+            continue
+        fallback_seen.add(candidate_key)
+        fallback_registry_paths.append(candidate_path)
+    resolved_artifact_registry_fallback_paths = tuple(fallback_registry_paths)
     git_provenance = collect_git_provenance()
     code_ref = str(git_provenance.get("git_commit") or "") or None
 
@@ -1466,6 +1483,7 @@ def run_experiment(
                         config_filename=config_path.name,
                         report_dir=report_dir,
                         artifact_registry_path=artifact_registry_path,
+                        artifact_registry_fallback_paths=resolved_artifact_registry_fallback_paths,
                         code_ref=code_ref,
                         affine_atol=SPATIAL_AFFINE_ATOL,
                         fold_metrics_path=fold_metrics_path,
@@ -2421,6 +2439,15 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Optional reuse policy for segmented runs (auto, require_explicit_base, disallow).",
     )
     parser.add_argument(
+        "--artifact-registry-fallback-path",
+        action="append",
+        default=[],
+        help=(
+            "Optional additional artifact registry path used when explicit base_artifact_id "
+            "is not found in the run-local registry."
+        ),
+    )
+    parser.add_argument(
         "--force",
         action="store_true",
         help="Force rerun: clear existing run output directory before execution.",
@@ -2596,6 +2623,7 @@ def main(argv: list[str] | None = None) -> int:
             end_section=args.end_section,
             base_artifact_id=args.base_artifact_id,
             reuse_policy=args.reuse_policy,
+            artifact_registry_fallback_paths=list(args.artifact_registry_fallback_path),
             force=bool(args.force),
             resume=bool(args.resume),
             reuse_completed_artifacts=bool(args.reuse_completed_artifacts),

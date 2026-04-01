@@ -138,6 +138,7 @@ def build_command(
     end_section: str | None = None,
     base_artifact_id: str | None = None,
     reuse_policy: str | None = None,
+    base_artifact_registry_path: str | None = None,
     methodology_policy_name: str | None = None,
     class_weight_policy: str | None = None,
     tuning_search_space_id: str | None = None,
@@ -224,6 +225,13 @@ def build_command(
         command.extend(["--base-artifact-id", str(base_artifact_id)])
     if reuse_policy:
         command.extend(["--reuse-policy", str(reuse_policy)])
+    if base_artifact_registry_path:
+        command.extend(
+            [
+                "--artifact-registry-fallback-path",
+                str(base_artifact_registry_path),
+            ]
+        )
     return command
 
 
@@ -330,11 +338,14 @@ def apply_feature_matrix_reuse_variant(
     variant: dict[str, Any],
     base_artifact_id: str,
     source_run_id: str | None = None,
+    source_registry_path: str | None = None,
 ) -> dict[str, Any]:
     updated_variant = dict(variant)
     updated_variant["start_section"] = "spatial_validation"
     updated_variant["base_artifact_id"] = str(base_artifact_id)
     updated_variant["reuse_policy"] = "require_explicit_base"
+    if source_registry_path:
+        updated_variant["base_artifact_registry_path"] = str(source_registry_path)
 
     design_metadata = (
         dict(updated_variant.get("design_metadata", {}))
@@ -345,6 +356,7 @@ def apply_feature_matrix_reuse_variant(
         "mode": "shared_feature_matrix_bundle",
         "base_artifact_id": str(base_artifact_id),
         "source_run_id": str(source_run_id) if source_run_id else None,
+        "source_registry_path": str(source_registry_path) if source_registry_path else None,
         "start_section": "spatial_validation",
     }
     updated_variant["design_metadata"] = design_metadata
@@ -367,6 +379,18 @@ def extract_feature_matrix_artifact_id(job_result: dict[str, Any] | None) -> str
     if not isinstance(artifact_ids, dict):
         return None
     return _optional_str(artifact_ids.get("feature_matrix_bundle"))
+
+
+def extract_artifact_registry_path(job_result: dict[str, Any] | None) -> str | None:
+    if not isinstance(job_result, dict):
+        return None
+    watchdog_result = job_result.get("watchdog_result")
+    if not isinstance(watchdog_result, dict):
+        return None
+    run_payload = watchdog_result.get("run_payload")
+    if not isinstance(run_payload, dict):
+        return None
+    return _optional_str(run_payload.get("artifact_registry_path"))
 
 
 def _resolve_run_kwargs_methodology_params(
@@ -424,6 +448,11 @@ def build_variant_run_kwargs(
         str(variant.get("base_artifact_id")).strip() if variant.get("base_artifact_id") else None
     )
     reuse_policy = str(variant.get("reuse_policy")).strip() if variant.get("reuse_policy") else None
+    base_artifact_registry_path = (
+        str(variant.get("base_artifact_registry_path")).strip()
+        if variant.get("base_artifact_registry_path")
+        else None
+    )
     resolved_permutation_override = _optional_int(variant.get("n_permutations_override"))
     effective_n_permutations = (
         int(resolved_permutation_override)
@@ -480,6 +509,9 @@ def build_variant_run_kwargs(
         "end_section": end_section,
         "base_artifact_id": base_artifact_id,
         "reuse_policy": reuse_policy,
+        "artifact_registry_fallback_paths": (
+            [str(base_artifact_registry_path)] if base_artifact_registry_path else None
+        ),
         "hardware_mode": str(hardware_mode),
         "gpu_device_id": int(gpu_device_id) if gpu_device_id is not None else None,
         "deterministic_compute": bool(deterministic_compute),
@@ -666,6 +698,11 @@ def execute_variant(
         str(variant.get("base_artifact_id")).strip() if variant.get("base_artifact_id") else None
     )
     reuse_policy = str(variant.get("reuse_policy")).strip() if variant.get("reuse_policy") else None
+    base_artifact_registry_path = (
+        str(variant.get("base_artifact_registry_path")).strip()
+        if variant.get("base_artifact_registry_path")
+        else None
+    )
     search_space_id = (
         str(variant.get("search_space_id")).strip() if variant.get("search_space_id") else None
     )
@@ -682,6 +719,16 @@ def execute_variant(
     manifests_dir.mkdir(parents=True, exist_ok=True)
 
     now_start = _utc_timestamp()
+    execution_started_at = (
+        _optional_str(job_execution_result.get("started_at_utc"))
+        if isinstance(job_execution_result, dict)
+        else None
+    )
+    execution_ended_at = (
+        _optional_str(job_execution_result.get("ended_at_utc"))
+        if isinstance(job_execution_result, dict)
+        else None
+    )
     command: list[str] | None = None
     command_text: str | None = None
     status = "planned"
@@ -720,6 +767,7 @@ def execute_variant(
                 end_section=end_section,
                 base_artifact_id=base_artifact_id,
                 reuse_policy=reuse_policy,
+                base_artifact_registry_path=base_artifact_registry_path,
                 methodology_policy_name=methodology_params["methodology_policy_name"],
                 class_weight_policy=methodology_params["class_weight_policy"],
                 tuning_search_space_id=methodology_params["tuning_search_space_id"],
@@ -834,6 +882,11 @@ def execute_variant(
                         end_section=end_section,
                         base_artifact_id=base_artifact_id,
                         reuse_policy=reuse_policy,
+                        artifact_registry_fallback_paths=(
+                            [str(base_artifact_registry_path)]
+                            if base_artifact_registry_path
+                            else None
+                        ),
                         hardware_mode=str(hardware_mode),
                         gpu_device_id=(int(gpu_device_id) if gpu_device_id is not None else None),
                         deterministic_compute=bool(deterministic_compute),
@@ -853,6 +906,8 @@ def execute_variant(
                     error = str(exc)
 
     now_end = _utc_timestamp()
+    record_started_at = execution_started_at or now_start
+    record_finished_at = execution_ended_at or now_end
     metrics = dict(result.get("metrics", {})) if result else {}
     raw_primary_metric_name = experiment.get("primary_metric")
     if raw_primary_metric_name is None or not str(raw_primary_metric_name).strip():
@@ -875,8 +930,8 @@ def execute_variant(
         "variant_id": variant_id,
         "variant_label": variant_label(params),
         "status": status,
-        "started_at": now_start,
-        "finished_at": now_end,
+        "started_at": record_started_at,
+        "finished_at": record_finished_at,
         "command": command_text,
         "config_used": {
             "index_csv": str(index_csv.resolve()),
@@ -888,6 +943,7 @@ def execute_variant(
             "end_section": end_section,
             "base_artifact_id": base_artifact_id,
             "reuse_policy": reuse_policy,
+            "base_artifact_registry_path": base_artifact_registry_path,
             "search_space_id": search_space_id,
             "search_assignment": search_assignment,
             "params": params,
@@ -1067,6 +1123,7 @@ def execute_variant(
         "end_section": end_section,
         "base_artifact_id": base_artifact_id,
         "reuse_policy": reuse_policy,
+        "base_artifact_registry_path": base_artifact_registry_path,
         "search_space_id": search_space_id,
         "search_assignment": (
             json.dumps(search_assignment, sort_keys=True)
@@ -1102,8 +1159,8 @@ def execute_variant(
         "blocked_reason": blocked_reason,
         "error": error,
         "command": command_text,
-        "started_at": now_start,
-        "finished_at": now_end,
+        "started_at": record_started_at,
+        "finished_at": record_finished_at,
         "n_folds": _safe_float(metrics.get("n_folds")),
         "notes": str(experiment.get("notes", "")),
     }
@@ -1116,6 +1173,7 @@ __all__ = [
     "build_variant_official_job",
     "build_variant_run_kwargs",
     "command_to_text",
+    "extract_artifact_registry_path",
     "extract_feature_matrix_artifact_id",
     "execute_official_jobs",
     "execute_variant",
