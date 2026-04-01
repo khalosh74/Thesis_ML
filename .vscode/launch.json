@@ -30,7 +30,7 @@
                 "--seed",
                 "42",
                 "--reports-root",
-                "${workspaceFolder}/outputs/reports"
+                "${workspaceFolder}/outputs/reports/exploratory"
             ]
         },
         {
@@ -53,7 +53,32 @@
                 "--variant",
                 "${input:comparisonVariant}",
                 "--reports-root",
-                "${workspaceFolder}/outputs/reports",
+                "${workspaceFolder}/outputs/reports/comparisons",
+                "--max-parallel-runs",
+                "1"
+            ]
+        },
+        {
+            "name": "Locked Comparison: comparison_runner (dry-run all variants)",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "Thesis_ML.cli.comparison_runner",
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src",
+                "THESIS_ML_INDEX_CSV": "${input:indexCsv}",
+                "THESIS_ML_DATA_ROOT": "${input:dataRoot}",
+                "THESIS_ML_CACHE_DIR": "${input:cacheDir}"
+            },
+            "args": [
+                "--comparison",
+                "${input:comparisonSpec}",
+                "--all-variants",
+                "--dry-run",
+                "--reports-root",
+                "${workspaceFolder}/outputs/reports/comparisons",
                 "--max-parallel-runs",
                 "1"
             ]
@@ -78,7 +103,7 @@
                 "--suite",
                 "${input:protocolSuite}",
                 "--reports-root",
-                "${workspaceFolder}/outputs/reports",
+                "${workspaceFolder}/outputs/reports/confirmatory",
                 "--max-parallel-runs",
                 "1"
             ]
@@ -103,7 +128,32 @@
                 "--all-suites",
                 "--dry-run",
                 "--reports-root",
-                "${workspaceFolder}/outputs/reports",
+                "${workspaceFolder}/outputs/reports/confirmatory",
+                "--max-parallel-runs",
+                "1"
+            ]
+        },
+        {
+            "name": "Confirmatory: frozen protocol_runner (dry-run all suites)",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "Thesis_ML.cli.protocol_runner",
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src",
+                "THESIS_ML_INDEX_CSV": "${input:indexCsv}",
+                "THESIS_ML_DATA_ROOT": "${input:dataRoot}",
+                "THESIS_ML_CACHE_DIR": "${input:cacheDir}"
+            },
+            "args": [
+                "--protocol",
+                "${input:protocolFrozenSpec}",
+                "--all-suites",
+                "--dry-run",
+                "--reports-root",
+                "${workspaceFolder}/outputs/reports/confirmatory",
                 "--max-parallel-runs",
                 "1"
             ]
@@ -141,6 +191,7 @@
             "options": [
                 "coarse_affect",
                 "emotion",
+                "binary_valence_like",
                 "modality",
                 "task",
                 "regressor_label"
@@ -155,7 +206,7 @@
                 "ridge",
                 "linearsvc",
                 "logreg",
-                "dummy",
+                "xgboost",
                 "all"
             ],
             "default": "ridge"
@@ -164,7 +215,7 @@
             "id": "comparisonSpec",
             "type": "promptString",
             "description": "Path to comparison spec JSON",
-            "default": "${workspaceFolder}/configs/comparisons/model_family_comparison_v1.json"
+            "default": "${workspaceFolder}/configs/comparisons/model_family_grouped_nested_comparison_v2.json"
         },
         {
             "id": "comparisonVariant",
@@ -175,8 +226,14 @@
         {
             "id": "protocolSpec",
             "type": "promptString",
-            "description": "Path to protocol JSON",
-            "default": "${workspaceFolder}/configs/protocols/thesis_canonical_v1.json"
+            "description": "Path to canonical protocol JSON",
+            "default": "${workspaceFolder}/configs/protocols/thesis_canonical_nested_v2.json"
+        },
+        {
+            "id": "protocolFrozenSpec",
+            "type": "promptString",
+            "description": "Path to frozen confirmatory protocol JSON",
+            "default": "${workspaceFolder}/configs/protocols/thesis_confirmatory_v1.json"
         },
         {
             "id": "protocolSuite",

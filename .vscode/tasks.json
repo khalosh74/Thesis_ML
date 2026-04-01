@@ -1,0 +1,116 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Setup: uv sync --frozen --extra dev",
+            "type": "shell",
+            "command": "python",
+            "args": [
+                "-m",
+                "uv",
+                "sync",
+                "--frozen",
+                "--extra",
+                "dev"
+            ],
+            "problemMatcher": []
+        },
+        {
+            "label": "Check: pytest -q",
+            "type": "shell",
+            "command": "python",
+            "args": [
+                "-m",
+                "uv",
+                "run",
+                "python",
+                "-m",
+                "pytest",
+                "-q"
+            ],
+            "group": "test",
+            "problemMatcher": []
+        },
+        {
+            "label": "Check: acceptance smoke",
+            "type": "shell",
+            "command": "python",
+            "args": [
+                "-m",
+                "uv",
+                "run",
+                "python",
+                "scripts/acceptance_smoke.py",
+                "--tmp-root",
+                "outputs/acceptance_tmp"
+            ],
+            "problemMatcher": []
+        },
+        {
+            "label": "Official: protocol dry-run (demo dataset)",
+            "type": "shell",
+            "command": "python",
+            "args": [
+                "-m",
+                "uv",
+                "run",
+                "thesisml-run-protocol",
+                "--protocol",
+                "configs/protocols/thesis_canonical_nested_v2.json",
+                "--all-suites",
+                "--reports-root",
+                "outputs/reports/confirmatory",
+                "--dry-run"
+            ],
+            "options": {
+                "env": {
+                    "THESIS_ML_INDEX_CSV": "${workspaceFolder}/demo_data/synthetic_v1/dataset_index.csv",
+                    "THESIS_ML_DATA_ROOT": "${workspaceFolder}/demo_data/synthetic_v1/data_root",
+                    "THESIS_ML_CACHE_DIR": "${workspaceFolder}/demo_data/synthetic_v1/cache"
+                }
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Official: comparison dry-run (demo dataset)",
+            "type": "shell",
+            "command": "python",
+            "args": [
+                "-m",
+                "uv",
+                "run",
+                "thesisml-run-comparison",
+                "--comparison",
+                "configs/comparisons/model_family_grouped_nested_comparison_v2.json",
+                "--all-variants",
+                "--reports-root",
+                "outputs/reports/comparisons",
+                "--dry-run"
+            ],
+            "options": {
+                "env": {
+                    "THESIS_ML_INDEX_CSV": "${workspaceFolder}/demo_data/synthetic_v1/dataset_index.csv",
+                    "THESIS_ML_DATA_ROOT": "${workspaceFolder}/demo_data/synthetic_v1/data_root",
+                    "THESIS_ML_CACHE_DIR": "${workspaceFolder}/demo_data/synthetic_v1/cache"
+                }
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Official: replay both (demo dataset)",
+            "type": "shell",
+            "command": "python",
+            "args": [
+                "-m",
+                "uv",
+                "run",
+                "python",
+                "scripts/replay_official_paths.py",
+                "--mode",
+                "both",
+                "--use-demo-dataset"
+            ],
+            "problemMatcher": []
+        }
+    ]
+}
