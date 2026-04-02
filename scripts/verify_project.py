@@ -8,6 +8,7 @@ from time import perf_counter
 from typing import Any
 
 from Thesis_ML.script_support.io import file_sha256
+from Thesis_ML.script_support.summaries import write_summary
 from Thesis_ML.verification.campaign_runtime_profile import verify_campaign_runtime_profile
 from Thesis_ML.verification.confirmatory_ready import verify_confirmatory_ready
 from Thesis_ML.verification.model_cost_policy import verify_model_cost_policy_precheck
@@ -16,20 +17,13 @@ from Thesis_ML.verification.official_artifacts import verify_official_artifacts
 EXPECTED_BUNDLE_SCHEMA_VERSION = "publishable-bundle-v1"
 
 
-def _write_summary(path_text: str | None, payload: dict[str, Any]) -> None:
-    if not path_text:
-        return
-    summary_path = Path(path_text)
-    summary_path.parent.mkdir(parents=True, exist_ok=True)
-    summary_path.write_text(f"{json.dumps(payload, indent=2)}\n", encoding="utf-8")
-
-
 def _run_official_artifacts(args: argparse.Namespace) -> int:
     summary = verify_official_artifacts(
         output_dir=Path(args.output_dir),
         mode=args.mode,
     )
-    _write_summary(args.summary_out, summary)
+    if args.summary_out:
+        write_summary(Path(args.summary_out), summary)
     print(json.dumps(summary, indent=2))
     if not bool(summary.get("passed", False)):
         print("Official artifact verification failed.", file=sys.stderr)
@@ -42,7 +36,8 @@ def _run_confirmatory_ready(args: argparse.Namespace) -> int:
         output_dir=Path(args.output_dir),
         reproducibility_summary=Path(args.repro_summary) if args.repro_summary else None,
     )
-    _write_summary(args.summary_out, summary)
+    if args.summary_out:
+        write_summary(Path(args.summary_out), summary)
     print(json.dumps(summary, indent=2))
     if not bool(summary.get("passed", False)):
         print("Confirmatory-ready verification failed.", file=sys.stderr)
@@ -56,7 +51,8 @@ def _run_model_cost_policy_precheck(args: argparse.Namespace) -> int:
         confirmatory_protocol=Path(args.confirmatory_protocol),
         comparison_specs=[Path(path) for path in list(args.comparison_spec)],
     )
-    _write_summary(args.summary_out, summary)
+    if args.summary_out:
+        write_summary(Path(args.summary_out), summary)
     print(json.dumps(summary, indent=2))
     if not bool(summary.get("passed", False)):
         print("Model-cost policy precheck failed.", file=sys.stderr)
@@ -393,7 +389,8 @@ def verify_publishable_bundle(bundle_dir: Path) -> dict[str, Any]:
 
 def _run_publishable_bundle(args: argparse.Namespace) -> int:
     summary = verify_publishable_bundle(Path(args.bundle_dir))
-    _write_summary(args.summary_out, summary)
+    if args.summary_out:
+        write_summary(Path(args.summary_out), summary)
     print(json.dumps(summary, indent=2))
     if not bool(summary.get("passed", False)):
         print("Publishable bundle verification failed.", file=sys.stderr)
@@ -517,7 +514,8 @@ def _run_campaign_runtime_profile(args: argparse.Namespace) -> int:
         progress_callback=progress_callback,
     )
 
-    _write_summary(args.summary_out, summary)
+    if args.summary_out:
+        write_summary(Path(args.summary_out), summary)
     print(json.dumps(summary, indent=2))
     if not bool(summary.get("passed", False)):
         print("Campaign runtime profile precheck failed.", file=sys.stderr)

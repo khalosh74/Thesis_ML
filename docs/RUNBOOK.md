@@ -524,7 +524,7 @@ python scripts/profile_runtime_baseline.py --mode operator_dataset --index-csv <
 python scripts/profile_runtime_baseline.py --mode ci_synthetic --compare-against outputs/performance/baselines/<previous_tag>/baseline_bundle.json
 python scripts/verify_official_artifacts.py --output-dir <official_output_dir>
 python scripts/verify_confirmatory_ready.py --output-dir <confirmatory_output_dir>
-python scripts/verify_official_reproducibility.py --mode protocol --index-csv <...> --data-root <...> --cache-dir <...> --suite confirmatory_primary_within_subject
+python scripts/replay_official_paths.py --mode confirmatory --index-csv <...> --data-root <...> --cache-dir <...> --suite confirmatory_primary_within_subject --verify-determinism --skip-confirmatory-ready
 python scripts/replay_official_paths.py --mode both --use-demo-dataset --verify-determinism
 python scripts/build_publishable_bundle.py --output-dir <bundle_dir> --comparison-output <...> --confirmatory-output <...> --replay-summary <...> --replay-verification-summary <...> --repro-manifest <...>
 python scripts/verify_publishable_bundle.py --bundle-dir <bundle_dir>

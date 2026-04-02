@@ -63,13 +63,15 @@ The deterministic comparator remains available directly:
 for frozen confirmatory replay / hard-gate validation (`thesis_confirmatory_v1.json`).
 
 ```bash
-python scripts/verify_official_reproducibility.py \
-  --mode protocol \
-  --config configs/protocols/thesis_confirmatory_v1.json \
+python scripts/replay_official_paths.py \
+  --mode confirmatory \
+  --protocol configs/protocols/thesis_confirmatory_v1.json \
   --index-csv demo_data/synthetic_v1/dataset_index.csv \
   --data-root demo_data/synthetic_v1/data_root \
   --cache-dir demo_data/synthetic_v1/cache \
-  --suite confirmatory_primary_within_subject
+  --suite confirmatory_primary_within_subject \
+  --verify-determinism \
+  --skip-confirmatory-ready
 ```
 
 ## Publishable bundle

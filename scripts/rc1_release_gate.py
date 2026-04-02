@@ -79,7 +79,7 @@ def _build_parser() -> argparse.ArgumentParser:
         default="",
         help=(
             "Optional full command string to execute reproducibility verification "
-            "(for example: 'python scripts/verify_official_reproducibility.py ...')."
+            "(for example: 'python scripts/replay_official_paths.py ... --verify-determinism')."
         ),
     )
     parser.add_argument(

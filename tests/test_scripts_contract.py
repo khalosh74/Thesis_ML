@@ -69,7 +69,6 @@ def test_script_role_families_are_explicit_and_stable() -> None:
         "verify_confirmatory_ready.py",
         "verify_model_cost_policy_precheck.py",
         "verify_official_artifacts.py",
-        "verify_official_reproducibility.py",
         "verify_project.py",
         "verify_publishable_bundle.py",
     ]

@@ -280,7 +280,7 @@ docker run --rm thesis-ml:dev
 - Lightweight performance smoke: `python scripts/performance_smoke.py`
 - Official artifact invariant check: `python scripts/verify_official_artifacts.py --output-dir <official_output_dir>`
 - Confirmatory-ready governance check: `python scripts/verify_confirmatory_ready.py --output-dir <confirmatory_output_dir>`
-- Deterministic rerun check: `python scripts/verify_official_reproducibility.py --mode protocol --index-csv <...> --data-root <...> --cache-dir <...> --suite confirmatory_primary_within_subject`
+- Deterministic rerun check: `python scripts/replay_official_paths.py --mode confirmatory --index-csv <...> --data-root <...> --cache-dir <...> --suite confirmatory_primary_within_subject --verify-determinism --skip-confirmatory-ready`
 - One-command official replay (comparison + confirmatory): `python scripts/replay_official_paths.py --mode both --use-demo-dataset`
 - Publishable bundle tooling:
   - `python scripts/build_publishable_bundle.py --output-dir <bundle_dir> --comparison-output <...> --confirmatory-output <...> --replay-summary <...> --replay-verification-summary <...> --repro-manifest <...>`

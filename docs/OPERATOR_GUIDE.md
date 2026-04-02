@@ -275,7 +275,7 @@ python scripts/performance_smoke.py --output outputs/performance/performance_smo
 python scripts/profile_runtime_baseline.py --mode ci_synthetic
 python scripts/profile_runtime_baseline.py --mode operator_dataset --index-csv <...> --data-root <...> --cache-dir <...>
 python scripts/profile_runtime_baseline.py --mode ci_synthetic --compare-against outputs/performance/baselines/<previous_tag>/baseline_bundle.json
-python scripts/verify_official_reproducibility.py --mode protocol --index-csv <...> --data-root <...> --cache-dir <...> --suite confirmatory_primary_within_subject
+python scripts/replay_official_paths.py --mode confirmatory --index-csv <...> --data-root <...> --cache-dir <...> --suite confirmatory_primary_within_subject --verify-determinism --skip-confirmatory-ready
 python scripts/rc1_release_gate.py --run-ruff --run-pytest --run-performance-smoke
 ```
 

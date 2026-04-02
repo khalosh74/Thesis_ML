@@ -49,9 +49,7 @@ def test_scripts_importing_common_still_import_cleanly() -> None:
         "build_publishable_bundle.py",
         "verify_publishable_bundle.py",
         "replay_official_paths.py",
-        "verify_official_reproducibility.py",
     ):
         module = _load_module(scripts_dir / name)
         assert hasattr(module, "main")
         assert callable(module.main)
-

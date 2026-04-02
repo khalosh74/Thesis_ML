@@ -25,9 +25,8 @@ python scripts/verify_confirmatory_ready.py \
   --summary-out outputs/release/confirmatory_ready_summary.json
 ```
 
-The optional reproducibility summary can come from:
+The optional reproducibility summary comes from:
 
-- `scripts/verify_official_reproducibility.py`
 - `scripts/replay_official_paths.py` (`replay_verification_summary.json`)
 
 The command emits a machine-readable JSON summary with:

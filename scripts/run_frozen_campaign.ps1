@@ -556,16 +556,20 @@ function Invoke-DeterministicOfficialReproCheck {
         [Parameter(Mandatory = $true)][string]$SummaryOut
     )
 
+    $replayMode = if ($Mode -eq "protocol") { "confirmatory" } else { "comparison" }
+    $configFlag = if ($Mode -eq "protocol") { "--protocol" } else { "--comparison" }
     $commandParts = @(
-        "python", "scripts/verify_official_reproducibility.py",
-        "--mode", $Mode,
-        "--config", $ConfigPath,
+        "python", "scripts/replay_official_paths.py",
+        "--mode", $replayMode,
+        $configFlag, $ConfigPath,
         "--index-csv", $IndexCsv,
         "--data-root", $DataRoot,
         "--cache-dir", $CacheDir,
         $SelectionFlag, $SelectionValue,
         "--reports-root", $ReportsRoot,
-        "--summary-out", $SummaryOut
+        "--summary-out", $SummaryOut,
+        "--verify-determinism",
+        "--skip-confirmatory-ready"
     )
     Invoke-PhaseCommand -Context $Context -Label $Label -CommandParts $commandParts | Out-Null
 }

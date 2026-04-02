@@ -28,5 +28,4 @@ Current Wave-2 inventory of `scripts/` with canonical vs wrapper ownership.
 | `verify_confirmatory_ready.py` | compatibility wrapper | yes | wrapper | Thin wrapper routing to `verify_project.py confirmatory-ready`. |
 | `verify_model_cost_policy_precheck.py` | compatibility wrapper | yes | wrapper | Thin wrapper routing to `verify_project.py model-cost-policy-precheck`. |
 | `verify_official_artifacts.py` | compatibility wrapper | yes | wrapper | Thin wrapper routing to `verify_project.py official-artifacts`. |
-| `verify_official_reproducibility.py` | compatibility wrapper | yes | wrapper | Thin wrapper routing to canonical replay path with deterministic verification enabled. |
 | `verify_publishable_bundle.py` | compatibility wrapper | yes | wrapper | Thin wrapper routing to `verify_project.py publishable-bundle`. |

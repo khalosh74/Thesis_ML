@@ -33,7 +33,6 @@ This directory keeps top-level entrypoint filenames stable while concentrating r
 - `verify_model_cost_policy_precheck.py` (routes to `verify_project.py model-cost-policy-precheck`)
 - `verify_publishable_bundle.py` (routes to `verify_project.py publishable-bundle`)
 - `verify_campaign_runtime_profile.py` (routes to `verify_project.py campaign-runtime-profile`)
-- `verify_official_reproducibility.py` (routes to `replay_official_paths.py --verify-determinism`)
 
 ## Release helper
 - `release_hygiene_check.py` remains a focused helper; `rc1_release_gate.py` is the canonical release orchestrator.

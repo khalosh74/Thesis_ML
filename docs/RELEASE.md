@@ -104,25 +104,28 @@ python scripts/verify_official_artifacts.py --output-dir <official_output_dir> -
 Run a small official path twice and compare deterministic invariants:
 
 ```bash
-python scripts/verify_official_reproducibility.py \
-  --mode protocol \
-  --config configs/protocols/thesis_confirmatory_v1.json \
+python scripts/replay_official_paths.py \
+  --mode confirmatory \
+  --protocol configs/protocols/thesis_confirmatory_v1.json \
   --index-csv <dataset_index.csv> \
   --data-root <data_root> \
   --cache-dir <cache_dir> \
-  --suite confirmatory_primary_within_subject
+  --suite confirmatory_primary_within_subject \
+  --verify-determinism \
+  --skip-confirmatory-ready
 ```
 
 Comparison example:
 
 ```bash
-python scripts/verify_official_reproducibility.py \
+python scripts/replay_official_paths.py \
   --mode comparison \
-  --config configs/comparisons/model_family_grouped_nested_comparison_v2.json \
+  --comparison configs/comparisons/model_family_grouped_nested_comparison_v2.json \
   --index-csv <dataset_index.csv> \
   --data-root <data_root> \
   --cache-dir <cache_dir> \
-  --variant ridge
+  --variant ridge \
+  --verify-determinism
 ```
 
 Canonical one-command replay path (comparison + confirmatory using checked-in demo data):
@@ -188,7 +191,7 @@ Use `--repro-command` to include a reproducibility check in the same gate run:
 python scripts/rc1_release_gate.py \
   --run-ruff \
   --run-pytest \
-  --repro-command "python scripts/verify_official_reproducibility.py --mode protocol --config configs/protocols/thesis_confirmatory_v1.json --index-csv <dataset_index.csv> --data-root <data_root> --cache-dir <cache_dir> --suite confirmatory_primary_within_subject"
+  --repro-command "python scripts/replay_official_paths.py --mode confirmatory --protocol configs/protocols/thesis_confirmatory_v1.json --index-csv <dataset_index.csv> --data-root <data_root> --cache-dir <cache_dir> --suite confirmatory_primary_within_subject --verify-determinism --skip-confirmatory-ready"
 ```
 
 Or use native replay/bundle options:
