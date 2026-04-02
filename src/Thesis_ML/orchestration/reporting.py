@@ -494,6 +494,10 @@ def write_campaign_execution_report(
         campaign_root,
         ["stage*_decision_notes.md"],
     )
+    preflight_review_paths = _existing_relative_paths(
+        campaign_root,
+        ["preflight_reviews/*.md"],
+    )
     phase_artifact_paths = _existing_relative_paths(
         campaign_root,
         [
@@ -535,6 +539,7 @@ def write_campaign_execution_report(
         ),
         "stage_summaries": stage_summary_paths,
         "stage_decision_notes": stage_decision_note_paths,
+        "preflight_reviews": preflight_review_paths,
         "phase_artifacts": phase_artifact_paths,
     }
     if eta_state is not None:

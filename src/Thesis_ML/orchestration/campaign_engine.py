@@ -764,6 +764,103 @@ def _write_phase_artifact(
     return output_path
 
 
+_PREFLIGHT_EXPERIMENT_IDS = frozenset(
+    {"E01", "E02", "E03", "E04", "E05", "E06", "E07", "E08", "E09", "E10", "E11"}
+)
+
+
+def _load_preflight_review_payload(
+    *,
+    campaign_root: Path,
+    experiment_id: str,
+) -> dict[str, Any] | None:
+    exp_id = str(experiment_id).strip().upper()
+    if exp_id not in _PREFLIGHT_EXPERIMENT_IDS:
+        return None
+    review_path = campaign_root / "preflight_reviews" / f"{exp_id}_review.json"
+    if not review_path.exists() or not review_path.is_file():
+        return None
+    payload = _safe_load_json(review_path)
+    return payload if isinstance(payload, dict) else None
+
+
+def _phase_review_fields(
+    *,
+    campaign_root: Path,
+    experiment_ids: list[str],
+) -> dict[str, Any]:
+    review_by_experiment: dict[str, dict[str, Any]] = {}
+    for experiment_id in sorted({str(value).strip().upper() for value in experiment_ids}):
+        review_payload = _load_preflight_review_payload(
+            campaign_root=campaign_root,
+            experiment_id=experiment_id,
+        )
+        if isinstance(review_payload, dict):
+            review_by_experiment[experiment_id] = review_payload
+
+    if not review_by_experiment:
+        return {
+            "lock_status": "not_reviewed",
+            "candidate_winner": None,
+            "candidate_winner_metric": None,
+            "consistency_pass": None,
+            "min_margin_pass": None,
+            "baseline_delta_pass": None,
+            "manual_review_required": None,
+            "review_artifacts": [],
+            "dependency_reruns_required": False,
+            "preflight_review_by_experiment": {},
+        }
+
+    review_items = list(review_by_experiment.values())
+    manual_review_required = any(bool(item.get("manual_review_required")) for item in review_items)
+    consistency_pass = all(bool(item.get("consistency_pass")) for item in review_items)
+    min_margin_pass = all(bool(item.get("min_margin_pass")) for item in review_items)
+    baseline_delta_pass = all(bool(item.get("baseline_delta_pass")) for item in review_items)
+    dependency_reruns_required = any(
+        bool(item.get("dependency_reruns_required")) for item in review_items
+    )
+    review_artifacts = []
+    for payload in review_items:
+        artifacts_payload = payload.get("review_artifacts")
+        if isinstance(artifacts_payload, dict):
+            review_artifacts.extend(
+                [str(value) for value in artifacts_payload.values() if str(value).strip()]
+            )
+
+    return {
+        "lock_status": ("manual_review_required" if manual_review_required else "auto_lock_passed"),
+        "candidate_winner": {
+            exp_id: payload.get("candidate_winner")
+            for exp_id, payload in sorted(review_by_experiment.items())
+        },
+        "candidate_winner_metric": {
+            exp_id: payload.get("candidate_winner_metric")
+            for exp_id, payload in sorted(review_by_experiment.items())
+        },
+        "consistency_pass": bool(consistency_pass),
+        "min_margin_pass": bool(min_margin_pass),
+        "baseline_delta_pass": bool(baseline_delta_pass),
+        "manual_review_required": bool(manual_review_required),
+        "review_artifacts": sorted(set(review_artifacts)),
+        "dependency_reruns_required": bool(dependency_reruns_required),
+        "preflight_review_by_experiment": {
+            exp_id: {
+                "lock_status": payload.get("lock_status"),
+                "candidate_winner": payload.get("candidate_winner"),
+                "candidate_winner_metric": payload.get("candidate_winner_metric"),
+                "consistency_pass": payload.get("consistency_pass"),
+                "min_margin_pass": payload.get("min_margin_pass"),
+                "baseline_delta_pass": payload.get("baseline_delta_pass"),
+                "manual_review_required": payload.get("manual_review_required"),
+                "review_artifacts": payload.get("review_artifacts"),
+                "dependency_reruns_required": payload.get("dependency_reruns_required"),
+            }
+            for exp_id, payload in sorted(review_by_experiment.items())
+        },
+    }
+
+
 def _is_sequential_only_group(
     *,
     group_experiment_ids: list[str],
@@ -1613,6 +1710,12 @@ def run_decision_support_campaign(
             ],
             "decision_note": None,
         }
+        phase_payload.update(
+            _phase_review_fields(
+                campaign_root=campaign_root,
+                experiment_ids=list(sorted(set(phase_experiment_ids))),
+            )
+        )
         artifact_filename = _PHASE_ARTIFACTS.get(phase_name)
         if artifact_filename:
             path = _write_phase_artifact(
