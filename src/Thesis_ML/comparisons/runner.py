@@ -258,8 +258,7 @@ def _validate_official_comparison_gpu_admission(
 
     if disallowed_runs or unsupported_runs:
         allowed_combinations = ", ".join(
-            f"{model_name}/{family}"
-            for model_name, family in sorted(allowlist)
+            f"{model_name}/{family}" for model_name, family in sorted(allowlist)
         )
         detail_parts = []
         if disallowed_runs:

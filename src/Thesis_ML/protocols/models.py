@@ -987,12 +987,9 @@ class ThesisProtocol(_ProtocolModel):
                 )
 
         if (
-            (
-                self.success_criteria.require_dummy_baseline_outperformance
-                or self.success_criteria.require_permutation_pass
-            )
-            and self.protocol_id != "thesis_confirmatory_v1"
-        ):
+            self.success_criteria.require_dummy_baseline_outperformance
+            or self.success_criteria.require_permutation_pass
+        ) and self.protocol_id != "thesis_confirmatory_v1":
             supporting_control_claims = [
                 claim
                 for claim in self.claims
@@ -1156,7 +1153,9 @@ class CompiledRunSpec(_ProtocolModel):
             field_name="CompiledRunSpec",
         )
         model_spec = get_model_spec(self.model)
-        if str(self.class_weight_policy.value) not in set(model_spec.supported_class_weight_policies):
+        if str(self.class_weight_policy.value) not in set(
+            model_spec.supported_class_weight_policies
+        ):
             allowed = ", ".join(model_spec.supported_class_weight_policies)
             raise ValueError(
                 f"CompiledRunSpec '{self.run_id}' class_weight_policy='{self.class_weight_policy.value}' "

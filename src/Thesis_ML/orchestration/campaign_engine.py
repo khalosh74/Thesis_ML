@@ -1258,9 +1258,9 @@ def run_decision_support_campaign(
                         **eta_planning_metadata,
                     },
                 )
-                experiment_planned_terminal_counts[exp_id] = int(
-                    experiment_planned_terminal_counts.get(exp_id, 0)
-                ) + 1
+                experiment_planned_terminal_counts[exp_id] = (
+                    int(experiment_planned_terminal_counts.get(exp_id, 0)) + 1
+                )
 
             runnable_cells = [
                 (experiment, cell)
@@ -1336,9 +1336,7 @@ def run_decision_support_campaign(
                     dependent_experiment_id = str(
                         group_cells[dependent_group_index][0]["experiment_id"]
                     )
-                    anchor_experiment_id = str(
-                        group_cells[anchor_group_index][0]["experiment_id"]
-                    )
+                    anchor_experiment_id = str(group_cells[anchor_group_index][0]["experiment_id"])
                     if dependent_experiment_id != anchor_experiment_id:
                         continue
                     dependent_run_id = run_id_by_group_index.get(dependent_group_index)
@@ -1686,9 +1684,9 @@ def run_decision_support_campaign(
                         metadata=eta_terminal_metadata,
                     )
                 if record_status in {"completed", "failed", "blocked", "dry_run"}:
-                    experiment_terminal_counts[exp_id] = int(
-                        experiment_terminal_counts.get(exp_id, 0)
-                    ) + 1
+                    experiment_terminal_counts[exp_id] = (
+                        int(experiment_terminal_counts.get(exp_id, 0)) + 1
+                    )
                     _maybe_emit_experiment_finished_event(exp_id)
 
         phase_payload = {

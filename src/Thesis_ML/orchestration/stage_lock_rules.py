@@ -95,7 +95,9 @@ def get_preflight_stage_rule(experiment_id: str) -> PreflightStageRule:
     rule = _PREFLIGHT_RULES.get(key)
     if rule is None:
         allowed = ", ".join(sorted(_PREFLIGHT_RULES))
-        raise ValueError(f"Unsupported preflight experiment_id '{experiment_id}'. Allowed: {allowed}")
+        raise ValueError(
+            f"Unsupported preflight experiment_id '{experiment_id}'. Allowed: {allowed}"
+        )
     return rule
 
 
@@ -135,10 +137,9 @@ def evaluate_stage_lock_decision(
     if not bool(consistency_pass):
         reasons.append("slice_winner_inconsistency")
 
-    min_margin_pass = (
-        mean_margin_balanced_accuracy is not None
-        and float(mean_margin_balanced_accuracy) >= float(rule.min_margin_balanced_accuracy)
-    )
+    min_margin_pass = mean_margin_balanced_accuracy is not None and float(
+        mean_margin_balanced_accuracy
+    ) >= float(rule.min_margin_balanced_accuracy)
     if not min_margin_pass:
         reasons.append(
             "margin_below_threshold"
@@ -147,8 +148,7 @@ def evaluate_stage_lock_decision(
 
     if not bool(baseline_delta_pass):
         reasons.append(
-            "baseline_delta_below_threshold"
-            f"(min={rule.min_baseline_delta_balanced_accuracy:.4f})"
+            f"baseline_delta_below_threshold(min={rule.min_baseline_delta_balanced_accuracy:.4f})"
         )
 
     if not bool(margin_vs_fold_std_pass):

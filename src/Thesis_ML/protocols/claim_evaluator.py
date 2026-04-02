@@ -219,7 +219,9 @@ def _build_strict_gate_summary(
     protocol_invalid_run_ids: list[str],
 ) -> dict[str, Any]:
     failed_condition_names = [
-        condition for condition in required_conditions if not bool(condition_summary.get(condition, False))
+        condition
+        for condition in required_conditions
+        if not bool(condition_summary.get(condition, False))
     ]
     return {
         "required_conditions": list(required_conditions),
@@ -260,7 +262,9 @@ def _evaluate_primary_claim(
         if (
             run_id in run_specs_by_id
             and _is_primary_evidence_run_spec(run_specs_by_id[run_id])
-            and _normalized_evidence_run_role(getattr(run_specs_by_id[run_id], "evidence_run_role", ""))
+            and _normalized_evidence_run_role(
+                getattr(run_specs_by_id[run_id], "evidence_run_role", "")
+            )
             != EvidenceRunRole.UNTUNED_BASELINE.value
         )
     ]
@@ -380,9 +384,15 @@ def _evaluate_primary_claim(
             methodology_mismatch = True
         if run_tuning_enabled != expected_tuning_from_protocol:
             methodology_mismatch = True
-        if not isinstance(config_tuning_enabled, bool) or bool(config_tuning_enabled) != run_tuning_enabled:
+        if (
+            not isinstance(config_tuning_enabled, bool)
+            or bool(config_tuning_enabled) != run_tuning_enabled
+        ):
             methodology_mismatch = True
-        if not isinstance(metrics_tuning_enabled, bool) or bool(metrics_tuning_enabled) != run_tuning_enabled:
+        if (
+            not isinstance(metrics_tuning_enabled, bool)
+            or bool(metrics_tuning_enabled) != run_tuning_enabled
+        ):
             methodology_mismatch = True
 
         if run_methodology == "grouped_nested_tuning":
@@ -483,7 +493,9 @@ def _evaluate_primary_claim(
             matched_control_run_id = str(matched_control_spec.run_id)
             matched_control_run_ids.append(matched_control_run_id)
             matched_control_result = run_results_by_id.get(matched_control_run_id)
-            if matched_control_result is None or not is_run_success_status(matched_control_result.status):
+            if matched_control_result is None or not is_run_success_status(
+                matched_control_result.status
+            ):
                 missing_control_run_ids.append(primary_run_id)
                 continue
 
@@ -524,7 +536,9 @@ def _evaluate_primary_claim(
                 matched_dummy_run_id = str(matched_dummy_spec.run_id)
                 matched_dummy_run_ids.append(matched_dummy_run_id)
                 matched_dummy_result = run_results_by_id.get(matched_dummy_run_id)
-                if matched_dummy_result is None or not is_run_success_status(matched_dummy_result.status):
+                if matched_dummy_result is None or not is_run_success_status(
+                    matched_dummy_result.status
+                ):
                     missing_dummy_run_ids.append(primary_run_id)
                     continue
 
@@ -574,11 +588,13 @@ def _evaluate_primary_claim(
         "complete_primary_evidence": bool((not require_complete) or (not missing_primary_run_ids)),
         "primary_metric_lock": bool(not metric_mismatch_run_ids),
         "methodology_lock": bool(not cv_mismatch_run_ids),
-        "matched_control_evidence": bool(not missing_control_run_ids and not duplicate_control_match_keys),
-        "matched_dummy_evidence": bool(not missing_dummy_run_ids and not duplicate_dummy_match_keys),
-        "dummy_baseline_outperformance": bool(
-            (not require_dummy) or (not baseline_fail_run_ids)
+        "matched_control_evidence": bool(
+            not missing_control_run_ids and not duplicate_control_match_keys
         ),
+        "matched_dummy_evidence": bool(
+            not missing_dummy_run_ids and not duplicate_dummy_match_keys
+        ),
+        "dummy_baseline_outperformance": bool((not require_dummy) or (not baseline_fail_run_ids)),
         "permutation_pass": bool((not require_permutation) or (not permutation_fail_run_ids)),
     }
 
@@ -597,9 +613,7 @@ def _evaluate_primary_claim(
         missing_dummy_run_ids=missing_dummy_run_ids,
         baseline_fail_run_ids=baseline_fail_run_ids,
         permutation_fail_run_ids=permutation_fail_run_ids,
-        protocol_invalid_run_ids=(
-            protocol_invalid_run_ids if protocol_invalid_conditions else []
-        ),
+        protocol_invalid_run_ids=(protocol_invalid_run_ids if protocol_invalid_conditions else []),
     )
 
     all_required_conditions_passed = bool(strict_gate_summary["all_required_conditions_passed"])
@@ -619,7 +633,9 @@ def _evaluate_primary_claim(
     ]
 
     for condition_name, reason in invalid_failure_map:
-        if condition_name in required_conditions and not bool(condition_summary.get(condition_name, False)):
+        if condition_name in required_conditions and not bool(
+            condition_summary.get(condition_name, False)
+        ):
             return {
                 "verdict": "invalid",
                 "reason": reason,

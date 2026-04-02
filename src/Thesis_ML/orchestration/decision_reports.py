@@ -79,16 +79,16 @@ def decision_text_for_experiment(
         lines.append("- Descriptive best-scoring variant: not available (no completed variants).")
 
     if isinstance(review_payload, dict):
-        lines.append(
-            f"- Auto-lock passed: {bool(review_payload.get('auto_lock_passed', False))}"
-        )
+        lines.append(f"- Auto-lock passed: {bool(review_payload.get('auto_lock_passed', False))}")
         lines.append(
             f"- Manual review required: {bool(review_payload.get('manual_review_required', True))}"
         )
         lines.append(
             f"- Margin to runner-up (mean BA): {review_payload.get('mean_margin_to_runner_up')}"
         )
-        lines.append(f"- Consistency across required slices: {review_payload.get('consistency_pass')}")
+        lines.append(
+            f"- Consistency across required slices: {review_payload.get('consistency_pass')}"
+        )
         lines.append(f"- Baseline delta pass: {review_payload.get('baseline_delta_pass')}")
         lines.append(
             f"- Uncertainty summary present: {review_payload.get('uncertainty_status') is not None}"

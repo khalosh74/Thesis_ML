@@ -465,9 +465,8 @@ class ComparisonSpec(_ComparisonModel):
         max_runtime = int(self.cost_policy.max_projected_runtime_seconds_per_run)
         for variant in self.allowed_variants:
             model_spec = get_model_spec(variant.model)
-            if (
-                str(self.methodology_policy.class_weight_policy.value)
-                not in set(model_spec.supported_class_weight_policies)
+            if str(self.methodology_policy.class_weight_policy.value) not in set(
+                model_spec.supported_class_weight_policies
             ):
                 allowed_class_weight = ", ".join(model_spec.supported_class_weight_policies)
                 raise ValueError(
@@ -574,7 +573,9 @@ class CompiledComparisonRunSpec(_ComparisonModel):
             field_name="CompiledComparisonRunSpec",
         )
         model_spec = get_model_spec(self.model)
-        if str(self.class_weight_policy.value) not in set(model_spec.supported_class_weight_policies):
+        if str(self.class_weight_policy.value) not in set(
+            model_spec.supported_class_weight_policies
+        ):
             allowed = ", ".join(model_spec.supported_class_weight_policies)
             raise ValueError(
                 f"CompiledComparisonRunSpec '{self.run_id}' class_weight_policy="
