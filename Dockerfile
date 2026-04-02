@@ -1,4 +1,7 @@
 # syntax=docker/dockerfile:1.7
+
+FROM ghcr.io/astral-sh/uv:0.10.9 AS uv
+
 FROM python:3.13-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -11,7 +14,9 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl git \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=ghcr.io/astral-sh/uv:0.10.9 /uv /usr/local/bin/uv
+# Copy the uv helper from the uv image stage
+COPY --from=uv /uv /usr/local/bin/uv
+RUN chmod +x /usr/local/bin/uv || true
 
 COPY pyproject.toml uv.lock README.md ./
 # Install locked dependencies first for better layer caching.
@@ -21,4 +26,6 @@ RUN uv sync --frozen --extra dev --no-install-project
 COPY . .
 RUN uv sync --frozen --extra dev
 
-CMD ["uv", "run", "python", "-m", "pytest", "-q"]
+# Keep container running for interactive devcontainer sessions.
+# Run tests manually (e.g. via a task) so the container doesn't exit.
+CMD ["sleep", "infinity"]

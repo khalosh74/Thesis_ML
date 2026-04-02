@@ -17,7 +17,8 @@
         "ms-toolsai.jupyter-renderers",
         "tamasfe.even-better-toml",
         "redhat.vscode-yaml",
-        "ms-vscode.powershell"
+        "ms-vscode.powershell",
+        "ms-azuretools.vscode-docker"
       ],
       "settings": {
         "python.defaultInterpreterPath": "/workspace/.venv/bin/python",
