@@ -3,12 +3,12 @@ from __future__ import annotations
 import json
 import os
 import time
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Iterator, Literal
+from typing import Any, Literal
 from uuid import uuid4
 
 LeaseClass = Literal["cpu", "gpu"]
@@ -123,7 +123,7 @@ class StageLeaseManager:
                     str(self._coordinator_lock_path),
                     os.O_CREAT | os.O_EXCL | os.O_RDWR,
                 )
-                os.write(fd, f"pid={os.getpid()} at={self._utc_now()}\n".encode("utf-8"))
+                os.write(fd, f"pid={os.getpid()} at={self._utc_now()}\n".encode())
             except FileExistsError:
                 try:
                     lock_mtime = self._coordinator_lock_path.stat().st_mtime

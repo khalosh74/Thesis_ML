@@ -9,6 +9,8 @@ import pandas as pd
 from Thesis_ML.config.framework_mode import FrameworkMode
 from Thesis_ML.config.metric_policy import (
     classification_metric_score as policy_metric_score,
+)
+from Thesis_ML.config.metric_policy import (
     validate_metric_name,
 )
 from Thesis_ML.data.affect_labels import (

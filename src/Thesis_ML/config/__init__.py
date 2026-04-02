@@ -3,8 +3,8 @@
 from .config_registry import (
     aliases_for_config_id,
     describe_config_path,
-    get_config_entry,
     get_bundle_entry,
+    get_config_entry,
     list_config_bundles,
     load_config_registry,
     resolve_config_alias,
@@ -12,7 +12,6 @@ from .config_registry import (
     resolve_config_registry_path,
     validate_config_bundle,
 )
-from .runtime_selection import resolve_runtime_config_path
 from .framework_mode import FrameworkMode, coerce_framework_mode
 from .methodology import (
     ALLOWED_DATA_BALANCE_AXES,
@@ -55,13 +54,13 @@ from .metric_policy import (
 from .paths import (
     DEFAULT_BASELINE_MODELS_DIR,
     DEFAULT_BASELINE_REPORTS_DIR,
+    DEFAULT_COARSE_AFFECT_TARGET_MAPPING_PATH,
     DEFAULT_COMPARISON_REPORTS_ROOT,
     DEFAULT_COMPARISON_SPEC_DIR,
     DEFAULT_COMPARISON_SPEC_PATH,
     DEFAULT_CONFIG_REGISTRY_PATH,
     DEFAULT_CONFIRMATORY_PROTOCOL_SCHEMA_PATH,
     DEFAULT_CONFIRMATORY_REPORTS_ROOT,
-    DEFAULT_COARSE_AFFECT_TARGET_MAPPING_PATH,
     DEFAULT_DECISION_SUPPORT_OUTPUT_ROOT,
     DEFAULT_DECISION_SUPPORT_REGISTRY,
     DEFAULT_EXPERIMENT_REPORTS_ROOT,
@@ -80,6 +79,7 @@ from .paths import (
     SOURCE_REPO_ROOT,
     ensure_default_output_dirs,
 )
+from .runtime_selection import resolve_runtime_config_path
 from .schema_versions import (
     ARTIFACT_SCHEMA_VERSION,
     COMPILED_MANIFEST_SCHEMA_VERSION,

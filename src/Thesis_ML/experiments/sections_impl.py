@@ -23,9 +23,9 @@ from Thesis_ML.experiments.stage_execution import StageAssignment
 from Thesis_ML.experiments.stage_registry import (
     MODEL_FIT_CPU_EXECUTOR_ID,
     PERMUTATION_REFERENCE_EXECUTOR_ID,
-    SPECIALIZED_RIDGE_TUNING_EXECUTOR_ID,
     SPECIALIZED_LINEARSVC_TUNING_EXECUTOR_ID,
     SPECIALIZED_LOGREG_TUNING_EXECUTOR_ID,
+    SPECIALIZED_RIDGE_TUNING_EXECUTOR_ID,
     TUNING_GENERIC_EXECUTOR_ID,
     TUNING_SKIPPED_CONTROL_EXECUTOR_ID,
     run_model_fit_executor,
@@ -37,12 +37,12 @@ from Thesis_ML.features.dimensionality import (
     resolve_dimensionality_config,
     validate_dimensionality_for_training_data,
 )
-from Thesis_ML.features.preprocessing import validate_preprocessing_for_training_data
 from Thesis_ML.features.feature_qc import (
     FEATURE_QC_SAMPLE_FIELDS,
     compute_sample_feature_qc,
     summarize_group_feature_qc,
 )
+from Thesis_ML.features.preprocessing import validate_preprocessing_for_training_data
 
 if TYPE_CHECKING:
     from Thesis_ML.experiments.section_models import (

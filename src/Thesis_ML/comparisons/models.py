@@ -18,14 +18,14 @@ from Thesis_ML.config.methodology import (
     SubgroupReportingPolicy,
 )
 from Thesis_ML.config.metric_policy import SUPPORTED_CLASSIFICATION_METRICS, validate_metric_name
+from Thesis_ML.experiments.model_admission import (
+    admitted_models_for_framework,
+    model_allowed_in_locked_comparison,
+)
 from Thesis_ML.experiments.model_catalog import (
     ModelCostTier,
     get_model_cost_entry,
     projected_runtime_seconds,
-)
-from Thesis_ML.experiments.model_admission import (
-    admitted_models_for_framework,
-    model_allowed_in_locked_comparison,
 )
 from Thesis_ML.experiments.model_registry import get_model_spec, registered_model_names
 from Thesis_ML.experiments.run_states import (

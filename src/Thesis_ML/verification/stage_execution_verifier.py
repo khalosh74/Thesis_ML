@@ -9,7 +9,6 @@ from typing import Any
 
 from Thesis_ML.experiments.stage_execution import StageExecutionResult
 
-
 _ARTIFACT_EXPECTED_STAGES = {
     "feature_cache_build",
     "feature_matrix_load",

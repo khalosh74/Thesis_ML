@@ -24,15 +24,15 @@ from Thesis_ML.config.schema_versions import (
     SUPPORTED_THESIS_PROTOCOL_SCHEMA_VERSIONS,
     THESIS_PROTOCOL_SCHEMA_VERSION,
 )
+from Thesis_ML.experiments.model_admission import (
+    admitted_models_for_framework,
+    model_allowed_in_confirmatory,
+)
 from Thesis_ML.experiments.model_catalog import (
     ModelCostTier,
     get_model_cost_entry,
     projected_runtime_seconds,
     supported_model_cost_tiers,
-)
-from Thesis_ML.experiments.model_admission import (
-    admitted_models_for_framework,
-    model_allowed_in_confirmatory,
 )
 from Thesis_ML.experiments.model_registry import get_model_spec, registered_model_names
 from Thesis_ML.experiments.run_states import (

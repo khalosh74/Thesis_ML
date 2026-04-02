@@ -26,6 +26,7 @@ from Thesis_ML.experiments.logreg_tuning import (
     is_specialized_logreg_grouped_nested_supported,
     run_specialized_logreg_grouped_nested_tuning,
 )
+from Thesis_ML.experiments.model_registry import iter_model_specs
 from Thesis_ML.experiments.ridge_tuning import (
     SPECIALIZED_RIDGE_TUNING_EXECUTOR_ID,
     is_specialized_ridge_grouped_nested_supported,
@@ -36,7 +37,6 @@ from Thesis_ML.experiments.stage_execution import (
     StageExecutorEquivalence,
     StageKey,
 )
-from Thesis_ML.experiments.model_registry import iter_model_specs
 
 StageExecutorSupportPredicate = Callable[
     ["StageExecutorSelectionContext"],
