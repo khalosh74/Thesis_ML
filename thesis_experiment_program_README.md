@@ -14,10 +14,10 @@ Canonical workbook command:
 thesisml-workbook --output templates/thesis_experiment_program.xlsx
 ```
 
-Compatibility wrapper (deprecated but still supported):
+Canonical command:
 
 ```bash
-python create_thesis_experiment_workbook.py
+thesisml-workbook --output templates/thesis_experiment_program.xlsx
 ```
 
 For current sheet set, schema metadata, and execution rules, always follow the canonical docs above.

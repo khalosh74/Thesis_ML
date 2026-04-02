@@ -516,14 +516,14 @@ python -m uv run python scripts/acceptance_smoke.py
 - `src/Thesis_ML/experiments/segment_execution.py`
 - `src/Thesis_ML/experiments/sections.py`
 
-## Compatibility wrappers (deprecated)
+## Compatibility wrappers
 
-The following script paths are still supported but deprecated:
+The legacy workbook/baseline script wrappers were removed during scripts-surface cleanup.
+Use canonical entrypoints:
 
-- `run_decision_support_experiments.py` -> use `thesisml-run-decision-support`
-- `create_thesis_experiment_workbook.py` -> use `thesisml-workbook`
-- `scripts/create_thesis_experiment_workbook.py` -> use `thesisml-workbook`
-- `scripts/run_baseline.py` -> use `thesisml-run-baseline`
+- `thesisml-workbook`
+- `thesisml-run-baseline`
+- `thesisml-run-decision-support`
 
 ## Existing synthetic baseline
 

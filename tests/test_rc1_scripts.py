@@ -30,26 +30,37 @@ def test_verify_repro_uses_default_protocol_config_when_omitted(
     monkeypatch,
 ) -> None:
     module = _load_verify_repro_module()
-    captured: dict[str, Path] = {}
+    captured: dict[str, list[str]] = {}
 
-    def _stub_run_protocol_once(**kwargs):
-        captured["config_path"] = Path(kwargs["protocol_path"])
-        return {
-            "n_failed": 0,
-            "protocol_output_dir": str(tmp_path / "protocol_runs" / "thesis-canonical-nested__2.0.0"),
-        }
+    def _stub_replay_main(argv):
+        captured["argv"] = list(argv)
+        summary_out = Path(argv[argv.index("--summary-out") + 1])
+        verification_out = Path(argv[argv.index("--verification-summary-out") + 1])
+        summary_out.parent.mkdir(parents=True, exist_ok=True)
+        summary_out.write_text(
+            json.dumps(
+                {
+                    "protocol_spec": str(module.DEFAULT_THESIS_CONFIRMATORY_PROTOCOL_PATH),
+                },
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        verification_out.write_text(
+            json.dumps(
+                {
+                    "passed": True,
+                    "determinism": {"by_mode": {"confirmatory": {"comparison": {"passed": True}}}},
+                },
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        return 0
 
-    monkeypatch.setattr(module, "_run_protocol_once", _stub_run_protocol_once)
-    monkeypatch.setattr(
-        module,
-        "compare_official_outputs",
-        lambda **_: {
-            "passed": True,
-            "left": {},
-            "right": {},
-            "mismatches": [],
-        },
-    )
+    monkeypatch.setattr(module, "_replay_main", _stub_replay_main)
 
     exit_code = module.main(
         [
@@ -69,7 +80,10 @@ def test_verify_repro_uses_default_protocol_config_when_omitted(
     )
 
     assert exit_code == 0
-    assert captured["config_path"] == Path(module.DEFAULT_THESIS_CONFIRMATORY_PROTOCOL_PATH)
+    replay_argv = captured["argv"]
+    assert replay_argv[0:2] == ["--mode", "confirmatory"]
+    assert "--verify-determinism" in replay_argv
+    assert "--skip-confirmatory-ready" in replay_argv
 
 
 def test_verify_repro_protocol_mode_resolves_config_alias(
@@ -77,28 +91,37 @@ def test_verify_repro_protocol_mode_resolves_config_alias(
     monkeypatch,
 ) -> None:
     module = _load_verify_repro_module()
-    captured: dict[str, Path] = {}
+    captured: dict[str, list[str]] = {}
 
-    def _stub_run_protocol_once(**kwargs):
-        captured["config_path"] = Path(kwargs["protocol_path"])
-        return {
-            "n_failed": 0,
-            "protocol_output_dir": str(
-                tmp_path / "protocol_runs" / "thesis-canonical-nested__2.0.0"
-            ),
-        }
+    def _stub_replay_main(argv):
+        captured["argv"] = list(argv)
+        summary_out = Path(argv[argv.index("--summary-out") + 1])
+        verification_out = Path(argv[argv.index("--verification-summary-out") + 1])
+        summary_out.parent.mkdir(parents=True, exist_ok=True)
+        summary_out.write_text(
+            json.dumps(
+                {
+                    "protocol_spec": str(module.DEFAULT_THESIS_CONFIRMATORY_PROTOCOL_PATH),
+                },
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        verification_out.write_text(
+            json.dumps(
+                {
+                    "passed": True,
+                    "determinism": {"by_mode": {"confirmatory": {"comparison": {"passed": True}}}},
+                },
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        return 0
 
-    monkeypatch.setattr(module, "_run_protocol_once", _stub_run_protocol_once)
-    monkeypatch.setattr(
-        module,
-        "compare_official_outputs",
-        lambda **_: {
-            "passed": True,
-            "left": {},
-            "right": {},
-            "mismatches": [],
-        },
-    )
+    monkeypatch.setattr(module, "_replay_main", _stub_replay_main)
 
     exit_code = module.main(
         [
@@ -119,7 +142,10 @@ def test_verify_repro_protocol_mode_resolves_config_alias(
         ]
     )
     assert exit_code == 0
-    assert captured["config_path"] == Path(module.DEFAULT_THESIS_CONFIRMATORY_PROTOCOL_PATH)
+    replay_argv = captured["argv"]
+    assert "--protocol-alias" in replay_argv
+    alias_index = replay_argv.index("--protocol-alias")
+    assert replay_argv[alias_index + 1] == "protocol.thesis_confirmatory_frozen"
 
 
 def test_verify_repro_protocol_summary_includes_config_identity(
@@ -128,25 +154,34 @@ def test_verify_repro_protocol_summary_includes_config_identity(
 ) -> None:
     module = _load_verify_repro_module()
 
-    def _stub_run_protocol_once(**kwargs):
-        return {
-            "n_failed": 0,
-            "protocol_output_dir": str(
-                tmp_path / "protocol_runs" / "thesis-canonical-nested__2.0.0"
-            ),
-        }
+    def _stub_replay_main(argv):
+        summary_out = Path(argv[argv.index("--summary-out") + 1])
+        verification_out = Path(argv[argv.index("--verification-summary-out") + 1])
+        summary_out.parent.mkdir(parents=True, exist_ok=True)
+        summary_out.write_text(
+            json.dumps(
+                {
+                    "protocol_spec": str(module.DEFAULT_THESIS_CONFIRMATORY_PROTOCOL_PATH),
+                },
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        verification_out.write_text(
+            json.dumps(
+                {
+                    "passed": True,
+                    "determinism": {"by_mode": {"confirmatory": {"comparison": {"passed": True}}}},
+                },
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        return 0
 
-    monkeypatch.setattr(module, "_run_protocol_once", _stub_run_protocol_once)
-    monkeypatch.setattr(
-        module,
-        "compare_official_outputs",
-        lambda **_: {
-            "passed": True,
-            "left": {},
-            "right": {},
-            "mismatches": [],
-        },
-    )
+    monkeypatch.setattr(module, "_replay_main", _stub_replay_main)
 
     summary_out = tmp_path / "summary.json"
     exit_code = module.main(
@@ -179,28 +214,37 @@ def test_verify_repro_uses_default_comparison_config_when_omitted(
     monkeypatch,
 ) -> None:
     module = _load_verify_repro_module()
-    captured: dict[str, Path] = {}
+    captured: dict[str, list[str]] = {}
 
-    def _stub_run_comparison_once(**kwargs):
-        captured["config_path"] = Path(kwargs["comparison_path"])
-        return {
-            "n_failed": 0,
-            "comparison_output_dir": str(
-                tmp_path / "comparison_runs" / "model-family-grouped-nested__2.0.0"
-            ),
-        }
+    def _stub_replay_main(argv):
+        captured["argv"] = list(argv)
+        summary_out = Path(argv[argv.index("--summary-out") + 1])
+        verification_out = Path(argv[argv.index("--verification-summary-out") + 1])
+        summary_out.parent.mkdir(parents=True, exist_ok=True)
+        summary_out.write_text(
+            json.dumps(
+                {
+                    "comparison_spec": str(module.DEFAULT_COMPARISON_SPEC_PATH),
+                },
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        verification_out.write_text(
+            json.dumps(
+                {
+                    "passed": True,
+                    "determinism": {"by_mode": {"comparison": {"comparison": {"passed": True}}}},
+                },
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        return 0
 
-    monkeypatch.setattr(module, "_run_comparison_once", _stub_run_comparison_once)
-    monkeypatch.setattr(
-        module,
-        "compare_official_outputs",
-        lambda **_: {
-            "passed": True,
-            "left": {},
-            "right": {},
-            "mismatches": [],
-        },
-    )
+    monkeypatch.setattr(module, "_replay_main", _stub_replay_main)
 
     exit_code = module.main(
         [
@@ -220,31 +264,37 @@ def test_verify_repro_uses_default_comparison_config_when_omitted(
     )
 
     assert exit_code == 0
-    assert captured["config_path"] == Path(module.DEFAULT_COMPARISON_SPEC_PATH)
+    replay_argv = captured["argv"]
+    assert replay_argv[0:2] == ["--mode", "comparison"]
+    assert "--verify-determinism" in replay_argv
 
 
 def test_verify_repro_fails_when_runs_are_timed_out(tmp_path: Path, monkeypatch) -> None:
     module = _load_verify_repro_module()
 
-    def _stub_run_protocol_once(**kwargs):
-        return {
-            "n_failed": 0,
-            "n_timed_out": 1,
-            "n_skipped_due_to_policy": 0,
-            "protocol_output_dir": str(tmp_path / "protocol_runs" / "thesis-canonical__1.0.0"),
-        }
+    def _stub_replay_main(argv):
+        summary_out = Path(argv[argv.index("--summary-out") + 1])
+        verification_out = Path(argv[argv.index("--verification-summary-out") + 1])
+        summary_out.parent.mkdir(parents=True, exist_ok=True)
+        summary_out.write_text(
+            json.dumps({"protocol_spec": str(module.DEFAULT_THESIS_CONFIRMATORY_PROTOCOL_PATH)}, indent=2)
+            + "\n",
+            encoding="utf-8",
+        )
+        verification_out.write_text(
+            json.dumps(
+                {
+                    "passed": False,
+                    "determinism": {"by_mode": {"confirmatory": {"comparison": {"passed": False}}}},
+                },
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        return 1
 
-    monkeypatch.setattr(module, "_run_protocol_once", _stub_run_protocol_once)
-    monkeypatch.setattr(
-        module,
-        "compare_official_outputs",
-        lambda **_: {
-            "passed": True,
-            "left": {},
-            "right": {},
-            "mismatches": [],
-        },
-    )
+    monkeypatch.setattr(module, "_replay_main", _stub_replay_main)
 
     exit_code = module.main(
         [

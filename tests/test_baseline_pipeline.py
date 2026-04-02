@@ -71,7 +71,8 @@ def test_cli_smoke(tmp_path: Path) -> None:
 
     command = [
         sys.executable,
-        "scripts/run_baseline.py",
+        "-m",
+        "Thesis_ML.cli.baseline",
         "--seed",
         "21",
         "--reports-dir",

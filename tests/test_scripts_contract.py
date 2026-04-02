@@ -40,18 +40,25 @@ def test_python_scripts_expose_main_and_main_guard() -> None:
         assert callable(getattr(module, "main")), script_path.name
 
 
-def test_wrapper_scripts_retain_deprecation_notice() -> None:
+def test_verify_wrappers_are_thin_compatibility_layers() -> None:
     wrapper_paths = [
-        _scripts_dir() / "run_baseline.py",
-        _scripts_dir() / "create_thesis_experiment_workbook.py",
+        _scripts_dir() / "verify_official_artifacts.py",
+        _scripts_dir() / "verify_confirmatory_ready.py",
+        _scripts_dir() / "verify_model_cost_policy_precheck.py",
+        _scripts_dir() / "verify_publishable_bundle.py",
+        _scripts_dir() / "verify_campaign_runtime_profile.py",
     ]
     for wrapper_path in wrapper_paths:
         content = wrapper_path.read_text(encoding="utf-8")
-        assert "deprecated and kept for compatibility" in content
+        assert "Compatibility wrapper" in content
+        assert "verify_project.py" in content
 
 
 def test_script_role_families_are_explicit_and_stable() -> None:
     script_names = {path.name for path in _scripts_dir().glob("*.py")}
+    assert "review_e01_target_lock.py" not in script_names
+    assert "run_baseline.py" not in script_names
+    assert "create_thesis_experiment_workbook.py" not in script_names
 
     verify_scripts = sorted(name for name in script_names if name.startswith("verify_"))
     build_scripts = sorted(name for name in script_names if name.startswith("build_"))
@@ -63,6 +70,7 @@ def test_script_role_families_are_explicit_and_stable() -> None:
         "verify_model_cost_policy_precheck.py",
         "verify_official_artifacts.py",
         "verify_official_reproducibility.py",
+        "verify_project.py",
         "verify_publishable_bundle.py",
     ]
     assert build_scripts == [

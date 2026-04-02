@@ -1,56 +1,44 @@
 # Scripts Directory Roles
 
-This directory keeps operator-facing entrypoint filenames stable.  
-Wave 1 introduces package-level shared helpers under `src/Thesis_ML/script_support/`; top-level scripts remain the runnable entrypoints.
+This directory keeps top-level entrypoint filenames stable while concentrating real logic in a smaller canonical set.
 
-## Role taxonomy
-
-### Supported operator entrypoint
+## Canonical operator scripts (extend these)
 - `review_preflight_stage.py`
-- `run_analysis_server_execution_plan.py`
-
-### Verification tool
-- `verify_campaign_runtime_profile.py`
-- `verify_confirmatory_ready.py`
-- `verify_model_cost_policy_precheck.py`
-- `verify_official_artifacts.py`
-- `verify_official_reproducibility.py`
-- `verify_publishable_bundle.py`
-
-### Release gate/orchestrator
-- `rc1_release_gate.py`
-- `release_hygiene_check.py`
-- `replay_official_paths.py`
-
-### Build/freeze utility
 - `build_frozen_confirmatory_registry.py`
+- `replay_official_paths.py`
 - `build_publishable_bundle.py`
+- `rc1_release_gate.py`
 - `freeze_workbook_registry.py`
-- `generate_demo_dataset.py`
 - `prepare_dependent_rerun_registry.py`
+- `verify_project.py`
 
-### Compatibility wrapper
-- `_common.py`
-- `create_thesis_experiment_workbook.py`
-- `review_e01_target_lock.py`
-- `run_baseline.py`
-
-### Dev-only smoke/performance tool
+## Dev/specialized tools (not main operator path)
 - `acceptance_smoke.py`
-- `benchmark_torch_ridge_backend.py`
 - `performance_smoke.py`
 - `profile_runtime_baseline.py`
+- `benchmark_torch_ridge_backend.py`
+- `generate_demo_dataset.py`
+- `run_analysis_server_execution_plan.py`
 
-### Platform helper
+## Platform helpers
 - `bootstrap_env.ps1`
 - `bootstrap_env.sh`
 - `prepare_frozen_campaign.ps1`
 - `run_frozen_campaign.ps1`
 
-## Canonical extension guidance
+## Compatibility wrappers (do not add new logic)
+- `_common.py`
+- `verify_official_artifacts.py` (routes to `verify_project.py official-artifacts`)
+- `verify_confirmatory_ready.py` (routes to `verify_project.py confirmatory-ready`)
+- `verify_model_cost_policy_precheck.py` (routes to `verify_project.py model-cost-policy-precheck`)
+- `verify_publishable_bundle.py` (routes to `verify_project.py publishable-bundle`)
+- `verify_campaign_runtime_profile.py` (routes to `verify_project.py campaign-runtime-profile`)
+- `verify_official_reproducibility.py` (routes to `replay_official_paths.py --verify-determinism`)
 
-- Extend canonical operator flows in the primary scripts for that role (for example `review_preflight_stage.py`, `build_frozen_confirmatory_registry.py`, and `verify_*.py` tools).
-- Put reusable low-level helpers in `src/Thesis_ML/script_support/`, not in wrapper scripts.
-- Keep compatibility wrappers thin and stable; do not accumulate new business/scientific logic in wrappers.
-- Keep platform helper scripts focused on environment/bootstrap/run wiring only.
+## Release helper
+- `release_hygiene_check.py` remains a focused helper; `rc1_release_gate.py` is the canonical release orchestrator.
 
+## Guidance
+- Add or change operator behavior in canonical scripts only.
+- Keep wrappers thin and import-forwarding only.
+- Put shared helper code in `src/Thesis_ML/script_support/`.

@@ -1,34 +1,31 @@
 from __future__ import annotations
 
+"""Compatibility wrapper. Use scripts/replay_official_paths.py --verify-determinism."""
+
 import argparse
 import json
-import shutil
 import sys
 from pathlib import Path
 from typing import Any
 
-from Thesis_ML.comparisons.loader import load_comparison_spec
-from Thesis_ML.comparisons.runner import compile_and_run_comparison
 from Thesis_ML.config import describe_config_path
 from Thesis_ML.config.paths import (
     DEFAULT_COMPARISON_SPEC_PATH,
     DEFAULT_THESIS_CONFIRMATORY_PROTOCOL_PATH,
 )
-from Thesis_ML.config.runtime_selection import resolve_runtime_config_path
-from Thesis_ML.protocols.loader import load_protocol
-from Thesis_ML.protocols.runner import compile_and_run_protocol
-from Thesis_ML.verification.reproducibility import compare_official_outputs
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
-from _common import write_json
+
+from replay_official_paths import main as _replay_main
 
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
-            "Run a small official path twice under the same config/seed and compare deterministic invariants."
+            "Compatibility wrapper for deterministic official reproducibility checks. "
+            "Delegates to scripts/replay_official_paths.py with --verify-determinism."
         )
     )
     parser.add_argument(
@@ -56,7 +53,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--reports-root",
         default="outputs/rc_reproducibility",
-        help="Base directory where the two rerun outputs are created.",
+        help="Base directory where replay outputs are created.",
     )
     parser.add_argument(
         "--suite",
@@ -83,171 +80,142 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--summary-out",
         default="",
-        help="Optional JSON path for reproducibility summary output.",
+        help="Optional JSON path for compatibility reproducibility summary output.",
     )
     return parser
 
 
-def _run_protocol_once(
-    *,
-    protocol_path: Path,
-    reports_root: Path,
-    index_csv: Path,
-    data_root: Path,
-    cache_dir: Path,
-    suite_ids: list[str] | None,
-) -> dict[str, Any]:
-    protocol = load_protocol(protocol_path)
-    return compile_and_run_protocol(
-        protocol=protocol,
-        index_csv=index_csv,
-        data_root=data_root,
-        cache_dir=cache_dir,
-        reports_root=reports_root,
-        suite_ids=suite_ids,
-        dry_run=False,
-        force=True,
-        resume=False,
-    )
+def _resolve_mode(old_mode: str) -> str:
+    return "confirmatory" if str(old_mode) == "protocol" else "comparison"
 
 
-def _run_comparison_once(
-    *,
-    comparison_path: Path,
-    reports_root: Path,
-    index_csv: Path,
-    data_root: Path,
-    cache_dir: Path,
-    variant_ids: list[str] | None,
-) -> dict[str, Any]:
-    comparison = load_comparison_spec(comparison_path)
-    return compile_and_run_comparison(
-        comparison=comparison,
-        index_csv=index_csv,
-        data_root=data_root,
-        cache_dir=cache_dir,
-        reports_root=reports_root,
-        variant_ids=variant_ids,
-        dry_run=False,
-        force=True,
-        resume=False,
+def _build_replay_args(args: argparse.Namespace) -> tuple[list[str], str]:
+    replay_mode = _resolve_mode(str(args.mode))
+    replay_args: list[str] = [
+        "--mode",
+        replay_mode,
+        "--index-csv",
+        str(args.index_csv),
+        "--data-root",
+        str(args.data_root),
+        "--cache-dir",
+        str(args.cache_dir),
+        "--reports-root",
+        str(args.reports_root),
+        "--verify-determinism",
+        "--skip-confirmatory-ready",
+    ]
+    if replay_mode == "confirmatory":
+        if args.config:
+            replay_args.extend(["--protocol", str(args.config)])
+        if args.config_alias:
+            replay_args.extend(["--protocol-alias", str(args.config_alias)])
+        if bool(args.all_suites):
+            replay_args.append("--all-suites")
+        else:
+            for suite in list(args.suite):
+                replay_args.extend(["--suite", str(suite)])
+    else:
+        if args.config:
+            replay_args.extend(["--comparison", str(args.config)])
+        if args.config_alias:
+            replay_args.extend(["--comparison-alias", str(args.config_alias)])
+        if bool(args.all_variants):
+            replay_args.append("--all-variants")
+        else:
+            for variant in list(args.variant):
+                replay_args.extend(["--variant", str(variant)])
+
+    reports_root = Path(args.reports_root).resolve()
+    reports_root.mkdir(parents=True, exist_ok=True)
+    replay_summary_path = reports_root / "_verify_official_reproducibility_replay_summary.json"
+    replay_verification_path = (
+        reports_root / "_verify_official_reproducibility_replay_verification_summary.json"
     )
+    replay_args.extend(
+        [
+            "--summary-out",
+            str(replay_summary_path),
+            "--verification-summary-out",
+            str(replay_verification_path),
+        ]
+    )
+    return replay_args, replay_mode
+
+
+def _compatibility_summary(
+    *,
+    replay_mode: str,
+    replay_reports_root: Path,
+) -> dict[str, Any]:
+    replay_summary_path = replay_reports_root / "_verify_official_reproducibility_replay_summary.json"
+    replay_verification_path = (
+        replay_reports_root / "_verify_official_reproducibility_replay_verification_summary.json"
+    )
+    replay_summary = (
+        json.loads(replay_summary_path.read_text(encoding="utf-8"))
+        if replay_summary_path.exists()
+        else {}
+    )
+    replay_verification = (
+        json.loads(replay_verification_path.read_text(encoding="utf-8"))
+        if replay_verification_path.exists()
+        else {}
+    )
+
+    config_path_text = (
+        replay_summary.get("protocol_spec")
+        if replay_mode == "confirmatory"
+        else replay_summary.get("comparison_spec")
+    )
+    config_path = Path(str(config_path_text)).resolve() if config_path_text else None
+
+    mode_key = "confirmatory" if replay_mode == "confirmatory" else "comparison"
+    determinism_by_mode = (
+        replay_verification.get("determinism", {}).get("by_mode", {})
+        if isinstance(replay_verification, dict)
+        else {}
+    )
+    determinism_payload = (
+        determinism_by_mode.get(mode_key) if isinstance(determinism_by_mode, dict) else None
+    )
+    if not isinstance(determinism_payload, dict):
+        determinism_payload = {}
+
+    return {
+        "passed": bool(replay_verification.get("passed", False)),
+        "mode": "protocol" if replay_mode == "confirmatory" else "comparison",
+        "config": str(config_path) if config_path is not None else None,
+        "config_identity": (
+            describe_config_path(config_path) if config_path is not None else None
+        ),
+        "comparison": determinism_payload.get("comparison"),
+        "replay_summary": str(replay_summary_path),
+        "replay_verification_summary": str(replay_verification_path),
+    }
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
 
-    if args.mode == "protocol" and args.all_suites and args.suite:
+    if args.mode == "protocol" and bool(args.all_suites) and bool(args.suite):
         parser.error("Use either --suite or --all-suites for protocol mode.")
-    if args.mode == "comparison" and args.all_variants and args.variant:
+    if args.mode == "comparison" and bool(args.all_variants) and bool(args.variant):
         parser.error("Use either --variant or --all-variants for comparison mode.")
 
-    if args.mode == "protocol":
-        config_path = resolve_runtime_config_path(
-            args.config,
-            args.config_alias,
-            default_alias="protocol.thesis_confirmatory_frozen",
-            fallback_path=DEFAULT_THESIS_CONFIRMATORY_PROTOCOL_PATH,
-        )
-    else:
-        config_path = resolve_runtime_config_path(
-            args.config,
-            args.config_alias,
-            default_alias="comparison.grouped_nested_default",
-            fallback_path=DEFAULT_COMPARISON_SPEC_PATH,
-        )
-    if not config_path.exists():
-        parser.error(f"Config path does not exist: {config_path}")
+    replay_args, replay_mode = _build_replay_args(args)
+    exit_code = int(_replay_main(replay_args))
 
-    base_reports_root = Path(args.reports_root)
-    run_a_root = base_reports_root / "run_a"
-    run_b_root = base_reports_root / "run_b"
-
-    for run_root in (run_a_root, run_b_root):
-        if run_root.exists():
-            shutil.rmtree(run_root)
-        run_root.mkdir(parents=True, exist_ok=True)
-
-    if args.mode == "protocol":
-        suite_ids = None if args.all_suites else list(args.suite) or None
-        result_a = _run_protocol_once(
-            protocol_path=config_path,
-            reports_root=run_a_root,
-            index_csv=Path(args.index_csv),
-            data_root=Path(args.data_root),
-            cache_dir=Path(args.cache_dir),
-            suite_ids=suite_ids,
-        )
-        result_b = _run_protocol_once(
-            protocol_path=config_path,
-            reports_root=run_b_root,
-            index_csv=Path(args.index_csv),
-            data_root=Path(args.data_root),
-            cache_dir=Path(args.cache_dir),
-            suite_ids=suite_ids,
-        )
-        left_dir = Path(str(result_a["protocol_output_dir"]))
-        right_dir = Path(str(result_b["protocol_output_dir"]))
-    else:
-        variant_ids = None if args.all_variants else list(args.variant) or None
-        result_a = _run_comparison_once(
-            comparison_path=config_path,
-            reports_root=run_a_root,
-            index_csv=Path(args.index_csv),
-            data_root=Path(args.data_root),
-            cache_dir=Path(args.cache_dir),
-            variant_ids=variant_ids,
-        )
-        result_b = _run_comparison_once(
-            comparison_path=config_path,
-            reports_root=run_b_root,
-            index_csv=Path(args.index_csv),
-            data_root=Path(args.data_root),
-            cache_dir=Path(args.cache_dir),
-            variant_ids=variant_ids,
-        )
-        left_dir = Path(str(result_a["comparison_output_dir"]))
-        right_dir = Path(str(result_b["comparison_output_dir"]))
-
-    if (
-        int(result_a.get("n_failed", 0)) > 0
-        or int(result_b.get("n_failed", 0)) > 0
-        or int(result_a.get("n_timed_out", 0)) > 0
-        or int(result_b.get("n_timed_out", 0)) > 0
-        or int(result_a.get("n_skipped_due_to_policy", 0)) > 0
-        or int(result_b.get("n_skipped_due_to_policy", 0)) > 0
-    ):
-        summary = {
-            "passed": False,
-            "mode": args.mode,
-            "config": str(config_path.resolve()),
-            "config_identity": describe_config_path(config_path),
-            "reason": "one_or_more_runs_not_successful",
-            "run_a": result_a,
-            "run_b": result_b,
-        }
-    else:
-        comparison_summary = compare_official_outputs(left_dir=left_dir, right_dir=right_dir)
-        summary = {
-            "passed": bool(comparison_summary.get("passed", False)),
-            "mode": args.mode,
-            "config": str(config_path.resolve()),
-            "config_identity": describe_config_path(config_path),
-            "left_output_dir": str(left_dir.resolve()),
-            "right_output_dir": str(right_dir.resolve()),
-            "comparison": comparison_summary,
-        }
-
+    compatibility_summary = _compatibility_summary(
+        replay_mode=replay_mode,
+        replay_reports_root=Path(args.reports_root).resolve(),
+    )
     if args.summary_out:
         summary_path = Path(args.summary_out)
-        write_json(summary_path, summary)
-
-    print(json.dumps(summary, indent=2))
-    if not bool(summary.get("passed", False)):
-        print("Official reproducibility verification failed.", file=sys.stderr)
-        return 1
-    return 0
+        summary_path.parent.mkdir(parents=True, exist_ok=True)
+        summary_path.write_text(f"{json.dumps(compatibility_summary, indent=2)}\n", encoding="utf-8")
+    return exit_code
 
 
 if __name__ == "__main__":
