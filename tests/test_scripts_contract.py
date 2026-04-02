@@ -65,5 +65,8 @@ def test_script_role_families_are_explicit_and_stable() -> None:
         "verify_official_reproducibility.py",
         "verify_publishable_bundle.py",
     ]
-    assert build_scripts == ["build_publishable_bundle.py"]
+    assert build_scripts == [
+        "build_frozen_confirmatory_registry.py",
+        "build_publishable_bundle.py",
+    ]
     assert replay_scripts == ["replay_official_paths.py"]

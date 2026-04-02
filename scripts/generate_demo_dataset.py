@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import shutil
 from pathlib import Path
@@ -12,6 +11,7 @@ import numpy as np
 import pandas as pd
 
 from Thesis_ML.data.index_dataset import build_dataset_index
+from Thesis_ML.script_support.io import file_sha256
 
 DEFAULT_OUTPUT = Path("demo_data") / "synthetic_v1"
 DATA_ROOT_DIRNAME = "data_root"
@@ -29,17 +29,6 @@ LABELS = (
     "run-1_passive_anger_video",
     "run-1_passive_happiness_video",
 )
-
-
-def _file_sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        while True:
-            chunk = handle.read(1024 * 1024)
-            if not chunk:
-                break
-            digest.update(chunk)
-    return digest.hexdigest()
 
 
 def _write_nifti(path: Path, data: np.ndarray) -> None:
@@ -131,7 +120,7 @@ def _manifest_payload(*, output_dir: Path, index_csv: Path) -> dict[str, Any]:
         files.append(
             {
                 "path": relative,
-                "sha256": _file_sha256(candidate),
+                "sha256": file_sha256(candidate),
                 "size_bytes": int(candidate.stat().st_size),
             }
         )
@@ -179,7 +168,7 @@ def _manifest_payload(*, output_dir: Path, index_csv: Path) -> dict[str, Any]:
         "n_sessions": int(index_df["subject_session"].nunique()),
         "sessions_per_subject": per_subject_sessions,
         "required_index_columns": required_columns,
-        "index_csv_sha256": _file_sha256(index_csv),
+        "index_csv_sha256": file_sha256(index_csv),
         "files": files,
     }
 
