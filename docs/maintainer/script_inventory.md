@@ -29,3 +29,26 @@ Current Wave-2 inventory of `scripts/` with canonical vs wrapper ownership.
 | `verify_model_cost_policy_precheck.py` | compatibility wrapper | yes | wrapper | Thin wrapper routing to `verify_project.py model-cost-policy-precheck`. |
 | `verify_official_artifacts.py` | compatibility wrapper | yes | wrapper | Thin wrapper routing to `verify_project.py official-artifacts`. |
 | `verify_publishable_bundle.py` | compatibility wrapper | yes | wrapper | Thin wrapper routing to `verify_project.py publishable-bundle`. |
+
+## Remaining compatibility surface
+
+- `verify_*.py` wrappers:
+  supported compatibility wrapper; do not extend.
+  Canonical replacement: `scripts/verify_project.py` subcommands.
+  Operator-facing: yes (legacy entrypoint compatibility).
+  Retirement status: defer until external callers migrate.
+
+- `scripts/_common.py`:
+  supported compatibility wrapper; do not extend.
+  Canonical replacement: `Thesis_ML.script_support`.
+  Operator-facing: no.
+  Retirement status: keep during thesis phase for import stability.
+
+- `run_decision_support_experiments.py` (repo root):
+  deprecated shim; plan removal after caller migration.
+  Canonical replacement: `thesisml-run-decision-support`.
+  Operator-facing: yes (legacy callers only).
+  Current status: keep for now (still referenced by docs/tests/internal command generation).
+
+- Internal package/config compatibility aliases:
+  internal compatibility alias; leave untouched during thesis phase.

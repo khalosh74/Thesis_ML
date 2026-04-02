@@ -22,6 +22,16 @@ def _load_module(script_path: Path):
     return module
 
 
+def _nonempty_noncomment_line_count(content: str) -> int:
+    count = 0
+    for raw_line in content.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        count += 1
+    return count
+
+
 def test_python_scripts_expose_main_and_main_guard() -> None:
     scripts_dir = _scripts_dir()
     script_paths = sorted(
@@ -52,6 +62,33 @@ def test_verify_wrappers_are_thin_compatibility_layers() -> None:
         content = wrapper_path.read_text(encoding="utf-8")
         assert "Compatibility wrapper" in content
         assert "verify_project.py" in content
+
+
+def test_verify_wrappers_forward_only_to_verify_project_main() -> None:
+    wrapper_subcommands = {
+        "verify_official_artifacts.py": "official-artifacts",
+        "verify_confirmatory_ready.py": "confirmatory-ready",
+        "verify_model_cost_policy_precheck.py": "model-cost-policy-precheck",
+        "verify_publishable_bundle.py": "publishable-bundle",
+        "verify_campaign_runtime_profile.py": "campaign-runtime-profile",
+    }
+    for filename, subcommand in wrapper_subcommands.items():
+        wrapper_path = _scripts_dir() / filename
+        content = wrapper_path.read_text(encoding="utf-8")
+        assert "from verify_project import main as _verify_project_main" in content
+        assert f'forwarded = ["{subcommand}"]' in content
+        assert "return int(_verify_project_main(forwarded))" in content
+        assert _nonempty_noncomment_line_count(content) <= 28
+
+
+def test_decision_support_shim_is_explicit_deprecated_forwarder() -> None:
+    shim_path = _repo_root() / "run_decision_support_experiments.py"
+    content = shim_path.read_text(encoding="utf-8")
+    assert "deprecated shim" in content.lower()
+    assert "thesisml-run-decision-support" in content
+    assert "no new logic should be added here" in content.lower()
+    assert "return _decision_support.main(argv)" in content
+    assert _nonempty_noncomment_line_count(content) <= 45
 
 
 def test_script_role_families_are_explicit_and_stable() -> None:
