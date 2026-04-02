@@ -1111,8 +1111,29 @@ def run_decision_support_campaign(
         # the phase has no groups to process (avoids spurious preflight phase events)
         expected_ids = [str(value) for value in phase.get("expected_experiment_ids", [])]
         groups = phase.get("groups", [])
+        # If the phase has no groups, do not emit phase_started/phase_finished events
+        # (keeps ordering of emitted experiment events stable), but still write the
+        # phase artifact file so downstream consumers and tests find the expected
+        # phase artifact payloads.
         if not groups:
-            # nothing to do for this phase, skip it entirely
+            artifact_filename = _PHASE_ARTIFACTS.get(phase_name)
+            if artifact_filename:
+                phase_payload = {
+                    "campaign_id": campaign_id,
+                    "generated_at": _utc_timestamp(),
+                    "phase_name": phase_name,
+                    "experiment_ids": list(expected_ids),
+                    "status": "no_runs",
+                    "selected_or_completed_cells": [],
+                    "skipped_experiments": [
+                        row for row in phase_skip_rows if str(row.get("phase_name")) == phase_name
+                    ],
+                    "decision_note": None,
+                }
+                path = _write_phase_artifact(
+                    campaign_root=campaign_root, filename=artifact_filename, payload=phase_payload
+                )
+                phase_artifact_paths.append(str(path.resolve()))
             continue
         phase_records: list[dict[str, Any]] = []
         phase_experiment_ids: list[str] = []

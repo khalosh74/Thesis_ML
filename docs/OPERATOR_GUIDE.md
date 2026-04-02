@@ -29,6 +29,15 @@ Installed wheel path is also supported; default decision-support registry is pac
 - `thesisml-workbook`
 - `thesisml-run-baseline`
 
+Grouped nested comparison execution (archived spec example):
+
+```bash
+thesisml-run-comparison \
+  --comparison configs/archive/comparisons/model_family_grouped_nested_comparison_v1.json \
+  --variant ridge \
+  --reports-root outputs/reports/comparisons
+```
+
 # Operator Guide (Merged)
 
 This document has been merged into `docs/RUNBOOK.md` (merged on 2026-04-02). The full original content is preserved in `docs/archived/OPERATOR_GUIDE_backup_2026-04-02.md` and the canonical operator guidance now lives at `docs/RUNBOOK.md#merged-content-operator-guide-from-operator_guide.md`.
