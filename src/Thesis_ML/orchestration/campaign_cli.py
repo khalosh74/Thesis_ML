@@ -194,7 +194,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--progress-interval-seconds",
         type=float,
-        default=15.0,
+        default=5.0,
         help="Heartbeat summary interval in seconds for live console progress output.",
     )
     parser.add_argument(
@@ -208,7 +208,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--progress-detail",
-        default="experiment_stage",
+        default="verbose",
         choices=list(PROGRESS_DETAIL_CHOICES),
         help=(
             "Progress detail feed level. summary=heartbeat only; "
@@ -312,11 +312,11 @@ def print_stage1_commands(args: argparse.Namespace) -> None:
         base.extend(["--runtime-profile-summary", str(args.runtime_profile_summary)])
     if bool(args.quiet_progress):
         base.append("--quiet-progress")
-    if float(args.progress_interval_seconds) != 15.0:
+    if float(args.progress_interval_seconds) != 5.0:
         base.extend(["--progress-interval-seconds", str(args.progress_interval_seconds)])
     if str(args.progress_ui).strip().lower() != "auto":
         base.extend(["--progress-ui", str(args.progress_ui)])
-    if str(args.progress_detail).strip().lower() != "experiment_stage":
+    if str(args.progress_detail).strip().lower() != "verbose":
         base.extend(["--progress-detail", str(args.progress_detail)])
 
     command = _command_to_text(base)

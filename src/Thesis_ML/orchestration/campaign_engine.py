@@ -975,6 +975,39 @@ def run_decision_support_campaign(
     selected_by_id = {str(experiment["experiment_id"]) for experiment in selected_experiments}
     experiment_phase_by_id: dict[str, str] = {}
     experiment_started_ids: set[str] = set()
+    experiment_planned_terminal_counts: dict[str, int] = {
+        str(experiment["experiment_id"]): 0 for experiment in selected_experiments
+    }
+    experiment_terminal_counts: dict[str, int] = {
+        str(experiment["experiment_id"]): 0 for experiment in selected_experiments
+    }
+    experiment_finished_emitted_ids: set[str] = set()
+
+    def _maybe_emit_experiment_finished_event(exp_id: str) -> None:
+        exp_id_key = str(exp_id)
+        if exp_id_key in experiment_finished_emitted_ids:
+            return
+        planned_count = int(experiment_planned_terminal_counts.get(exp_id_key, 0))
+        terminal_count = int(experiment_terminal_counts.get(exp_id_key, 0))
+        if planned_count <= 0 or terminal_count < planned_count:
+            return
+        variant_records = list(experiment_records.get(exp_id_key, []))
+        warnings = list(experiment_warnings.get(exp_id_key, []))
+        experiment_status = _phase_status_from_records(variant_records)
+        if not variant_records and warnings:
+            experiment_status = "skipped"
+        _emit_campaign_event(
+            event_name="experiment_finished",
+            scope="experiment",
+            status=experiment_status,
+            stage="campaign",
+            phase_name=experiment_phase_by_id.get(exp_id_key),
+            experiment_id=exp_id_key,
+            message="experiment finished",
+            metadata={"warnings": list(warnings)},
+        )
+        experiment_finished_emitted_ids.add(exp_id_key)
+
     for phase in phase_batches:
         phase_name = str(phase["phase_name"])
         phase_records: list[dict[str, Any]] = []
@@ -1128,6 +1161,9 @@ def run_decision_support_campaign(
                         **eta_planning_metadata,
                     },
                 )
+                experiment_planned_terminal_counts[exp_id] = int(
+                    experiment_planned_terminal_counts.get(exp_id, 0)
+                ) + 1
 
             runnable_cells = [
                 (experiment, cell)
@@ -1191,8 +1227,25 @@ def run_decision_support_campaign(
                 )
                 reuse_dependency_by_run_id: dict[str, str] = {}
                 for dependent_index, anchor_index in reuse_dependency_by_group_index.items():
-                    dependent_run_id = run_id_by_group_index.get(int(dependent_index))
-                    anchor_run_id = run_id_by_group_index.get(int(anchor_index))
+                    dependent_group_index = int(dependent_index)
+                    anchor_group_index = int(anchor_index)
+                    if (
+                        dependent_group_index < 0
+                        or anchor_group_index < 0
+                        or dependent_group_index >= len(group_cells)
+                        or anchor_group_index >= len(group_cells)
+                    ):
+                        continue
+                    dependent_experiment_id = str(
+                        group_cells[dependent_group_index][0]["experiment_id"]
+                    )
+                    anchor_experiment_id = str(
+                        group_cells[anchor_group_index][0]["experiment_id"]
+                    )
+                    if dependent_experiment_id != anchor_experiment_id:
+                        continue
+                    dependent_run_id = run_id_by_group_index.get(dependent_group_index)
+                    anchor_run_id = run_id_by_group_index.get(anchor_group_index)
                     if dependent_run_id is None or anchor_run_id is None:
                         continue
                     if dependent_run_id == anchor_run_id:
@@ -1535,6 +1588,11 @@ def run_decision_support_campaign(
                         message="run dry-run",
                         metadata=eta_terminal_metadata,
                     )
+                if record_status in {"completed", "failed", "blocked", "dry_run"}:
+                    experiment_terminal_counts[exp_id] = int(
+                        experiment_terminal_counts.get(exp_id, 0)
+                    ) + 1
+                    _maybe_emit_experiment_finished_event(exp_id)
 
         phase_payload = {
             "campaign_id": campaign_id,
@@ -1610,16 +1668,18 @@ def run_decision_support_campaign(
             variant_records=variant_records,
             warnings=warnings,
         )
-        _emit_campaign_event(
-            event_name="experiment_finished",
-            scope="experiment",
-            status=experiment_status,
-            stage="campaign",
-            phase_name=experiment_phase_by_id.get(exp_id),
-            experiment_id=exp_id,
-            message="experiment finished",
-            metadata={"warnings": list(warnings)},
-        )
+        if exp_id not in experiment_finished_emitted_ids:
+            _emit_campaign_event(
+                event_name="experiment_finished",
+                scope="experiment",
+                status=experiment_status,
+                stage="campaign",
+                phase_name=experiment_phase_by_id.get(exp_id),
+                experiment_id=exp_id,
+                message="experiment finished",
+                metadata={"warnings": list(warnings)},
+            )
+            experiment_finished_emitted_ids.add(exp_id)
         if not variant_records and warnings:
             blocked_experiments.append(
                 {

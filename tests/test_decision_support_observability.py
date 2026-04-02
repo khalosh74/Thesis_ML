@@ -160,6 +160,57 @@ def test_campaign_observability_reflects_completed_and_blocked_counts(tmp_path: 
     assert live_payload["counts"]["runs_blocked"] >= 1
 
 
+def test_experiment_finished_is_emitted_when_experiment_becomes_terminal_without_duplicates(
+    tmp_path: Path,
+) -> None:
+    registry_path = tmp_path / "registry.json"
+    index_csv = tmp_path / "index.csv"
+    _write_registry(registry_path)
+    _write_index(index_csv)
+
+    result = campaign_engine.run_decision_support_campaign(
+        registry_path=registry_path,
+        index_csv=index_csv,
+        data_root=tmp_path / "Data",
+        cache_dir=tmp_path / "cache",
+        output_root=tmp_path / "outputs",
+        experiment_id=None,
+        stage=None,
+        run_all=True,
+        seed=42,
+        n_permutations=0,
+        dry_run=True,
+        run_experiment_fn=_stub_run_experiment,
+    )
+
+    events = _read_jsonl(Path(result["campaign_root"]) / "execution_events.jsonl")
+    exp_finished_indexes = [
+        idx
+        for idx, event in enumerate(events)
+        if str(event.get("event_name")) == "experiment_finished"
+        and str(event.get("experiment_id")) == "E01"
+    ]
+    assert len(exp_finished_indexes) == 1
+    exp_finished_idx = exp_finished_indexes[0]
+
+    terminal_run_indexes = [
+        idx
+        for idx, event in enumerate(events)
+        if str(event.get("experiment_id")) == "E01"
+        and str(event.get("event_name")) in {"run_finished", "run_failed", "run_blocked", "run_dry_run"}
+    ]
+    assert terminal_run_indexes
+    assert exp_finished_idx > max(terminal_run_indexes)
+
+    phase_finished_indexes = [
+        idx
+        for idx, event in enumerate(events)
+        if str(event.get("event_name")) == "phase_finished"
+    ]
+    assert phase_finished_indexes
+    assert exp_finished_idx < min(phase_finished_indexes)
+
+
 def test_campaign_observability_writes_stage_evidence_summaries(tmp_path: Path) -> None:
     registry_path = tmp_path / "registry.json"
     index_csv = tmp_path / "index.csv"

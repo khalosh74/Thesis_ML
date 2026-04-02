@@ -23,6 +23,96 @@ def _json_safe(value: Any) -> Any:
         return repr(value)
 
 
+def _coerce_float(value: Any) -> float | None:
+    if value in (None, ""):
+        return None
+    try:
+        return float(value)
+    except Exception:
+        return None
+
+
+def _normalize_optional_text(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _resolve_percent_complete(
+    completed_units: float | None,
+    total_units: float | None,
+) -> float | None:
+    if completed_units is None or total_units is None:
+        return None
+    if total_units <= 0.0:
+        return None
+    percent = (float(completed_units) / float(total_units)) * 100.0
+    return float(min(max(percent, 0.0), 100.0))
+
+
+def _rebuild_operation_progress_indexes(state: dict[str, Any]) -> None:
+    active_operations_raw = state.get("active_operations")
+    active_operations = (
+        dict(active_operations_raw) if isinstance(active_operations_raw, dict) else {}
+    )
+
+    experiment_progress: dict[str, dict[str, Any]] = {}
+    phase_progress: dict[str, dict[str, Any]] = {}
+
+    for operation in active_operations.values():
+        if not isinstance(operation, dict):
+            continue
+        experiment_id = _normalize_optional_text(operation.get("experiment_id"))
+        phase_name = _normalize_optional_text(operation.get("phase_name"))
+        percent_complete = _coerce_float(operation.get("percent_complete"))
+
+        if experiment_id is not None:
+            exp_entry = experiment_progress.setdefault(
+                experiment_id,
+                {
+                    "experiment_id": experiment_id,
+                    "active_operation_count": 0,
+                    "avg_percent_complete": None,
+                },
+            )
+            exp_entry["active_operation_count"] = int(exp_entry["active_operation_count"]) + 1
+            if percent_complete is not None:
+                current = exp_entry.get("_percent_samples")
+                samples = list(current) if isinstance(current, list) else []
+                samples.append(float(percent_complete))
+                exp_entry["_percent_samples"] = samples
+
+        if phase_name is not None:
+            phase_entry = phase_progress.setdefault(
+                phase_name,
+                {
+                    "phase_name": phase_name,
+                    "active_operation_count": 0,
+                    "avg_percent_complete": None,
+                },
+            )
+            phase_entry["active_operation_count"] = int(phase_entry["active_operation_count"]) + 1
+            if percent_complete is not None:
+                current = phase_entry.get("_percent_samples")
+                samples = list(current) if isinstance(current, list) else []
+                samples.append(float(percent_complete))
+                phase_entry["_percent_samples"] = samples
+
+    for payload in list(experiment_progress.values()) + list(phase_progress.values()):
+        samples_raw = payload.pop("_percent_samples", None)
+        samples = (
+            [float(value) for value in samples_raw if isinstance(value, (int, float))]
+            if isinstance(samples_raw, list)
+            else []
+        )
+        if samples:
+            payload["avg_percent_complete"] = float(sum(samples) / float(len(samples)))
+
+    state["experiment_progress"] = _json_safe(experiment_progress)
+    state["phase_progress"] = _json_safe(phase_progress)
+
+
 def initial_live_status(campaign_id: str) -> dict[str, Any]:
     now = _utc_now()
     return {
@@ -46,6 +136,9 @@ def initial_live_status(campaign_id: str) -> dict[str, Any]:
         },
         "active_experiments": [],
         "active_runs": [],
+        "active_operations": {},
+        "experiment_progress": {},
+        "phase_progress": {},
         "recent_events": [],
         "blocked_experiments": [],
         "failed_runs": [],
@@ -96,6 +189,7 @@ def apply_event_to_live_status(
     experiment_id = event.get("experiment_id")
     run_id = event.get("run_id")
     metadata = event.get("metadata")
+    normalized_run_id = _normalize_optional_text(run_id)
 
     state["last_updated_at_utc"] = now
     counts = state.setdefault("counts", {})
@@ -150,18 +244,69 @@ def apply_event_to_live_status(
         counts["runs_dispatched"] = int(counts.get("runs_dispatched", 0)) + 1
     elif event_name == "run_started":
         counts["runs_started"] = int(counts.get("runs_started", 0)) + 1
-        _append_unique(state.setdefault("active_runs", []), None if run_id is None else str(run_id))
+        _append_unique(state.setdefault("active_runs", []), normalized_run_id)
     elif event_name == "run_finished":
         counts["runs_completed"] = int(counts.get("runs_completed", 0)) + 1
-        _remove_value(state.setdefault("active_runs", []), None if run_id is None else str(run_id))
+        _remove_value(state.setdefault("active_runs", []), normalized_run_id)
     elif event_name == "run_failed":
         counts["runs_failed"] = int(counts.get("runs_failed", 0)) + 1
-        _remove_value(state.setdefault("active_runs", []), None if run_id is None else str(run_id))
-        _append_unique(state.setdefault("failed_runs", []), None if run_id is None else str(run_id))
+        _remove_value(state.setdefault("active_runs", []), normalized_run_id)
+        _append_unique(state.setdefault("failed_runs", []), normalized_run_id)
     elif event_name == "run_blocked":
         counts["runs_blocked"] = int(counts.get("runs_blocked", 0)) + 1
+        _remove_value(state.setdefault("active_runs", []), normalized_run_id)
     elif event_name == "run_dry_run":
         counts["runs_dry_run"] = int(counts.get("runs_dry_run", 0)) + 1
+        _remove_value(state.setdefault("active_runs", []), normalized_run_id)
+
+    active_operations_raw = state.setdefault("active_operations", {})
+    active_operations = (
+        active_operations_raw if isinstance(active_operations_raw, dict) else {}
+    )
+    if event_name == "progress" and normalized_run_id is not None:
+        existing_payload = active_operations.get(normalized_run_id)
+        existing_operation = (
+            dict(existing_payload) if isinstance(existing_payload, dict) else {}
+        )
+        completed_units = _coerce_float(event.get("completed_units"))
+        total_units = _coerce_float(event.get("total_units"))
+        operation_payload = {
+            "run_id": normalized_run_id,
+            "experiment_id": (
+                _normalize_optional_text(experiment_id)
+                or _normalize_optional_text(existing_operation.get("experiment_id"))
+            ),
+            "phase_name": (
+                _normalize_optional_text(phase_name)
+                or _normalize_optional_text(existing_operation.get("phase_name"))
+            ),
+            "stage": (
+                _normalize_optional_text(event.get("stage"))
+                or _normalize_optional_text(existing_operation.get("stage"))
+            ),
+            "message": (
+                _normalize_optional_text(event.get("message"))
+                or _normalize_optional_text(existing_operation.get("message"))
+            ),
+            "completed_units": completed_units,
+            "total_units": total_units,
+            "started_at_utc": str(existing_operation.get("started_at_utc") or now),
+            "last_updated_at_utc": str(now),
+            "percent_complete": _resolve_percent_complete(completed_units, total_units),
+            "metadata": _json_safe(
+                dict(metadata)
+                if isinstance(metadata, dict)
+                else dict(existing_operation.get("metadata", {}))
+            ),
+        }
+        active_operations[normalized_run_id] = _json_safe(operation_payload)
+
+    if event_name in {"run_finished", "run_failed", "run_blocked", "run_dry_run"}:
+        if normalized_run_id is not None:
+            active_operations.pop(normalized_run_id, None)
+
+    state["active_operations"] = _json_safe(active_operations)
+    _rebuild_operation_progress_indexes(state)
 
     recent_events = state.setdefault("recent_events", [])
     recent_events.append(_json_safe(dict(event)))

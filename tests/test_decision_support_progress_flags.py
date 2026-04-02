@@ -83,3 +83,33 @@ def test_campaign_cli_progress_ui_flags_are_forwarded(tmp_path: Path) -> None:
     assert exit_code == 0
     assert captured["progress_ui"] == "bar"
     assert captured["progress_detail"] == "verbose"
+
+
+def test_campaign_cli_progress_defaults_are_verbose_and_fast(tmp_path: Path) -> None:
+    captured: dict[str, object] = {}
+
+    def _stub_read_registry_manifest(_: Path):
+        return object()
+
+    def _stub_run_campaign(**kwargs):
+        captured.update(kwargs)
+        return _campaign_result_payload(tmp_path)
+
+    exit_code = campaign_cli_main(
+        [
+            "--registry-alias",
+            "registry.decision_support_default",
+            "--all",
+            "--dry-run",
+            "--output-root",
+            str(tmp_path / "outputs"),
+        ],
+        run_decision_support_campaign_fn=_stub_run_campaign,
+        run_workbook_decision_support_campaign_fn=lambda **_: _campaign_result_payload(tmp_path),
+        read_registry_manifest_fn=_stub_read_registry_manifest,
+    )
+
+    assert exit_code == 0
+    assert captured["progress_ui"] == "auto"
+    assert captured["progress_detail"] == "verbose"
+    assert captured["progress_interval_seconds"] == 5.0
