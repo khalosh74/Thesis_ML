@@ -498,6 +498,13 @@ def write_campaign_execution_report(
         campaign_root,
         ["preflight_reviews/*.md"],
     )
+    confirmatory_bundle_paths = _existing_relative_paths(
+        campaign_root,
+        ["preflight_reviews/confirmatory_selection_bundle.json"],
+    )
+    frozen_confirmatory_outputs = _read_optional_json(
+        campaign_root / "preflight_reviews" / "frozen_confirmatory_outputs.json"
+    )
     phase_artifact_paths = _existing_relative_paths(
         campaign_root,
         [
@@ -540,6 +547,18 @@ def write_campaign_execution_report(
         "stage_summaries": stage_summary_paths,
         "stage_decision_notes": stage_decision_note_paths,
         "preflight_reviews": preflight_review_paths,
+        "confirmatory_selection_bundle": (
+            confirmatory_bundle_paths[0] if confirmatory_bundle_paths else None
+        ),
+        "frozen_confirmatory_artifacts": (
+            {
+                "registry": frozen_confirmatory_outputs.get("registry"),
+                "manifest": frozen_confirmatory_outputs.get("manifest"),
+                "report": frozen_confirmatory_outputs.get("report"),
+            }
+            if isinstance(frozen_confirmatory_outputs, dict)
+            else None
+        ),
         "phase_artifacts": phase_artifact_paths,
     }
     if eta_state is not None:

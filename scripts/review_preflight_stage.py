@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +21,18 @@ from Thesis_ML.orchestration.stage_lock_rules import (
 )
 
 _DEFAULT_REVISED_REGISTRY_PATH = Path("configs") / "decision_support_registry_revised_execution.json"
+_DEFAULT_CONFIRMATORY_SCOPE_PATH = Path("configs") / "confirmatory" / "confirmatory_scope_v1.json"
+_REQUIRED_HARD_LOCK_STAGES: tuple[str, ...] = (
+    "E01",
+    "E04",
+    "E06",
+    "E07",
+    "E08",
+    "E09",
+    "E10",
+    "E11",
+)
+_ADVISORY_STAGES: tuple[str, ...] = ("E02", "E03")
 
 
 class PreflightReviewError(RuntimeError):
@@ -89,6 +102,14 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help=(
             "Decision-support registry used for context and model defaults. "
             "Defaults to configs/decision_support_registry_revised_execution.json"
+        ),
+    )
+    parser.add_argument(
+        "--emit-confirmatory-bundle",
+        action="store_true",
+        help=(
+            "Emit preflight_reviews/confirmatory_selection_bundle.json from reviewed "
+            "preflight stage outputs."
         ),
     )
     return parser.parse_args(argv)
@@ -1069,6 +1090,150 @@ def _load_experiment_titles(registry_payload: dict[str, Any]) -> dict[str, str]:
         titles[experiment_id] = str(row.get("title") or "").strip()
     return titles
 
+
+def _relative_review_json_path(*, campaign_root: Path, experiment_id: str) -> str:
+    path = campaign_root / "preflight_reviews" / f"{experiment_id}_review.json"
+    return str(path.relative_to(campaign_root))
+
+
+def _load_stage_review_payload_for_bundle(
+    *,
+    campaign_root: Path,
+    experiment_id: str,
+    computed_reviews: dict[str, dict[str, Any]],
+) -> tuple[dict[str, Any] | None, str]:
+    experiment_key = str(experiment_id).strip().upper()
+    relative_path = _relative_review_json_path(campaign_root=campaign_root, experiment_id=experiment_key)
+    if experiment_key in computed_reviews:
+        payload = computed_reviews[experiment_key]
+        if isinstance(payload, dict):
+            return payload, relative_path
+    review_path = campaign_root / relative_path
+    if review_path.exists() and review_path.is_file():
+        payload = _load_json_object(review_path, label=f"{experiment_key} review")
+        return payload, relative_path
+    return None, relative_path
+
+
+def _candidate_value(payload: dict[str, Any], key: str) -> Any:
+    candidate = payload.get("candidate_winner")
+    if not isinstance(candidate, dict):
+        return None
+    return candidate.get(key)
+
+
+def emit_confirmatory_selection_bundle(
+    *,
+    campaign_root: Path,
+    computed_reviews: dict[str, dict[str, Any]],
+    scope_config_path: Path = _DEFAULT_CONFIRMATORY_SCOPE_PATH,
+) -> Path:
+    resolved_scope_path = scope_config_path.resolve()
+    scope_payload = _load_json_object(resolved_scope_path, label="confirmatory scope")
+    scope_id = str(scope_payload.get("scope_id") or "confirmatory_scope_v1").strip()
+    if not scope_id:
+        raise PreflightReviewError(
+            f"Invalid confirmatory scope_id in scope config: {resolved_scope_path}"
+        )
+
+    review_sources: dict[str, str] = {}
+    notes: list[str] = []
+    selected: dict[str, Any] = {
+        "cv_transfer": "frozen_cross_person_transfer",
+    }
+    advisory: dict[str, Any] = {
+        "task_pooling": None,
+        "modality_pooling": None,
+    }
+
+    required_mapping: dict[str, tuple[str, str]] = {
+        "E01": ("target", "target"),
+        "E04": ("cv", "cv_within_subject"),
+        "E06": ("model", "model"),
+        "E07": ("class_weight_policy", "class_weight_policy"),
+        "E08": ("methodology_policy_name", "methodology_policy_name"),
+        "E09": ("feature_space", "feature_space"),
+        "E10": ("dimensionality_strategy", "dimensionality_strategy"),
+        "E11": ("preprocessing_strategy", "preprocessing_strategy"),
+    }
+    advisory_mapping: dict[str, tuple[str, str]] = {
+        "E02": ("task_pooling_choice", "task_pooling"),
+        "E03": ("modality_pooling_choice", "modality_pooling"),
+    }
+
+    freeze_ready = True
+    manual_review_required = False
+
+    for experiment_id in _REQUIRED_HARD_LOCK_STAGES:
+        payload, source_rel = _load_stage_review_payload_for_bundle(
+            campaign_root=campaign_root,
+            experiment_id=experiment_id,
+            computed_reviews=computed_reviews,
+        )
+        review_sources[experiment_id] = source_rel
+        if payload is None:
+            freeze_ready = False
+            manual_review_required = True
+            notes.append(f"{experiment_id}:missing_review")
+            continue
+        if bool(payload.get("manual_review_required")):
+            freeze_ready = False
+            manual_review_required = True
+            notes.append(f"{experiment_id}:manual_review_required")
+        candidate_key, selected_key = required_mapping[experiment_id]
+        candidate_value = _candidate_value(payload, candidate_key)
+        if candidate_value in (None, ""):
+            freeze_ready = False
+            manual_review_required = True
+            notes.append(f"{experiment_id}:missing_candidate_{candidate_key}")
+            continue
+        selected[selected_key] = candidate_value
+        if experiment_id == "E08":
+            candidate_payload = payload.get("candidate_winner")
+            if isinstance(candidate_payload, dict):
+                for key in (
+                    "tuning_search_space_id",
+                    "tuning_search_space_version",
+                    "tuning_inner_cv_scheme",
+                    "tuning_inner_group_field",
+                ):
+                    value = candidate_payload.get(key)
+                    if value not in (None, ""):
+                        selected[key] = value
+
+    for experiment_id in _ADVISORY_STAGES:
+        payload, _ = _load_stage_review_payload_for_bundle(
+            campaign_root=campaign_root,
+            experiment_id=experiment_id,
+            computed_reviews=computed_reviews,
+        )
+        candidate_key, advisory_key = advisory_mapping[experiment_id]
+        if payload is None:
+            advisory[advisory_key] = None
+            notes.append(f"{experiment_id}:advisory_review_missing")
+            continue
+        advisory[advisory_key] = _candidate_value(payload, candidate_key)
+
+    bundle_payload: dict[str, Any] = {
+        "bundle_id": f"confirmatory_selection_bundle_{campaign_root.name}",
+        "campaign_id": campaign_root.name,
+        "scope_id": scope_id,
+        "generated_at_utc": datetime.now(UTC).replace(microsecond=0).isoformat(),
+        "review_sources": review_sources,
+        "selected": selected,
+        "advisory": advisory,
+        "freeze_ready": bool(freeze_ready),
+        "manual_review_required": bool(manual_review_required),
+        "notes": sorted(set(str(note) for note in notes if str(note).strip())),
+    }
+
+    reviews_dir = campaign_root / "preflight_reviews"
+    reviews_dir.mkdir(parents=True, exist_ok=True)
+    bundle_path = reviews_dir / "confirmatory_selection_bundle.json"
+    bundle_path.write_text(f"{json.dumps(bundle_payload, indent=2)}\n", encoding="utf-8")
+    return bundle_path
+
+
 def _apply_phase_artifact_review_update(
     *,
     campaign_root: Path,
@@ -1422,6 +1587,12 @@ def main(argv: list[str] | None = None) -> int:
 
     review_dir = campaign_root / "preflight_reviews"
     print(f"Wrote preflight review artifacts to: {review_dir}")
+    if args.emit_confirmatory_bundle:
+        bundle_path = emit_confirmatory_selection_bundle(
+            campaign_root=campaign_root,
+            computed_reviews=computed_reviews,
+        )
+        print(f"Wrote confirmatory selection bundle: {bundle_path}")
     return 0
 
 

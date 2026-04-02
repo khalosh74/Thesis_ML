@@ -1,0 +1,27 @@
+{
+  "scope_id": "confirmatory_scope_v1",
+  "main_tasks": [
+    "emo",
+    "recog"
+  ],
+  "main_modality": "audiovisual",
+  "main_target": "coarse_affect",
+  "within_subjects": [
+    "sub-001",
+    "sub-002"
+  ],
+  "transfer_pairs": [
+    {
+      "train_subject": "sub-001",
+      "test_subject": "sub-002"
+    },
+    {
+      "train_subject": "sub-002",
+      "test_subject": "sub-001"
+    }
+  ],
+  "notes": {
+    "task_pooling_stage": "advisory_only",
+    "modality_pooling_stage": "advisory_only"
+  }
+}

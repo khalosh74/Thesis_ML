@@ -65,6 +65,19 @@ def _optional_str(value: Any) -> str | None:
     return value_text or None
 
 
+def _optional_bool(value: Any) -> bool | None:
+    if value in (None, ""):
+        return None
+    if isinstance(value, bool):
+        return value
+    lowered = str(value).strip().lower()
+    if lowered in {"true", "1", "yes", "y"}:
+        return True
+    if lowered in {"false", "0", "no", "n"}:
+        return False
+    return None
+
+
 def _resolve_methodology_params(params: dict[str, Any]) -> dict[str, Any]:
     raw_policy_name = _optional_str(params.get("methodology_policy_name"))
     raw_class_weight = _optional_str(params.get("class_weight_policy"))
@@ -524,6 +537,25 @@ def build_variant_run_kwargs(
             else None
         ),
     }
+    raw_framework_mode = variant.get("framework_mode", params.get("framework_mode"))
+    framework_mode = _optional_str(raw_framework_mode)
+    if framework_mode is not None:
+        run_kwargs["framework_mode"] = framework_mode
+
+    raw_protocol_context = variant.get("protocol_context", params.get("protocol_context"))
+    if isinstance(raw_protocol_context, dict):
+        run_kwargs["protocol_context"] = dict(raw_protocol_context)
+
+    raw_comparison_context = variant.get("comparison_context", params.get("comparison_context"))
+    if isinstance(raw_comparison_context, dict):
+        run_kwargs["comparison_context"] = dict(raw_comparison_context)
+
+    canonical_run = _optional_bool(variant.get("canonical_run", params.get("canonical_run")))
+    if canonical_run is not None and isinstance(run_kwargs.get("protocol_context"), dict):
+        protocol_context_payload = dict(run_kwargs["protocol_context"])
+        protocol_context_payload["canonical_run"] = bool(canonical_run)
+        run_kwargs["protocol_context"] = protocol_context_payload
+
     return run_kwargs, None, run_id
 
 
@@ -567,7 +599,7 @@ def build_variant_official_job(
         return None, blocked_reason, run_id
 
     timeout_policy = resolve_run_timeout_policy(
-        framework_mode=FrameworkMode.EXPLORATORY,
+        framework_mode=run_kwargs.get("framework_mode", FrameworkMode.EXPLORATORY),
         model_name=str(run_kwargs["model"]),
     )
     run_identity = {

@@ -55,6 +55,23 @@ def test_write_campaign_execution_report_uses_existing_artifacts(tmp_path: Path)
         "# notes\n",
         encoding="utf-8",
     )
+    (campaign_root / "preflight_reviews").mkdir(parents=True, exist_ok=True)
+    (campaign_root / "preflight_reviews" / "confirmatory_selection_bundle.json").write_text(
+        json.dumps({"scope_id": "confirmatory_scope_v1"}, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    (campaign_root / "preflight_reviews" / "frozen_confirmatory_outputs.json").write_text(
+        json.dumps(
+            {
+                "registry": "configs/generated/frozen_confirmatory_registry_c1.json",
+                "manifest": "configs/generated/frozen_confirmatory_manifest_c1.json",
+                "report": "configs/generated/frozen_confirmatory_report_c1.md",
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
 
     md_path, json_path = write_campaign_execution_report(campaign_root=campaign_root, campaign_id="c1")
 
@@ -65,6 +82,10 @@ def test_write_campaign_execution_report_uses_existing_artifacts(tmp_path: Path)
     assert payload["final_execution_status"]["status"] == "finished"
     assert "key_generated_artifacts" in payload
     assert "stage1_target_lock_summary.csv" in payload["key_generated_artifacts"]["stage_summaries"]
+    assert str(payload["key_generated_artifacts"]["confirmatory_selection_bundle"]).replace(
+        "\\", "/"
+    ).endswith("preflight_reviews/confirmatory_selection_bundle.json")
+    assert isinstance(payload["key_generated_artifacts"]["frozen_confirmatory_artifacts"], dict)
 
     markdown = md_path.read_text(encoding="utf-8")
     assert "## Campaign overview" in markdown
