@@ -1107,6 +1107,13 @@ def run_decision_support_campaign(
 
     for phase in phase_batches:
         phase_name = str(phase["phase_name"])
+        # compute expected ids and groups first; skip emitting phase events when
+        # the phase has no groups to process (avoids spurious preflight phase events)
+        expected_ids = [str(value) for value in phase.get("expected_experiment_ids", [])]
+        groups = phase.get("groups", [])
+        if not groups:
+            # nothing to do for this phase, skip it entirely
+            continue
         phase_records: list[dict[str, Any]] = []
         phase_experiment_ids: list[str] = []
         _emit_campaign_event(
@@ -1118,9 +1125,7 @@ def run_decision_support_campaign(
             message="phase started",
             metadata={
                 "dry_run": bool(dry_run),
-                "expected_experiment_ids": [
-                    str(value) for value in phase.get("expected_experiment_ids", [])
-                ],
+                "expected_experiment_ids": list(expected_ids),
             },
         )
 
@@ -1321,6 +1326,7 @@ def run_decision_support_campaign(
                 reuse_dependency_by_group_index = _plan_sibling_feature_matrix_reuse(
                     variants=[cell for _, cell in group_cells],
                     cache_dir=cache_dir,
+                    parent_experiment_ids=[str(experiment["experiment_id"]) for experiment, _ in group_cells],
                 )
                 reuse_dependency_by_run_id: dict[str, str] = {}
                 for dependent_index, anchor_index in reuse_dependency_by_group_index.items():

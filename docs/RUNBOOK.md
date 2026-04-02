@@ -561,3 +561,164 @@ This is the canonical pre-release/pre-campaign acceptance path and validates:
 - shipped workbook asset compatibility
 - canonical workbook CLI generation
 - shipped registry dry-run through canonical decision-support CLI
+
+## Merged content: Operator Guide (from `OPERATOR_GUIDE.md`)
+
+The following content was merged from `docs/OPERATOR_GUIDE.md` on 2026-04-02. A backup of the original `OPERATOR_GUIDE.md` is available at `docs/archived/OPERATOR_GUIDE_backup_2026-04-02.md`.
+
+---
+
+## Operator Guide (Canonical)
+
+Use these commands as the supported operator path.
+
+### 1) Environment
+
+Canonical operator path is source checkout + `uv.lock`.
+
+```bash
+python -m pip install --upgrade pip
+python -m pip install uv
+python -m uv sync --frozen --extra dev
+```
+
+Optional Optuna support:
+
+```bash
+python -m uv sync --frozen --extra dev --extra optuna
+```
+
+Installed wheel path is also supported; default decision-support registry is packaged in the wheel.
+
+### 2) Canonical CLIs
+
+- `thesisml-run-protocol` (official thesis-facing command)
+- `thesisml-run-experiment`
+- `thesisml-run-comparison`
+- `thesisml-run-decision-support`
+- `thesisml-workbook`
+- `thesisml-run-baseline`
+
+Compatibility wrappers are kept only for migration and are deprecated.
+
+### 3) First-use checks
+
+Frozen confirmatory protocol dry-run:
+
+```bash
+thesisml-run-protocol \
+  --protocol configs/protocols/thesis_canonical_nested_v2.json \
+  --all-suites \
+  --reports-root outputs/reports/confirmatory \
+  --dry-run
+```
+
+Frozen confirmatory protocol execution:
+
+```bash
+thesisml-run-protocol \
+  --protocol configs/protocols/thesis_confirmatory_v1.json \
+  --all-suites \
+  --reports-root outputs/reports/confirmatory
+```
+
+Locked comparison dry-run:
+
+```bash
+thesisml-run-comparison \
+  --comparison configs/comparisons/model_family_grouped_nested_comparison_v2.json \
+  --all-variants \
+  --reports-root outputs/reports/comparisons \
+  --dry-run
+```
+
+Locked comparison execution:
+
+```bash
+thesisml-run-comparison \
+  --comparison configs/comparisons/model_family_grouped_nested_comparison_v2.json \
+  --all-variants \
+  --reports-root outputs/reports/comparisons
+```
+
+Grouped nested comparison execution:
+
+```bash
+thesisml-run-comparison \
+  --comparison configs/archive/comparisons/model_family_grouped_nested_comparison_v1.json \
+  --variant ridge \
+  --reports-root outputs/reports/comparisons
+```
+
+Official-policy note:
+- exploratory mode (`thesisml-run-experiment`) is ad hoc and non-confirmatory.
+- locked comparison mode (`thesisml-run-comparison`) is restricted to registered variants.
+- confirmatory mode (`thesisml-run-protocol`) is the final thesis evidence path.
+- default mode roots are `outputs/reports/exploratory`, `outputs/reports/comparisons`, and `outputs/reports/confirmatory`.
+- comparison/protocol contracts must choose exactly one methodology policy:
+  `fixed_baselines_only` or `grouped_nested_tuning`.
+- official checked-in comparison/protocol specs use `repeat_count=3` by default.
+- locked comparison specs require significant paired wins by default (`require_significant_win=true`).
+- locked comparison runs emit `comparison_decision.json` for machine-readable selection outcomes.
+- locked comparison runs emit evidence artifacts:
+  `repeated_run_metrics.csv`, `repeated_run_summary.json`,
+  `confidence_intervals.json`, `metric_intervals.csv`,
+  `paired_model_comparisons.json`, `paired_model_comparisons.csv`.
+- confirmatory runs emit evidence artifacts:
+  `repeated_run_metrics.csv`, `repeated_run_summary.json`,
+  `confidence_intervals.json`, `metric_intervals.csv`.
+- official comparison/confirmatory paths run strict preflight contract validation and fail fast on violations.
+- run-level `run_status.json` exposes structured diagnostics (`error_code`, `error_type`, `failure_stage`) and warning/timing/resource summaries.
+
+Official metric policy:
+- declare one `primary_metric` per comparison/protocol contract (`balanced_accuracy`, `macro_f1`, or `accuracy`)
+- primary metric is decision-driving for tuning, comparison winner selection, permutation testing, and headline summaries
+- secondary metrics are reporting-only
+- official permutation metric must match primary metric
+- artifacts include `metric_policy_effective` so operators can audit effective primary/decision/tuning/permutation metrics
+- official run artifacts include deterministic provenance (`git_provenance`, `dataset_fingerprint`) for rerun traceability
+- official run artifacts include evidence metadata (`evidence_policy_effective`, repeat metadata, `evidence_run_role`)
+- calibration status is explicit in run artifacts:
+  - `performed` when probability outputs are available
+  - `not_applicable` when a model path has no probability outputs
+- official comparison/confirmatory contracts also declare explicit `data_policy`:
+  - structural data/leakage blockers fail official preflight
+  - class-balance and missingness thresholds warn by default unless set to blocking
+  - external validation is compatibility-only in this phase (explicitly labeled external/non-confirmatory)
+- official run artifacts include standardized data-layer outputs:
+  `dataset_card.json`, `dataset_card.md`, `dataset_summary.json`, `dataset_summary.csv`,
+  `data_quality_report.json`, `class_balance_report.csv`, `missingness_report.csv`,
+  `leakage_audit.json`, `external_dataset_card.json`, `external_dataset_summary.json`,
+  `external_validation_compatibility.json`
+- additive stage observability artifacts are emitted for run-level plan-vs-observed evidence:
+  `stage_events.jsonl`, `stage_observed_evidence.json`
+- with process profiling enabled, stage-scoped resource attribution is available in
+  `stage_resource_attribution.json`
+
+Governance references:
+- `docs/PRIVACY_AND_DATA_HANDLING.md`
+- `docs/USE_AND_MISUSE_BOUNDARIES.md`
+- `docs/CONFIRMATORY_READY.md`
+- `docs/REPRODUCIBILITY.md`
+
+Architecture ownership (where to extend safely):
+- runner policy resolution belongs in `src/Thesis_ML/experiments/runtime_policies.py`
+- run artifact payload shaping belongs in `src/Thesis_ML/experiments/run_artifacts.py`
+- comparison decision rules belong in `src/Thesis_ML/comparisons/decision.py`
+- workbook study-review guardrail helpers belong in `src/Thesis_ML/orchestration/study_review.py`
+
+Generate workbook template:
+
+```bash
+thesisml-workbook --output templates/thesis_experiment_program.xlsx
+```
+
+Template note:
+- `templates/thesis_experiment_program.xlsx` is non-runnable by default
+- enable/populate executable rows in `Experiment_Definitions` for single-experiment flow
+- or enable/populate `Study_Design` (+ `Factors`/`Fixed_Controls`/`Constraints` as needed)
+  for factorial flow
+- optionally complete `Study_Rigor_Checklist` and `Analysis_Plan` for explicit
+  scientific-rigor metadata and stricter confirmatory validation
+
+## End merged content

@@ -22,3 +22,21 @@
 - Recovery note: Deleted files remain recoverable from Git history (use revert/checkout).
 
 -- Recorded by repository agent
+
+- 2026-04-02 (follow-up):
+  - Created `docs/proposals/` and `docs/archived/` directories and scanned `docs/` for remaining developer/design plan files.
+  - Result: No additional standalone implementation/design plan files were found in `docs/` to move; canonical governance, operator, and maintainer docs remain in place.
+  - Updated todo list to mark scanning and directory creation completed.
+
+-- Recorded by repository agent (follow-up)
+
+## 2026-04-02 — Merged script inventory
+
+- Merged `docs/maintainer/script_inventory.md` into `docs/MAINTAINER_GUIDE.md`.
+- Backups created:
+  - `docs/archived/script_inventory_backup_2026-04-02.md`
+  - `docs/archived/MAINTAINER_GUIDE_backup_2026-04-02.md`
+- Replaced `docs/maintainer/script_inventory.md` with a pointer to the merged section and added a merge note in `docs/MAINTAINER_GUIDE.md`.
+- Reason: Consolidate maintainer-facing operator/script references into a single canonical maintainer guide.
+
+-- Recorded by repository agent

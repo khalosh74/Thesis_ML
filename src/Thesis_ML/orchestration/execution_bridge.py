@@ -322,7 +322,13 @@ def plan_sibling_feature_matrix_reuse(
     *,
     variants: list[dict[str, Any]],
     cache_dir: Path,
+    parent_experiment_ids: list[str] | None = None,
 ) -> dict[int, int]:
+    """Plan reuse dependencies for sibling feature-matrix bundles.
+
+    When `parent_experiment_ids` is provided, grouping is restricted per-experiment
+    to avoid cross-experiment coalescing of feature-matrix reuse anchors.
+    """
     grouped_indexes: dict[str, list[int]] = {}
     for index, variant in enumerate(variants):
         upstream_identity = _build_feature_matrix_upstream_identity(
@@ -334,7 +340,13 @@ def plan_sibling_feature_matrix_reuse(
         key = compute_config_hash(upstream_identity)
         if key is None:
             continue
-        grouped_indexes.setdefault(str(key), []).append(int(index))
+        # If parent_experiment_ids provided, partition groups by experiment id
+        if isinstance(parent_experiment_ids, list) and len(parent_experiment_ids) > index:
+            parent_id = str(parent_experiment_ids[index])
+            compound_key = f"{parent_id}|{key}"
+        else:
+            compound_key = str(key)
+        grouped_indexes.setdefault(compound_key, []).append(int(index))
 
     dependency_map: dict[int, int] = {}
     for indexes in grouped_indexes.values():

@@ -1,3 +1,9 @@
+# Backup: script_inventory.md
+
+This is an archived backup copy of `docs/maintainer/script_inventory.md` created on 2026-04-02 by the repository agent during a documentation consolidation operation. The original content follows.
+
+----------
+
 # Script Inventory
 
 Current Wave-2 inventory of `scripts/` with canonical vs wrapper ownership.
@@ -52,12 +58,3 @@ Current Wave-2 inventory of `scripts/` with canonical vs wrapper ownership.
 
 - Internal package/config compatibility aliases:
   internal compatibility alias; leave untouched during thesis phase.
-
-# Merged
-
-This file was merged into `docs/MAINTAINER_GUIDE.md` on 2026-04-02.
-The canonical script inventory now lives at `docs/MAINTAINER_GUIDE.md#merged-content-script-inventory-from-docs%2Fmaintainer%2Fscript_inventory.md`.
-
-A backup of the original inventory is available at `docs/archived/script_inventory_backup_2026-04-02.md`.
-
--- Merged on 2026-04-02 by repository agent
