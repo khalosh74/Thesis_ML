@@ -2172,7 +2172,7 @@
       "executable_now": true,
       "execution_status": "unknown",
       "blocked_reasons": [],
-      "notes": "Atlas-mask ROI component repaired with Julich v3.0.3-derived bilateral V1 and primary auditory masks. The 29 spherical ROI coordinate provenance is unresolved and intentionally not fabricated; do not treat E09 as a fully frozen D06 lock on this basis alone.",
+      "notes": "Atlas-mask ROI component repaired with Julich v3.0.3-derived bilateral V1 and primary auditory masks. This remains a partial atlas-only ROI path: the 29 spherical ROI coordinate provenance is unresolved and intentionally not fabricated. Treat E09 as advisory/supporting feature-space sensitivity evidence, not a fully frozen D06 lock dependency.",
       "section_plan": [
         "dataset_selection",
         "feature_cache_build",
