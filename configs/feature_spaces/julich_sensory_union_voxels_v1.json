@@ -1,0 +1,23 @@
+{
+  "feature_space_id": "julich_sensory_union_voxels_v1",
+  "representation": "roi_masked_predefined",
+  "description": "Atlas-derived bilateral V1 and primary auditory cortex (Heschl TE1.0/1.1/1.2) voxel-union feature space for E09 sensitivity checks. Effective extraction uses atlas ROI union intersected with the selected samples' common valid mask support.",
+  "reference_space": "MNI_152_ICBM_2009c_nonlinear_asymmetric_resampled_to_beta_grid_2mm",
+  "scientific_readiness": "partial_atlas_only_not_full_hybrid",
+  "pending_components": [
+    "29_spherical_rois_radius_12mm_meta_study_provenance_unresolved_intentionally_excluded"
+  ],
+  "provenance_manifest": "configs/feature_spaces/assets/julich_v3_0_3/julich_v303_roi_provenance.json",
+  "rois": [
+    {
+      "roi_id": "julich_v1_bilateral_real_atlas",
+      "type": "mask",
+      "mask_path": "configs/feature_spaces/assets/julich_v3_0_3/masks/julich_v303_v1_bilateral_beta2mm.nii.gz"
+    },
+    {
+      "roi_id": "julich_primary_auditory_te1_bilateral_real_atlas",
+      "type": "mask",
+      "mask_path": "configs/feature_spaces/assets/julich_v3_0_3/masks/julich_v303_pac_te1_bilateral_beta2mm.nii.gz"
+    }
+  ]
+}

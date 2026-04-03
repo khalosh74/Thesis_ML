@@ -6,6 +6,7 @@
   ],
   "main_modality": "audiovisual",
   "main_target": "coarse_affect",
+  "feature_space": "whole_brain_masked",
   "within_subjects": [
     "sub-001",
     "sub-002"

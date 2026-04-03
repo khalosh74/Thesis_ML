@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from typing import Any, Literal
 
 import numpy as np
-from sklearn.metrics import accuracy_score, balanced_accuracy_score, f1_score, make_scorer
+from sklearn.metrics import accuracy_score, f1_score, make_scorer, recall_score
 
 MetricName = Literal["balanced_accuracy", "macro_f1", "accuracy"]
 SUPPORTED_CLASSIFICATION_METRICS = frozenset({"balanced_accuracy", "macro_f1", "accuracy"})
@@ -27,8 +27,18 @@ def _macro_f1(
     return float(f1_score(y_true, y_pred, average="macro", zero_division=0))
 
 
+def _balanced_accuracy(
+    y_true: list[str] | np.ndarray,
+    y_pred: list[str] | np.ndarray,
+) -> float:
+    # Equivalent to sklearn's balanced_accuracy_score while avoiding warning noise
+    # when a fold's y_true does not contain all classes predicted by the model.
+    labels = np.unique(np.asarray(y_true)).tolist()
+    return float(recall_score(y_true, y_pred, labels=labels, average="macro", zero_division=0))
+
+
 _METRIC_FNS: dict[str, Callable[[list[str] | np.ndarray, list[str] | np.ndarray], float]] = {
-    "balanced_accuracy": lambda y_true, y_pred: float(balanced_accuracy_score(y_true, y_pred)),
+    "balanced_accuracy": _balanced_accuracy,
     "macro_f1": _macro_f1,
     "accuracy": lambda y_true, y_pred: float(accuracy_score(y_true, y_pred)),
 }

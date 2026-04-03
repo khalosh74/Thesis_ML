@@ -26,8 +26,8 @@ def test_template_constants_e09_wording_is_advisory_supporting() -> None:
         e09["Decision_Supported"]
         == "Advisory/supporting ROI feature-space sensitivity check"
     )
-    assert "simpler atlas-based ROI" in str(e09["Exact_Question"])
-    assert "theory-justified ROIs" not in str(e09["Exact_Question"])
+    assert "atlas-based sensory ROI masked-voxel representation" in str(e09["Exact_Question"])
+    assert "common valid sample support" in str(e09["Exact_Question"])
 
     # Ensure nearby unrelated experiment metadata remains stable.
     assert by_id["E10"]["Decision_Supported"] == "Feature reduction policy"
@@ -63,8 +63,9 @@ def test_governance_thesis_map_e09_is_marked_as_advisory() -> None:
     fill_thesis_map_sheet(ws)
 
     e09_row = _find_row(ws, "E09")
-    assert ws.cell(e09_row, 4).value == "Whole-brain vs simpler atlas-based ROI comparison"
+    assert ws.cell(e09_row, 4).value == "Whole-brain vs atlas-derived sensory ROI voxel comparison"
     scope = str(ws.cell(e09_row, 7).value or "").lower()
     assert "advisory" in scope
+    assert "common valid sample support" in scope
     assert "not a lock dependency" in scope
 

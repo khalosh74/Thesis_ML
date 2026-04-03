@@ -529,7 +529,7 @@ class AnomalyEngine:
 
         feature_space = _normalized_text(metadata.get("feature_space"))
         roi_spec_path = _normalized_text(metadata.get("roi_spec_path"))
-        if feature_space == "roi_mean_predefined":
+        if feature_space in {"roi_mean_predefined", "roi_masked_predefined"}:
             missing_or_proxy = False
             proxy_reason = None
             if roi_spec_path is None:

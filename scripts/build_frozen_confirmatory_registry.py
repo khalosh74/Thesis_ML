@@ -69,6 +69,7 @@ def _resolve_scope_payload(scope_payload: dict[str, Any]) -> dict[str, Any]:
         "main_tasks",
         "main_modality",
         "main_target",
+        "feature_space",
         "within_subjects",
         "transfer_pairs",
     )
@@ -102,12 +103,16 @@ def _resolve_scope_payload(scope_payload: dict[str, Any]) -> dict[str, Any]:
         raise FrozenConfirmatoryBuildError("Confirmatory scope within_subjects must be non-empty.")
     if not transfer_pairs:
         raise FrozenConfirmatoryBuildError("Confirmatory scope transfer_pairs must be non-empty.")
+    feature_space = _safe_text(scope_payload.get("feature_space"))
+    if not feature_space:
+        raise FrozenConfirmatoryBuildError("Confirmatory scope feature_space must be non-empty.")
 
     return {
         "scope_id": _safe_text(scope_payload.get("scope_id")),
         "main_tasks": main_tasks,
         "main_modality": _safe_text(scope_payload.get("main_modality")),
         "main_target": _safe_text(scope_payload.get("main_target")),
+        "feature_space": feature_space,
         "within_subjects": within_subjects,
         "transfer_pairs": transfer_pairs,
         "notes": dict(scope_payload.get("notes", {}))
@@ -128,7 +133,6 @@ def _required_selected(bundle_payload: dict[str, Any]) -> dict[str, Any]:
         "model",
         "class_weight_policy",
         "methodology_policy_name",
-        "feature_space",
         "dimensionality_strategy",
         "preprocessing_strategy",
     )
@@ -535,6 +539,13 @@ def main(argv: list[str] | None = None) -> int:
     selected = _required_selected(bundle_payload)
     advisory_payload = bundle_payload.get("advisory")
     advisory = dict(advisory_payload) if isinstance(advisory_payload, dict) else {}
+    scope_feature_space = str(scope["feature_space"])
+    selected_feature_space = _safe_text(selected.get("feature_space"))
+    if selected_feature_space and selected_feature_space != scope_feature_space:
+        raise FrozenConfirmatoryBuildError(
+            "Selection bundle feature_space does not match canonical confirmatory scope feature_space."
+        )
+    selected["feature_space"] = scope_feature_space
 
     if str(selected.get("target")) != str(scope["main_target"]):
         raise FrozenConfirmatoryBuildError(
@@ -577,7 +588,7 @@ def main(argv: list[str] | None = None) -> int:
         "target": str(scope["main_target"]),
         "model": selected_model,
         "filter_modality": str(scope["main_modality"]),
-        "feature_space": str(selected["feature_space"]),
+        "feature_space": str(scope_feature_space),
         "dimensionality_strategy": str(selected["dimensionality_strategy"]),
         "preprocessing_strategy": str(selected["preprocessing_strategy"]),
         "methodology_policy_name": selected_methodology,

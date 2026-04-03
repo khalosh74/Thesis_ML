@@ -2172,7 +2172,7 @@
       "executable_now": true,
       "execution_status": "unknown",
       "blocked_reasons": [],
-      "notes": "Atlas-mask ROI component repaired with Julich v3.0.3-derived bilateral V1 and primary auditory masks. This remains a partial atlas-only ROI path: the 29 spherical ROI coordinate provenance is unresolved and intentionally not fabricated. Treat E09 as advisory/supporting feature-space sensitivity evidence, not a fully frozen D06 lock dependency.",
+      "notes": "Atlas-derived sensory ROI voxel comparison between whole_brain_masked and roi_masked_predefined. ROI masked extraction is restricted to atlas ROI union intersected with common valid sample support. The unresolved 29 spherical ROI component remains intentionally excluded. E09 remains advisory/supporting only and is not a frozen lock dependency.",
       "section_plan": [
         "dataset_selection",
         "feature_cache_build",
@@ -2183,164 +2183,6 @@
         "interpretability"
       ],
       "variant_templates": [
-        {
-          "experiment_id": "E09",
-          "template_id": "e09_emo_sub001_whole_brain",
-          "supported": true,
-          "unsupported_reason": null,
-          "params": {
-            "target": "coarse_affect",
-            "cv": "within_subject_loso_session",
-            "model": "ridge",
-            "subject": "sub-001",
-            "filter_task": "emo",
-            "filter_modality": "audiovisual",
-            "feature_space": "whole_brain_masked"
-          },
-          "expand": {},
-          "sections": [
-            "dataset_selection",
-            "feature_cache_build",
-            "feature_matrix_load",
-            "spatial_validation",
-            "model_fit",
-            "interpretability",
-            "evaluation"
-          ],
-          "artifacts": [],
-          "start_section": "dataset_selection",
-          "end_section": "evaluation",
-          "base_artifact_id": null,
-          "reuse_policy": "require_explicit_base",
-          "search_space_id": null,
-          "study_id": null,
-          "trial_id": null,
-          "cell_id": null,
-          "repeat_id": null,
-          "seed": null,
-          "factor_settings": {},
-          "fixed_controls": {},
-          "design_metadata": {}
-        },
-        {
-          "experiment_id": "E09",
-          "template_id": "e09_emo_sub001_roi",
-          "supported": true,
-          "unsupported_reason": null,
-          "params": {
-            "target": "coarse_affect",
-            "cv": "within_subject_loso_session",
-            "model": "ridge",
-            "subject": "sub-001",
-            "filter_task": "emo",
-            "filter_modality": "audiovisual",
-            "feature_space": "roi_mean_predefined",
-            "roi_spec_path": "configs/feature_spaces/julich_hybrid_affect_v2_real_atlas.json"
-          },
-          "expand": {},
-          "sections": [
-            "dataset_selection",
-            "feature_cache_build",
-            "feature_matrix_load",
-            "spatial_validation",
-            "model_fit",
-            "interpretability",
-            "evaluation"
-          ],
-          "artifacts": [],
-          "start_section": "dataset_selection",
-          "end_section": "evaluation",
-          "base_artifact_id": null,
-          "reuse_policy": "require_explicit_base",
-          "search_space_id": null,
-          "study_id": null,
-          "trial_id": null,
-          "cell_id": null,
-          "repeat_id": null,
-          "seed": null,
-          "factor_settings": {},
-          "fixed_controls": {},
-          "design_metadata": {}
-        },
-        {
-          "experiment_id": "E09",
-          "template_id": "e09_emo_sub002_whole_brain",
-          "supported": true,
-          "unsupported_reason": null,
-          "params": {
-            "target": "coarse_affect",
-            "cv": "within_subject_loso_session",
-            "model": "ridge",
-            "subject": "sub-002",
-            "filter_task": "emo",
-            "filter_modality": "audiovisual",
-            "feature_space": "whole_brain_masked"
-          },
-          "expand": {},
-          "sections": [
-            "dataset_selection",
-            "feature_cache_build",
-            "feature_matrix_load",
-            "spatial_validation",
-            "model_fit",
-            "interpretability",
-            "evaluation"
-          ],
-          "artifacts": [],
-          "start_section": "dataset_selection",
-          "end_section": "evaluation",
-          "base_artifact_id": null,
-          "reuse_policy": "require_explicit_base",
-          "search_space_id": null,
-          "study_id": null,
-          "trial_id": null,
-          "cell_id": null,
-          "repeat_id": null,
-          "seed": null,
-          "factor_settings": {},
-          "fixed_controls": {},
-          "design_metadata": {}
-        },
-        {
-          "experiment_id": "E09",
-          "template_id": "e09_emo_sub002_roi",
-          "supported": true,
-          "unsupported_reason": null,
-          "params": {
-            "target": "coarse_affect",
-            "cv": "within_subject_loso_session",
-            "model": "ridge",
-            "subject": "sub-002",
-            "filter_task": "emo",
-            "filter_modality": "audiovisual",
-            "feature_space": "roi_mean_predefined",
-            "roi_spec_path": "configs/feature_spaces/julich_hybrid_affect_v2_real_atlas.json"
-          },
-          "expand": {},
-          "sections": [
-            "dataset_selection",
-            "feature_cache_build",
-            "feature_matrix_load",
-            "spatial_validation",
-            "model_fit",
-            "interpretability",
-            "evaluation"
-          ],
-          "artifacts": [],
-          "start_section": "dataset_selection",
-          "end_section": "evaluation",
-          "base_artifact_id": null,
-          "reuse_policy": "require_explicit_base",
-          "search_space_id": null,
-          "study_id": null,
-          "trial_id": null,
-          "cell_id": null,
-          "repeat_id": null,
-          "seed": null,
-          "factor_settings": {},
-          "fixed_controls": {},
-          "design_metadata": {}
-        },
         {
           "experiment_id": "E09",
           "template_id": "e09_recog_sub001_whole_brain",
@@ -2382,7 +2224,7 @@
         },
         {
           "experiment_id": "E09",
-          "template_id": "e09_recog_sub001_roi",
+          "template_id": "e09_recog_sub001_roi_masked",
           "supported": true,
           "unsupported_reason": null,
           "params": {
@@ -2392,8 +2234,8 @@
             "subject": "sub-001",
             "filter_task": "recog",
             "filter_modality": "audiovisual",
-            "feature_space": "roi_mean_predefined",
-            "roi_spec_path": "configs/feature_spaces/julich_hybrid_affect_v2_real_atlas.json"
+            "feature_space": "roi_masked_predefined",
+            "roi_spec_path": "configs/feature_spaces/julich_sensory_union_voxels_v1.json"
           },
           "expand": {},
           "sections": [
@@ -2461,7 +2303,7 @@
         },
         {
           "experiment_id": "E09",
-          "template_id": "e09_recog_sub002_roi",
+          "template_id": "e09_recog_sub002_roi_masked",
           "supported": true,
           "unsupported_reason": null,
           "params": {
@@ -2471,8 +2313,8 @@
             "subject": "sub-002",
             "filter_task": "recog",
             "filter_modality": "audiovisual",
-            "feature_space": "roi_mean_predefined",
-            "roi_spec_path": "configs/feature_spaces/julich_hybrid_affect_v2_real_atlas.json"
+            "feature_space": "roi_masked_predefined",
+            "roi_spec_path": "configs/feature_spaces/julich_sensory_union_voxels_v1.json"
           },
           "expand": {},
           "sections": [

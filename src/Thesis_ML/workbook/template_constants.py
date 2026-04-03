@@ -828,7 +828,7 @@ def build_experiments() -> list[dict[str, str]]:
             "Evidential_Role": "Secondary decision-support",
             "Stage": "Stage 4 - Feature/preprocessing lock",
             "Decision_Supported": "Advisory/supporting ROI feature-space sensitivity check",
-            "Exact_Question": "Does a simpler atlas-based ROI representation provide supporting sensitivity evidence relative to the primary whole-brain masked representation?",
+            "Exact_Question": "Does an atlas-based sensory ROI masked-voxel representation, restricted to common valid sample support, provide supporting sensitivity evidence relative to the primary whole-brain masked representation?",
             "Manipulated_Factor": "Feature space",
         },
         {

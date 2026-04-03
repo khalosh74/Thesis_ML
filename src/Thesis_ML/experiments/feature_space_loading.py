@@ -11,9 +11,11 @@ from Thesis_ML.features.roi_features import load_roi_feature_matrix
 
 FEATURE_SPACE_WHOLE_BRAIN_MASKED = "whole_brain_masked"
 FEATURE_SPACE_ROI_MEAN_PREDEFINED = "roi_mean_predefined"
+FEATURE_SPACE_ROI_MASKED_PREDEFINED = "roi_masked_predefined"
 SUPPORTED_FEATURE_SPACES = (
     FEATURE_SPACE_WHOLE_BRAIN_MASKED,
     FEATURE_SPACE_ROI_MEAN_PREDEFINED,
+    FEATURE_SPACE_ROI_MASKED_PREDEFINED,
 )
 
 
@@ -48,17 +50,19 @@ def load_feature_matrix(
 
     if roi_spec_path is None or not str(roi_spec_path).strip():
         raise ValueError(
-            "feature_space='roi_mean_predefined' requires a non-empty roi_spec_path."
+            f"feature_space='{resolved_feature_space}' requires a non-empty roi_spec_path."
         )
     return load_roi_feature_matrix(
         selected_index_df=selected_index_df,
         data_root=Path(data_root),
         roi_spec_path=Path(roi_spec_path),
+        feature_space=resolved_feature_space,
         spatial_report_path=spatial_report_path,
     )
 
 
 __all__ = [
+    "FEATURE_SPACE_ROI_MASKED_PREDEFINED",
     "FEATURE_SPACE_ROI_MEAN_PREDEFINED",
     "FEATURE_SPACE_WHOLE_BRAIN_MASKED",
     "SUPPORTED_FEATURE_SPACES",

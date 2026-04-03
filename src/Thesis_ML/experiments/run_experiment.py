@@ -54,6 +54,7 @@ from Thesis_ML.experiments.execution_policy import (
     write_run_status,
 )
 from Thesis_ML.experiments.feature_space_loading import (
+    FEATURE_SPACE_ROI_MASKED_PREDEFINED,
     FEATURE_SPACE_ROI_MEAN_PREDEFINED,
     FEATURE_SPACE_WHOLE_BRAIN_MASKED,
     SUPPORTED_FEATURE_SPACES,
@@ -692,10 +693,13 @@ def run_experiment(
         else None
     )
     if (
-        resolved_feature_space == FEATURE_SPACE_ROI_MEAN_PREDEFINED
+        resolved_feature_space
+        in {FEATURE_SPACE_ROI_MEAN_PREDEFINED, FEATURE_SPACE_ROI_MASKED_PREDEFINED}
         and resolved_roi_spec_path is None
     ):
-        raise ValueError("feature_space='roi_mean_predefined' requires a non-empty roi_spec_path.")
+        raise ValueError(
+            f"feature_space='{resolved_feature_space}' requires a non-empty roi_spec_path."
+        )
     resolved_dimensionality_config = resolve_dimensionality_config(
         dimensionality_strategy=dimensionality_strategy,
         pca_n_components=pca_n_components,
@@ -2308,14 +2312,17 @@ def _build_parser() -> argparse.ArgumentParser:
         "--feature-space",
         default=FEATURE_SPACE_WHOLE_BRAIN_MASKED,
         choices=list(SUPPORTED_FEATURE_SPACES),
-        help="Feature representation path: whole-brain masked voxels or predefined ROI means.",
+        help=(
+            "Feature representation path: whole-brain masked voxels, predefined ROI means, "
+            "or predefined ROI masked voxels."
+        ),
     )
     parser.add_argument(
         "--roi-spec-path",
         default=None,
         help=(
             "Path to ROI feature-space spec JSON. Required when --feature-space "
-            "roi_mean_predefined."
+            "roi_mean_predefined or roi_masked_predefined."
         ),
     )
     parser.add_argument(

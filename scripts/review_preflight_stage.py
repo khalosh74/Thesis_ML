@@ -30,7 +30,6 @@ _REQUIRED_HARD_LOCK_STAGES: tuple[str, ...] = (
     "E06",
     "E07",
     "E08",
-    "E09",
     "E10",
     "E11",
 )
@@ -1151,11 +1150,17 @@ def emit_confirmatory_selection_bundle(
         raise PreflightReviewError(
             f"Invalid confirmatory scope_id in scope config: {resolved_scope_path}"
         )
+    scope_feature_space = str(scope_payload.get("feature_space") or "").strip()
+    if not scope_feature_space:
+        raise PreflightReviewError(
+            f"Invalid confirmatory feature_space in scope config: {resolved_scope_path}"
+        )
 
     review_sources: dict[str, str] = {}
     notes: list[str] = []
     selected: dict[str, Any] = {
         "cv_transfer": "frozen_cross_person_transfer",
+        "feature_space": scope_feature_space,
     }
     advisory: dict[str, Any] = {
         "task_pooling": None,
@@ -1168,7 +1173,6 @@ def emit_confirmatory_selection_bundle(
         "E06": ("model", "model"),
         "E07": ("class_weight_policy", "class_weight_policy"),
         "E08": ("methodology_policy_name", "methodology_policy_name"),
-        "E09": ("feature_space", "feature_space"),
         "E10": ("dimensionality_strategy", "dimensionality_strategy"),
         "E11": ("preprocessing_strategy", "preprocessing_strategy"),
     }

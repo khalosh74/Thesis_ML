@@ -92,6 +92,12 @@ def _feature_set_label(params: dict[str, Any]) -> str:
             base_label = f"predefined ROI means ({Path(roi_spec_path).name}){pca_suffix}"
         else:
             base_label = f"predefined ROI means{pca_suffix}"
+    elif feature_space == "roi_masked_predefined":
+        roi_spec_path = str(params.get("roi_spec_path") or "").strip()
+        if roi_spec_path:
+            base_label = f"predefined ROI masked voxels ({Path(roi_spec_path).name}){pca_suffix}"
+        else:
+            base_label = f"predefined ROI masked voxels{pca_suffix}"
     else:
         base_label = f"masked whole-brain voxel cache (current pipeline){pca_suffix}"
     if preprocessing_strategy:

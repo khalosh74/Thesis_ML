@@ -20,6 +20,7 @@ def _write_scope(path: Path) -> None:
         "main_tasks": ["emo", "recog"],
         "main_modality": "audiovisual",
         "main_target": "coarse_affect",
+        "feature_space": "whole_brain_masked",
         "within_subjects": ["sub-001", "sub-002"],
         "transfer_pairs": [
             {"train_subject": "sub-001", "test_subject": "sub-002"},
@@ -67,10 +68,6 @@ def test_confirmatory_selection_bundle_resolved_required_stages_freeze_ready(
         candidate_winner={"methodology_policy_name": "fixed_baselines_only"},
     )
     _write_review(
-        reviews_dir / "E09_review.json",
-        candidate_winner={"feature_space": "whole_brain_masked"},
-    )
-    _write_review(
         reviews_dir / "E10_review.json",
         candidate_winner={"dimensionality_strategy": "none"},
     )
@@ -113,6 +110,8 @@ def test_confirmatory_selection_bundle_resolved_required_stages_freeze_ready(
     assert "modality_pooling" in payload["advisory"]
     assert "task_pooling" not in payload["selected"]
     assert "modality_pooling" not in payload["selected"]
+    assert "E09" not in payload["review_sources"]
+    assert not any("E09:missing_review" in str(note) for note in payload["notes"])
     notes = payload["selection_reporting_notes"]
     assert notes["selection_source"] == "reviewed_preflight_stage_outputs"
     assert notes["reporting_mode"] == "locked_confirmatory"
@@ -144,10 +143,6 @@ def test_confirmatory_selection_bundle_missing_required_stage_sets_freeze_false(
     _write_review(
         reviews_dir / "E08_review.json",
         candidate_winner={"methodology_policy_name": "fixed_baselines_only"},
-    )
-    _write_review(
-        reviews_dir / "E09_review.json",
-        candidate_winner={"feature_space": "whole_brain_masked"},
     )
     _write_review(
         reviews_dir / "E11_review.json",

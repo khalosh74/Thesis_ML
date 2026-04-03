@@ -440,13 +440,70 @@
         "accuracy"
       ],
       "output_dir": "outputs/artifacts/decision_support/E09",
-      "notes": "Blocked until ROI feature-space switch is available in cache/runner.",
-      "executable_now": false,
-      "execution_status": "blocked",
-      "blocked_reasons": [
-        "Feature-space selection (whole-brain vs ROI) is not parameterized in current experiment path."
-      ],
-      "variant_templates": []
+      "notes": "Atlas-derived sensory ROI voxel comparison between whole_brain_masked and roi_masked_predefined. ROI masked extraction is restricted to atlas ROI union intersected with common valid sample support. The unresolved 29 spherical ROI component remains intentionally excluded. E09 remains advisory/supporting only and is not a frozen lock dependency.",
+      "executable_now": true,
+      "execution_status": "executable",
+      "blocked_reasons": [],
+      "variant_templates": [
+        {
+          "template_id": "e09_recog_sub001_whole_brain",
+          "supported": true,
+          "params": {
+            "target": "coarse_affect",
+            "model": "ridge",
+            "cv": "within_subject_loso_session",
+            "subject": "sub-001",
+            "filter_task": "recog",
+            "filter_modality": "audiovisual",
+            "feature_space": "whole_brain_masked"
+          },
+          "expand": {}
+        },
+        {
+          "template_id": "e09_recog_sub001_roi_masked",
+          "supported": true,
+          "params": {
+            "target": "coarse_affect",
+            "model": "ridge",
+            "cv": "within_subject_loso_session",
+            "subject": "sub-001",
+            "filter_task": "recog",
+            "filter_modality": "audiovisual",
+            "feature_space": "roi_masked_predefined",
+            "roi_spec_path": "configs/feature_spaces/julich_sensory_union_voxels_v1.json"
+          },
+          "expand": {}
+        },
+        {
+          "template_id": "e09_recog_sub002_whole_brain",
+          "supported": true,
+          "params": {
+            "target": "coarse_affect",
+            "model": "ridge",
+            "cv": "within_subject_loso_session",
+            "subject": "sub-002",
+            "filter_task": "recog",
+            "filter_modality": "audiovisual",
+            "feature_space": "whole_brain_masked"
+          },
+          "expand": {}
+        },
+        {
+          "template_id": "e09_recog_sub002_roi_masked",
+          "supported": true,
+          "params": {
+            "target": "coarse_affect",
+            "model": "ridge",
+            "cv": "within_subject_loso_session",
+            "subject": "sub-002",
+            "filter_task": "recog",
+            "filter_modality": "audiovisual",
+            "feature_space": "roi_masked_predefined",
+            "roi_spec_path": "configs/feature_spaces/julich_sensory_union_voxels_v1.json"
+          },
+          "expand": {}
+        }
+      ]
     },
     {
       "experiment_id": "E10",

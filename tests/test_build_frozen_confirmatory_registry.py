@@ -23,6 +23,7 @@ def _write_scope(path: Path) -> None:
         "main_tasks": ["emo", "recog"],
         "main_modality": "audiovisual",
         "main_target": "coarse_affect",
+        "feature_space": "whole_brain_masked",
         "within_subjects": ["sub-001", "sub-002"],
         "transfer_pairs": [
             {"train_subject": "sub-001", "test_subject": "sub-002"},
@@ -36,7 +37,7 @@ def _write_scope(path: Path) -> None:
     path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
 
-def _write_bundle(path: Path) -> None:
+def _write_bundle(path: Path, *, include_feature_space: bool = True) -> None:
     payload = {
         "bundle_id": "confirmatory_selection_bundle_campaign_a",
         "campaign_id": "campaign_a",
@@ -47,7 +48,6 @@ def _write_bundle(path: Path) -> None:
             "E06": "preflight_reviews/E06_review.json",
             "E07": "preflight_reviews/E07_review.json",
             "E08": "preflight_reviews/E08_review.json",
-            "E09": "preflight_reviews/E09_review.json",
             "E10": "preflight_reviews/E10_review.json",
             "E11": "preflight_reviews/E11_review.json",
         },
@@ -58,7 +58,6 @@ def _write_bundle(path: Path) -> None:
             "model": "ridge",
             "class_weight_policy": "none",
             "methodology_policy_name": "fixed_baselines_only",
-            "feature_space": "whole_brain_masked",
             "dimensionality_strategy": "none",
             "preprocessing_strategy": "standardize_zscore",
         },
@@ -70,6 +69,8 @@ def _write_bundle(path: Path) -> None:
         "manual_review_required": False,
         "notes": [],
     }
+    if include_feature_space:
+        payload["selected"]["feature_space"] = "whole_brain_masked"
     path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
 
@@ -271,6 +272,87 @@ def test_build_frozen_confirmatory_registry_generates_expected_cells(tmp_path: P
     assert "registry" in outputs_payload
     assert "manifest" in outputs_payload
     assert "report" in outputs_payload
+
+
+def test_build_frozen_confirmatory_registry_uses_scope_feature_space_when_bundle_missing(
+    tmp_path: Path,
+) -> None:
+    campaign_root = tmp_path / "campaigns" / "campaign_a"
+    campaign_root.mkdir(parents=True, exist_ok=True)
+    (campaign_root / "preflight_reviews").mkdir(parents=True, exist_ok=True)
+
+    bundle_path = tmp_path / "bundle.json"
+    scope_path = tmp_path / "scope.json"
+    index_path = tmp_path / "index.csv"
+    output_registry = (
+        tmp_path / "configs" / "generated" / "frozen_confirmatory_registry_campaign_a.json"
+    )
+
+    _write_bundle(bundle_path, include_feature_space=False)
+    _write_scope(scope_path)
+    _write_index(index_path)
+
+    script = _load_script_module(Path("scripts") / "build_frozen_confirmatory_registry.py")
+    exit_code = script.main(
+        [
+            "--campaign-root",
+            str(campaign_root),
+            "--selection-bundle",
+            str(bundle_path),
+            "--scope-config",
+            str(scope_path),
+            "--output-registry",
+            str(output_registry),
+            "--index-csv",
+            str(index_path),
+        ]
+    )
+    assert exit_code == 0
+
+    registry_payload = json.loads(output_registry.read_text(encoding="utf-8"))
+    templates = registry_payload["experiments"][0]["variant_templates"]
+    assert templates
+    for row in templates:
+        assert row["params"]["feature_space"] == "whole_brain_masked"
+
+
+def test_build_frozen_confirmatory_registry_rejects_feature_space_mismatch(
+    tmp_path: Path,
+) -> None:
+    campaign_root = tmp_path / "campaigns" / "campaign_a"
+    campaign_root.mkdir(parents=True, exist_ok=True)
+
+    bundle_path = tmp_path / "bundle.json"
+    scope_path = tmp_path / "scope.json"
+    index_path = tmp_path / "index.csv"
+    output_registry = (
+        tmp_path / "configs" / "generated" / "frozen_confirmatory_registry_campaign_a.json"
+    )
+
+    _write_bundle(bundle_path)
+    payload = json.loads(bundle_path.read_text(encoding="utf-8"))
+    payload["selected"]["feature_space"] = "roi_masked_predefined"
+    bundle_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+
+    _write_scope(scope_path)
+    _write_index(index_path)
+
+    script = _load_script_module(Path("scripts") / "build_frozen_confirmatory_registry.py")
+    with pytest.raises(Exception, match="feature_space does not match canonical confirmatory scope"):
+        script.main(
+            [
+                "--campaign-root",
+                str(campaign_root),
+                "--selection-bundle",
+                str(bundle_path),
+                "--scope-config",
+                str(scope_path),
+                "--output-registry",
+                str(output_registry),
+                "--index-csv",
+                str(index_path),
+            ]
+        )
 
 
 @pytest.mark.parametrize(

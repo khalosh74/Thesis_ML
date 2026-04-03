@@ -2,14 +2,23 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import nibabel as nib
 import numpy as np
 import pandas as pd
+from nibabel.spatialimages import SpatialImage
+
+from Thesis_ML.features.nifti_features import (
+    _build_spatial_signature,
+    _load_mask_and_signature,
+    extract_masked_vector,
+)
 
 _AFFINE_ATOL = 1e-5
 _ALLOWED_ROI_TYPES = {"mask", "sphere_mni"}
+_FEATURE_SPACE_ROI_MEAN_PREDEFINED = "roi_mean_predefined"
+_FEATURE_SPACE_ROI_MASKED_PREDEFINED = "roi_masked_predefined"
 
 
 def _as_float_triplet(value: Any, *, field_name: str) -> tuple[float, float, float]:
@@ -60,6 +69,24 @@ def _resolve_beta_path(row: pd.Series, *, data_root: Path) -> Path:
     if beta_candidate.is_absolute():
         return beta_candidate.resolve()
     return (data_root / beta_candidate).resolve()
+
+
+def _resolve_mask_path(row: pd.Series, *, data_root: Path) -> Path:
+    canonical = row.get("mask_path_canonical")
+    if canonical is not None:
+        text = str(canonical).strip()
+        if text:
+            return Path(text).resolve()
+
+    mask_path = row.get("mask_path")
+    if mask_path is None or not str(mask_path).strip():
+        sample_id = str(row.get("sample_id", "unknown_sample"))
+        raise ValueError(f"Selected row '{sample_id}' is missing mask path metadata.")
+
+    mask_candidate = Path(str(mask_path).strip())
+    if mask_candidate.is_absolute():
+        return mask_candidate.resolve()
+    return (data_root / mask_candidate).resolve()
 
 
 def _validate_roi_spec(roi_spec: dict[str, Any], *, roi_spec_path: Path) -> dict[str, Any]:
@@ -124,7 +151,7 @@ def _validate_roi_spec(roi_spec: dict[str, Any], *, roi_spec_path: Path) -> dict
 
     normalized: dict[str, Any] = {
         "feature_space_id": str(roi_spec["feature_space_id"]),
-        "representation": str(roi_spec["representation"]),
+        "representation": str(roi_spec["representation"]).strip().lower(),
         "description": str(roi_spec["description"]),
         "reference_space": str(roi_spec["reference_space"]),
         "rois": normalized_rois,
@@ -186,7 +213,7 @@ def _build_roi_masks(
             )
             if not mask_path.exists():
                 raise FileNotFoundError(f"ROI mask file does not exist for '{roi_id}': {mask_path}")
-            mask_img = nib.load(str(mask_path))
+            mask_img = cast(SpatialImage, nib.load(str(mask_path)))
             mask_data = np.asarray(mask_img.get_fdata(dtype=np.float32))
             mask_affine = np.asarray(mask_img.affine, dtype=np.float64)
             if tuple(mask_data.shape) != reference_shape:
@@ -216,46 +243,104 @@ def _build_roi_masks(
     return roi_ids, roi_masks
 
 
-def load_roi_feature_matrix(
+def _canonical_signature_key(signature: dict[str, Any]) -> str:
+    return json.dumps(signature, sort_keys=True, separators=(",", ":"), allow_nan=False)
+
+
+def _resolve_selected_sample_mask_signatures(
     *,
     selected_index_df: pd.DataFrame,
     data_root: Path,
-    roi_spec_path: Path,
-    spatial_report_path: Path | None = None,
-) -> tuple[np.ndarray, pd.DataFrame, dict[str, Any]]:
+) -> tuple[np.ndarray, dict[str, Any]]:
     if selected_index_df.empty:
         raise ValueError("ROI feature loading received an empty selected index dataframe.")
 
-    resolved_spec_path = Path(roi_spec_path).resolve()
-    roi_spec = _load_roi_spec(resolved_spec_path)
-
-    first_row = selected_index_df.iloc[0]
-    reference_beta_path = _resolve_beta_path(first_row, data_root=Path(data_root))
-    if not reference_beta_path.exists():
-        raise FileNotFoundError(f"Reference beta file does not exist: {reference_beta_path}")
-    reference_beta_img = nib.load(str(reference_beta_path))
-    reference_shape = tuple(int(value) for value in reference_beta_img.shape)
-    if len(reference_shape) != 3:
-        raise ValueError(
-            f"ROI feature loading expects 3D beta maps. Got shape {reference_shape} for "
-            f"'{reference_beta_path}'."
+    signature_groups: dict[str, dict[str, Any]] = {}
+    for row_index, (_, row) in enumerate(selected_index_df.iterrows(), start=1):
+        sample_id = str(row.get("sample_id", f"row_{row_index}"))
+        mask_path = _resolve_mask_path(row, data_root=data_root)
+        mask_bool, signature = _load_mask_and_signature(mask_path)
+        signature_key = _canonical_signature_key(signature)
+        group_entry = signature_groups.setdefault(
+            signature_key,
+            {
+                "sample_ids": [],
+                "mask_path": str(mask_path),
+                "mask_bool": np.asarray(mask_bool, dtype=bool),
+                "signature": dict(signature),
+            },
         )
-    reference_affine = np.asarray(reference_beta_img.affine, dtype=np.float64)
+        group_entry["sample_ids"].append(sample_id)
 
-    roi_ids, roi_masks = _build_roi_masks(
-        roi_spec=roi_spec,
-        roi_spec_path=resolved_spec_path,
-        data_root=Path(data_root),
-        reference_shape=reference_shape,
-        reference_affine=reference_affine,
-    )
+    if len(signature_groups) != 1:
+        summary = []
+        for entry in signature_groups.values():
+            sample_ids = list(entry["sample_ids"])
+            preview = ", ".join(sample_ids[:3])
+            if len(sample_ids) > 3:
+                preview = f"{preview}, ..."
+            summary.append(f"n={len(sample_ids)} samples [{preview}]")
+        raise ValueError(
+            "Selected samples do not share a single common valid mask signature. "
+            f"Found {len(signature_groups)} distinct signatures ({'; '.join(summary)})."
+        )
 
+    only_entry = next(iter(signature_groups.values()))
+    common_valid_mask = np.asarray(only_entry["mask_bool"], dtype=bool)
+    common_signature = dict(only_entry["signature"])
+    return common_valid_mask, common_signature
+
+
+def _build_effective_roi_union_mask(
+    *,
+    roi_masks: list[np.ndarray],
+    common_valid_mask: np.ndarray,
+) -> tuple[np.ndarray, dict[str, int]]:
+    if not roi_masks:
+        raise ValueError("ROI mask construction produced no ROI masks.")
+
+    reference_shape = tuple(int(value) for value in common_valid_mask.shape)
+    atlas_union_mask = np.zeros(reference_shape, dtype=bool)
+    for roi_mask in roi_masks:
+        roi_mask_bool = np.asarray(roi_mask, dtype=bool)
+        if tuple(int(value) for value in roi_mask_bool.shape) != reference_shape:
+            raise ValueError(
+                "ROI mask geometry does not match the common valid sample mask geometry."
+            )
+        atlas_union_mask |= roi_mask_bool
+
+    atlas_union_voxel_count = int(atlas_union_mask.sum())
+    common_valid_mask_voxel_count = int(np.asarray(common_valid_mask, dtype=bool).sum())
+    effective_union_mask = atlas_union_mask & np.asarray(common_valid_mask, dtype=bool)
+    effective_union_voxel_count = int(effective_union_mask.sum())
+    if effective_union_voxel_count <= 0:
+        raise ValueError(
+            "Effective ROI union mask has zero voxels after intersecting atlas ROI union with "
+            "common valid sample mask."
+        )
+
+    return effective_union_mask, {
+        "atlas_union_voxel_count": atlas_union_voxel_count,
+        "common_valid_mask_voxel_count": common_valid_mask_voxel_count,
+        "effective_union_voxel_count": effective_union_voxel_count,
+    }
+
+
+def _load_roi_mean_feature_matrix(
+    *,
+    selected_index_df: pd.DataFrame,
+    data_root: Path,
+    reference_shape: tuple[int, int, int],
+    reference_affine: np.ndarray,
+    roi_ids: list[str],
+    roi_masks: list[np.ndarray],
+) -> tuple[np.ndarray, pd.DataFrame]:
     feature_rows: list[list[float]] = []
     for row_index, (_, row) in enumerate(selected_index_df.iterrows(), start=1):
-        beta_path = _resolve_beta_path(row, data_root=Path(data_root))
+        beta_path = _resolve_beta_path(row, data_root=data_root)
         if not beta_path.exists():
             raise FileNotFoundError(f"Selected beta file does not exist: {beta_path}")
-        beta_img = nib.load(str(beta_path))
+        beta_img = cast(SpatialImage, nib.load(str(beta_path)))
         beta_data = np.asarray(beta_img.get_fdata(dtype=np.float32))
         beta_affine = np.asarray(beta_img.affine, dtype=np.float64)
         if tuple(beta_data.shape) != reference_shape:
@@ -270,7 +355,7 @@ def load_roi_feature_matrix(
 
         row_features: list[float] = []
         for roi_id, roi_mask in zip(roi_ids, roi_masks, strict=True):
-            roi_values = np.asarray(beta_data[roi_mask], dtype=np.float64)
+            roi_values = np.asarray(beta_data[np.asarray(roi_mask, dtype=bool)], dtype=np.float64)
             finite_values = roi_values[np.isfinite(roi_values)]
             if finite_values.size == 0:
                 raise ValueError(
@@ -282,22 +367,192 @@ def load_roi_feature_matrix(
 
     x_matrix = np.asarray(feature_rows, dtype=np.float32)
     metadata_df = selected_index_df.reset_index(drop=True).copy()
-    spatial_compatibility = {
-        "status": "passed",
-        "passed": True,
-        "n_groups_checked": 1,
-        "reference_group_id": "roi_feature_space",
-        "affine_atol": _AFFINE_ATOL,
-        "feature_space": "roi_mean_predefined",
-        "roi_spec_path": str(resolved_spec_path),
-        "feature_space_id": roi_spec["feature_space_id"],
-        "representation": roi_spec["representation"],
-        "reference_space": roi_spec["reference_space"],
-        "roi_spec_description": roi_spec["description"],
-        "roi_ids": list(roi_ids),
-        "roi_count": int(len(roi_ids)),
-        "n_features": int(x_matrix.shape[1]),
-    }
+    return x_matrix, metadata_df
+
+
+def _load_roi_masked_feature_matrix(
+    *,
+    selected_index_df: pd.DataFrame,
+    data_root: Path,
+    effective_union_mask: np.ndarray,
+    mask_affine: np.ndarray,
+    roi_spec_path: Path,
+) -> tuple[np.ndarray, pd.DataFrame]:
+    vectors: list[np.ndarray] = []
+    for _, row in selected_index_df.iterrows():
+        beta_path = _resolve_beta_path(row, data_root=data_root)
+        vector = extract_masked_vector(
+            beta_path=beta_path,
+            mask_bool=effective_union_mask,
+            mask_path=roi_spec_path,
+            mask_affine=mask_affine,
+        )
+        vectors.append(np.asarray(vector, dtype=np.float32))
+
+    if not vectors:
+        raise ValueError("ROI masked feature extraction produced no vectors.")
+    x_matrix = np.vstack(vectors).astype(np.float32, copy=False)
+    metadata_df = selected_index_df.reset_index(drop=True).copy()
+    return x_matrix, metadata_df
+
+
+def _expected_representation_for_feature_space(feature_space: str) -> str:
+    normalized = str(feature_space).strip().lower()
+    if normalized == _FEATURE_SPACE_ROI_MEAN_PREDEFINED:
+        return _FEATURE_SPACE_ROI_MEAN_PREDEFINED
+    if normalized == _FEATURE_SPACE_ROI_MASKED_PREDEFINED:
+        return _FEATURE_SPACE_ROI_MASKED_PREDEFINED
+    raise ValueError(f"Unsupported ROI feature_space '{feature_space}'.")
+
+
+def load_roi_feature_matrix(
+    *,
+    selected_index_df: pd.DataFrame,
+    data_root: Path,
+    roi_spec_path: Path,
+    feature_space: str = _FEATURE_SPACE_ROI_MEAN_PREDEFINED,
+    spatial_report_path: Path | None = None,
+) -> tuple[np.ndarray, pd.DataFrame, dict[str, Any]]:
+    if selected_index_df.empty:
+        raise ValueError("ROI feature loading received an empty selected index dataframe.")
+
+    resolved_feature_space = str(feature_space).strip().lower()
+    expected_representation = _expected_representation_for_feature_space(resolved_feature_space)
+    resolved_spec_path = Path(roi_spec_path).resolve()
+    roi_spec = _load_roi_spec(resolved_spec_path)
+
+    actual_representation = str(roi_spec["representation"]).strip().lower()
+    if actual_representation != expected_representation:
+        raise ValueError(
+            "Requested feature_space and ROI spec representation disagree. "
+            f"feature_space='{resolved_feature_space}' expects representation="
+            f"'{expected_representation}', but ROI spec '{resolved_spec_path}' declares "
+            f"'{actual_representation}'."
+        )
+
+    first_row = selected_index_df.iloc[0]
+    reference_beta_path = _resolve_beta_path(first_row, data_root=Path(data_root))
+    if not reference_beta_path.exists():
+        raise FileNotFoundError(f"Reference beta file does not exist: {reference_beta_path}")
+    reference_beta_img = cast(SpatialImage, nib.load(str(reference_beta_path)))
+    reference_shape = tuple(int(value) for value in reference_beta_img.shape)
+    if len(reference_shape) != 3:
+        raise ValueError(
+            f"ROI feature loading expects 3D beta maps. Got shape {reference_shape} for "
+            f"'{reference_beta_path}'."
+        )
+    reference_affine = np.asarray(reference_beta_img.affine, dtype=np.float64)
+
+    common_valid_mask, common_valid_signature = _resolve_selected_sample_mask_signatures(
+        selected_index_df=selected_index_df,
+        data_root=Path(data_root),
+    )
+    if tuple(int(value) for value in common_valid_mask.shape) != reference_shape:
+        raise ValueError(
+            "Selected-sample common valid mask geometry does not match beta geometry. "
+            f"mask_shape={tuple(int(value) for value in common_valid_mask.shape)}, "
+            f"beta_shape={reference_shape}."
+        )
+    common_affine = np.asarray(common_valid_signature.get("affine"), dtype=np.float64)
+    if common_affine.shape != (4, 4):
+        raise ValueError(
+            "Selected-sample common valid mask signature has invalid affine shape. "
+            f"Expected (4, 4), got {common_affine.shape}."
+        )
+    if not np.allclose(common_affine, reference_affine, rtol=0.0, atol=_AFFINE_ATOL):
+        raise ValueError(
+            "Selected-sample common valid mask affine does not match beta geometry."
+        )
+
+    roi_ids, roi_masks = _build_roi_masks(
+        roi_spec=roi_spec,
+        roi_spec_path=resolved_spec_path,
+        data_root=Path(data_root),
+        reference_shape=reference_shape,
+        reference_affine=reference_affine,
+    )
+
+    x_matrix: np.ndarray
+    metadata_df: pd.DataFrame
+    spatial_compatibility: dict[str, Any]
+
+    if resolved_feature_space == _FEATURE_SPACE_ROI_MASKED_PREDEFINED:
+        effective_union_mask, mask_counts = _build_effective_roi_union_mask(
+            roi_masks=roi_masks,
+            common_valid_mask=common_valid_mask,
+        )
+        x_matrix, metadata_df = _load_roi_masked_feature_matrix(
+            selected_index_df=selected_index_df,
+            data_root=Path(data_root),
+            effective_union_mask=effective_union_mask,
+            mask_affine=reference_affine,
+            roi_spec_path=resolved_spec_path,
+        )
+        effective_signature = _build_spatial_signature(
+            mask_img=reference_beta_img,
+            mask_bool=effective_union_mask,
+        )
+        if int(x_matrix.shape[1]) != int(mask_counts["effective_union_voxel_count"]):
+            raise ValueError(
+                "Effective ROI union voxel count does not match extracted feature count "
+                f"({mask_counts['effective_union_voxel_count']} != {x_matrix.shape[1]})."
+            )
+        if int(effective_signature["feature_count"]) != int(x_matrix.shape[1]):
+            raise ValueError(
+                "Effective ROI mask signature feature_count does not match extracted feature count "
+                f"({effective_signature['feature_count']} != {x_matrix.shape[1]})."
+            )
+        spatial_compatibility = {
+            "status": "passed",
+            "passed": True,
+            "n_groups_checked": 1,
+            "reference_group_id": "roi_feature_space",
+            "affine_atol": _AFFINE_ATOL,
+            "feature_space": _FEATURE_SPACE_ROI_MASKED_PREDEFINED,
+            "roi_spec_path": str(resolved_spec_path),
+            "feature_space_id": roi_spec["feature_space_id"],
+            "representation": roi_spec["representation"],
+            "reference_space": roi_spec["reference_space"],
+            "roi_spec_description": roi_spec["description"],
+            "roi_ids": list(roi_ids),
+            "roi_count": int(len(roi_ids)),
+            "atlas_union_voxel_count": int(mask_counts["atlas_union_voxel_count"]),
+            "common_valid_mask_voxel_count": int(mask_counts["common_valid_mask_voxel_count"]),
+            "effective_union_voxel_count": int(mask_counts["effective_union_voxel_count"]),
+            "image_shape": list(effective_signature["image_shape"]),
+            "affine": effective_signature["affine"],
+            "voxel_size": list(effective_signature.get("voxel_size", [])),
+            "mask_voxel_count": int(effective_signature["mask_voxel_count"]),
+            "feature_count": int(effective_signature["feature_count"]),
+            "mask_sha256": str(effective_signature["mask_sha256"]),
+            "n_features": int(x_matrix.shape[1]),
+        }
+    else:
+        x_matrix, metadata_df = _load_roi_mean_feature_matrix(
+            selected_index_df=selected_index_df,
+            data_root=Path(data_root),
+            reference_shape=reference_shape,
+            reference_affine=reference_affine,
+            roi_ids=roi_ids,
+            roi_masks=roi_masks,
+        )
+        spatial_compatibility = {
+            "status": "passed",
+            "passed": True,
+            "n_groups_checked": 1,
+            "reference_group_id": "roi_feature_space",
+            "affine_atol": _AFFINE_ATOL,
+            "feature_space": _FEATURE_SPACE_ROI_MEAN_PREDEFINED,
+            "roi_spec_path": str(resolved_spec_path),
+            "feature_space_id": roi_spec["feature_space_id"],
+            "representation": roi_spec["representation"],
+            "reference_space": roi_spec["reference_space"],
+            "roi_spec_description": roi_spec["description"],
+            "roi_ids": list(roi_ids),
+            "roi_count": int(len(roi_ids)),
+            "n_features": int(x_matrix.shape[1]),
+        }
+
     if "scientific_readiness" in roi_spec:
         spatial_compatibility["scientific_readiness"] = roi_spec["scientific_readiness"]
     if "pending_components" in roi_spec:
@@ -312,3 +567,6 @@ def load_roi_feature_matrix(
         )
 
     return x_matrix, metadata_df, spatial_compatibility
+
+
+__all__ = ["load_roi_feature_matrix"]

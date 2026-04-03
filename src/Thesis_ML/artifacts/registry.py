@@ -3,6 +3,8 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -129,6 +131,15 @@ def _connect(registry_path: Path) -> sqlite3.Connection:
     return connection
 
 
+@contextmanager
+def _open_registry_connection(registry_path: Path) -> Iterator[sqlite3.Connection]:
+    connection = _connect(registry_path)
+    try:
+        yield connection
+    finally:
+        connection.close()
+
+
 def _row_to_record(row: sqlite3.Row) -> ArtifactRecord:
     upstream_raw = row["upstream_artifact_ids"]
     upstream = json.loads(upstream_raw) if upstream_raw else []
@@ -184,7 +195,7 @@ def register_artifact(
         artifact_schema_version=artifact_schema_version,
     )
 
-    with _connect(Path(registry_path)) as connection:
+    with _open_registry_connection(Path(registry_path)) as connection:
         connection.execute(
             """
             INSERT OR REPLACE INTO artifacts (
@@ -218,7 +229,7 @@ def register_artifact(
 
 
 def get_artifact(*, registry_path: Path, artifact_id: str) -> ArtifactRecord | None:
-    with _connect(Path(registry_path)) as connection:
+    with _open_registry_connection(Path(registry_path)) as connection:
         row = connection.execute(
             "SELECT * FROM artifacts WHERE artifact_id = ?",
             (artifact_id,),
@@ -229,7 +240,7 @@ def get_artifact(*, registry_path: Path, artifact_id: str) -> ArtifactRecord | N
 
 
 def list_artifacts_for_run(*, registry_path: Path, run_id: str) -> list[ArtifactRecord]:
-    with _connect(Path(registry_path)) as connection:
+    with _open_registry_connection(Path(registry_path)) as connection:
         rows = connection.execute(
             "SELECT * FROM artifacts WHERE run_id = ? ORDER BY created_at DESC, artifact_id DESC",
             (run_id,),
@@ -258,7 +269,7 @@ def find_latest_compatible_artifact(
         values.append(status)
     query += " ORDER BY created_at DESC, artifact_id DESC LIMIT 1"
 
-    with _connect(Path(registry_path)) as connection:
+    with _open_registry_connection(Path(registry_path)) as connection:
         row = connection.execute(query, values).fetchone()
     if row is None:
         return None
