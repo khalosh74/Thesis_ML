@@ -11,6 +11,37 @@ _RUN_EXPERIMENT_SUPPORTED_CV_MODES: set[str] = {
     "frozen_cross_person_transfer",
     "record_random_split",
 }
+_E12_ANCHOR_PREFERRED_EXPERIMENT_IDS: tuple[str, ...] = ("E16",)
+_E12_CONFIRMATORY_CV_MODES: set[str] = {
+    "within_subject_loso_session",
+    "frozen_cross_person_transfer",
+}
+_E12_ANCHOR_PARAM_KEYS: tuple[str, ...] = (
+    "target",
+    "cv",
+    "model",
+    "subject",
+    "train_subject",
+    "test_subject",
+    "filter_task",
+    "filter_modality",
+    "feature_space",
+    "roi_spec_path",
+    "preprocessing_strategy",
+    "dimensionality_strategy",
+    "pca_n_components",
+    "pca_variance_ratio",
+    "methodology_policy_name",
+    "class_weight_policy",
+    "tuning_search_space_id",
+    "tuning_search_space_version",
+    "tuning_inner_cv_scheme",
+    "tuning_inner_group_field",
+    "framework_mode",
+    "canonical_run",
+    "protocol_context",
+    "scope_task_ids",
+)
 
 
 def _optional_int(value: Any) -> int | None:
@@ -20,6 +51,179 @@ def _optional_int(value: Any) -> int | None:
         return int(str(value))
     except Exception:
         return None
+
+
+def _safe_text(value: Any) -> str:
+    if value is None:
+        return ""
+    return str(value).strip()
+
+
+def _is_executable_experiment(row: dict[str, Any]) -> bool:
+    if bool(row.get("executable_now", True)) is False:
+        return False
+    execution_status = _safe_text(row.get("execution_status")).lower()
+    if execution_status == "blocked":
+        return False
+    return True
+
+
+def _anchor_analysis_key(anchor_params: dict[str, Any]) -> str:
+    payload = {
+        key: anchor_params.get(key)
+        for key in sorted(_E12_ANCHOR_PARAM_KEYS)
+        if anchor_params.get(key) not in (None, "")
+    }
+    return str(payload)
+
+
+def _resolve_e12_anchor_identities(
+    *,
+    experiment: dict[str, Any],
+    variants: list[dict[str, Any]],
+    registry_experiments: list[dict[str, Any]] | None,
+) -> tuple[list[dict[str, Any]], str | None]:
+    experiments = list(registry_experiments or [])
+    if not experiments:
+        return [], "E12 anchor resolution failed: registry experiments are unavailable."
+
+    hinted_anchor_ids: list[str] = []
+    for variant in variants:
+        params = variant.get("params")
+        if not isinstance(params, dict):
+            continue
+        anchor_hint = _safe_text(params.get("anchor_experiment_id"))
+        if anchor_hint and anchor_hint not in hinted_anchor_ids:
+            hinted_anchor_ids.append(anchor_hint)
+
+    experiments_by_id = {
+        _safe_text(row.get("experiment_id")): dict(row)
+        for row in experiments
+        if isinstance(row, dict) and _safe_text(row.get("experiment_id"))
+    }
+    stage5_candidates = [
+        row
+        for row in experiments_by_id.values()
+        if _safe_text(row.get("stage")) == "Stage 5 - Confirmatory analysis"
+    ]
+    fallback_candidates = [row for row in experiments_by_id.values() if row not in stage5_candidates]
+
+    ordered_experiments: list[dict[str, Any]] = []
+    seen_order_ids: set[str] = set()
+    for experiment_id in hinted_anchor_ids + list(_E12_ANCHOR_PREFERRED_EXPERIMENT_IDS):
+        experiment_key = str(experiment_id).strip()
+        candidate = experiments_by_id.get(experiment_key)
+        if candidate is None or experiment_key in seen_order_ids:
+            continue
+        ordered_experiments.append(candidate)
+        seen_order_ids.add(experiment_key)
+    for pool in (stage5_candidates, fallback_candidates):
+        for row in pool:
+            experiment_id = _safe_text(row.get("experiment_id"))
+            if not experiment_id or experiment_id in seen_order_ids:
+                continue
+            ordered_experiments.append(row)
+            seen_order_ids.add(experiment_id)
+
+    anchors: list[dict[str, Any]] = []
+    seen_analysis_keys: set[str] = set()
+    for experiment_row in ordered_experiments:
+        if not isinstance(experiment_row, dict):
+            continue
+        if not _is_executable_experiment(experiment_row):
+            continue
+        templates = list(experiment_row.get("variant_templates", []))
+        for template in templates:
+            if not isinstance(template, dict):
+                continue
+            if bool(template.get("supported", True)) is False:
+                continue
+            params = template.get("params")
+            if not isinstance(params, dict):
+                continue
+            cv_mode = _safe_text(params.get("cv"))
+            if cv_mode not in _E12_CONFIRMATORY_CV_MODES:
+                continue
+            subject = _safe_text(params.get("subject"))
+            train_subject = _safe_text(params.get("train_subject"))
+            test_subject = _safe_text(params.get("test_subject"))
+            if cv_mode == "within_subject_loso_session" and not subject:
+                continue
+            if cv_mode == "frozen_cross_person_transfer":
+                if not train_subject or not test_subject:
+                    continue
+                if train_subject == test_subject:
+                    continue
+            anchor_params: dict[str, Any] = {
+                key: params.get(key)
+                for key in _E12_ANCHOR_PARAM_KEYS
+                if params.get(key) not in (None, "")
+            }
+            analysis_key = _anchor_analysis_key(anchor_params)
+            if analysis_key in seen_analysis_keys:
+                continue
+            seen_analysis_keys.add(analysis_key)
+            anchor_experiment_id = _safe_text(experiment_row.get("experiment_id"))
+            anchor_template_id = _safe_text(template.get("template_id"))
+            anchor_subject = _safe_text(anchor_params.get("subject"))
+            anchor_train_subject = _safe_text(anchor_params.get("train_subject"))
+            anchor_test_subject = _safe_text(anchor_params.get("test_subject"))
+            if anchor_subject:
+                analysis_label = f"{cv_mode}:{anchor_subject}"
+            elif anchor_train_subject and anchor_test_subject:
+                analysis_label = f"{cv_mode}:{anchor_train_subject}->{anchor_test_subject}"
+            else:
+                analysis_label = cv_mode
+            anchors.append(
+                {
+                    "anchor_experiment_id": anchor_experiment_id,
+                    "anchor_experiment_title": _safe_text(experiment_row.get("title")),
+                    "anchor_stage": _safe_text(experiment_row.get("stage")),
+                    "anchor_template_id": anchor_template_id,
+                    "anchor_subject": anchor_subject,
+                    "anchor_train_subject": anchor_train_subject,
+                    "anchor_test_subject": anchor_test_subject,
+                    "anchor_cv": _safe_text(anchor_params.get("cv")),
+                    "anchor_target": _safe_text(anchor_params.get("target")),
+                    "anchor_model": _safe_text(anchor_params.get("model")),
+                    "anchor_feature_space": _safe_text(anchor_params.get("feature_space"))
+                    or "whole_brain_masked",
+                    "anchor_analysis_label": analysis_label,
+                    "anchor_analysis_key": analysis_key,
+                    "anchor_params": anchor_params,
+                }
+            )
+
+    experiment_id = _safe_text(experiment.get("experiment_id")) or "E12"
+    if not anchors:
+        return (
+            [],
+            f"{experiment_id} anchor resolution failed: no executable confirmatory anchors were found.",
+        )
+    return anchors, None
+
+
+def _build_e12_permutation_group_id(
+    *,
+    params: dict[str, Any],
+    template_id: str,
+    anchor_experiment_id: str,
+    anchor_template_id: str,
+    anchor_analysis_label: str,
+) -> str:
+    subject = _safe_text(params.get("subject")) or "unknown_subject"
+    target = _safe_text(params.get("target")) or "unknown_target"
+    model = _safe_text(params.get("model")) or "unknown_model"
+    cv_mode = _safe_text(params.get("cv")) or "unknown_cv"
+    task = _safe_text(params.get("filter_task")) or "all_tasks"
+    modality = _safe_text(params.get("filter_modality")) or "all_modalities"
+    feature_space = _safe_text(params.get("feature_space")) or "whole_brain_masked"
+    anchor_experiment = _safe_text(anchor_experiment_id) or "unknown_anchor"
+    anchor_template = _safe_text(anchor_template_id) or "unknown_template"
+    return (
+        f"E12::{template_id}::anchor={anchor_experiment}:{anchor_template}::"
+        f"{anchor_analysis_label}::{subject}::{target}::{model}::{cv_mode}::{task}::{modality}::{feature_space}"
+    )
 
 
 def variant_label(params: dict[str, Any]) -> str:
@@ -396,14 +600,24 @@ def _reindex_variants(variants: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 def _expand_e12_permutation_cells(
     *,
+    experiment: dict[str, Any],
     variants: list[dict[str, Any]],
     n_permutations: int,
+    registry_experiments: list[dict[str, Any]] | None = None,
 ) -> tuple[list[dict[str, Any]], list[str]]:
     if int(n_permutations) <= 0:
         return (
             [],
             ["E12 requires --n-permutations > 0 to materialize permutation chunks."],
         )
+
+    anchor_identities, anchor_warning = _resolve_e12_anchor_identities(
+        experiment=experiment,
+        variants=variants,
+        registry_experiments=registry_experiments,
+    )
+    if not anchor_identities:
+        return [], [str(anchor_warning or "E12 anchor resolution failed.")]
 
     chunk_size = 50
     if int(n_permutations) < chunk_size:
@@ -414,33 +628,102 @@ def _expand_e12_permutation_cells(
         if not bool(base.get("supported", False)):
             cells.append(_copy_variant(base))
             continue
-        for chunk_index in range(1, chunk_count + 1):
-            start = int((chunk_index - 1) * chunk_size + 1)
-            end = int(min(int(n_permutations), chunk_index * chunk_size))
-            size = int(max(0, end - start + 1))
-            row = _copy_variant(base)
-            row["n_permutations_override"] = size
-            row["factor_settings"]["permutation_chunk_index"] = int(chunk_index)
-            row["design_metadata"].update(
-                {
-                    "special_cell_kind": "permutation_chunk",
-                    "chunk_index": int(chunk_index),
-                    "chunk_start": int(start),
-                    "chunk_end": int(end),
-                    "chunk_size": int(size),
-                    "total_permutations_requested": int(n_permutations),
-                }
+        for anchor_identity in anchor_identities:
+            anchor_params = dict(anchor_identity.get("anchor_params", {}))
+            anchor_experiment_id = _safe_text(anchor_identity.get("anchor_experiment_id"))
+            anchor_template_id = _safe_text(anchor_identity.get("anchor_template_id"))
+            anchor_analysis_label = _safe_text(anchor_identity.get("anchor_analysis_label"))
+
+            base_row = _copy_variant(base)
+            base_params = dict(base_row.get("params", {}))
+            for key, value in anchor_params.items():
+                if value not in (None, ""):
+                    base_params[key] = value
+            base_row["params"] = base_params
+            cv_mode = _safe_text(base_params.get("cv"))
+            if cv_mode == "within_subject_loso_session" and not _safe_text(base_params.get("subject")):
+                base_row["supported"] = False
+                base_row["blocked_reason"] = (
+                    "E12 anchor inheritance failed to provide subject for cv='within_subject_loso_session'."
+                )
+                cells.append(base_row)
+                continue
+            if cv_mode == "frozen_cross_person_transfer":
+                if not _safe_text(base_params.get("train_subject")) or not _safe_text(
+                    base_params.get("test_subject")
+                ):
+                    base_row["supported"] = False
+                    base_row["blocked_reason"] = (
+                        "E12 anchor inheritance failed to provide train_subject/test_subject for "
+                        "cv='frozen_cross_person_transfer'."
+                    )
+                    cells.append(base_row)
+                    continue
+
+            permutation_group_id = _build_e12_permutation_group_id(
+                params=base_params,
+                template_id=_safe_text(base_row.get("template_id")) or "template",
+                anchor_experiment_id=anchor_experiment_id,
+                anchor_template_id=anchor_template_id,
+                anchor_analysis_label=anchor_analysis_label,
             )
-            trial_id = str(row.get("trial_id")).strip() if row.get("trial_id") else None
-            if trial_id:
-                row["trial_id"] = f"{trial_id}__perm_chunk_{chunk_index:03d}"
-            cell_id = str(row.get("cell_id")).strip() if row.get("cell_id") else None
-            row["cell_id"] = (
-                f"{cell_id}__perm_chunk_{chunk_index:03d}"
-                if cell_id
-                else f"{row.get('template_id', 'cell')}__perm_chunk_{chunk_index:03d}"
-            )
-            cells.append(row)
+            for chunk_index in range(1, chunk_count + 1):
+                start = int((chunk_index - 1) * chunk_size + 1)
+                end = int(min(int(n_permutations), chunk_index * chunk_size))
+                size = int(max(0, end - start + 1))
+                row = _copy_variant(base_row)
+                row["n_permutations_override"] = size
+                row["factor_settings"]["permutation_chunk_index"] = int(chunk_index)
+                row["factor_settings"]["permutation_group_id"] = str(permutation_group_id)
+                row["factor_settings"]["expected_chunk_count"] = int(chunk_count)
+                row["factor_settings"]["total_permutations_requested"] = int(n_permutations)
+                row["factor_settings"]["anchor_experiment_id"] = str(anchor_experiment_id)
+                row["factor_settings"]["anchor_template_id"] = str(anchor_template_id)
+                row["factor_settings"]["anchor_analysis_label"] = str(anchor_analysis_label)
+                row["design_metadata"].update(
+                    {
+                        "special_cell_kind": "permutation_chunk",
+                        "chunk_index": int(chunk_index),
+                        "chunk_start": int(start),
+                        "chunk_end": int(end),
+                        "chunk_size": int(size),
+                        "permutation_group_id": str(permutation_group_id),
+                        "expected_chunk_count": int(chunk_count),
+                        "total_permutations_requested": int(n_permutations),
+                        "anchor_experiment_id": str(anchor_experiment_id),
+                        "anchor_template_id": str(anchor_template_id),
+                        "anchor_analysis_label": str(anchor_analysis_label),
+                        "anchor_identity": {
+                            "anchor_experiment_id": str(anchor_experiment_id),
+                            "anchor_template_id": str(anchor_template_id),
+                            "anchor_subject": _safe_text(anchor_identity.get("anchor_subject")),
+                            "anchor_train_subject": _safe_text(
+                                anchor_identity.get("anchor_train_subject")
+                            ),
+                            "anchor_test_subject": _safe_text(
+                                anchor_identity.get("anchor_test_subject")
+                            ),
+                            "anchor_cv": _safe_text(anchor_identity.get("anchor_cv")),
+                            "anchor_target": _safe_text(anchor_identity.get("anchor_target")),
+                            "anchor_model": _safe_text(anchor_identity.get("anchor_model")),
+                            "anchor_feature_space": _safe_text(
+                                anchor_identity.get("anchor_feature_space")
+                            )
+                            or "whole_brain_masked",
+                            "anchor_analysis_label": str(anchor_analysis_label),
+                        },
+                    }
+                )
+                trial_id = str(row.get("trial_id")).strip() if row.get("trial_id") else None
+                if trial_id:
+                    row["trial_id"] = f"{trial_id}__perm_chunk_{chunk_index:03d}"
+                cell_id = str(row.get("cell_id")).strip() if row.get("cell_id") else None
+                row["cell_id"] = (
+                    f"{cell_id}__perm_chunk_{chunk_index:03d}"
+                    if cell_id
+                    else f"{row.get('template_id', 'cell')}__perm_chunk_{chunk_index:03d}"
+                )
+                cells.append(row)
     return _reindex_variants(cells), []
 
 
@@ -581,12 +864,15 @@ def materialize_experiment_cells(
     variants: list[dict[str, Any]],
     dataset_scope: dict[str, Any],
     n_permutations: int,
+    registry_experiments: list[dict[str, Any]] | None = None,
 ) -> tuple[list[dict[str, Any]], list[str]]:
     experiment_id = str(experiment.get("experiment_id"))
     if experiment_id == "E12":
         return _expand_e12_permutation_cells(
+            experiment=experiment,
             variants=variants,
             n_permutations=int(n_permutations),
+            registry_experiments=registry_experiments,
         )
     if experiment_id == "E23":
         return _expand_e23_omitted_session_cells(

@@ -279,6 +279,121 @@ def _write_e07_e08_registry(path: Path) -> None:
     path.write_text(f"{json.dumps(payload, indent=2)}\n", encoding="utf-8")
 
 
+def _write_e12_confirmatory_anchor_registry(path: Path) -> None:
+    payload = {
+        "schema_version": "test",
+        "experiments": [
+            {
+                "experiment_id": "E12",
+                "title": "Permutation test experiment",
+                "stage": "Stage 6 - Robustness analysis",
+                "decision_id": "D08",
+                "manipulated_factor": "Label structure",
+                "primary_metric": "balanced_accuracy",
+                "variant_templates": [
+                    {
+                        "template_id": "e12_template",
+                        "supported": True,
+                        "params": {
+                            "target": "coarse_affect",
+                            "model": "ridge",
+                            "cv": "within_subject_loso_session",
+                            "anchor_experiment_id": "E16",
+                        },
+                    }
+                ],
+            },
+            {
+                "experiment_id": "E16",
+                "title": "Final within-person confirmatory analysis",
+                "stage": "Stage 5 - Confirmatory analysis",
+                "decision_id": "CFM_LOCK_V1",
+                "manipulated_factor": "none",
+                "primary_metric": "balanced_accuracy",
+                "variant_templates": [
+                    {
+                        "template_id": "e16_anchor",
+                        "supported": True,
+                        "params": {
+                            "target": "coarse_affect",
+                            "model": "ridge",
+                            "cv": "within_subject_loso_session",
+                            "subject": "sub-001",
+                            "feature_space": "whole_brain_masked",
+                        },
+                    }
+                ],
+            },
+            {
+                "experiment_id": "E17",
+                "title": "Final within-person confirmatory analysis",
+                "stage": "Stage 5 - Confirmatory analysis",
+                "decision_id": "CFM_LOCK_V1",
+                "manipulated_factor": "none",
+                "primary_metric": "balanced_accuracy",
+                "variant_templates": [
+                    {
+                        "template_id": "e17_anchor",
+                        "supported": True,
+                        "params": {
+                            "target": "coarse_affect",
+                            "model": "ridge",
+                            "cv": "within_subject_loso_session",
+                            "subject": "sub-002",
+                            "feature_space": "whole_brain_masked",
+                        },
+                    }
+                ],
+            },
+            {
+                "experiment_id": "E18",
+                "title": "Final cross-person confirmatory analysis",
+                "stage": "Stage 5 - Confirmatory analysis",
+                "decision_id": "CFM_LOCK_V1",
+                "manipulated_factor": "none",
+                "primary_metric": "balanced_accuracy",
+                "variant_templates": [
+                    {
+                        "template_id": "e18_anchor",
+                        "supported": True,
+                        "params": {
+                            "target": "coarse_affect",
+                            "model": "ridge",
+                            "cv": "frozen_cross_person_transfer",
+                            "train_subject": "sub-001",
+                            "test_subject": "sub-002",
+                            "feature_space": "whole_brain_masked",
+                        },
+                    }
+                ],
+            },
+            {
+                "experiment_id": "E19",
+                "title": "Final cross-person confirmatory analysis",
+                "stage": "Stage 5 - Confirmatory analysis",
+                "decision_id": "CFM_LOCK_V1",
+                "manipulated_factor": "none",
+                "primary_metric": "balanced_accuracy",
+                "variant_templates": [
+                    {
+                        "template_id": "e19_anchor",
+                        "supported": True,
+                        "params": {
+                            "target": "coarse_affect",
+                            "model": "ridge",
+                            "cv": "frozen_cross_person_transfer",
+                            "train_subject": "sub-002",
+                            "test_subject": "sub-001",
+                            "feature_space": "whole_brain_masked",
+                        },
+                    }
+                ],
+            },
+        ],
+    }
+    path.write_text(f"{json.dumps(payload, indent=2)}\n", encoding="utf-8")
+
+
 def _stub_run_experiment(**kwargs: object) -> dict[str, object]:
     run_id = str(kwargs["run_id"])
     reports_root = Path(kwargs["reports_root"])
@@ -299,6 +414,62 @@ def _stub_run_experiment(**kwargs: object) -> dict[str, object]:
             "macro_f1": 0.57,
             "n_folds": 3,
         },
+    }
+
+
+def _stub_run_experiment_with_permutation_metrics(**kwargs: object) -> dict[str, object]:
+    run_id = str(kwargs["run_id"])
+    reports_root = Path(kwargs["reports_root"])
+    report_dir = reports_root / run_id
+    report_dir.mkdir(parents=True, exist_ok=True)
+    metrics_path = report_dir / "metrics.json"
+    n_permutations = int(kwargs.get("n_permutations", 0))
+    observed = 0.58
+    null_scores = [0.20 + (0.001 * idx) for idx in range(n_permutations)]
+    ge_count = sum(float(value) >= float(observed) for value in null_scores)
+    p_value = (float(ge_count) + 1.0) / (float(len(null_scores)) + 1.0)
+    permutation_payload = {
+        "n_permutations": int(n_permutations),
+        "metric_name": "balanced_accuracy",
+        "observed_score": float(observed),
+        "observed_metric": float(observed),
+        "p_value": float(p_value),
+        "null_summary": {
+            "mean": float(sum(null_scores) / len(null_scores)) if null_scores else 0.0,
+            "std": 0.0,
+            "min": float(min(null_scores)) if null_scores else 0.0,
+            "max": float(max(null_scores)) if null_scores else 0.0,
+            "q25": float(min(null_scores)) if null_scores else 0.0,
+            "q50": float(min(null_scores)) if null_scores else 0.0,
+            "q75": float(max(null_scores)) if null_scores else 0.0,
+        },
+        "null_scores": [float(value) for value in null_scores],
+        "alpha": 0.05,
+        "minimum_required": 100,
+        "meets_minimum": bool(n_permutations >= 100),
+        "passes_threshold": bool(p_value <= 0.05),
+        "interpretation_status": ("passes_threshold" if p_value <= 0.05 else "fails_threshold"),
+    }
+    metrics_payload = {
+        "primary_metric_name": "balanced_accuracy",
+        "primary_metric_value": 0.58,
+        "balanced_accuracy": 0.58,
+        "macro_f1": 0.57,
+        "accuracy": 0.61,
+        "n_folds": 3,
+        "permutation_test": permutation_payload,
+    }
+    metrics_path.write_text(f"{json.dumps(metrics_payload, indent=2)}\n", encoding="utf-8")
+    return {
+        "run_id": run_id,
+        "report_dir": str(report_dir),
+        "config_path": str(report_dir / "config.json"),
+        "metrics_path": str(metrics_path),
+        "fold_metrics_path": str(report_dir / "fold_metrics.csv"),
+        "fold_splits_path": str(report_dir / "fold_splits.csv"),
+        "predictions_path": str(report_dir / "predictions.csv"),
+        "spatial_compatibility_report_path": str(report_dir / "spatial_compatibility_report.json"),
+        "metrics": metrics_payload,
     }
 
 
@@ -591,3 +762,85 @@ def test_campaign_dry_run_e01_e04_not_blocked(tmp_path: Path) -> None:
     e04 = summary_df[summary_df["experiment_id"] == "E04"].iloc[0]
     assert e01["status"] == "dry_run"
     assert e04["status"] == "dry_run"
+
+
+def test_e12_uses_anchor_subject_and_merged_summary_outputs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    registry_path = tmp_path / "decision_support_registry.json"
+    index_csv = tmp_path / "dataset_index.csv"
+    _write_e12_confirmatory_anchor_registry(registry_path)
+    _write_index_csv(index_csv)
+
+    captured_identities: list[tuple[str, str | None, str | None, str | None]] = []
+
+    def _capturing_stub(**kwargs: object) -> dict[str, object]:
+        captured_identities.append(
+            (
+                str(kwargs.get("cv")),
+                (str(kwargs.get("subject")) if kwargs.get("subject") else None),
+                (str(kwargs.get("train_subject")) if kwargs.get("train_subject") else None),
+                (str(kwargs.get("test_subject")) if kwargs.get("test_subject") else None),
+            )
+        )
+        if kwargs.get("cv") == "within_subject_loso_session" and not kwargs.get("subject"):
+            raise ValueError("missing subject for within_subject_loso_session")
+        return _stub_run_experiment_with_permutation_metrics(**kwargs)
+
+    monkeypatch.setattr(orchestrator, "run_experiment", _capturing_stub)
+
+    result = orchestrator.run_decision_support_campaign(
+        registry_path=registry_path,
+        index_csv=index_csv,
+        data_root=tmp_path / "Data",
+        cache_dir=tmp_path / "cache",
+        output_root=tmp_path / "artifacts" / "decision_support",
+        experiment_id="E12",
+        stage=None,
+        run_all=False,
+        seed=42,
+        n_permutations=120,
+        dry_run=False,
+    )
+
+    assert captured_identities
+    within_subjects = {
+        identity[1]
+        for identity in captured_identities
+        if identity[0] == "within_subject_loso_session"
+    }
+    transfer_pairs = {
+        (identity[2], identity[3])
+        for identity in captured_identities
+        if identity[0] == "frozen_cross_person_transfer"
+    }
+    assert within_subjects == {"sub-001", "sub-002"}
+    assert transfer_pairs == {("sub-001", "sub-002"), ("sub-002", "sub-001")}
+
+    campaign_root = Path(result["campaign_root"])
+    run_log_df = pd.read_csv(campaign_root / "run_log_export.csv")
+    assert len(run_log_df[run_log_df["Experiment_ID"] == "E12"]) == 12
+
+    summary_df = pd.read_csv(campaign_root / "decision_support_summary.csv")
+    e12_row = summary_df[summary_df["experiment_id"] == "E12"].iloc[0]
+    assert int(e12_row["total_variants"]) == 4
+    assert int(e12_row["completed_variants"]) == 4
+    assert str(e12_row["status"]) == "completed"
+
+    aggregation_payload = json.loads((campaign_root / "result_aggregation.json").read_text())
+    best_runs = list(aggregation_payload.get("best_full_pipeline_runs", []))
+    assert len(best_runs) == 4
+    assert all(str(row.get("run_id", "")).endswith("__perm_merged") for row in best_runs)
+
+    summary_outputs_df = pd.read_csv(campaign_root / "summary_outputs_export.csv")
+    merged_run_ids = [
+        str(value) for value in summary_outputs_df["run_id"] if str(value).strip()
+    ]
+    assert merged_run_ids
+    assert all(value.endswith("__perm_merged") for value in merged_run_ids)
+    decision_notes = (campaign_root / "decision_recommendations.md").read_text(encoding="utf-8")
+    assert "__perm_merged" in decision_notes
+    table_ready_path = campaign_root / "special_aggregations" / "E12" / "e12_permutation_analysis_summary.csv"
+    assert table_ready_path.exists()
+    table_ready_df = pd.read_csv(table_ready_path)
+    assert len(table_ready_df) == 4

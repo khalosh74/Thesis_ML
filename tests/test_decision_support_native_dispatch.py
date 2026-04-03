@@ -243,6 +243,117 @@ def _write_cross_experiment_reuse_registry(path: Path) -> None:
     path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
 
+def _write_e12_confirmatory_anchor_registry(path: Path) -> None:
+    payload = {
+        "schema_version": "test",
+        "experiments": [
+            {
+                "experiment_id": "E12",
+                "title": "Permutation test experiment",
+                "stage": "Stage 6 - Robustness analysis",
+                "decision_id": "D08",
+                "manipulated_factor": "Label structure",
+                "primary_metric": "balanced_accuracy",
+                "variant_templates": [
+                    {
+                        "template_id": "e12_template",
+                        "supported": True,
+                        "params": {
+                            "target": "coarse_affect",
+                            "model": "ridge",
+                            "cv": "within_subject_loso_session",
+                            "anchor_experiment_id": "E16",
+                        },
+                    }
+                ],
+            },
+            {
+                "experiment_id": "E16",
+                "title": "Final within-person confirmatory analysis",
+                "stage": "Stage 5 - Confirmatory analysis",
+                "decision_id": "CFM_LOCK_V1",
+                "manipulated_factor": "none",
+                "primary_metric": "balanced_accuracy",
+                "variant_templates": [
+                    {
+                        "template_id": "e16_anchor",
+                        "supported": True,
+                        "params": {
+                            "target": "coarse_affect",
+                            "model": "ridge",
+                            "cv": "within_subject_loso_session",
+                            "subject": "sub-001",
+                        },
+                    }
+                ],
+            },
+            {
+                "experiment_id": "E17",
+                "title": "Final within-person confirmatory analysis",
+                "stage": "Stage 5 - Confirmatory analysis",
+                "decision_id": "CFM_LOCK_V1",
+                "manipulated_factor": "none",
+                "primary_metric": "balanced_accuracy",
+                "variant_templates": [
+                    {
+                        "template_id": "e17_anchor",
+                        "supported": True,
+                        "params": {
+                            "target": "coarse_affect",
+                            "model": "ridge",
+                            "cv": "within_subject_loso_session",
+                            "subject": "sub-002",
+                        },
+                    }
+                ],
+            },
+            {
+                "experiment_id": "E18",
+                "title": "Final cross-person confirmatory analysis",
+                "stage": "Stage 5 - Confirmatory analysis",
+                "decision_id": "CFM_LOCK_V1",
+                "manipulated_factor": "none",
+                "primary_metric": "balanced_accuracy",
+                "variant_templates": [
+                    {
+                        "template_id": "e18_anchor",
+                        "supported": True,
+                        "params": {
+                            "target": "coarse_affect",
+                            "model": "ridge",
+                            "cv": "frozen_cross_person_transfer",
+                            "train_subject": "sub-001",
+                            "test_subject": "sub-002",
+                        },
+                    }
+                ],
+            },
+            {
+                "experiment_id": "E19",
+                "title": "Final cross-person confirmatory analysis",
+                "stage": "Stage 5 - Confirmatory analysis",
+                "decision_id": "CFM_LOCK_V1",
+                "manipulated_factor": "none",
+                "primary_metric": "balanced_accuracy",
+                "variant_templates": [
+                    {
+                        "template_id": "e19_anchor",
+                        "supported": True,
+                        "params": {
+                            "target": "coarse_affect",
+                            "model": "ridge",
+                            "cv": "frozen_cross_person_transfer",
+                            "train_subject": "sub-002",
+                            "test_subject": "sub-001",
+                        },
+                    }
+                ],
+            },
+        ],
+    }
+    path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+
+
 def _success_payload_for_jobs(jobs: list[OfficialRunJob]) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for job in jobs:
@@ -651,3 +762,61 @@ def test_campaign_reuse_planner_does_not_coalesce_different_feature_spaces(
     assert len(dispatched_jobs) == 2
     assert all(job.run_kwargs["start_section"] == "dataset_selection" for job in dispatched_jobs)
     assert all(job.run_kwargs["base_artifact_id"] is None for job in dispatched_jobs)
+
+
+def test_native_dispatch_e12_inherits_anchor_subject_for_chunks(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    registry_path = tmp_path / "registry_e12.json"
+    index_csv = tmp_path / "index.csv"
+    _write_e12_confirmatory_anchor_registry(registry_path)
+    _write_index(index_csv)
+
+    captured_jobs: list[OfficialRunJob] = []
+
+    def _fake_execute_official_jobs(
+        *,
+        jobs: list[OfficialRunJob],
+        max_parallel_runs: int,
+        max_parallel_gpu_runs: int,
+        run_experiment_fn=None,
+    ):
+        captured_jobs.extend(jobs)
+        return _success_payload_for_jobs(jobs)
+
+    monkeypatch.setattr(campaign_engine, "_execute_official_jobs", _fake_execute_official_jobs)
+
+    campaign_engine.run_decision_support_campaign(
+        registry_path=registry_path,
+        index_csv=index_csv,
+        data_root=tmp_path / "Data",
+        cache_dir=tmp_path / "cache",
+        output_root=tmp_path / "outputs",
+        experiment_id="E12",
+        stage=None,
+        run_all=False,
+        seed=42,
+        n_permutations=120,
+        dry_run=False,
+        max_parallel_runs=3,
+        max_parallel_gpu_runs=0,
+        run_experiment_fn=_stub_run_experiment,
+    )
+
+    assert len(captured_jobs) == 12
+    assert sorted(int(job.run_kwargs.get("n_permutations", 0)) for job in captured_jobs) == (
+        [20] * 4 + [50] * 8
+    )
+    within_subjects = {
+        str(job.run_kwargs.get("subject"))
+        for job in captured_jobs
+        if str(job.run_kwargs.get("cv")) == "within_subject_loso_session"
+    }
+    transfer_pairs = {
+        (str(job.run_kwargs.get("train_subject")), str(job.run_kwargs.get("test_subject")))
+        for job in captured_jobs
+        if str(job.run_kwargs.get("cv")) == "frozen_cross_person_transfer"
+    }
+    assert within_subjects == {"sub-001", "sub-002"}
+    assert transfer_pairs == {("sub-001", "sub-002"), ("sub-002", "sub-001")}

@@ -62,6 +62,10 @@ from Thesis_ML.orchestration.execution_bridge import (
 from Thesis_ML.orchestration.execution_bridge import (
     resolve_variant_run_id as _resolve_variant_run_id,
 )
+from Thesis_ML.orchestration.permutation_chunk_aggregation import (
+    build_e12_table_ready_rows as _build_e12_table_ready_rows,
+    build_reporting_variant_records as _build_reporting_variant_records,
+)
 from Thesis_ML.orchestration.experiment_selection import (
     collect_dataset_scope as _collect_dataset_scope,
 )
@@ -932,6 +936,9 @@ def run_decision_support_campaign(
         stage=stage,
         run_all=run_all,
     )
+    registry_experiments_payload = [
+        experiment.model_dump(mode="python") for experiment in list(registry.experiments)
+    ]
     if experiment_id and len(selected_experiments) == 1:
         selected = selected_experiments[0]
         if not bool(selected.get("executable_now", True)):
@@ -1194,6 +1201,7 @@ def run_decision_support_campaign(
                     variants=variants,
                     dataset_scope=dataset_scope,
                     n_permutations=n_permutations,
+                    registry_experiments=registry_experiments_payload,
                 )
                 combined_warnings = list(warnings) + list(materialization_warnings)
                 if combined_warnings:
@@ -1857,10 +1865,48 @@ def run_decision_support_campaign(
         campaign_root=campaign_root,
         variant_records=all_variant_records,
     )
+    reporting_variant_records, permutation_chunk_merge_summary = _build_reporting_variant_records(
+        campaign_root=campaign_root,
+        variant_records=all_variant_records,
+    )
+    permutation_chunk_merge_summary_path: str | None = None
+    e12_table_ready_summary_csv_path: str | None = None
+    e12_table_ready_summary_json_path: str | None = None
+    if isinstance(permutation_chunk_merge_summary, dict):
+        merge_groups = permutation_chunk_merge_summary.get("groups")
+        merge_errors = permutation_chunk_merge_summary.get("errors")
+        has_merge_groups = isinstance(merge_groups, list) and bool(merge_groups)
+        has_merge_errors = isinstance(merge_errors, list) and bool(merge_errors)
+        if has_merge_groups or has_merge_errors:
+            merge_summary_path = campaign_root / "e12_permutation_chunk_merge_summary.json"
+            merge_payload = dict(permutation_chunk_merge_summary)
+            merge_payload["generated_at_utc"] = _utc_timestamp()
+            merge_summary_path.write_text(
+                f"{json.dumps(merge_payload, indent=2)}\n",
+                encoding="utf-8",
+            )
+            permutation_chunk_merge_summary_path = str(merge_summary_path.resolve())
+        e12_table_rows = _build_e12_table_ready_rows(
+            reporting_variant_records=reporting_variant_records
+        )
+        if e12_table_rows:
+            special_aggregation_root = campaign_root / "special_aggregations" / "E12"
+            special_aggregation_root.mkdir(parents=True, exist_ok=True)
+            e12_csv_path = special_aggregation_root / "e12_permutation_analysis_summary.csv"
+            e12_json_path = special_aggregation_root / "e12_permutation_analysis_summary.json"
+            import pandas as pd
+
+            pd.DataFrame(e12_table_rows).to_csv(e12_csv_path, index=False)
+            e12_json_path.write_text(
+                f"{json.dumps(e12_table_rows, indent=2)}\n",
+                encoding="utf-8",
+            )
+            e12_table_ready_summary_csv_path = str(e12_csv_path.resolve())
+            e12_table_ready_summary_json_path = str(e12_json_path.resolve())
 
     summary_df = _summarize_by_experiment(
         experiments=selected_experiments,
-        variant_records=all_variant_records,
+        variant_records=reporting_variant_records,
         warnings_by_experiment=experiment_warnings,
     )
     decision_summary_path = campaign_root / "decision_support_summary.csv"
@@ -1877,10 +1923,10 @@ def run_decision_support_campaign(
     decision_report_path, stage_decision_paths = _write_decision_reports(
         campaign_root=campaign_root,
         experiments=selected_experiments,
-        variant_records=all_variant_records,
+        variant_records=reporting_variant_records,
     )
 
-    aggregation = aggregate_variant_records(all_variant_records, top_k=5)
+    aggregation = aggregate_variant_records(reporting_variant_records, top_k=5)
     aggregation_path = campaign_root / "result_aggregation.json"
     aggregation_path.write_text(
         f"{json.dumps(aggregation, indent=2)}\n",
@@ -2051,6 +2097,9 @@ def run_decision_support_campaign(
                 if isinstance(stage_evidence_summary_paths, dict)
                 else None
             ),
+            "e12_permutation_chunk_merge_summary": permutation_chunk_merge_summary_path,
+            "e12_permutation_analysis_summary_csv": e12_table_ready_summary_csv_path,
+            "e12_permutation_analysis_summary_json": e12_table_ready_summary_json_path,
             "stage_decision_notes": [str(path.resolve()) for path in stage_decision_paths],
             "phase_artifacts": list(phase_artifact_paths),
             "phase_skip_summary": str(phase_skip_summary_path.resolve()),
@@ -2125,6 +2174,9 @@ def run_decision_support_campaign(
             if isinstance(stage_evidence_summary_paths, dict)
             else None
         ),
+        "e12_permutation_chunk_merge_summary_path": permutation_chunk_merge_summary_path,
+        "e12_permutation_analysis_summary_csv_path": e12_table_ready_summary_csv_path,
+        "e12_permutation_analysis_summary_json_path": e12_table_ready_summary_json_path,
         "eta_state_path": str((campaign_root / "eta_state.json").resolve()),
         "eta_calibration_path": eta_calibration_path,
         "runtime_history_path": str(history_path.resolve()),

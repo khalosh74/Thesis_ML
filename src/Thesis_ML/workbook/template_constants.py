@@ -862,7 +862,7 @@ def build_experiments() -> list[dict[str, str]]:
             "Exact_Question": "Are the main predictive results distinguishable from chance under the exact same split logic?",
             "Manipulated_Factor": "Label structure (true vs permuted)",
             "Split_Logic": "exact confirmatory split logic with train-only permutation",
-            "Secondary_Metrics": "Empirical p-value; null distribution summary",
+            "Secondary_Metrics": "Empirical p-value; merged null distribution summary across chunked permutations",
             "Reporting_Destination": "Chapter 4 Supporting robustness",
         },
         {

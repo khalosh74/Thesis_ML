@@ -3070,7 +3070,8 @@
           "params": {
             "target": "coarse_affect",
             "cv": "within_subject_loso_session",
-            "model": "ridge"
+            "model": "ridge",
+            "anchor_experiment_id": "E16"
           },
           "expand": {},
           "sections": [
