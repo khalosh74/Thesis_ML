@@ -394,6 +394,76 @@ def _write_e12_confirmatory_anchor_registry(path: Path) -> None:
     path.write_text(f"{json.dumps(payload, indent=2)}\n", encoding="utf-8")
 
 
+def _write_e13_confirmatory_anchor_registry(path: Path) -> None:
+    payload = {
+        "schema_version": "test",
+        "experiments": [
+            {
+                "experiment_id": "E13",
+                "title": "Trivial baseline experiment",
+                "stage": "Stage 6 - Robustness analysis",
+                "decision_id": "D08",
+                "manipulated_factor": "Baseline type",
+                "primary_metric": "balanced_accuracy",
+                "variant_templates": [
+                    {
+                        "template_id": "e13_template",
+                        "supported": True,
+                        "params": {
+                            "target": "coarse_affect",
+                            "model": "dummy_or_majority",
+                            "cv": "within_subject_loso_session",
+                            "subject": "None",
+                        },
+                    }
+                ],
+            },
+            {
+                "experiment_id": "E16",
+                "title": "Final within-person confirmatory analysis",
+                "stage": "Stage 5 - Confirmatory analysis",
+                "decision_id": "CFM_LOCK_V1",
+                "manipulated_factor": "none",
+                "primary_metric": "balanced_accuracy",
+                "variant_templates": [
+                    {
+                        "template_id": "e16_anchor",
+                        "supported": True,
+                        "params": {
+                            "target": "coarse_affect",
+                            "model": "ridge",
+                            "cv": "within_subject_loso_session",
+                            "subject": "sub-001",
+                        },
+                    }
+                ],
+            },
+            {
+                "experiment_id": "E17",
+                "title": "Final cross-person confirmatory analysis",
+                "stage": "Stage 5 - Confirmatory analysis",
+                "decision_id": "CFM_LOCK_V1",
+                "manipulated_factor": "none",
+                "primary_metric": "balanced_accuracy",
+                "variant_templates": [
+                    {
+                        "template_id": "e17_anchor",
+                        "supported": True,
+                        "params": {
+                            "target": "coarse_affect",
+                            "model": "ridge",
+                            "cv": "frozen_cross_person_transfer",
+                            "train_subject": "sub-001",
+                            "test_subject": "sub-002",
+                        },
+                    }
+                ],
+            },
+        ],
+    }
+    path.write_text(f"{json.dumps(payload, indent=2)}\n", encoding="utf-8")
+
+
 def _stub_run_experiment(**kwargs: object) -> dict[str, object]:
     run_id = str(kwargs["run_id"])
     reports_root = Path(kwargs["reports_root"])
@@ -833,14 +903,93 @@ def test_e12_uses_anchor_subject_and_merged_summary_outputs(
     assert all(str(row.get("run_id", "")).endswith("__perm_merged") for row in best_runs)
 
     summary_outputs_df = pd.read_csv(campaign_root / "summary_outputs_export.csv")
-    merged_run_ids = [
-        str(value) for value in summary_outputs_df["run_id"] if str(value).strip()
-    ]
+    merged_run_ids = [str(value) for value in summary_outputs_df["run_id"] if str(value).strip()]
     assert merged_run_ids
     assert all(value.endswith("__perm_merged") for value in merged_run_ids)
     decision_notes = (campaign_root / "decision_recommendations.md").read_text(encoding="utf-8")
     assert "__perm_merged" in decision_notes
-    table_ready_path = campaign_root / "special_aggregations" / "E12" / "e12_permutation_analysis_summary.csv"
+    table_ready_path = (
+        campaign_root / "special_aggregations" / "E12" / "e12_permutation_analysis_summary.csv"
+    )
     assert table_ready_path.exists()
     table_ready_df = pd.read_csv(table_ready_path)
     assert len(table_ready_df) == 4
+
+
+def test_e13_materializes_anchor_matched_dummy_baselines_and_writes_table_ready_summary(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    registry_path = tmp_path / "decision_support_registry.json"
+    index_csv = tmp_path / "dataset_index.csv"
+    _write_e13_confirmatory_anchor_registry(registry_path)
+    _write_index_csv(index_csv)
+
+    captured_identities: list[tuple[str, str | None, str | None, str | None, str]] = []
+
+    def _capturing_stub(**kwargs: object) -> dict[str, object]:
+        captured_identities.append(
+            (
+                str(kwargs.get("cv")),
+                (str(kwargs.get("subject")) if kwargs.get("subject") else None),
+                (str(kwargs.get("train_subject")) if kwargs.get("train_subject") else None),
+                (str(kwargs.get("test_subject")) if kwargs.get("test_subject") else None),
+                str(kwargs.get("model")),
+            )
+        )
+        if str(kwargs.get("model")) != "dummy":
+            raise ValueError("E13 baseline run must use model=dummy")
+        if kwargs.get("subject") == "None":
+            raise ValueError("placeholder subject should not survive E13 materialization")
+        return _stub_run_experiment(**kwargs)
+
+    monkeypatch.setattr(orchestrator, "run_experiment", _capturing_stub)
+
+    result = orchestrator.run_decision_support_campaign(
+        registry_path=registry_path,
+        index_csv=index_csv,
+        data_root=tmp_path / "Data",
+        cache_dir=tmp_path / "cache",
+        output_root=tmp_path / "artifacts" / "decision_support",
+        experiment_id="E13",
+        stage=None,
+        run_all=False,
+        seed=42,
+        n_permutations=0,
+        dry_run=False,
+    )
+
+    assert len(captured_identities) == 2
+    assert {identity[4] for identity in captured_identities} == {"dummy"}
+    assert {
+        identity[1]
+        for identity in captured_identities
+        if identity[0] == "within_subject_loso_session"
+    } == {"sub-001"}
+    assert {
+        (identity[2], identity[3])
+        for identity in captured_identities
+        if identity[0] == "frozen_cross_person_transfer"
+    } == {("sub-001", "sub-002")}
+
+    campaign_root = Path(result["campaign_root"])
+    run_log_df = pd.read_csv(campaign_root / "run_log_export.csv")
+    e13_rows = run_log_df[run_log_df["Experiment_ID"] == "E13"]
+    assert len(e13_rows) == 2
+    assert set(e13_rows["Model"].astype(str).tolist()) == {"dummy"}
+    assert "None" not in set(e13_rows["Data_Subset"].astype(str).tolist())
+
+    summary_outputs_df = pd.read_csv(campaign_root / "summary_outputs_export.csv")
+    run_ids = set(summary_outputs_df["run_id"].astype(str).tolist())
+    assert len(run_ids) >= 1
+
+    table_ready_path = (
+        campaign_root / "special_aggregations" / "E13" / "e13_dummy_baseline_analysis_summary.csv"
+    )
+    assert table_ready_path.exists()
+    table_ready_df = pd.read_csv(table_ready_path)
+    assert len(table_ready_df) == 2
+    assert set(table_ready_df["model"].astype(str).tolist()) == {"dummy"}
+    assert set(table_ready_df["anchor_analysis_type"].astype(str).tolist()) == {
+        "within_person_loso",
+        "cross_person_transfer",
+    }

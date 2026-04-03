@@ -9,7 +9,11 @@ def _base_variant() -> dict[str, object]:
         "variant_index": 1,
         "supported": True,
         "blocked_reason": None,
-        "params": {"target": "coarse_affect", "model": "ridge", "cv": "within_subject_loso_session"},
+        "params": {
+            "target": "coarse_affect",
+            "model": "ridge",
+            "cv": "within_subject_loso_session",
+        },
         "factor_settings": {},
         "fixed_controls": {},
         "design_metadata": {},
@@ -103,6 +107,109 @@ def _registry_experiments_for_e12_multi_anchor() -> list[dict[str, object]]:
     ]
 
 
+def _registry_experiments_for_e13_multi_anchor() -> list[dict[str, object]]:
+    return [
+        {
+            "experiment_id": "E13",
+            "executable_now": True,
+            "execution_status": "unknown",
+            "variant_templates": [
+                {
+                    "template_id": "e13_template",
+                    "supported": True,
+                    "params": {
+                        "target": "coarse_affect",
+                        "model": "dummy_or_majority",
+                        "cv": "within_subject_loso_session",
+                        "subject": "None",
+                    },
+                }
+            ],
+        },
+        {
+            "experiment_id": "E16",
+            "title": "Final within-person confirmatory analysis",
+            "stage": "Stage 5 - Confirmatory analysis",
+            "executable_now": True,
+            "execution_status": "unknown",
+            "variant_templates": [
+                {
+                    "template_id": "e16_anchor",
+                    "supported": True,
+                    "params": {
+                        "target": "coarse_affect",
+                        "model": "ridge",
+                        "cv": "within_subject_loso_session",
+                        "subject": "sub-001",
+                        "feature_space": "whole_brain_masked",
+                    },
+                }
+            ],
+        },
+        {
+            "experiment_id": "E18",
+            "title": "Final cross-person confirmatory analysis",
+            "stage": "Stage 5 - Confirmatory analysis",
+            "executable_now": True,
+            "execution_status": "unknown",
+            "variant_templates": [
+                {
+                    "template_id": "e18_anchor",
+                    "supported": True,
+                    "params": {
+                        "target": "coarse_affect",
+                        "model": "ridge",
+                        "cv": "frozen_cross_person_transfer",
+                        "train_subject": "sub-001",
+                        "test_subject": "sub-002",
+                        "feature_space": "whole_brain_masked",
+                    },
+                }
+            ],
+        },
+    ]
+
+
+def _registry_experiments_for_e13_single_anchor() -> list[dict[str, object]]:
+    return [
+        {
+            "experiment_id": "E13",
+            "executable_now": True,
+            "execution_status": "unknown",
+            "variant_templates": [
+                {
+                    "template_id": "e13_template",
+                    "supported": True,
+                    "params": {
+                        "target": "coarse_affect",
+                        "model": "dummy",
+                        "cv": "within_subject_loso_session",
+                    },
+                }
+            ],
+        },
+        {
+            "experiment_id": "E16",
+            "title": "Final within-person confirmatory analysis",
+            "stage": "Stage 5 - Confirmatory analysis",
+            "executable_now": True,
+            "execution_status": "unknown",
+            "variant_templates": [
+                {
+                    "template_id": "e16_anchor",
+                    "supported": True,
+                    "params": {
+                        "target": "coarse_affect",
+                        "model": "ridge",
+                        "cv": "within_subject_loso_session",
+                        "subject": "sub-001",
+                    },
+                }
+            ],
+        },
+    ]
+
+
 def test_e12_materialization_chunks_permutations_deterministically() -> None:
     experiment = {"experiment_id": "E12"}
     cells, warnings = materialize_experiment_cells(
@@ -169,6 +276,64 @@ def test_e12_materialization_creates_separate_groups_for_within_and_transfer_anc
         (str(cell["params"].get("train_subject")), str(cell["params"].get("test_subject")))
         for cell in transfer_cells
     } == {("sub-001", "sub-002")}
+
+
+def test_e13_materialization_matches_confirmatory_anchors_and_enforces_dummy_model() -> None:
+    experiment = {"experiment_id": "E13"}
+    cells, warnings = materialize_experiment_cells(
+        experiment=experiment,
+        variants=[_base_variant()],
+        dataset_scope={},
+        n_permutations=0,
+        registry_experiments=_registry_experiments_for_e13_multi_anchor(),
+    )
+    assert warnings == []
+    assert len(cells) == 2
+    assert {str(cell["params"].get("model")) for cell in cells} == {"dummy"}
+    assert all(cell["params"].get("subject") != "None" for cell in cells)
+
+    within_cells = [
+        cell for cell in cells if str(cell["params"].get("cv")) == "within_subject_loso_session"
+    ]
+    transfer_cells = [
+        cell for cell in cells if str(cell["params"].get("cv")) == "frozen_cross_person_transfer"
+    ]
+    assert len(within_cells) == 1
+    assert len(transfer_cells) == 1
+    assert {str(cell["params"].get("subject")) for cell in within_cells} == {"sub-001"}
+    assert {
+        (str(cell["params"].get("train_subject")), str(cell["params"].get("test_subject")))
+        for cell in transfer_cells
+    } == {("sub-001", "sub-002")}
+
+    metadata_kinds = {
+        str(cell.get("design_metadata", {}).get("special_cell_kind"))
+        for cell in cells
+        if isinstance(cell.get("design_metadata"), dict)
+    }
+    assert metadata_kinds == {"confirmatory_dummy_baseline"}
+    group_ids = {
+        str(cell.get("design_metadata", {}).get("baseline_group_id"))
+        for cell in cells
+        if isinstance(cell.get("design_metadata"), dict)
+    }
+    assert len(group_ids) == 2
+
+
+def test_e13_materialization_adapts_when_confirmatory_anchor_set_changes() -> None:
+    experiment = {"experiment_id": "E13"}
+    cells, warnings = materialize_experiment_cells(
+        experiment=experiment,
+        variants=[_base_variant()],
+        dataset_scope={},
+        n_permutations=0,
+        registry_experiments=_registry_experiments_for_e13_single_anchor(),
+    )
+    assert warnings == []
+    assert len(cells) == 1
+    assert str(cells[0]["params"].get("model")) == "dummy"
+    assert str(cells[0]["params"].get("cv")) == "within_subject_loso_session"
+    assert str(cells[0]["params"].get("subject")) == "sub-001"
 
 
 def test_e23_materialization_expands_omitted_sessions() -> None:

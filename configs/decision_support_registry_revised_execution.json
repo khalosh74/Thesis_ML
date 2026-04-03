@@ -3129,8 +3129,7 @@
           "params": {
             "target": "coarse_affect",
             "cv": "within_subject_loso_session",
-            "model": "dummy_or_majority",
-            "subject": "None"
+            "model": "dummy"
           },
           "expand": {},
           "sections": [

@@ -37,6 +37,9 @@ from Thesis_ML.orchestration.contracts import CompiledStudyManifest
 from Thesis_ML.orchestration.decision_reports import (
     write_decision_reports as _write_decision_reports,
 )
+from Thesis_ML.orchestration.dummy_baseline_aggregation import (
+    build_e13_table_ready_rows as _build_e13_table_ready_rows,
+)
 from Thesis_ML.orchestration.execution_bridge import (
     apply_feature_matrix_reuse_variant as _apply_feature_matrix_reuse_variant,
 )
@@ -62,15 +65,17 @@ from Thesis_ML.orchestration.execution_bridge import (
 from Thesis_ML.orchestration.execution_bridge import (
     resolve_variant_run_id as _resolve_variant_run_id,
 )
-from Thesis_ML.orchestration.permutation_chunk_aggregation import (
-    build_e12_table_ready_rows as _build_e12_table_ready_rows,
-    build_reporting_variant_records as _build_reporting_variant_records,
-)
 from Thesis_ML.orchestration.experiment_selection import (
     collect_dataset_scope as _collect_dataset_scope,
 )
 from Thesis_ML.orchestration.experiment_selection import (
     select_experiments as _select_experiments,
+)
+from Thesis_ML.orchestration.permutation_chunk_aggregation import (
+    build_e12_table_ready_rows as _build_e12_table_ready_rows,
+)
+from Thesis_ML.orchestration.permutation_chunk_aggregation import (
+    build_reporting_variant_records as _build_reporting_variant_records,
 )
 from Thesis_ML.orchestration.reporting import (
     status_snapshot as _status_snapshot,
@@ -1355,7 +1360,9 @@ def run_decision_support_campaign(
                 reuse_dependency_by_group_index = _plan_sibling_feature_matrix_reuse(
                     variants=[cell for _, cell in group_cells],
                     cache_dir=cache_dir,
-                    parent_experiment_ids=[str(experiment["experiment_id"]) for experiment, _ in group_cells],
+                    parent_experiment_ids=[
+                        str(experiment["experiment_id"]) for experiment, _ in group_cells
+                    ],
                 )
                 reuse_dependency_by_run_id: dict[str, str] = {}
                 for dependent_index, anchor_index in reuse_dependency_by_group_index.items():
@@ -1872,6 +1879,8 @@ def run_decision_support_campaign(
     permutation_chunk_merge_summary_path: str | None = None
     e12_table_ready_summary_csv_path: str | None = None
     e12_table_ready_summary_json_path: str | None = None
+    e13_table_ready_summary_csv_path: str | None = None
+    e13_table_ready_summary_json_path: str | None = None
     if isinstance(permutation_chunk_merge_summary, dict):
         merge_groups = permutation_chunk_merge_summary.get("groups")
         merge_errors = permutation_chunk_merge_summary.get("errors")
@@ -1903,6 +1912,24 @@ def run_decision_support_campaign(
             )
             e12_table_ready_summary_csv_path = str(e12_csv_path.resolve())
             e12_table_ready_summary_json_path = str(e12_json_path.resolve())
+
+    e13_table_rows = _build_e13_table_ready_rows(
+        reporting_variant_records=reporting_variant_records
+    )
+    if e13_table_rows:
+        special_aggregation_root = campaign_root / "special_aggregations" / "E13"
+        special_aggregation_root.mkdir(parents=True, exist_ok=True)
+        e13_csv_path = special_aggregation_root / "e13_dummy_baseline_analysis_summary.csv"
+        e13_json_path = special_aggregation_root / "e13_dummy_baseline_analysis_summary.json"
+        import pandas as pd
+
+        pd.DataFrame(e13_table_rows).to_csv(e13_csv_path, index=False)
+        e13_json_path.write_text(
+            f"{json.dumps(e13_table_rows, indent=2)}\n",
+            encoding="utf-8",
+        )
+        e13_table_ready_summary_csv_path = str(e13_csv_path.resolve())
+        e13_table_ready_summary_json_path = str(e13_json_path.resolve())
 
     summary_df = _summarize_by_experiment(
         experiments=selected_experiments,
@@ -2100,6 +2127,8 @@ def run_decision_support_campaign(
             "e12_permutation_chunk_merge_summary": permutation_chunk_merge_summary_path,
             "e12_permutation_analysis_summary_csv": e12_table_ready_summary_csv_path,
             "e12_permutation_analysis_summary_json": e12_table_ready_summary_json_path,
+            "e13_dummy_baseline_analysis_summary_csv": e13_table_ready_summary_csv_path,
+            "e13_dummy_baseline_analysis_summary_json": e13_table_ready_summary_json_path,
             "stage_decision_notes": [str(path.resolve()) for path in stage_decision_paths],
             "phase_artifacts": list(phase_artifact_paths),
             "phase_skip_summary": str(phase_skip_summary_path.resolve()),
@@ -2177,6 +2206,8 @@ def run_decision_support_campaign(
         "e12_permutation_chunk_merge_summary_path": permutation_chunk_merge_summary_path,
         "e12_permutation_analysis_summary_csv_path": e12_table_ready_summary_csv_path,
         "e12_permutation_analysis_summary_json_path": e12_table_ready_summary_json_path,
+        "e13_dummy_baseline_analysis_summary_csv_path": e13_table_ready_summary_csv_path,
+        "e13_dummy_baseline_analysis_summary_json_path": e13_table_ready_summary_json_path,
         "eta_state_path": str((campaign_root / "eta_state.json").resolve()),
         "eta_calibration_path": eta_calibration_path,
         "runtime_history_path": str(history_path.resolve()),
