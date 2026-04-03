@@ -20,7 +20,9 @@ from Thesis_ML.orchestration.stage_lock_rules import (
     preflight_experiment_ids,
 )
 
-_DEFAULT_REVISED_REGISTRY_PATH = Path("configs") / "decision_support_registry_revised_execution.json"
+_DEFAULT_REVISED_REGISTRY_PATH = (
+    Path("configs") / "decision_support_registry_revised_execution.json"
+)
 _DEFAULT_CONFIRMATORY_SCOPE_PATH = Path("configs") / "confirmatory" / "confirmatory_scope_v1.json"
 _REQUIRED_HARD_LOCK_STAGES: tuple[str, ...] = (
     "E01",
@@ -346,6 +348,7 @@ def _summarize_fold_metrics(
     }
     return summary, None
 
+
 def _parse_completed_runs(
     *,
     campaign_root: Path,
@@ -376,7 +379,9 @@ def _parse_completed_runs(
         run_id = str(row.get(run_id_col, "")).strip()
         config_path_text = str(row.get(config_col, ""))
         config_payload = _read_run_config(config_path_text, campaign_root=campaign_root)
-        report_dir = _resolve_report_dir(str(row.get(artifact_col, "")), campaign_root=campaign_root)
+        report_dir = _resolve_report_dir(
+            str(row.get(artifact_col, "")), campaign_root=campaign_root
+        )
 
         metrics_payload: dict[str, Any] = {}
         metrics_path = None
@@ -420,7 +425,9 @@ def _parse_completed_runs(
         test_subject_text = _safe_text(test_subject_value)
 
         task_pooling_choice = "task_specific" if filter_task_text else "pooled_tasks"
-        modality_pooling_choice = "modality_specific" if filter_modality_text else "pooled_modalities"
+        modality_pooling_choice = (
+            "modality_specific" if filter_modality_text else "pooled_modalities"
+        )
         transfer_direction = (
             f"{train_subject_text}->{test_subject_text}"
             if train_subject_text and test_subject_text
@@ -587,9 +594,7 @@ def _slice_winner_rows(
                 "winner_mean_balanced_accuracy": (
                     float(winner["mean_balanced_accuracy"]) if winner else None
                 ),
-                "runner_up_option_key": (
-                    str(runner_up["option_key"]) if runner_up else None
-                ),
+                "runner_up_option_key": (str(runner_up["option_key"]) if runner_up else None),
                 "runner_up_option": (runner_up.get("option_payload") if runner_up else None),
                 "runner_up_mean_balanced_accuracy": (
                     float(runner_up["mean_balanced_accuracy"]) if runner_up else None
@@ -613,6 +618,7 @@ def _slice_winner_rows(
         consistency_pass,
         sign_reversals_across_slices,
     )
+
 
 def _winner_runner_uncertainty(
     *,
@@ -643,7 +649,9 @@ def _winner_runner_uncertainty(
     option_means.sort(key=lambda item: item[1], reverse=True)
 
     winner_key = (
-        candidate_winner_key if candidate_winner_key is not None else (option_means[0][0] if option_means else None)
+        candidate_winner_key
+        if candidate_winner_key is not None
+        else (option_means[0][0] if option_means else None)
     )
     runner_up_key = None
     for option_key, _ in option_means:
@@ -652,7 +660,9 @@ def _winner_runner_uncertainty(
             break
 
     winner_values = option_fold_values.get(str(winner_key), []) if winner_key is not None else []
-    runner_up_values = option_fold_values.get(str(runner_up_key), []) if runner_up_key is not None else []
+    runner_up_values = (
+        option_fold_values.get(str(runner_up_key), []) if runner_up_key is not None else []
+    )
 
     winner_fold_mean = float(np.mean(winner_values)) if winner_values else None
     winner_fold_std = float(np.std(winner_values, ddof=0)) if winner_values else None
@@ -672,7 +682,9 @@ def _winner_runner_uncertainty(
 
     return {
         "winner_option": _candidate_from_key(winner_key) if winner_key is not None else None,
-        "runner_up_option": _candidate_from_key(runner_up_key) if runner_up_key is not None else None,
+        "runner_up_option": _candidate_from_key(runner_up_key)
+        if runner_up_key is not None
+        else None,
         "winner_fold_mean": winner_fold_mean,
         "winner_fold_std": winner_fold_std,
         "runner_up_fold_mean": runner_up_fold_mean,
@@ -868,6 +880,7 @@ def _write_markdown_review(path: Path, payload: dict[str, Any]) -> None:
 
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
+
 def _write_lock_review_template(path: Path, payload: dict[str, Any]) -> None:
     advisory_note = (
         "This stage is advisory by default and should not be treated as an automatic lock."
@@ -945,9 +958,7 @@ def _review_to_csv_rows(payload: dict[str, Any]) -> list[dict[str, Any]]:
             "dummy_baseline_mean_balanced_accuracy": payload.get(
                 "dummy_baseline_mean_balanced_accuracy"
             ),
-            "delta_over_dummy_balanced_accuracy": payload.get(
-                "delta_over_dummy_balanced_accuracy"
-            ),
+            "delta_over_dummy_balanced_accuracy": payload.get("delta_over_dummy_balanced_accuracy"),
             "winner_fold_mean": payload.get("winner_fold_mean"),
             "winner_fold_std": payload.get("winner_fold_std"),
             "runner_up_fold_mean": payload.get("runner_up_fold_mean"),
@@ -983,9 +994,7 @@ def _review_to_csv_rows(payload: dict[str, Any]) -> list[dict[str, Any]]:
                 "dummy_baseline_mean_balanced_accuracy": row.get(
                     "dummy_baseline_mean_balanced_accuracy"
                 ),
-                "delta_over_dummy_balanced_accuracy": row.get(
-                    "delta_over_dummy_balanced_accuracy"
-                ),
+                "delta_over_dummy_balanced_accuracy": row.get("delta_over_dummy_balanced_accuracy"),
                 "uncertainty_mean": (
                     row.get("uncertainty_summary", {}).get("mean")
                     if isinstance(row.get("uncertainty_summary"), dict)
@@ -1002,7 +1011,10 @@ def _review_to_csv_rows(payload: dict[str, Any]) -> list[dict[str, Any]]:
                     else None
                 ),
                 "option": json.dumps(
-                    {field: row.get(field) for field in payload.get("manipulated_factor_fields", [])},
+                    {
+                        field: row.get(field)
+                        for field in payload.get("manipulated_factor_fields", [])
+                    },
                     ensure_ascii=True,
                 ),
                 "slice": json.dumps(
@@ -1049,7 +1061,9 @@ def _load_summary_counts(
 ) -> dict[str, int] | None:
     if summary_df.empty:
         return None
-    experiment_col = _resolve_column(summary_df, "experiment_id", ("experiment_id", "Experiment_ID"))
+    experiment_col = _resolve_column(
+        summary_df, "experiment_id", ("experiment_id", "Experiment_ID")
+    )
     matches = summary_df[summary_df[experiment_col].astype(str) == experiment_id]
     if matches.empty:
         return None
@@ -1103,7 +1117,9 @@ def _load_stage_review_payload_for_bundle(
     computed_reviews: dict[str, dict[str, Any]],
 ) -> tuple[dict[str, Any] | None, str]:
     experiment_key = str(experiment_id).strip().upper()
-    relative_path = _relative_review_json_path(campaign_root=campaign_root, experiment_id=experiment_key)
+    relative_path = _relative_review_json_path(
+        campaign_root=campaign_root, experiment_id=experiment_key
+    )
     if experiment_key in computed_reviews:
         payload = computed_reviews[experiment_key]
         if isinstance(payload, dict):
@@ -1224,6 +1240,18 @@ def emit_confirmatory_selection_bundle(
         "advisory": advisory,
         "freeze_ready": bool(freeze_ready),
         "manual_review_required": bool(manual_review_required),
+        "selection_reporting_notes": {
+            "selection_source": "reviewed_preflight_stage_outputs",
+            "reporting_mode": "locked_confirmatory",
+            "dataset_relationship": "shared_overall_project_dataset",
+            "external_validation_equivalence": "not_equivalent",
+            "interpretation_note": (
+                "Preflight stage outputs were used to select the locked confirmatory "
+                "configuration. Final confirmatory reporting remains within the same "
+                "overall project dataset and is not equivalent to external validation "
+                "or an untouched external holdout cohort."
+            ),
+        },
         "notes": sorted(set(str(note) for note in notes if str(note).strip())),
     }
 
@@ -1295,7 +1323,9 @@ def _apply_phase_artifact_review_update(
             for exp_id in phase_ids
             for value in (
                 (review_by_experiment.get(exp_id) or {}).get("review_artifacts", {}).values()
-                if isinstance((review_by_experiment.get(exp_id) or {}).get("review_artifacts"), dict)
+                if isinstance(
+                    (review_by_experiment.get(exp_id) or {}).get("review_artifacts"), dict
+                )
                 else []
             )
         ]
@@ -1395,7 +1425,10 @@ def review_preflight_experiment(
                 ]
             )
         )
-        if any(_safe_float(row.get("dummy_baseline_mean_balanced_accuracy")) is not None for row in candidate_winner_runs)
+        if any(
+            _safe_float(row.get("dummy_baseline_mean_balanced_accuracy")) is not None
+            for row in candidate_winner_runs
+        )
         else None
     )
     dummy_baseline_mean_macro_f1 = (
@@ -1408,7 +1441,10 @@ def review_preflight_experiment(
                 ]
             )
         )
-        if any(_safe_float(row.get("dummy_baseline_mean_macro_f1")) is not None for row in candidate_winner_runs)
+        if any(
+            _safe_float(row.get("dummy_baseline_mean_macro_f1")) is not None
+            for row in candidate_winner_runs
+        )
         else None
     )
     dummy_baseline_mean_accuracy = (
@@ -1421,15 +1457,16 @@ def review_preflight_experiment(
                 ]
             )
         )
-        if any(_safe_float(row.get("dummy_baseline_mean_accuracy")) is not None for row in candidate_winner_runs)
+        if any(
+            _safe_float(row.get("dummy_baseline_mean_accuracy")) is not None
+            for row in candidate_winner_runs
+        )
         else None
     )
 
-    baseline_delta_pass = (
-        delta_over_dummy_balanced_accuracy is not None
-        and float(delta_over_dummy_balanced_accuracy)
-        >= float(rule.min_baseline_delta_balanced_accuracy)
-    )
+    baseline_delta_pass = delta_over_dummy_balanced_accuracy is not None and float(
+        delta_over_dummy_balanced_accuracy
+    ) >= float(rule.min_baseline_delta_balanced_accuracy)
 
     uncertainty_summary = _winner_runner_uncertainty(
         completed_runs=completed_runs,
@@ -1438,7 +1475,9 @@ def review_preflight_experiment(
     )
 
     cv_values = {
-        str(row.get("cv") or "").strip() for row in completed_runs if str(row.get("cv") or "").strip()
+        str(row.get("cv") or "").strip()
+        for row in completed_runs
+        if str(row.get("cv") or "").strip()
     }
     uncertainty_status = (
         "single_split_no_fold_variance"
@@ -1446,7 +1485,9 @@ def review_preflight_experiment(
         else "fold_spread_available"
     )
 
-    selected_model = _stage3_selected_model(campaign_root=campaign_root, computed_reviews=computed_reviews)
+    selected_model = _stage3_selected_model(
+        campaign_root=campaign_root, computed_reviews=computed_reviews
+    )
     dependency_reruns_required = False
     rerun_required = False
     rerun_commands: list[str] = []

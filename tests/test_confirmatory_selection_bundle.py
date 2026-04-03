@@ -42,7 +42,9 @@ def _write_review(path: Path, *, candidate_winner: dict[str, object], manual: bo
     path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
 
-def test_confirmatory_selection_bundle_resolved_required_stages_freeze_ready(tmp_path: Path) -> None:
+def test_confirmatory_selection_bundle_resolved_required_stages_freeze_ready(
+    tmp_path: Path,
+) -> None:
     campaign_root = tmp_path / "campaign"
     reviews_dir = campaign_root / "preflight_reviews"
     reviews_dir.mkdir(parents=True, exist_ok=True)
@@ -111,9 +113,17 @@ def test_confirmatory_selection_bundle_resolved_required_stages_freeze_ready(tmp
     assert "modality_pooling" in payload["advisory"]
     assert "task_pooling" not in payload["selected"]
     assert "modality_pooling" not in payload["selected"]
+    notes = payload["selection_reporting_notes"]
+    assert notes["selection_source"] == "reviewed_preflight_stage_outputs"
+    assert notes["reporting_mode"] == "locked_confirmatory"
+    assert notes["dataset_relationship"] == "shared_overall_project_dataset"
+    assert notes["external_validation_equivalence"] == "not_equivalent"
+    assert "same overall project dataset" in notes["interpretation_note"]
 
 
-def test_confirmatory_selection_bundle_missing_required_stage_sets_freeze_false(tmp_path: Path) -> None:
+def test_confirmatory_selection_bundle_missing_required_stage_sets_freeze_false(
+    tmp_path: Path,
+) -> None:
     campaign_root = tmp_path / "campaign"
     reviews_dir = campaign_root / "preflight_reviews"
     reviews_dir.mkdir(parents=True, exist_ok=True)
@@ -155,4 +165,3 @@ def test_confirmatory_selection_bundle_missing_required_stage_sets_freeze_false(
     assert payload["freeze_ready"] is False
     assert payload["manual_review_required"] is True
     assert any("E10:missing_review" in str(note) for note in payload["notes"])
-

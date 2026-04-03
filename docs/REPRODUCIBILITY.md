@@ -113,3 +113,5 @@ python scripts/rc1_release_gate.py \
 - `replay_verification_summary.json`
 - `reproducibility_manifest.json`
 - `bundle_manifest.json`
+
+Reproducibility replay verifies deterministic re-execution of official paths and artifact consistency; it does not by itself establish independent external validation. For this thesis workflow, preflight selection and final locked confirmatory reporting are both derived from the same overall project dataset, so conclusions are reproducible and methodologically locked within that dataset scope.

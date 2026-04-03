@@ -23,8 +23,7 @@ class FrozenConfirmatoryBuildError(RuntimeError):
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Build a frozen confirmatory decision-support registry from reviewed "
-            "preflight outputs."
+            "Build a frozen confirmatory decision-support registry from reviewed preflight outputs."
         )
     )
     parser.add_argument("--campaign-root", type=Path, required=True)
@@ -133,11 +132,7 @@ def _required_selected(bundle_payload: dict[str, Any]) -> dict[str, Any]:
         "dimensionality_strategy",
         "preprocessing_strategy",
     )
-    missing = [
-        key
-        for key in required
-        if selected_payload.get(key) in (None, "")
-    ]
+    missing = [key for key in required if selected_payload.get(key) in (None, "")]
     if missing:
         raise FrozenConfirmatoryBuildError(
             "Selection bundle selected payload is missing required keys: "
@@ -164,7 +159,9 @@ def _extract_index_csv_from_run_config(config_path: Path) -> Path | None:
     return None
 
 
-def _infer_index_csv_from_bundle(*, campaign_root: Path, bundle_payload: dict[str, Any]) -> Path | None:
+def _infer_index_csv_from_bundle(
+    *, campaign_root: Path, bundle_payload: dict[str, Any]
+) -> Path | None:
     review_sources = bundle_payload.get("review_sources")
     if not isinstance(review_sources, dict):
         return None
@@ -214,8 +211,7 @@ def _validate_scope_coverage(
     missing_columns = sorted(required_columns - set(frame.columns))
     if missing_columns:
         raise FrozenConfirmatoryBuildError(
-            "Coverage validation index is missing required columns: "
-            + ", ".join(missing_columns)
+            "Coverage validation index is missing required columns: " + ", ".join(missing_columns)
         )
 
     subjects_present = sorted(frame["subject"].astype(str).unique().tolist())
@@ -401,25 +397,17 @@ def _build_protocol_context(
             "split": str(cv_mode),
             "primary_metric": str(primary_metric),
             "model_family": model_name,
-            "hyperparameter_policy": (
-                "grouped_nested_tuning" if tuning_enabled else "fixed"
-            ),
+            "hyperparameter_policy": ("grouped_nested_tuning" if tuning_enabled else "fixed"),
             "class_weight_policy": class_weight_policy,
-            "subgroup_min_samples_per_group": int(
-                subgroup_payload.get("min_samples_per_group", 1)
-            ),
-            "subgroup_min_classes_per_group": int(
-                subgroup_payload.get("min_classes_per_group", 1)
-            ),
+            "subgroup_min_samples_per_group": int(subgroup_payload.get("min_samples_per_group", 1)),
+            "subgroup_min_classes_per_group": int(subgroup_payload.get("min_classes_per_group", 1)),
             "subgroup_report_small_groups": bool(
                 subgroup_payload.get("report_small_groups", False)
             ),
             "multiplicity_primary_hypotheses": int(
                 multiplicity_payload.get("primary_hypotheses", 1)
             ),
-            "multiplicity_primary_alpha": float(
-                multiplicity_payload.get("primary_alpha", 0.05)
-            ),
+            "multiplicity_primary_alpha": float(multiplicity_payload.get("primary_alpha", 0.05)),
             "multiplicity_secondary_policy": str(
                 multiplicity_payload.get("secondary_policy", "descriptive_only")
             ),
@@ -470,6 +458,7 @@ def _write_markdown_report(path: Path, *, payload: dict[str, Any]) -> None:
     selected = payload["selected"]
     scope = payload["scope"]
     advisory = payload["advisory"]
+    interpretation_boundary = payload.get("interpretation_boundary", {})
     lines = [
         "# Frozen Confirmatory Registry Report",
         "",
@@ -512,6 +501,16 @@ def _write_markdown_report(path: Path, *, payload: dict[str, Any]) -> None:
             "- framework_mode: confirmatory",
             "- protocol_name: thesis_confirmatory_v1",
             f"- protocol_version: {payload['protocol_binding']['protocol_version']}",
+            "",
+            "## Selection and Validation Scope",
+            "- Preflight experiments were used to select the final locked confirmatory configuration.",
+            "- Final frozen confirmatory runs report that locked configuration under fixed settings.",
+            "- Selection and confirmatory reporting both use the same overall project dataset.",
+            (
+                "- Interpretation boundary: stronger than ad hoc tuning, but weaker than "
+                "independent external validation."
+            ),
+            f"- validation_scope: {interpretation_boundary.get('validation_scope', 'internal_project_dataset')}",
             "",
             "## Caveats",
             "- E02/E03 remain advisory and do not override canonical confirmatory scope.",
@@ -565,7 +564,9 @@ def main(argv: list[str] | None = None) -> int:
             "reason": "index_csv not provided and could not be inferred from bundle review sources.",
         }
 
-    protocol_payload = _load_json_object(_DEFAULT_PROTOCOL_PATH.resolve(), label="confirmatory protocol")
+    protocol_payload = _load_json_object(
+        _DEFAULT_PROTOCOL_PATH.resolve(), label="confirmatory protocol"
+    )
 
     campaign_id = _safe_text(bundle_payload.get("campaign_id")) or campaign_root.name
     selected_model = str(selected["model"])
@@ -701,6 +702,17 @@ def main(argv: list[str] | None = None) -> int:
     report_path = output_registry.parent / f"frozen_confirmatory_report_{campaign_id}.md"
 
     protocol_version = str(protocol_payload.get("protocol_version") or "v1")
+    interpretation_boundary = {
+        "selection_reporting_relationship": "preflight_selected_locked_confirmatory",
+        "validation_scope": "internal_project_dataset",
+        "external_validation_equivalence": "not_equivalent",
+        "interpretation_note": (
+            "The frozen confirmatory registry is generated from reviewed preflight "
+            "selection outputs. Selection and final reporting belong to the same "
+            "overall project dataset, supporting methodological and dataset-specific "
+            "conclusions rather than external validation claims."
+        ),
+    }
     manifest_payload = {
         "manifest_id": f"frozen_confirmatory_manifest_{campaign_id}",
         "generated_at_utc": datetime.now(UTC).replace(microsecond=0).isoformat(),
@@ -723,6 +735,14 @@ def main(argv: list[str] | None = None) -> int:
             "protocol_version": protocol_version,
             "protocol_schema_version": THESIS_PROTOCOL_SCHEMA_VERSION,
         },
+        "selection_reporting_relationship": interpretation_boundary[
+            "selection_reporting_relationship"
+        ],
+        "validation_scope": interpretation_boundary["validation_scope"],
+        "external_validation_equivalence": interpretation_boundary[
+            "external_validation_equivalence"
+        ],
+        "interpretation_note": interpretation_boundary["interpretation_note"],
         "coverage_validation": coverage_validation,
         "registry_path": str(output_registry.resolve()),
         "report_path": str(report_path.resolve()),
@@ -738,6 +758,7 @@ def main(argv: list[str] | None = None) -> int:
             "protocol_binding": {
                 "protocol_version": protocol_version,
             },
+            "interpretation_boundary": interpretation_boundary,
         },
     )
 

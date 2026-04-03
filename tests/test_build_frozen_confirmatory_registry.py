@@ -76,10 +76,38 @@ def _write_bundle(path: Path) -> None:
 def _write_index(path: Path, *, modality: str = "audiovisual") -> None:
     frame = pd.DataFrame(
         [
-            {"sample_id": "s1", "subject": "sub-001", "session": "ses-01", "task": "emo", "modality": modality, "coarse_affect": "positive"},
-            {"sample_id": "s2", "subject": "sub-001", "session": "ses-02", "task": "recog", "modality": modality, "coarse_affect": "negative"},
-            {"sample_id": "s3", "subject": "sub-002", "session": "ses-01", "task": "emo", "modality": modality, "coarse_affect": "positive"},
-            {"sample_id": "s4", "subject": "sub-002", "session": "ses-02", "task": "recog", "modality": modality, "coarse_affect": "negative"},
+            {
+                "sample_id": "s1",
+                "subject": "sub-001",
+                "session": "ses-01",
+                "task": "emo",
+                "modality": modality,
+                "coarse_affect": "positive",
+            },
+            {
+                "sample_id": "s2",
+                "subject": "sub-001",
+                "session": "ses-02",
+                "task": "recog",
+                "modality": modality,
+                "coarse_affect": "negative",
+            },
+            {
+                "sample_id": "s3",
+                "subject": "sub-002",
+                "session": "ses-01",
+                "task": "emo",
+                "modality": modality,
+                "coarse_affect": "positive",
+            },
+            {
+                "sample_id": "s4",
+                "subject": "sub-002",
+                "session": "ses-02",
+                "task": "recog",
+                "modality": modality,
+                "coarse_affect": "negative",
+            },
         ]
     )
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -160,7 +188,9 @@ def test_build_frozen_confirmatory_registry_generates_expected_cells(tmp_path: P
     bundle_path = tmp_path / "bundle.json"
     scope_path = tmp_path / "scope.json"
     index_path = tmp_path / "index.csv"
-    output_registry = tmp_path / "configs" / "generated" / "frozen_confirmatory_registry_campaign_a.json"
+    output_registry = (
+        tmp_path / "configs" / "generated" / "frozen_confirmatory_registry_campaign_a.json"
+    )
 
     _write_bundle(bundle_path)
     _write_scope(scope_path)
@@ -188,6 +218,23 @@ def test_build_frozen_confirmatory_registry_generates_expected_cells(tmp_path: P
     report_path = output_registry.parent / "frozen_confirmatory_report_campaign_a.md"
     assert manifest_path.exists()
     assert report_path.exists()
+
+    manifest_payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert (
+        manifest_payload["selection_reporting_relationship"]
+        == "preflight_selected_locked_confirmatory"
+    )
+    assert manifest_payload["validation_scope"] == "internal_project_dataset"
+    assert manifest_payload["external_validation_equivalence"] == "not_equivalent"
+    assert "same overall project dataset" in manifest_payload["interpretation_note"]
+
+    report_text = report_path.read_text(encoding="utf-8")
+    assert "## Selection and Validation Scope" in report_text
+    assert "same overall project dataset" in report_text
+    assert (
+        "stronger than ad hoc tuning, but weaker than independent external validation"
+        in report_text
+    )
 
     registry_payload = json.loads(output_registry.read_text(encoding="utf-8"))
     templates = registry_payload["experiments"][0]["variant_templates"]
@@ -245,7 +292,9 @@ def test_build_frozen_confirmatory_registry_fails_when_scope_coverage_missing(
     bundle_path = tmp_path / "bundle.json"
     scope_path = tmp_path / "scope.json"
     index_path = tmp_path / index_name
-    output_registry = tmp_path / "configs" / "generated" / "frozen_confirmatory_registry_campaign_a.json"
+    output_registry = (
+        tmp_path / "configs" / "generated" / "frozen_confirmatory_registry_campaign_a.json"
+    )
 
     _write_bundle(bundle_path)
     _write_scope(scope_path)
