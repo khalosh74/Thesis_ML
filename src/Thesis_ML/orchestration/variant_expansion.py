@@ -153,7 +153,8 @@ def _resolve_e12_anchor_identities(
             continue
         ordered_experiments.append(candidate)
         seen_order_ids.add(experiment_key)
-    for pool in (stage5_candidates, fallback_candidates):
+    candidate_pools = [stage5_candidates] if stage5_candidates else [fallback_candidates]
+    for pool in candidate_pools:
         for row in pool:
             experiment_id = _safe_text(row.get("experiment_id"))
             if not experiment_id or experiment_id in seen_order_ids:

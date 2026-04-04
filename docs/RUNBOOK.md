@@ -34,8 +34,17 @@ python -m pip install -e ".[dev,optuna]"
 
 Configured in `src/Thesis_ML/config/paths.py`.
 
+Authority layering (Phase 1):
+- scientific authority: `configs/confirmatory/confirmatory_scope_v1.json`, `docs/Science/CLAIM_EVALUATION_RULES.md`, `docs/Science/THESIS_TRACEABILITY_MATRIX.md`
+- thesis runtime authority: `configs/decision_support_registry_revised_execution.json`
+- package/demo registry: `configs/decision_support_registry.json`
+- generation authority: `templates/thesis_experiment_program.xlsx` plus workbook compiler/template constants
+- derived mirrors only: `src/Thesis_ML/assets/configs/decision_support_registry.json`, `src/Thesis_ML/assets/templates/thesis_experiment_program.xlsx`
+- archive-only backups: `configs/archive/registries/`
+
 - Decision-support registry default:
-  - source checkout: `configs/decision_support_registry.json`
+  - source checkout thesis runtime: `configs/decision_support_registry_revised_execution.json`
+  - source checkout package/demo: `configs/decision_support_registry.json`
   - installed wheel: packaged asset under `Thesis_ML/assets/configs/decision_support_registry.json`
 - Workbook generation default output: `templates/thesis_experiment_program.xlsx` under current project/cwd
 - Shipped workbook template asset:
@@ -418,7 +427,7 @@ Run state file:
 
 ```bash
 thesisml-run-decision-support \
-  --registry configs/decision_support_registry.json \
+  --registry configs/decision_support_registry_revised_execution.json \
   --index-csv Data/processed/dataset_index.csv \
   --data-root Data \
   --cache-dir Data/processed/feature_cache \
@@ -433,6 +442,9 @@ python scripts/freeze_workbook_registry.py \
   --workbook templates/thesis_experiment_program_revised.xlsx \
   --output configs/decision_support_registry_revised_execution.json
 ```
+
+Note: `templates/thesis_experiment_program_revised.xlsx` is treated as a study workbook instance,
+not as a generic reusable template.
 
 Run from the frozen execution registry:
 

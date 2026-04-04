@@ -54,6 +54,17 @@ def _resolve_default_registry(source_repo_root: Path | None) -> Path:
     )
 
 
+def _resolve_thesis_runtime_registry(source_repo_root: Path | None) -> Path:
+    if source_repo_root is not None:
+        source_path = (
+            source_repo_root / "configs" / "decision_support_registry_revised_execution.json"
+        )
+        if source_path.exists():
+            return source_path
+    # Wheels do not ship thesis runtime registries; fall back to the package default registry.
+    return _resolve_default_registry(source_repo_root)
+
+
 def _resolve_shipped_workbook_template(source_repo_root: Path | None) -> Path:
     if source_repo_root is not None:
         source_path = source_repo_root / "templates" / "thesis_experiment_program.xlsx"
@@ -74,12 +85,20 @@ DEFAULT_CONFIG_REGISTRY_PATH = resolve_config_registry_path(
     project_root=PROJECT_ROOT,
 )
 
-DEFAULT_DECISION_SUPPORT_REGISTRY = resolve_config_alias(
-    "registry.decision_support_default",
+DEFAULT_DECISION_SUPPORT_THESIS_RUNTIME_REGISTRY = resolve_config_alias(
+    "registry.decision_support_thesis_runtime",
+    source_repo_root=SOURCE_REPO_ROOT,
+    project_root=PROJECT_ROOT,
+    fallback=_resolve_thesis_runtime_registry(SOURCE_REPO_ROOT),
+)
+DEFAULT_DECISION_SUPPORT_PACKAGE_REGISTRY = resolve_config_alias(
+    "registry.decision_support_package_default",
     source_repo_root=SOURCE_REPO_ROOT,
     project_root=PROJECT_ROOT,
     fallback=_resolve_default_registry(SOURCE_REPO_ROOT),
 )
+# Backward-compatible alias used by existing call sites.
+DEFAULT_DECISION_SUPPORT_REGISTRY = DEFAULT_DECISION_SUPPORT_THESIS_RUNTIME_REGISTRY
 SHIPPED_WORKBOOK_TEMPLATE = _resolve_shipped_workbook_template(SOURCE_REPO_ROOT)
 
 # Writable default output location used by workbook-generation CLIs.

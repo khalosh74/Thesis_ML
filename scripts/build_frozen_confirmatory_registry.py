@@ -10,8 +10,12 @@ from typing import Any
 import pandas as pd
 
 from Thesis_ML.config.framework_mode import FrameworkMode
+from Thesis_ML.config.paths import DEFAULT_DECISION_SUPPORT_THESIS_RUNTIME_REGISTRY
 from Thesis_ML.config.schema_versions import THESIS_PROTOCOL_SCHEMA_VERSION
 from Thesis_ML.experiments.model_catalog import get_model_cost_entry, projected_runtime_seconds
+from Thesis_ML.verification.confirmatory_scope_runtime_alignment import (
+    verify_confirmatory_scope_runtime_alignment,
+)
 
 _DEFAULT_PROTOCOL_PATH = Path("configs") / "protocols" / "thesis_confirmatory_v1.json"
 
@@ -30,6 +34,18 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--selection-bundle", type=Path, required=True)
     parser.add_argument("--scope-config", type=Path, required=True)
     parser.add_argument("--output-registry", type=Path, required=True)
+    parser.add_argument(
+        "--runtime-registry",
+        type=Path,
+        default=Path(DEFAULT_DECISION_SUPPORT_THESIS_RUNTIME_REGISTRY),
+        help="Thesis runtime registry used for scientific scope alignment checks.",
+    )
+    parser.add_argument(
+        "--scope-exceptions",
+        type=Path,
+        default=None,
+        help="Optional explicit deferred exceptions for confirmatory scope alignment.",
+    )
     parser.add_argument(
         "--index-csv",
         type=Path,
@@ -536,6 +552,24 @@ def main(argv: list[str] | None = None) -> int:
     bundle_payload = _load_json_object(bundle_path, label="confirmatory selection bundle")
     scope_payload_raw = _load_json_object(scope_path, label="confirmatory scope config")
     scope = _resolve_scope_payload(scope_payload_raw)
+    alignment_summary = verify_confirmatory_scope_runtime_alignment(
+        scope_config_path=scope_path,
+        runtime_registry_path=args.runtime_registry.resolve(),
+        exceptions_config_path=(
+            args.scope_exceptions.resolve() if args.scope_exceptions is not None else None
+        ),
+    )
+    if not bool(alignment_summary.get("passed", False)):
+        issue_codes = [
+            str(row.get("code"))
+            for row in list(alignment_summary.get("issues") or [])
+            if isinstance(row, dict)
+        ]
+        raise FrozenConfirmatoryBuildError(
+            "Scientific scope and thesis runtime registry are not aligned; "
+            f"cannot build frozen confirmatory registry. Issues: {', '.join(issue_codes)}"
+        )
+
     selected = _required_selected(bundle_payload)
     advisory_payload = bundle_payload.get("advisory")
     advisory = dict(advisory_payload) if isinstance(advisory_payload, dict) else {}
@@ -755,6 +789,7 @@ def main(argv: list[str] | None = None) -> int:
         ],
         "interpretation_note": interpretation_boundary["interpretation_note"],
         "coverage_validation": coverage_validation,
+        "scope_runtime_alignment": alignment_summary,
         "registry_path": str(output_registry.resolve()),
         "report_path": str(report_path.resolve()),
     }

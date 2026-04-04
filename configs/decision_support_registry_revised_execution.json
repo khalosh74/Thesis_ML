@@ -1,6 +1,6 @@
 {
   "schema_version": "workbook-v1",
-  "description": "Frozen execution registry compiled from workbook thesis_experiment_program_revised.xlsx.",
+  "description": "Frozen thesis runtime execution registry compiled from study workbook instance thesis_experiment_program_revised.xlsx.",
   "experiments": [
     {
       "experiment_id": "E01",
@@ -3274,6 +3274,42 @@
           "factor_settings": {},
           "fixed_controls": {},
           "design_metadata": {}
+        },
+        {
+          "experiment_id": "E16",
+          "template_id": "wb_row_014_sub002",
+          "supported": true,
+          "unsupported_reason": null,
+          "params": {
+            "target": "coarse_affect",
+            "cv": "within_subject_loso_session",
+            "model": "ridge",
+            "subject": "sub-002"
+          },
+          "expand": {},
+          "sections": [
+            "dataset_selection",
+            "feature_cache_build",
+            "feature_matrix_load",
+            "spatial_validation",
+            "model_fit",
+            "interpretability",
+            "evaluation"
+          ],
+          "artifacts": [],
+          "start_section": "dataset_selection",
+          "end_section": "evaluation",
+          "base_artifact_id": null,
+          "reuse_policy": "auto",
+          "search_space_id": null,
+          "study_id": null,
+          "trial_id": null,
+          "cell_id": null,
+          "repeat_id": null,
+          "seed": null,
+          "factor_settings": {},
+          "fixed_controls": {},
+          "design_metadata": {}
         }
       ]
     },
@@ -3309,6 +3345,43 @@
             "model": "ridge",
             "train_subject": "sub-001",
             "test_subject": "sub-002"
+          },
+          "expand": {},
+          "sections": [
+            "dataset_selection",
+            "feature_cache_build",
+            "feature_matrix_load",
+            "spatial_validation",
+            "model_fit",
+            "interpretability",
+            "evaluation"
+          ],
+          "artifacts": [],
+          "start_section": "dataset_selection",
+          "end_section": "evaluation",
+          "base_artifact_id": null,
+          "reuse_policy": "auto",
+          "search_space_id": null,
+          "study_id": null,
+          "trial_id": null,
+          "cell_id": null,
+          "repeat_id": null,
+          "seed": null,
+          "factor_settings": {},
+          "fixed_controls": {},
+          "design_metadata": {}
+        },
+        {
+          "experiment_id": "E17",
+          "template_id": "wb_row_015_reverse",
+          "supported": true,
+          "unsupported_reason": null,
+          "params": {
+            "target": "coarse_affect",
+            "cv": "frozen_cross_person_transfer",
+            "model": "ridge",
+            "train_subject": "sub-002",
+            "test_subject": "sub-001"
           },
           "expand": {},
           "sections": [

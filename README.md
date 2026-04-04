@@ -17,6 +17,7 @@ Governance policy and release-facing boundaries are explicit and versioned:
 - Intended/non-intended use and misuse warnings: `docs/USE_AND_MISUSE_BOUNDARIES.md`
 - Confirmatory-ready criteria and verification command: `docs/CONFIRMATORY_READY.md`
 - Canonical reproducibility workflow: `docs/REPRODUCIBILITY.md`
+- Authority layering manifest: `configs/authority_manifest.json`
 
 Confirmatory-ready means contract/governance checks passed for frozen scientific runs.
 It does **not** mean deployable clinical decision support.
@@ -197,7 +198,7 @@ Decision-support campaign command (requires index/cache/data paths to exist):
 
 ```powershell
 python -m uv run thesisml-run-decision-support `
-  --registry configs/decision_support_registry.json `
+  --registry configs/decision_support_registry_revised_execution.json `
   --index-csv Data/processed/dataset_index.csv `
   --data-root Data `
   --cache-dir Data/processed/feature_cache `
@@ -206,8 +207,10 @@ python -m uv run thesisml-run-decision-support `
 ```
 
 Registry default behavior:
-- source checkout default resolves to `configs/decision_support_registry.json`
+- source checkout thesis runtime alias resolves to `configs/decision_support_registry_revised_execution.json`
+- source checkout package/demo alias resolves to `configs/decision_support_registry.json`
 - installed wheel default resolves to packaged asset `Thesis_ML/assets/configs/decision_support_registry.json`
+- legacy alias `registry.decision_support_default` is retained and resolves to thesis runtime
 - explicit `--registry` remains supported and is recommended for controlled runs
 
 Optional Optuna-backed variant search:
@@ -245,6 +248,10 @@ python -m uv run thesisml-run-decision-support `
   --all `
   --write-back-workbook
 ```
+
+Study workbook instance classification:
+- `templates/thesis_experiment_program_revised.xlsx` is a thesis study instance used to freeze runtime
+  registries; it is not a generic template authority.
 
 ## Compatibility install path (kept)
 

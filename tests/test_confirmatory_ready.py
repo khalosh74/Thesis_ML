@@ -169,3 +169,47 @@ def test_confirmatory_ready_surfaces_official_verification_failure(
     assert any(
         issue["code"] == "official_artifact_verification_failed" for issue in summary["issues"]
     )
+
+
+def test_confirmatory_ready_fails_when_scope_runtime_alignment_fails(
+    tmp_path: Path, monkeypatch
+) -> None:
+    output_dir = tmp_path / "protocol_runs" / "thesis-confirmatory__1.0.0"
+    _write_minimal_confirmatory_summary(output_dir)
+    monkeypatch.setattr(
+        "Thesis_ML.verification.confirmatory_ready.verify_official_artifacts",
+        lambda **_: {"passed": True, "framework_mode": "confirmatory", "issues": []},
+    )
+    monkeypatch.setattr(
+        "Thesis_ML.verification.confirmatory_ready.verify_confirmatory_scope_runtime_alignment",
+        lambda **_: {
+            "passed": False,
+            "issues": [{"code": "scope_within_missing_in_runtime"}],
+        },
+    )
+    summary = verify_confirmatory_ready(output_dir=output_dir)
+    assert summary["passed"] is False
+    assert any(
+        issue["code"] == "confirmatory_scope_runtime_mismatch" for issue in summary["issues"]
+    )
+
+
+def test_confirmatory_ready_enforces_control_coverage_when_requested(
+    tmp_path: Path, monkeypatch
+) -> None:
+    output_dir = tmp_path / "protocol_runs" / "thesis-confirmatory__1.0.0"
+    _write_minimal_confirmatory_summary(output_dir)
+    monkeypatch.setattr(
+        "Thesis_ML.verification.confirmatory_ready.verify_official_artifacts",
+        lambda **_: {"passed": True, "framework_mode": "confirmatory", "issues": []},
+    )
+    monkeypatch.setattr(
+        "Thesis_ML.verification.confirmatory_ready.verify_confirmatory_scope_runtime_alignment",
+        lambda **_: {"passed": True, "issues": []},
+    )
+    summary = verify_confirmatory_ready(output_dir=output_dir, require_control_coverage=True)
+    assert summary["passed"] is False
+    assert any(
+        issue["code"] == "confirmatory_control_coverage_artifact_missing"
+        for issue in summary["issues"]
+    )

@@ -6,7 +6,9 @@ from typing import Any
 
 from Thesis_ML.config.paths import (
     DEFAULT_COMPARISON_SPEC_PATH,
+    DEFAULT_DECISION_SUPPORT_PACKAGE_REGISTRY,
     DEFAULT_DECISION_SUPPORT_REGISTRY,
+    DEFAULT_DECISION_SUPPORT_THESIS_RUNTIME_REGISTRY,
     DEFAULT_TARGET_CONFIGS_DIR,
     DEFAULT_THESIS_CONFIRMATORY_PROTOCOL_PATH,
     DEFAULT_THESIS_PROTOCOL_PATH,
@@ -26,7 +28,9 @@ _EXPECTED_ALIASES = {
     "protocol.thesis_confirmatory_frozen": "protocol.thesis_confirmatory_v1",
     "comparison.grouped_nested_default": "comparison.model_family_grouped_nested_comparison_v2",
     "comparison.fixed_linear_baseline": "comparison.model_family_comparison_v1",
-    "registry.decision_support_default": "registry.decision_support_registry",
+    "registry.decision_support_thesis_runtime": "registry.decision_support_thesis_runtime",
+    "registry.decision_support_package_default": "registry.decision_support_registry",
+    "registry.decision_support_default": "registry.decision_support_thesis_runtime",
 }
 
 _EXPECTED_LIFECYCLE_BY_ID = {
@@ -38,7 +42,8 @@ _EXPECTED_LIFECYCLE_BY_ID = {
     "comparison.model_family_comparison_v1": "active_variant",
     "comparison.model_family_grouped_nested_comparison_v1": "compatibility",
     "comparison.model_family_grouped_nested_comparison_v2": "active_default",
-    "registry.decision_support_registry": "active_default",
+    "registry.decision_support_thesis_runtime": "active_default",
+    "registry.decision_support_registry": "active_variant",
 }
 
 
@@ -105,6 +110,7 @@ def test_registry_lists_every_current_config_json_file() -> None:
         }
     )
     expected_paths.add("configs/decision_support_registry.json")
+    expected_paths.add("configs/decision_support_registry_revised_execution.json")
 
     assert registry_paths == expected_paths
 
@@ -141,21 +147,34 @@ def test_alias_paths_match_current_runtime_defaults() -> None:
         config_id = aliases[alias_key]
         return (repo_root / str(by_id[config_id]["path"])).resolve()
 
-    assert _alias_path("protocol.thesis_canonical_default") == Path(
-        DEFAULT_THESIS_PROTOCOL_PATH
-    ).resolve()
-    assert _alias_path("protocol.thesis_confirmatory_frozen") == Path(
-        DEFAULT_THESIS_CONFIRMATORY_PROTOCOL_PATH
-    ).resolve()
-    assert _alias_path("comparison.grouped_nested_default") == Path(
-        DEFAULT_COMPARISON_SPEC_PATH
-    ).resolve()
-    assert _alias_path("registry.decision_support_default") == Path(
-        DEFAULT_DECISION_SUPPORT_REGISTRY
-    ).resolve()
-    assert _alias_path("target.coarse_affect_default") == (
-        Path(DEFAULT_TARGET_CONFIGS_DIR) / "affect_mapping_v2.json"
-    ).resolve()
+    assert (
+        _alias_path("protocol.thesis_canonical_default")
+        == Path(DEFAULT_THESIS_PROTOCOL_PATH).resolve()
+    )
+    assert (
+        _alias_path("protocol.thesis_confirmatory_frozen")
+        == Path(DEFAULT_THESIS_CONFIRMATORY_PROTOCOL_PATH).resolve()
+    )
+    assert (
+        _alias_path("comparison.grouped_nested_default")
+        == Path(DEFAULT_COMPARISON_SPEC_PATH).resolve()
+    )
+    assert (
+        _alias_path("registry.decision_support_thesis_runtime")
+        == Path(DEFAULT_DECISION_SUPPORT_THESIS_RUNTIME_REGISTRY).resolve()
+    )
+    assert (
+        _alias_path("registry.decision_support_package_default")
+        == Path(DEFAULT_DECISION_SUPPORT_PACKAGE_REGISTRY).resolve()
+    )
+    assert (
+        _alias_path("registry.decision_support_default")
+        == Path(DEFAULT_DECISION_SUPPORT_REGISTRY).resolve()
+    )
+    assert (
+        _alias_path("target.coarse_affect_default")
+        == (Path(DEFAULT_TARGET_CONFIGS_DIR) / "affect_mapping_v2.json").resolve()
+    )
 
 
 def test_exact_lifecycle_classifications() -> None:

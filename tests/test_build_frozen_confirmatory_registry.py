@@ -181,6 +181,81 @@ def _write_index_missing_task(path: Path) -> None:
     frame.to_csv(path, index=False)
 
 
+def _write_runtime_registry(path: Path, *, include_full_scope: bool) -> None:
+    e16_templates: list[dict[str, object]] = [
+        {
+            "template_id": "e16_sub001",
+            "supported": True,
+            "params": {
+                "target": "coarse_affect",
+                "cv": "within_subject_loso_session",
+                "model": "ridge",
+                "subject": "sub-001",
+            },
+        }
+    ]
+    e17_templates: list[dict[str, object]] = [
+        {
+            "template_id": "e17_001_to_002",
+            "supported": True,
+            "params": {
+                "target": "coarse_affect",
+                "cv": "frozen_cross_person_transfer",
+                "model": "ridge",
+                "train_subject": "sub-001",
+                "test_subject": "sub-002",
+            },
+        }
+    ]
+    if include_full_scope:
+        e16_templates.append(
+            {
+                "template_id": "e16_sub002",
+                "supported": True,
+                "params": {
+                    "target": "coarse_affect",
+                    "cv": "within_subject_loso_session",
+                    "model": "ridge",
+                    "subject": "sub-002",
+                },
+            }
+        )
+        e17_templates.append(
+            {
+                "template_id": "e17_002_to_001",
+                "supported": True,
+                "params": {
+                    "target": "coarse_affect",
+                    "cv": "frozen_cross_person_transfer",
+                    "model": "ridge",
+                    "train_subject": "sub-002",
+                    "test_subject": "sub-001",
+                },
+            }
+        )
+
+    payload = {
+        "schema_version": "workbook-v1",
+        "experiments": [
+            {
+                "experiment_id": "E16",
+                "stage": "Stage 5 - Confirmatory analysis",
+                "executable_now": True,
+                "execution_status": "unknown",
+                "variant_templates": e16_templates,
+            },
+            {
+                "experiment_id": "E17",
+                "stage": "Stage 5 - Confirmatory analysis",
+                "executable_now": True,
+                "execution_status": "unknown",
+                "variant_templates": e17_templates,
+            },
+        ],
+    }
+    path.write_text(f"{json.dumps(payload, indent=2)}\n", encoding="utf-8")
+
+
 def test_build_frozen_confirmatory_registry_generates_expected_cells(tmp_path: Path) -> None:
     campaign_root = tmp_path / "campaigns" / "campaign_a"
     campaign_root.mkdir(parents=True, exist_ok=True)
@@ -316,6 +391,48 @@ def test_build_frozen_confirmatory_registry_uses_scope_feature_space_when_bundle
         assert row["params"]["feature_space"] == "whole_brain_masked"
 
 
+def test_build_frozen_confirmatory_registry_fails_on_scope_runtime_mismatch(
+    tmp_path: Path,
+) -> None:
+    campaign_root = tmp_path / "campaigns" / "campaign_a"
+    campaign_root.mkdir(parents=True, exist_ok=True)
+
+    bundle_path = tmp_path / "bundle.json"
+    scope_path = tmp_path / "scope.json"
+    runtime_registry_path = tmp_path / "runtime_registry.json"
+    index_path = tmp_path / "index.csv"
+    output_registry = (
+        tmp_path / "configs" / "generated" / "frozen_confirmatory_registry_campaign_a.json"
+    )
+
+    _write_bundle(bundle_path)
+    _write_scope(scope_path)
+    _write_runtime_registry(runtime_registry_path, include_full_scope=False)
+    _write_index(index_path)
+
+    script = _load_script_module(Path("scripts") / "build_frozen_confirmatory_registry.py")
+    with pytest.raises(
+        Exception,
+        match="Scientific scope and thesis runtime registry are not aligned",
+    ):
+        script.main(
+            [
+                "--campaign-root",
+                str(campaign_root),
+                "--selection-bundle",
+                str(bundle_path),
+                "--scope-config",
+                str(scope_path),
+                "--runtime-registry",
+                str(runtime_registry_path),
+                "--output-registry",
+                str(output_registry),
+                "--index-csv",
+                str(index_path),
+            ]
+        )
+
+
 def test_build_frozen_confirmatory_registry_rejects_feature_space_mismatch(
     tmp_path: Path,
 ) -> None:
@@ -338,7 +455,9 @@ def test_build_frozen_confirmatory_registry_rejects_feature_space_mismatch(
     _write_index(index_path)
 
     script = _load_script_module(Path("scripts") / "build_frozen_confirmatory_registry.py")
-    with pytest.raises(Exception, match="feature_space does not match canonical confirmatory scope"):
+    with pytest.raises(
+        Exception, match="feature_space does not match canonical confirmatory scope"
+    ):
         script.main(
             [
                 "--campaign-root",

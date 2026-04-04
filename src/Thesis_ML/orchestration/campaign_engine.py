@@ -129,6 +129,10 @@ from Thesis_ML.orchestration.workbook_bridge import (
     build_trial_results_rows as _build_trial_results_rows,
 )
 from Thesis_ML.orchestration.workbook_writeback import write_workbook_results
+from Thesis_ML.verification.confirmatory_scope_runtime_alignment import (
+    build_confirmatory_control_coverage_rows,
+    collect_runtime_confirmatory_anchors,
+)
 
 
 def _now_timestamp() -> str:
@@ -1881,6 +1885,10 @@ def run_decision_support_campaign(
     e12_table_ready_summary_json_path: str | None = None
     e13_table_ready_summary_csv_path: str | None = None
     e13_table_ready_summary_json_path: str | None = None
+    confirmatory_anchor_control_coverage_csv_path: str | None = None
+    confirmatory_anchor_control_coverage_json_path: str | None = None
+    e12_table_rows: list[dict[str, Any]] = []
+    e13_table_rows: list[dict[str, Any]] = []
     if isinstance(permutation_chunk_merge_summary, dict):
         merge_groups = permutation_chunk_merge_summary.get("groups")
         merge_errors = permutation_chunk_merge_summary.get("errors")
@@ -1930,6 +1938,47 @@ def run_decision_support_campaign(
         )
         e13_table_ready_summary_csv_path = str(e13_csv_path.resolve())
         e13_table_ready_summary_json_path = str(e13_json_path.resolve())
+
+    runtime_anchor_rows: list[dict[str, Any]] = []
+    try:
+        runtime_registry_payload = json.loads(registry_path.read_text(encoding="utf-8"))
+        if isinstance(runtime_registry_payload, dict):
+            runtime_anchor_rows = collect_runtime_confirmatory_anchors(runtime_registry_payload)
+    except Exception:
+        runtime_anchor_rows = []
+
+    if runtime_anchor_rows:
+        coverage_rows = build_confirmatory_control_coverage_rows(
+            runtime_anchors=runtime_anchor_rows,
+            e12_table_rows=e12_table_rows,
+            e13_table_rows=e13_table_rows,
+            e12_summary_json_path=e12_table_ready_summary_json_path,
+            e13_summary_json_path=e13_table_ready_summary_json_path,
+        )
+        coverage_root = campaign_root / "special_aggregations" / "confirmatory"
+        coverage_root.mkdir(parents=True, exist_ok=True)
+        coverage_csv = coverage_root / "confirmatory_anchor_control_coverage.csv"
+        coverage_json = coverage_root / "confirmatory_anchor_control_coverage.json"
+        import pandas as pd
+
+        pd.DataFrame(coverage_rows).to_csv(coverage_csv, index=False)
+        coverage_payload = {
+            "generated_at_utc": _utc_timestamp(),
+            "runtime_registry_path": str(registry_path.resolve()),
+            "rows": coverage_rows,
+            "summary": {
+                "n_runtime_anchors": int(len(coverage_rows)),
+                "n_e12_covered": int(
+                    sum(1 for row in coverage_rows if bool(row.get("e12_covered")))
+                ),
+                "n_e13_covered": int(
+                    sum(1 for row in coverage_rows if bool(row.get("e13_covered")))
+                ),
+            },
+        }
+        coverage_json.write_text(f"{json.dumps(coverage_payload, indent=2)}\n", encoding="utf-8")
+        confirmatory_anchor_control_coverage_csv_path = str(coverage_csv.resolve())
+        confirmatory_anchor_control_coverage_json_path = str(coverage_json.resolve())
 
     summary_df = _summarize_by_experiment(
         experiments=selected_experiments,
@@ -2129,6 +2178,8 @@ def run_decision_support_campaign(
             "e12_permutation_analysis_summary_json": e12_table_ready_summary_json_path,
             "e13_dummy_baseline_analysis_summary_csv": e13_table_ready_summary_csv_path,
             "e13_dummy_baseline_analysis_summary_json": e13_table_ready_summary_json_path,
+            "confirmatory_anchor_control_coverage_csv": confirmatory_anchor_control_coverage_csv_path,
+            "confirmatory_anchor_control_coverage_json": confirmatory_anchor_control_coverage_json_path,
             "stage_decision_notes": [str(path.resolve()) for path in stage_decision_paths],
             "phase_artifacts": list(phase_artifact_paths),
             "phase_skip_summary": str(phase_skip_summary_path.resolve()),
@@ -2208,6 +2259,8 @@ def run_decision_support_campaign(
         "e12_permutation_analysis_summary_json_path": e12_table_ready_summary_json_path,
         "e13_dummy_baseline_analysis_summary_csv_path": e13_table_ready_summary_csv_path,
         "e13_dummy_baseline_analysis_summary_json_path": e13_table_ready_summary_json_path,
+        "confirmatory_anchor_control_coverage_csv_path": confirmatory_anchor_control_coverage_csv_path,
+        "confirmatory_anchor_control_coverage_json_path": confirmatory_anchor_control_coverage_json_path,
         "eta_state_path": str((campaign_root / "eta_state.json").resolve()),
         "eta_calibration_path": eta_calibration_path,
         "runtime_history_path": str(history_path.resolve()),

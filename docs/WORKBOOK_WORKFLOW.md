@@ -10,12 +10,18 @@ This framework supports a full round trip:
 ## Authoritative workbook files
 
 - Template: `templates/thesis_experiment_program.xlsx`
+- Study workbook instance (thesis program instance): `templates/thesis_experiment_program_revised.xlsx`
 - Versioned write-back outputs: `outputs/workbooks/`
 
 Template policy:
 - `templates/thesis_experiment_program.xlsx` is a governed planning template
 - it is intentionally non-runnable until executable rows are enabled/populated in
   `Experiment_Definitions`
+
+Study-instance policy:
+- `templates/thesis_experiment_program_revised.xlsx` is a thesis study instance used to generate
+  frozen runtime registries (for example `configs/decision_support_registry_revised_execution.json`)
+- it is not treated as a generic baseline template for new studies
 
 Canonical designed-study example:
 - `templates/examples/canonical_designed_study.xlsx`

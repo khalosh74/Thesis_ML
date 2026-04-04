@@ -2,11 +2,14 @@
 
 ## Purpose
 This document defines the governance layer for versioned JSON configs under `configs/`.
-It introduces a central lifecycle registry (`configs/config_registry.json`) for:
-- `configs/targets`
-- `configs/protocols`
-- `configs/comparisons`
-- `configs/decision_support_registry.json`
+It introduces a central lifecycle registry (`configs/config_registry.json`) plus an explicit
+authority manifest (`configs/authority_manifest.json`).
+
+Authority layers are:
+- scientific authority: what the thesis says should exist
+- thesis runtime authority: what thesis runtime commands execute
+- generation authority: workbook/template sources that generate runtime registries
+- derived/package/archive artifacts: mirrors and backups for distribution or reproducibility only
 
 Phase 1 is governance-only and does not change runtime behavior.
 
@@ -28,8 +31,12 @@ Phase 1 is governance-only and does not change runtime behavior.
 - New defaults are introduced by adding a new config and updating the registry.
 - Frozen confirmatory configs are retained for replay/hard-gate compatibility.
 - Deprecated configs are not deleted until references and replay needs are retired.
-- Future phases will route runtime config resolution through registry aliases.
-- Phase 1 does not change runtime behavior yet.
+- Thesis runtime authority for decision-support execution is `configs/decision_support_registry_revised_execution.json`.
+- `configs/decision_support_registry.json` is package/demo default registry, not thesis runtime authority.
+- Workbook template authority is `templates/thesis_experiment_program.xlsx`.
+- `templates/thesis_experiment_program_revised.xlsx` is a study workbook instance, not a generic template.
+- Packaged assets under `src/Thesis_ML/assets/` are derived mirrors and must not be hand-maintained as peer authorities.
+- Backup registries are archive-only and must not be discoverable as active runtime defaults.
 
 ## Current Defaults
 | Alias | Resolved path |
@@ -38,7 +45,9 @@ Phase 1 is governance-only and does not change runtime behavior.
 | canonical thesis protocol default | `configs/protocols/thesis_canonical_nested_v2.json` |
 | frozen confirmatory protocol | `configs/protocols/thesis_confirmatory_v1.json` |
 | grouped-nested comparison default | `configs/comparisons/model_family_grouped_nested_comparison_v2.json` |
-| decision-support registry default | `configs/decision_support_registry.json` |
+| thesis runtime decision-support registry | `configs/decision_support_registry_revised_execution.json` |
+| package/demo decision-support registry | `configs/decision_support_registry.json` |
+| legacy decision-support default alias | `configs/decision_support_registry_revised_execution.json` |
 
 ## Current Lifecycle Table (All Current JSON Files in `configs/`)
 | config_id | path | lifecycle | replay_allowed | superseded_by |
@@ -51,7 +60,8 @@ Phase 1 is governance-only and does not change runtime behavior.
 | `comparison.model_family_comparison_v1` | `configs/comparisons/model_family_comparison_v1.json` | `active_variant` | `true` | `null` |
 | `comparison.model_family_grouped_nested_comparison_v1` | `configs/archive/comparisons/model_family_grouped_nested_comparison_v1.json` | `compatibility` | `true` | `comparison.model_family_grouped_nested_comparison_v2` |
 | `comparison.model_family_grouped_nested_comparison_v2` | `configs/comparisons/model_family_grouped_nested_comparison_v2.json` | `active_default` | `true` | `null` |
-| `registry.decision_support_registry` | `configs/decision_support_registry.json` | `active_default` | `true` | `null` |
+| `registry.decision_support_thesis_runtime` | `configs/decision_support_registry_revised_execution.json` | `active_default` | `true` | `null` |
+| `registry.decision_support_registry` | `configs/decision_support_registry.json` | `active_variant` | `true` | `null` |
 
 ## Retired Configs
 | config_id | former_path | replacement | notes |

@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from Thesis_ML.config.config_registry import load_config_registry
 from Thesis_ML.config.runtime_selection import resolve_runtime_config_path
 
 
@@ -40,6 +41,34 @@ def test_runtime_selection_resolves_default_alias_when_no_override() -> None:
     assert resolved.name == "model_family_grouped_nested_comparison_v2.json"
 
 
+def test_runtime_selection_resolves_explicit_thesis_runtime_registry_alias() -> None:
+    resolved = resolve_runtime_config_path(
+        None,
+        "registry.decision_support_thesis_runtime",
+        default_alias="registry.decision_support_thesis_runtime",
+        fallback_path=Path("configs/decision_support_registry_revised_execution.json"),
+    )
+    assert resolved.name == "decision_support_registry_revised_execution.json"
+
+
+def test_runtime_selection_resolves_explicit_package_registry_alias() -> None:
+    resolved = resolve_runtime_config_path(
+        None,
+        "registry.decision_support_package_default",
+        default_alias="registry.decision_support_thesis_runtime",
+        fallback_path=Path("configs/decision_support_registry_revised_execution.json"),
+    )
+    assert resolved.name == "decision_support_registry.json"
+
+
+def test_backup_registry_is_not_present_in_active_config_registry() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    payload = load_config_registry(registry_path=repo_root / "configs" / "config_registry.json")
+    for entry in payload.get("configs", []):
+        path_text = str(entry.get("path", ""))
+        assert "decision_support_registry_revised_execution.E02_backup.json" not in path_text
+
+
 def test_runtime_selection_default_alias_uses_fallback_when_registry_missing(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -52,7 +81,9 @@ def test_runtime_selection_default_alias_uses_fallback_when_registry_missing(
             return Path(kwargs["fallback"]).resolve()
         raise FileNotFoundError("Config registry file not found.")
 
-    monkeypatch.setattr("Thesis_ML.config.runtime_selection.resolve_config_alias", _stub_resolve_alias)
+    monkeypatch.setattr(
+        "Thesis_ML.config.runtime_selection.resolve_config_alias", _stub_resolve_alias
+    )
     resolved = resolve_runtime_config_path(
         None,
         None,
@@ -74,7 +105,9 @@ def test_runtime_selection_explicit_alias_does_not_silently_fallback_when_regist
             return Path(kwargs["fallback"]).resolve()
         raise FileNotFoundError("Config registry file not found.")
 
-    monkeypatch.setattr("Thesis_ML.config.runtime_selection.resolve_config_alias", _stub_resolve_alias)
+    monkeypatch.setattr(
+        "Thesis_ML.config.runtime_selection.resolve_config_alias", _stub_resolve_alias
+    )
     with pytest.raises(FileNotFoundError):
         resolve_runtime_config_path(
             None,

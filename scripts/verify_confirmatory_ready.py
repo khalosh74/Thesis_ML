@@ -14,8 +14,9 @@ from verify_project import main as _verify_project_main
 
 def main(argv: list[str] | None = None) -> int:
     forwarded = ["confirmatory-ready"]
-    if argv:
-        forwarded.extend(list(argv))
+    effective_argv = list(argv) if argv is not None else sys.argv[1:]
+    if effective_argv:
+        forwarded.extend(effective_argv)
     return int(_verify_project_main(forwarded))
 
 

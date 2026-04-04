@@ -4,7 +4,14 @@ import json
 from pathlib import Path
 from typing import Any
 
+from Thesis_ML.config.paths import (
+    DEFAULT_DECISION_SUPPORT_THESIS_RUNTIME_REGISTRY,
+    PROJECT_ROOT,
+)
 from Thesis_ML.experiments.run_states import is_run_success_status
+from Thesis_ML.verification.confirmatory_scope_runtime_alignment import (
+    verify_confirmatory_scope_runtime_alignment,
+)
 from Thesis_ML.verification.official_artifacts import verify_official_artifacts
 
 
@@ -48,10 +55,65 @@ def verify_confirmatory_ready(
     *,
     output_dir: Path | str,
     reproducibility_summary: Path | str | None = None,
+    scope_config_path: Path | str | None = None,
+    runtime_registry_path: Path | str | None = None,
+    scope_exceptions_path: Path | str | None = None,
+    require_control_coverage: bool = False,
 ) -> dict[str, Any]:
     root = Path(output_dir)
     criteria: list[dict[str, Any]] = []
     issues: list[dict[str, Any]] = []
+
+    resolved_scope_path = (
+        Path(scope_config_path)
+        if scope_config_path is not None
+        else (PROJECT_ROOT / "configs" / "confirmatory" / "confirmatory_scope_v1.json")
+    )
+    resolved_runtime_registry_path = (
+        Path(runtime_registry_path)
+        if runtime_registry_path is not None
+        else Path(DEFAULT_DECISION_SUPPORT_THESIS_RUNTIME_REGISTRY)
+    )
+    resolved_scope_exceptions_path = (
+        Path(scope_exceptions_path) if scope_exceptions_path is not None else None
+    )
+
+    try:
+        scope_runtime_summary = verify_confirmatory_scope_runtime_alignment(
+            scope_config_path=resolved_scope_path,
+            runtime_registry_path=resolved_runtime_registry_path,
+            exceptions_config_path=resolved_scope_exceptions_path,
+        )
+    except Exception as exc:
+        scope_runtime_summary = {
+            "passed": False,
+            "issues": [
+                {
+                    "code": "scope_runtime_alignment_exception",
+                    "message": str(exc),
+                }
+            ],
+        }
+
+    scope_runtime_passed = bool(scope_runtime_summary.get("passed", False))
+    criteria.append(
+        _criterion(
+            "confirmatory_scope_runtime_alignment",
+            passed=scope_runtime_passed,
+            details={
+                "scope_config_path": str(resolved_scope_path.resolve()),
+                "runtime_registry_path": str(resolved_runtime_registry_path.resolve()),
+            },
+        )
+    )
+    if not scope_runtime_passed:
+        issues.append(
+            {
+                "code": "confirmatory_scope_runtime_mismatch",
+                "message": "Scientific confirmatory scope and thesis runtime registry are not aligned.",
+                "details": {"issues": scope_runtime_summary.get("issues", [])},
+            }
+        )
 
     official_summary = verify_official_artifacts(output_dir=root, mode="confirmatory")
     official_passed = bool(official_summary.get("passed", False))
@@ -337,6 +399,28 @@ def verify_confirmatory_ready(
                     }
                 )
 
+    control_coverage_path = root / "special_aggregations" / "confirmatory"
+    control_coverage_json = control_coverage_path / "confirmatory_anchor_control_coverage.json"
+    if require_control_coverage:
+        control_coverage_present = (
+            control_coverage_json.exists() and control_coverage_json.is_file()
+        )
+        criteria.append(
+            _criterion(
+                "confirmatory_control_coverage_artifact_present",
+                passed=control_coverage_present,
+                details={"path": str(control_coverage_json.resolve())},
+            )
+        )
+        if not control_coverage_present:
+            issues.append(
+                {
+                    "code": "confirmatory_control_coverage_artifact_missing",
+                    "message": "Required confirmatory control coverage artifact is missing.",
+                    "details": {"path": str(control_coverage_json.resolve())},
+                }
+            )
+
     passed = bool(all(entry.get("passed", False) for entry in criteria))
     return {
         "passed": passed,
@@ -344,6 +428,7 @@ def verify_confirmatory_ready(
         "criteria": criteria,
         "issues": issues,
         "official_artifact_summary": official_summary,
+        "scope_runtime_alignment": scope_runtime_summary,
         "reproducibility_summary_path": (
             str(Path(reproducibility_summary).resolve()) if reproducibility_summary else None
         ),

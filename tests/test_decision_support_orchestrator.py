@@ -915,6 +915,18 @@ def test_e12_uses_anchor_subject_and_merged_summary_outputs(
     table_ready_df = pd.read_csv(table_ready_path)
     assert len(table_ready_df) == 4
 
+    coverage_path = (
+        campaign_root
+        / "special_aggregations"
+        / "confirmatory"
+        / "confirmatory_anchor_control_coverage.csv"
+    )
+    assert coverage_path.exists()
+    coverage_df = pd.read_csv(coverage_path)
+    assert len(coverage_df) == 4
+    assert set(coverage_df["e12_covered"].astype(bool).tolist()) == {True}
+    assert set(coverage_df["e13_covered"].astype(bool).tolist()) == {False}
+
 
 def test_e13_materializes_anchor_matched_dummy_baselines_and_writes_table_ready_summary(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -993,3 +1005,15 @@ def test_e13_materializes_anchor_matched_dummy_baselines_and_writes_table_ready_
         "within_person_loso",
         "cross_person_transfer",
     }
+
+    coverage_path = (
+        campaign_root
+        / "special_aggregations"
+        / "confirmatory"
+        / "confirmatory_anchor_control_coverage.csv"
+    )
+    assert coverage_path.exists()
+    coverage_df = pd.read_csv(coverage_path)
+    assert len(coverage_df) == 2
+    assert set(coverage_df["e12_covered"].astype(bool).tolist()) == {False}
+    assert set(coverage_df["e13_covered"].astype(bool).tolist()) == {True}

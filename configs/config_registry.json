@@ -14,7 +14,9 @@
     "protocol.thesis_confirmatory_frozen": "protocol.thesis_confirmatory_v1",
     "comparison.grouped_nested_default": "comparison.model_family_grouped_nested_comparison_v2",
     "comparison.fixed_linear_baseline": "comparison.model_family_comparison_v1",
-    "registry.decision_support_default": "registry.decision_support_registry"
+    "registry.decision_support_thesis_runtime": "registry.decision_support_thesis_runtime",
+    "registry.decision_support_package_default": "registry.decision_support_registry",
+    "registry.decision_support_default": "registry.decision_support_thesis_runtime"
   },
   "configs": [
     {
@@ -106,15 +108,26 @@
       "notes": "current grouped-nested comparison default"
     },
     {
+      "config_id": "registry.decision_support_thesis_runtime",
+      "kind": "registry",
+      "family": "decision_support_registry",
+      "version": "workbook-v1",
+      "path": "configs/decision_support_registry_revised_execution.json",
+      "lifecycle": "active_default",
+      "replay_allowed": true,
+      "superseded_by": null,
+      "notes": "thesis runtime authority registry for decision-support execution"
+    },
+    {
       "config_id": "registry.decision_support_registry",
       "kind": "registry",
       "family": "decision_support_registry",
       "version": "1.0",
       "path": "configs/decision_support_registry.json",
-      "lifecycle": "active_default",
+      "lifecycle": "active_variant",
       "replay_allowed": true,
       "superseded_by": null,
-      "notes": "current decision-support registry asset"
+      "notes": "package/demo default registry asset (not thesis runtime authority)"
     }
   ],
   "bundles": [

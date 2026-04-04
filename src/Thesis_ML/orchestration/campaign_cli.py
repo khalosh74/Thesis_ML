@@ -340,7 +340,7 @@ def main(
         resolve_runtime_config_path(
             args.registry,
             args.registry_alias,
-            default_alias="registry.decision_support_default",
+            default_alias="registry.decision_support_thesis_runtime",
             fallback_path=DEFAULT_DECISION_SUPPORT_REGISTRY,
         )
         if workbook_path is None

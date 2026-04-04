@@ -7,6 +7,7 @@ from pathlib import Path
 from time import perf_counter
 from typing import Any
 
+from Thesis_ML.config.paths import DEFAULT_DECISION_SUPPORT_THESIS_RUNTIME_REGISTRY, PROJECT_ROOT
 from Thesis_ML.script_support.io import file_sha256
 from Thesis_ML.script_support.summaries import write_summary
 from Thesis_ML.verification.campaign_runtime_profile import verify_campaign_runtime_profile
@@ -35,6 +36,10 @@ def _run_confirmatory_ready(args: argparse.Namespace) -> int:
     summary = verify_confirmatory_ready(
         output_dir=Path(args.output_dir),
         reproducibility_summary=Path(args.repro_summary) if args.repro_summary else None,
+        scope_config_path=Path(args.scope_config) if args.scope_config else None,
+        runtime_registry_path=(Path(args.runtime_registry) if args.runtime_registry else None),
+        scope_exceptions_path=(Path(args.scope_exceptions) if args.scope_exceptions else None),
+        require_control_coverage=bool(args.require_control_coverage),
     )
     if args.summary_out:
         write_summary(Path(args.summary_out), summary)
@@ -568,6 +573,26 @@ def _build_parser() -> argparse.ArgumentParser:
         "--summary-out",
         default="",
         help="Optional JSON path for confirmatory-ready summary output.",
+    )
+    confirm.add_argument(
+        "--scope-config",
+        default=str(PROJECT_ROOT / "configs" / "confirmatory" / "confirmatory_scope_v1.json"),
+        help="Confirmatory scientific scope JSON path.",
+    )
+    confirm.add_argument(
+        "--runtime-registry",
+        default=str(Path(DEFAULT_DECISION_SUPPORT_THESIS_RUNTIME_REGISTRY)),
+        help="Thesis runtime registry JSON path.",
+    )
+    confirm.add_argument(
+        "--scope-exceptions",
+        default="",
+        help="Optional explicit deferred scope exceptions JSON path.",
+    )
+    confirm.add_argument(
+        "--require-control-coverage",
+        action="store_true",
+        help="Require confirmatory control coverage artifact in output_dir/special_aggregations/confirmatory.",
     )
 
     cost = subparsers.add_parser(
