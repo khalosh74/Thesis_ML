@@ -61,7 +61,7 @@ Phase 1 is governance-only and does not change runtime behavior.
 | `comparison.model_family_grouped_nested_comparison_v1` | `configs/archive/comparisons/model_family_grouped_nested_comparison_v1.json` | `compatibility` | `true` | `comparison.model_family_grouped_nested_comparison_v2` |
 | `comparison.model_family_grouped_nested_comparison_v2` | `configs/comparisons/model_family_grouped_nested_comparison_v2.json` | `active_default` | `true` | `null` |
 | `registry.decision_support_thesis_runtime` | `configs/decision_support_registry_revised_execution.json` | `active_default` | `true` | `null` |
-| `registry.decision_support_registry` | `configs/decision_support_registry.json` | `active_variant` | `true` | `null` |
+| `registry.decision_support_package_default` | `configs/decision_support_registry.json` | `active_variant` | `true` | `null` |
 
 ## Retired Configs
 | config_id | former_path | replacement | notes |

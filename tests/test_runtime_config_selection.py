@@ -61,6 +61,16 @@ def test_runtime_selection_resolves_explicit_package_registry_alias() -> None:
     assert resolved.name == "decision_support_registry.json"
 
 
+def test_runtime_selection_resolves_legacy_package_registry_alias() -> None:
+    resolved = resolve_runtime_config_path(
+        None,
+        "registry.decision_support_registry",
+        default_alias="registry.decision_support_thesis_runtime",
+        fallback_path=Path("configs/decision_support_registry_revised_execution.json"),
+    )
+    assert resolved.name == "decision_support_registry.json"
+
+
 def test_backup_registry_is_not_present_in_active_config_registry() -> None:
     repo_root = Path(__file__).resolve().parents[1]
     payload = load_config_registry(registry_path=repo_root / "configs" / "config_registry.json")

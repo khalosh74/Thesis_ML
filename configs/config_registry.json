@@ -15,8 +15,9 @@
     "comparison.grouped_nested_default": "comparison.model_family_grouped_nested_comparison_v2",
     "comparison.fixed_linear_baseline": "comparison.model_family_comparison_v1",
     "registry.decision_support_thesis_runtime": "registry.decision_support_thesis_runtime",
-    "registry.decision_support_package_default": "registry.decision_support_registry",
-    "registry.decision_support_default": "registry.decision_support_thesis_runtime"
+    "registry.decision_support_package_default": "registry.decision_support_package_default",
+    "registry.decision_support_default": "registry.decision_support_thesis_runtime",
+    "registry.decision_support_registry": "registry.decision_support_package_default"
   },
   "configs": [
     {
@@ -119,7 +120,7 @@
       "notes": "thesis runtime authority registry for decision-support execution"
     },
     {
-      "config_id": "registry.decision_support_registry",
+      "config_id": "registry.decision_support_package_default",
       "kind": "registry",
       "family": "decision_support_registry",
       "version": "1.0",

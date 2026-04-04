@@ -1,6 +1,6 @@
 {
   "schema_version": "1.0",
-  "description": "Decision-support experiment registry for thesis method locks (E01-E11).",
+  "description": "Package/demo decision-support experiment registry for thesis method-lock family experiments (not thesis runtime authority).",
   "experiments": [
     {
       "experiment_id": "E01",

@@ -97,7 +97,9 @@ DEFAULT_DECISION_SUPPORT_PACKAGE_REGISTRY = resolve_config_alias(
     project_root=PROJECT_ROOT,
     fallback=_resolve_default_registry(SOURCE_REPO_ROOT),
 )
-# Backward-compatible alias used by existing call sites.
+# Backward-compatible thesis-runtime default alias used by existing call sites.
+# Package/demo registry authority is exposed separately via
+# DEFAULT_DECISION_SUPPORT_PACKAGE_REGISTRY.
 DEFAULT_DECISION_SUPPORT_REGISTRY = DEFAULT_DECISION_SUPPORT_THESIS_RUNTIME_REGISTRY
 SHIPPED_WORKBOOK_TEMPLATE = _resolve_shipped_workbook_template(SOURCE_REPO_ROOT)
 

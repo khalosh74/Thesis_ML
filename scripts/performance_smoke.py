@@ -4,6 +4,7 @@ import argparse
 import json
 import os
 import subprocess
+import sys
 import time
 from pathlib import Path
 from typing import Any
@@ -22,7 +23,9 @@ def _timed(label: str, fn: Any) -> tuple[Any, float]:
     return value, time.perf_counter() - start
 
 
-def _run_subprocess(cmd: list[str], *, cwd: Path, env: dict[str, str] | None = None) -> dict[str, Any]:
+def _run_subprocess(
+    cmd: list[str], *, cwd: Path, env: dict[str, str] | None = None
+) -> dict[str, Any]:
     start = time.perf_counter()
     completed = subprocess.run(
         cmd,
@@ -77,7 +80,7 @@ def _resolve_cli_command(command: str, module_fallback: str) -> list[str]:
         probe = None
     if probe is not None and probe.returncode == 0:
         return [command]
-    return ["python", "-m", module_fallback]
+    return [sys.executable, "-m", module_fallback]
 
 
 def main() -> int:

@@ -214,6 +214,7 @@ Registry default behavior:
 - explicit `--registry` remains supported and is recommended for controlled runs
 
 Optional Optuna-backed variant search:
+Package/demo registry example (non-thesis runtime default):
 
 ```powershell
 python -m uv run thesisml-run-decision-support `
@@ -331,6 +332,7 @@ Execution mode semantics:
 - Workbook workflow: `docs/WORKBOOK_WORKFLOW.md`
 - Segment execution: `docs/SEGMENT_EXECUTION.md`
 - Maintainer quick path: `docs/MAINTAINER_GUIDE.md`
+- Maintainer authority inventory: `docs/maintainer/authority_inventory.md`
 - Extension guide: `docs/EXTENDING.md`
 - Schema/version migration notes: `docs/SCHEMA_MIGRATIONS.md`
 - Decision-support specifics: `docs/DECISION_SUPPORT_AUTOMATION.md`

@@ -21,7 +21,7 @@ README_FILENAME = "README.md"
 MANIFEST_SCHEMA_VERSION = "demo-dataset-manifest-v1"
 
 SUBJECTS = ("sub-001", "sub-002")
-SESSIONS = ("ses-01", "ses-02")
+SESSIONS = ("ses-01", "ses-02", "ses-03")
 BAS_NAME = "BAS2"
 LABELS = (
     "run-1_passive_anger_audio",

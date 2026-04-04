@@ -72,6 +72,10 @@ def test_aliases_resolve_to_expected_ground_truth_paths() -> None:
         _resolve_alias("registry.decision_support_default")
         == (repo_root / "configs" / "decision_support_registry_revised_execution.json").resolve()
     )
+    assert (
+        _resolve_alias("registry.decision_support_registry")
+        == (repo_root / "configs" / "decision_support_registry.json").resolve()
+    )
 
 
 def test_exported_defaults_match_alias_resolution() -> None:

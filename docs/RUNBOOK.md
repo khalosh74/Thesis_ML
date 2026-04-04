@@ -41,6 +41,7 @@ Authority layering (Phase 1):
 - generation authority: `templates/thesis_experiment_program.xlsx` plus workbook compiler/template constants
 - derived mirrors only: `src/Thesis_ML/assets/configs/decision_support_registry.json`, `src/Thesis_ML/assets/templates/thesis_experiment_program.xlsx`
 - archive-only backups: `configs/archive/registries/`
+- derived/package/archive files are not peer authorities to scientific/runtime/generation truth
 
 - Decision-support registry default:
   - source checkout thesis runtime: `configs/decision_support_registry_revised_execution.json`
@@ -458,7 +459,8 @@ thesisml-run-decision-support \
   --all
 ```
 
-Optuna mode requires optional dependency installation (`--extra optuna` or `.[optuna]`):
+Optuna mode requires optional dependency installation (`--extra optuna` or `.[optuna]`).
+Package/demo registry example (non-thesis runtime default):
 
 ```bash
 thesisml-run-decision-support \

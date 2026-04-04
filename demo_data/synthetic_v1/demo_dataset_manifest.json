@@ -11,7 +11,8 @@
   ],
   "sessions": [
     "ses-01",
-    "ses-02"
+    "ses-02",
+    "ses-03"
   ],
   "labels": [
     "run-1_passive_anger_audio",
@@ -19,12 +20,12 @@
     "run-1_passive_anger_video",
     "run-1_passive_happiness_video"
   ],
-  "n_rows": 16,
+  "n_rows": 24,
   "n_subjects": 2,
-  "n_sessions": 4,
+  "n_sessions": 6,
   "sessions_per_subject": {
-    "sub-001": 2,
-    "sub-002": 2
+    "sub-001": 3,
+    "sub-002": 3
   },
   "required_index_columns": [
     "sample_id",
@@ -41,7 +42,7 @@
     "regressor_label",
     "bas"
   ],
-  "index_csv_sha256": "597f22f9235bb856611f4da9bca8b8bc7df295e1a630c9174525047cb13bfa2e",
+  "index_csv_sha256": "c37a9f27ad275ef88ee28c0d24a25c9b4df3364d059e27406b3769976c23450f",
   "files": [
     {
       "path": "cache/.gitkeep",
@@ -55,8 +56,8 @@
     },
     {
       "path": "data_root/processed/extractions/sub-001/ses-01/BAS2/session_summary.json",
-      "sha256": "e9423c0c4169b8fb719c8fceb450d3399a9222ca698cd14555c3cb40833c1f72",
-      "size_bytes": 497
+      "sha256": "02fd3dff0f6b2e66221748f34c8dd54fc0a51dfcdac1139c88d4762bc6493150",
+      "size_bytes": 501
     },
     {
       "path": "data_root/processed/extractions/sub-001/ses-02/BAS2/regressor_beta_mapping.csv",
@@ -65,8 +66,18 @@
     },
     {
       "path": "data_root/processed/extractions/sub-001/ses-02/BAS2/session_summary.json",
-      "sha256": "c758c30e08462b61aaca1fd372cb56126024f1f21062090ab329285d7e30cdcc",
-      "size_bytes": 497
+      "sha256": "adfb3807d195da6c5cde87315d7e48e2fa2da8942beccdf6e66e7b699c1b41c1",
+      "size_bytes": 501
+    },
+    {
+      "path": "data_root/processed/extractions/sub-001/ses-03/BAS2/regressor_beta_mapping.csv",
+      "sha256": "1a41d6eb71310ec6919888b1155ce9df01630cfedd87cd3c0124adcb9c8fffb4",
+      "size_bytes": 654
+    },
+    {
+      "path": "data_root/processed/extractions/sub-001/ses-03/BAS2/session_summary.json",
+      "sha256": "5e20a5aca46098942ddac9c29e25c8add92c6d0a2a6ead09acf3e5bccde83c3d",
+      "size_bytes": 501
     },
     {
       "path": "data_root/processed/extractions/sub-002/ses-01/BAS2/regressor_beta_mapping.csv",
@@ -75,8 +86,8 @@
     },
     {
       "path": "data_root/processed/extractions/sub-002/ses-01/BAS2/session_summary.json",
-      "sha256": "bb9cfedfa7a2748ce0063d0e9614fd49b0aba0feac234b1140cf579d436cab56",
-      "size_bytes": 497
+      "sha256": "f84eb7946a5701e170d4e05375f547a4edee2baefac35ee8bac2c42380d5c71f",
+      "size_bytes": 501
     },
     {
       "path": "data_root/processed/extractions/sub-002/ses-02/BAS2/regressor_beta_mapping.csv",
@@ -85,8 +96,18 @@
     },
     {
       "path": "data_root/processed/extractions/sub-002/ses-02/BAS2/session_summary.json",
-      "sha256": "80c0223b4df295713ab1fc99b0408f42078dd52c32becc0cd36774475809013d",
-      "size_bytes": 497
+      "sha256": "d6d5695f82f6a6abd5c45819bef728c228692c4f3593052fc6bd411f2423a635",
+      "size_bytes": 501
+    },
+    {
+      "path": "data_root/processed/extractions/sub-002/ses-03/BAS2/regressor_beta_mapping.csv",
+      "sha256": "1a41d6eb71310ec6919888b1155ce9df01630cfedd87cd3c0124adcb9c8fffb4",
+      "size_bytes": 654
+    },
+    {
+      "path": "data_root/processed/extractions/sub-002/ses-03/BAS2/session_summary.json",
+      "sha256": "01b9acc19c4437da3e57dbed6ce42d0e134bc8b6f140a2d998f54188456c2d32",
+      "size_bytes": 501
     },
     {
       "path": "data_root/sub-001/ses-01/BAS2/beta_0001.nii",
@@ -145,6 +166,36 @@
     },
     {
       "path": "data_root/sub-001/ses-02/BAS2/regressor_labels.csv",
+      "sha256": "47d53cd961d0c7677727cb2bcca9bfa51f582fa2eb4ef7a4d01c6d1d455e3cfd",
+      "size_bytes": 116
+    },
+    {
+      "path": "data_root/sub-001/ses-03/BAS2/beta_0001.nii",
+      "sha256": "80971699281d64ad8d8e21faf727657abaadb407673e890ad21abe0c29d5dc6a",
+      "size_bytes": 460
+    },
+    {
+      "path": "data_root/sub-001/ses-03/BAS2/beta_0002.nii",
+      "sha256": "49bd36673daf46f2193406c524b4117797619a5a86b120acc8114c2b46fb4653",
+      "size_bytes": 460
+    },
+    {
+      "path": "data_root/sub-001/ses-03/BAS2/beta_0003.nii",
+      "sha256": "c3f7b4ed50a2186be2ede465b86ee871075cdd4fccc96c5c6e5dc9f957b5314d",
+      "size_bytes": 460
+    },
+    {
+      "path": "data_root/sub-001/ses-03/BAS2/beta_0004.nii",
+      "sha256": "6fc08079b09391b59e27acf63e95392bb28ef33fcf1b3fa4dff4a3cd626ac68b",
+      "size_bytes": 460
+    },
+    {
+      "path": "data_root/sub-001/ses-03/BAS2/mask.nii",
+      "sha256": "42cea30c9edb3f977465c0b384372bb5b140b668a9acf7758ac86279fbadc297",
+      "size_bytes": 460
+    },
+    {
+      "path": "data_root/sub-001/ses-03/BAS2/regressor_labels.csv",
       "sha256": "47d53cd961d0c7677727cb2bcca9bfa51f582fa2eb4ef7a4d01c6d1d455e3cfd",
       "size_bytes": 116
     },
@@ -209,9 +260,39 @@
       "size_bytes": 116
     },
     {
+      "path": "data_root/sub-002/ses-03/BAS2/beta_0001.nii",
+      "sha256": "ddb3b9b937efe7d86e58511cbb8f5ed92aa400e664e6b9455833e2bce5f76230",
+      "size_bytes": 460
+    },
+    {
+      "path": "data_root/sub-002/ses-03/BAS2/beta_0002.nii",
+      "sha256": "7018e2189e094864f29e7434195b8fe42ef09821052ef7941db07e7f9ade1a5e",
+      "size_bytes": 460
+    },
+    {
+      "path": "data_root/sub-002/ses-03/BAS2/beta_0003.nii",
+      "sha256": "d24fa3543201b660146a222f7c63023095edb84e193383e927d603d8d885e195",
+      "size_bytes": 460
+    },
+    {
+      "path": "data_root/sub-002/ses-03/BAS2/beta_0004.nii",
+      "sha256": "1faa235da9465eee2fb41d8ef0b30af68287deccfe800a420969c9d44a674968",
+      "size_bytes": 460
+    },
+    {
+      "path": "data_root/sub-002/ses-03/BAS2/mask.nii",
+      "sha256": "42cea30c9edb3f977465c0b384372bb5b140b668a9acf7758ac86279fbadc297",
+      "size_bytes": 460
+    },
+    {
+      "path": "data_root/sub-002/ses-03/BAS2/regressor_labels.csv",
+      "sha256": "47d53cd961d0c7677727cb2bcca9bfa51f582fa2eb4ef7a4d01c6d1d455e3cfd",
+      "size_bytes": 116
+    },
+    {
       "path": "dataset_index.csv",
-      "sha256": "597f22f9235bb856611f4da9bca8b8bc7df295e1a630c9174525047cb13bfa2e",
-      "size_bytes": 12729
+      "sha256": "c37a9f27ad275ef88ee28c0d24a25c9b4df3364d059e27406b3769976c23450f",
+      "size_bytes": 19057
     },
     {
       "path": "README.md",

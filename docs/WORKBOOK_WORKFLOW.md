@@ -13,6 +13,12 @@ This framework supports a full round trip:
 - Study workbook instance (thesis program instance): `templates/thesis_experiment_program_revised.xlsx`
 - Versioned write-back outputs: `outputs/workbooks/`
 
+Authority contract:
+- scientific authority defines what claims/scope must be evaluated
+- thesis runtime authority defines the registry used for thesis execution evidence
+- generation authority defines workbook/template sources used to produce runtime registries
+- packaged assets and archive backups are derived artifacts, not generation or runtime truth
+
 Template policy:
 - `templates/thesis_experiment_program.xlsx` is a governed planning template
 - it is intentionally non-runnable until executable rows are enabled/populated in

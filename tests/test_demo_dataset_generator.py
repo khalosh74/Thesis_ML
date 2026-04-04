@@ -60,3 +60,4 @@ def test_checked_in_demo_dataset_manifest_exists_and_has_expected_shape() -> Non
     assert payload["dataset_id"] == "thesis_ml_synthetic_v1"
     assert int(payload["n_subjects"]) >= 2
     assert int(payload["n_rows"]) > 0
+    assert min(int(value) for value in payload["sessions_per_subject"].values()) >= 3

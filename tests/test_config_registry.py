@@ -29,8 +29,9 @@ _EXPECTED_ALIASES = {
     "comparison.grouped_nested_default": "comparison.model_family_grouped_nested_comparison_v2",
     "comparison.fixed_linear_baseline": "comparison.model_family_comparison_v1",
     "registry.decision_support_thesis_runtime": "registry.decision_support_thesis_runtime",
-    "registry.decision_support_package_default": "registry.decision_support_registry",
+    "registry.decision_support_package_default": "registry.decision_support_package_default",
     "registry.decision_support_default": "registry.decision_support_thesis_runtime",
+    "registry.decision_support_registry": "registry.decision_support_package_default",
 }
 
 _EXPECTED_LIFECYCLE_BY_ID = {
@@ -43,7 +44,7 @@ _EXPECTED_LIFECYCLE_BY_ID = {
     "comparison.model_family_grouped_nested_comparison_v1": "compatibility",
     "comparison.model_family_grouped_nested_comparison_v2": "active_default",
     "registry.decision_support_thesis_runtime": "active_default",
-    "registry.decision_support_registry": "active_variant",
+    "registry.decision_support_package_default": "active_variant",
 }
 
 
