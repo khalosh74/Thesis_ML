@@ -1,0 +1,33 @@
+{
+  "artifact_role": "fold_model",
+  "experiment_id": "E17",
+  "run_id": "ds_E17_wb_row_015_reverse__002_20260404_155407_128028",
+  "variant_id": "wb_row_015_reverse__002",
+  "model_logical_name": "ridge",
+  "backend_family": "sklearn_cpu",
+  "backend_id": null,
+  "seed": 42,
+  "target": "coarse_affect",
+  "cv_mode": "frozen_cross_person_transfer",
+  "subject": null,
+  "train_subject": "sub-002",
+  "test_subject": "sub-001",
+  "fold_index": 0,
+  "split_identity": "sub-002->sub-001",
+  "feature_space": "whole_brain_masked",
+  "preprocessing_strategy": "standardize_zscore",
+  "dimensionality_strategy": "none",
+  "class_labels": [
+    "negative",
+    "neutral",
+    "positive"
+  ],
+  "n_train": 621,
+  "n_test": 513,
+  "n_features": 199209,
+  "config_filename": "config.json",
+  "runtime_info": {
+    "python_version": "3.13.5",
+    "config_filename": "config.json"
+  }
+}

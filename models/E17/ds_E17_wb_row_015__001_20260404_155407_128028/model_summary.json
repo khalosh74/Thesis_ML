@@ -1,0 +1,54 @@
+{
+  "status": "captured",
+  "n_models": 2,
+  "n_fold_models": 1,
+  "n_final_refit_models": 1,
+  "models": [
+    {
+      "artifact_role": "fold_model",
+      "fold": 0,
+      "direction": "sub-001->sub-002",
+      "held_out_identity": "sub-001->sub-002",
+      "subject": null,
+      "train_subject": "sub-001",
+      "test_subject": "sub-002",
+      "n_train": 513,
+      "n_test": 621,
+      "n_features": 199209,
+      "class_labels": "[\"negative\", \"neutral\", \"positive\"]",
+      "status": "saved",
+      "model_path": "C:\\Users\\khal6952\\Projects\\Thesis_ML\\outputs\\validation_runs\\e16_e17_full_model_training\\E17\\20260404_155407_128028\\reports\\ds_E17_wb_row_015__001_20260404_155407_128028\\models\\fold_000_model.joblib",
+      "metadata_path": "C:\\Users\\khal6952\\Projects\\Thesis_ML\\outputs\\validation_runs\\e16_e17_full_model_training\\E17\\20260404_155407_128028\\reports\\ds_E17_wb_row_015__001_20260404_155407_128028\\models\\fold_000_model.metadata.json",
+      "model_size_bytes": 7173149,
+      "metadata_size_bytes": 894
+    },
+    {
+      "artifact_role": "final_refit_after_confirmatory_evaluation",
+      "fold": null,
+      "direction": "sub-001->sub-002",
+      "held_out_identity": "sub-001->sub-002",
+      "subject": null,
+      "train_subject": "sub-001",
+      "test_subject": "sub-002",
+      "n_train": 1134,
+      "n_test": 0,
+      "n_features": 199209,
+      "class_labels": "[\"negative\", \"neutral\", \"positive\"]",
+      "status": "saved",
+      "model_path": "C:\\Users\\khal6952\\Projects\\Thesis_ML\\outputs\\validation_runs\\e16_e17_full_model_training\\E17\\20260404_155407_128028\\reports\\ds_E17_wb_row_015__001_20260404_155407_128028\\models\\final_refit_model.joblib",
+      "metadata_path": "C:\\Users\\khal6952\\Projects\\Thesis_ML\\outputs\\validation_runs\\e16_e17_full_model_training\\E17\\20260404_155407_128028\\reports\\ds_E17_wb_row_015__001_20260404_155407_128028\\models\\final_refit_model.metadata.json",
+      "model_size_bytes": 7173149,
+      "metadata_size_bytes": 927
+    }
+  ],
+  "run_metadata": {
+    "run_id": "ds_E17_wb_row_015__001_20260404_155407_128028",
+    "experiment_id": "E17",
+    "variant_id": "wb_row_015__001",
+    "model": "ridge",
+    "target": "coarse_affect",
+    "cv_mode": "frozen_cross_person_transfer",
+    "persist_fold_models": true,
+    "persist_final_refit_model": true
+  }
+}
