@@ -74,6 +74,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     target_group = parser.add_mutually_exclusive_group(required=True)
     target_group.add_argument("--experiment-id", help="Run one experiment ID (e.g., E01).")
+    target_group.add_argument(
+        "--experiment-ids",
+        nargs="+",
+        default=None,
+        help="Run a specific list of experiment IDs (e.g., E12 E13 E14 E15).",
+    )
     target_group.add_argument("--stage", help="Run one full stage (exact stage name).")
     target_group.add_argument("--all", action="store_true", help="Run all experiments in registry.")
     parser.add_argument("--seed", type=int, default=42, help="Seed passed to runner.")
@@ -373,6 +379,7 @@ def main(
                 cache_dir=cache_dir,
                 output_root=output_root,
                 experiment_id=args.experiment_id,
+                experiment_ids=args.experiment_ids,
                 stage=args.stage,
                 run_all=bool(args.all),
                 seed=args.seed,
@@ -413,6 +420,7 @@ def main(
                 cache_dir=cache_dir,
                 output_root=output_root,
                 experiment_id=args.experiment_id,
+                experiment_ids=args.experiment_ids,
                 stage=args.stage,
                 run_all=bool(args.all),
                 seed=args.seed,

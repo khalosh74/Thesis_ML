@@ -933,8 +933,9 @@ _PHASE_BLUEPRINT_AUTO: list[dict[str, Any]] = [
     },
     {"phase_name": "Freeze final confirmatory pipeline", "groups": []},
     {"phase_name": "Confirmatory", "groups": [["E16", "E17"]]},
-    {"phase_name": "Blocking robustness", "groups": [["E12", "E13", "E14", "E20"]]},
-    {"phase_name": "Context robustness", "groups": [["E21", "E22", "E23", "E15"]]},
+    {"phase_name": "Primary robustness", "groups": [["E12", "E13"], ["E14", "E15"]]},
+    {"phase_name": "Blocking robustness", "groups": [["E20"]]},
+    {"phase_name": "Context robustness", "groups": [["E21", "E22", "E23"]]},
     {"phase_name": "Reproducibility audit", "groups": [["E24"]]},
 ]
 
@@ -1193,6 +1194,7 @@ def run_decision_support_campaign(
     progress_ui: str = "auto",
     progress_detail: str = "experiment_stage",
     run_experiment_fn: Callable[..., dict[str, Any]] | None = None,
+    experiment_ids: list[str] | None = None,
 ) -> dict[str, Any]:
     if run_experiment_fn is None:
         from Thesis_ML.experiments.run_experiment import run_experiment as _run_experiment
@@ -1207,6 +1209,7 @@ def run_decision_support_campaign(
     selected_experiments = _select_experiments(
         registry=registry,
         experiment_id=experiment_id,
+        experiment_ids=experiment_ids,
         stage=stage,
         run_all=run_all,
     )
@@ -1475,6 +1478,7 @@ def run_decision_support_campaign(
                     variants=variants,
                     dataset_scope=dataset_scope,
                     n_permutations=n_permutations,
+                    seed=seed,
                     registry_experiments=registry_experiments_payload,
                 )
                 combined_warnings = list(warnings) + list(materialization_warnings)
@@ -2666,6 +2670,7 @@ def run_workbook_decision_support_campaign(
     progress_ui: str = "auto",
     progress_detail: str = "experiment_stage",
     run_experiment_fn: Callable[..., dict[str, Any]] | None = None,
+    experiment_ids: list[str] | None = None,
 ) -> dict[str, Any]:
     workbook_manifest = read_workbook_manifest(workbook_path)
     return run_decision_support_campaign(
@@ -2675,6 +2680,7 @@ def run_workbook_decision_support_campaign(
         cache_dir=cache_dir,
         output_root=output_root,
         experiment_id=experiment_id,
+        experiment_ids=experiment_ids,
         stage=stage,
         run_all=run_all,
         seed=seed,

@@ -110,10 +110,22 @@ def experiment_sort_key(experiment: dict[str, Any]) -> tuple[int, int, str]:
 def select_experiments(
     registry: CompiledStudyManifest,
     experiment_id: str | None,
+    experiment_ids: list[str] | None,
     stage: str | None,
     run_all: bool,
 ) -> list[dict[str, Any]]:
     experiments = [experiment.model_dump(mode="python") for experiment in registry.experiments]
+    if experiment_ids:
+        requested_ids = {str(value).strip() for value in experiment_ids if str(value).strip()}
+        selected = [
+            exp for exp in experiments if str(exp.get("experiment_id")).strip() in requested_ids
+        ]
+        if not selected:
+            raise ValueError(
+                f"None of the requested experiments were found in registry: {sorted(requested_ids)}"
+            )
+        return sorted(selected, key=experiment_sort_key)
+
     if experiment_id:
         selected = [exp for exp in experiments if str(exp.get("experiment_id")) == experiment_id]
         if not selected:
@@ -129,7 +141,7 @@ def select_experiments(
     if run_all:
         return sorted(experiments, key=experiment_sort_key)
 
-    raise ValueError("Select one of --experiment-id, --stage, or --all.")
+    raise ValueError("Select one of --experiment-id, --experiment-ids, --stage, or --all.")
 
 
 __all__ = [

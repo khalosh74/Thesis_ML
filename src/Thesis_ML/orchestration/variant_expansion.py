@@ -1141,6 +1141,7 @@ def _expand_e12_permutation_cells(
     experiment: dict[str, Any],
     variants: list[dict[str, Any]],
     n_permutations: int,
+    seed: int = 42,
     registry_experiments: list[dict[str, Any]] | None = None,
 ) -> tuple[list[dict[str, Any]], list[str]]:
     if int(n_permutations) <= 0:
@@ -1212,6 +1213,8 @@ def _expand_e12_permutation_cells(
                 end = int(min(int(n_permutations), chunk_index * chunk_size))
                 size = int(max(0, end - start + 1))
                 row = _copy_variant(base_row)
+                group_seed_offset = int(sum(ord(char) for char in str(permutation_group_id)) % 1000)
+                row["seed"] = int(seed) + int(chunk_index * 1000) + int(group_seed_offset)
                 row["n_permutations_override"] = size
                 row["factor_settings"]["permutation_chunk_index"] = int(chunk_index)
                 row["factor_settings"]["permutation_group_id"] = str(permutation_group_id)
@@ -1380,6 +1383,125 @@ def _expand_e23_omitted_session_cells(
     return _reindex_variants(cells), []
 
 
+def _expand_e15_subset_sensitivity_cells(
+    *,
+    variants: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[str]]:
+    cells: list[dict[str, Any]] = []
+    warnings: list[str] = []
+    full_control_keys: set[tuple[str, str, str]] = set()
+
+    for base in variants:
+        row = _copy_variant(base)
+        if not bool(row.get("supported", False)):
+            cells.append(row)
+            continue
+
+        params = dict(row.get("params", {}))
+        cv_mode = _safe_text(params.get("cv"))
+        subject = _safe_text(params.get("subject"))
+        filter_task = _safe_text(params.get("filter_task"))
+        filter_modality = _safe_text(params.get("filter_modality"))
+        template_id = _safe_text(row.get("template_id")) or "template"
+
+        if cv_mode not in _RUN_EXPERIMENT_SUPPORTED_CV_MODES:
+            row["supported"] = False
+            row["blocked_reason"] = (
+                "E15 subset sensitivity cell is blocked: "
+                f"cv mode '{cv_mode}' is not supported by thesisml-run-experiment."
+            )
+            cells.append(row)
+            continue
+        if cv_mode == "within_subject_loso_session" and not subject:
+            row["supported"] = False
+            row["blocked_reason"] = (
+                "E15 subset sensitivity requires subject for cv='within_subject_loso_session'."
+            )
+            cells.append(row)
+            continue
+        if not filter_task:
+            row["supported"] = False
+            row["blocked_reason"] = "E15 subset sensitivity requires non-empty filter_task."
+            cells.append(row)
+            continue
+
+        group_id = (
+            f"E15::{template_id}::{subject or 'unknown_subject'}::"
+            f"task={filter_task}::modality={filter_modality or 'all'}"
+        )
+        restricted_suffix = (
+            f"__subject_{subject or 'unknown'}"
+            f"__task_{filter_task}"
+            f"__modality_{filter_modality or 'all'}"
+        )
+        row["factor_settings"].update(
+            {
+                "special_cell_kind": "subset_sensitivity",
+                "subset_arm": "task_restricted",
+                "subset_sensitivity_group_id": group_id,
+            }
+        )
+        row["design_metadata"].update(
+            {
+                "special_cell_kind": "subset_sensitivity",
+                "subset_arm": "task_restricted",
+                "subset_sensitivity_group_id": group_id,
+            }
+        )
+        trial_id = str(row.get("trial_id")).strip() if row.get("trial_id") else None
+        if trial_id:
+            row["trial_id"] = f"{trial_id}{restricted_suffix}"
+        cell_id = str(row.get("cell_id")).strip() if row.get("cell_id") else None
+        row["cell_id"] = (
+            f"{cell_id}{restricted_suffix}" if cell_id else f"{template_id}{restricted_suffix}"
+        )
+        cells.append(row)
+
+        full_control_key = (template_id, subject, filter_modality)
+        if full_control_key in full_control_keys:
+            continue
+        full_control_keys.add(full_control_key)
+
+        control = _copy_variant(base)
+        control_params = dict(control.get("params", {}))
+        control_params["subject"] = subject
+        control_params.pop("filter_task", None)
+        control["params"] = control_params
+        control_group_id = (
+            f"E15::{template_id}::{subject or 'unknown_subject'}::"
+            f"task=full::modality={filter_modality or 'all'}"
+        )
+        control_suffix = (
+            f"__subject_{subject or 'unknown'}__task_full__modality_{filter_modality or 'all'}"
+        )
+        control["factor_settings"].update(
+            {
+                "special_cell_kind": "subset_sensitivity",
+                "subset_arm": "full_control",
+                "subset_sensitivity_group_id": control_group_id,
+            }
+        )
+        control["design_metadata"].update(
+            {
+                "special_cell_kind": "subset_sensitivity",
+                "subset_arm": "full_control",
+                "subset_sensitivity_group_id": control_group_id,
+            }
+        )
+        trial_id = str(control.get("trial_id")).strip() if control.get("trial_id") else None
+        if trial_id:
+            control["trial_id"] = f"{trial_id}{control_suffix}"
+        cell_id = str(control.get("cell_id")).strip() if control.get("cell_id") else None
+        control["cell_id"] = (
+            f"{cell_id}{control_suffix}" if cell_id else f"{template_id}{control_suffix}"
+        )
+        cells.append(control)
+
+    if not cells:
+        warnings.append("E15 subset sensitivity did not produce any materialized cells.")
+    return _reindex_variants(cells), warnings
+
+
 def _expand_e24_rerun_cells(
     *,
     variants: list[dict[str, Any]],
@@ -1404,6 +1526,7 @@ def materialize_experiment_cells(
     variants: list[dict[str, Any]],
     dataset_scope: dict[str, Any],
     n_permutations: int,
+    seed: int = 42,
     registry_experiments: list[dict[str, Any]] | None = None,
 ) -> tuple[list[dict[str, Any]], list[str]]:
     experiment_id = str(experiment.get("experiment_id"))
@@ -1412,6 +1535,7 @@ def materialize_experiment_cells(
             experiment=experiment,
             variants=variants,
             n_permutations=int(n_permutations),
+            seed=int(seed),
             registry_experiments=registry_experiments,
         )
     if experiment_id == "E13":
@@ -1425,6 +1549,10 @@ def materialize_experiment_cells(
             experiment=experiment,
             variants=variants,
             registry_experiments=registry_experiments,
+        )
+    if experiment_id == "E15":
+        return _expand_e15_subset_sensitivity_cells(
+            variants=variants,
         )
     if experiment_id == "E23":
         return _expand_e23_omitted_session_cells(

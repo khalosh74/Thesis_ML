@@ -3273,10 +3273,12 @@
             "target": "coarse_affect",
             "cv": "within_subject_loso_session",
             "model": "ridge",
-            "filter_task": "VARIES",
-            "filter_modality": "VARIES"
+            "filter_modality": "audiovisual"
           },
-          "expand": {},
+          "expand": {
+            "subject": "subjects",
+            "filter_task": "tasks"
+          },
           "sections": [
             "dataset_selection",
             "feature_cache_build",
@@ -3290,7 +3292,7 @@
           "start_section": "dataset_selection",
           "end_section": "evaluation",
           "base_artifact_id": null,
-          "reuse_policy": "require_explicit_base",
+          "reuse_policy": "auto",
           "search_space_id": null,
           "study_id": null,
           "trial_id": null,

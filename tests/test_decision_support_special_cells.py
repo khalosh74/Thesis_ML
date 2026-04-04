@@ -369,6 +369,9 @@ def test_e12_materialization_chunks_permutations_deterministically() -> None:
     assert len(cells) == 3
     assert [int(cell["n_permutations_override"]) for cell in cells] == [50, 50, 20]
     assert [int(cell["design_metadata"]["chunk_index"]) for cell in cells] == [1, 2, 3]
+    seeds = [int(cell["seed"]) for cell in cells]
+    assert len(set(seeds)) == 3
+    assert seeds == sorted(seeds)
     assert {str(cell["params"]["subject"]) for cell in cells} == {"sub-001"}
     assert {str(cell["params"]["feature_space"]) for cell in cells} == {"whole_brain_masked"}
     required_chunk_keys = {
@@ -576,3 +579,67 @@ def test_e24_materialization_marks_cells_as_sequential_only() -> None:
     assert len(cells) == 1
     assert bool(cells[0]["sequential_only"]) is True
     assert bool(cells[0]["design_metadata"]["sequential_only"]) is True
+
+
+def test_e15_materialization_emits_restricted_and_full_control_cells() -> None:
+    experiment = {"experiment_id": "E15"}
+    variant = _base_variant()
+    variant["params"] = {
+        "target": "coarse_affect",
+        "model": "ridge",
+        "cv": "within_subject_loso_session",
+        "subject": "sub-001",
+        "filter_task": "emo",
+        "filter_modality": "audiovisual",
+    }
+
+    cells, warnings = materialize_experiment_cells(
+        experiment=experiment,
+        variants=[variant],
+        dataset_scope={},
+        n_permutations=0,
+    )
+
+    assert warnings == []
+    assert len(cells) == 2
+    subset_arms = {
+        str(cell.get("design_metadata", {}).get("subset_arm"))
+        for cell in cells
+        if isinstance(cell.get("design_metadata"), dict)
+    }
+    assert subset_arms == {"task_restricted", "full_control"}
+    restricted = [
+        cell
+        for cell in cells
+        if str(cell.get("design_metadata", {}).get("subset_arm")) == "task_restricted"
+    ][0]
+    full_control = [
+        cell
+        for cell in cells
+        if str(cell.get("design_metadata", {}).get("subset_arm")) == "full_control"
+    ][0]
+    assert str(restricted["params"].get("filter_task")) == "emo"
+    assert full_control["params"].get("filter_task") is None
+
+
+def test_e15_materialization_blocks_missing_subject_for_within_subject_cv() -> None:
+    experiment = {"experiment_id": "E15"}
+    variant = _base_variant()
+    variant["params"] = {
+        "target": "coarse_affect",
+        "model": "ridge",
+        "cv": "within_subject_loso_session",
+        "filter_task": "emo",
+    }
+
+    cells, warnings = materialize_experiment_cells(
+        experiment=experiment,
+        variants=[variant],
+        dataset_scope={},
+        n_permutations=0,
+    )
+
+    assert warnings == []
+    assert len(cells) == 1
+    assert bool(cells[0]["supported"]) is False
+    assert "requires subject" in str(cells[0].get("blocked_reason", ""))
