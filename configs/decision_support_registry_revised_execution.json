@@ -1,6 +1,6 @@
 {
   "schema_version": "workbook-v1",
-  "description": "Frozen thesis runtime execution registry compiled from study workbook instance thesis_experiment_program_revised.xlsx.",
+  "description": "Frozen thesis runtime execution registry compiled from study workbook instance thesis_experiment_program_revised_v1.xlsx.",
   "experiments": [
     {
       "experiment_id": "E01",

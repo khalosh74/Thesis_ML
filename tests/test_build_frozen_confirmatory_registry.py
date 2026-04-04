@@ -411,10 +411,7 @@ def test_build_frozen_confirmatory_registry_fails_on_scope_runtime_mismatch(
     _write_index(index_path)
 
     script = _load_script_module(Path("scripts") / "build_frozen_confirmatory_registry.py")
-    with pytest.raises(
-        Exception,
-        match="Scientific scope and thesis runtime registry are not aligned",
-    ):
+    with pytest.raises(Exception) as exc_info:
         script.main(
             [
                 "--campaign-root",
@@ -431,6 +428,10 @@ def test_build_frozen_confirmatory_registry_fails_on_scope_runtime_mismatch(
                 str(index_path),
             ]
         )
+    message = str(exc_info.value)
+    assert "Scientific scope and thesis runtime registry are not aligned" in message
+    assert "within_subject_loso_session:sub-002" in message
+    assert "frozen_cross_person_transfer:sub-002->sub-001" in message
 
 
 def test_build_frozen_confirmatory_registry_rejects_feature_space_mismatch(

@@ -440,11 +440,11 @@ Freeze workbook to execution JSON registry (recommended for stable reruns):
 
 ```bash
 python scripts/freeze_workbook_registry.py \
-  --workbook templates/thesis_experiment_program_revised.xlsx \
+  --workbook workbooks/thesis_program_instances/thesis_experiment_program_revised_v1.xlsx \
   --output configs/decision_support_registry_revised_execution.json
 ```
 
-Note: `templates/thesis_experiment_program_revised.xlsx` is treated as a study workbook instance,
+Note: `workbooks/thesis_program_instances/thesis_experiment_program_revised_v1.xlsx` is treated as a study workbook instance,
 not as a generic reusable template.
 
 Run from the frozen execution registry:

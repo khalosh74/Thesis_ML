@@ -132,6 +132,9 @@ def test_scope_runtime_alignment_fails_when_runtime_is_narrower(tmp_path: Path) 
     }
     assert "scope_within_missing_in_runtime" in issue_codes
     assert "scope_transfer_missing_in_runtime" in issue_codes
+    missing_labels = set(summary.get("missing_analysis_labels", []))
+    assert "within_subject_loso_session:sub-002" in missing_labels
+    assert "frozen_cross_person_transfer:sub-002->sub-001" in missing_labels
 
 
 def test_scope_runtime_alignment_allows_explicit_deferred_exceptions(tmp_path: Path) -> None:
@@ -155,6 +158,32 @@ def test_scope_runtime_alignment_allows_explicit_deferred_exceptions(tmp_path: P
     assert summary["passed"] is True
 
 
+def test_scope_runtime_alignment_rejects_deferred_exceptions_outside_scope(tmp_path: Path) -> None:
+    scope_path = tmp_path / "scope.json"
+    runtime_path = tmp_path / "runtime.json"
+    exceptions_path = tmp_path / "exceptions.json"
+    _write_scope(scope_path)
+    _write_runtime_registry(runtime_path, include_sub002=True, include_reverse=True)
+    exceptions_payload = {
+        "scope_id": "confirmatory_scope_v1",
+        "deferred_within_subjects": ["sub-099"],
+        "deferred_transfer_pairs": [{"train_subject": "sub-001", "test_subject": "sub-099"}],
+    }
+    exceptions_path.write_text(f"{json.dumps(exceptions_payload, indent=2)}\n", encoding="utf-8")
+
+    summary = verify_confirmatory_scope_runtime_alignment(
+        scope_config_path=scope_path,
+        runtime_registry_path=runtime_path,
+        exceptions_config_path=exceptions_path,
+    )
+    assert summary["passed"] is False
+    issue_codes = {
+        str(row.get("code")) for row in summary.get("issues", []) if isinstance(row, dict)
+    }
+    assert "scope_exceptions_within_outside_scope" in issue_codes
+    assert "scope_exceptions_transfer_outside_scope" in issue_codes
+
+
 def test_control_coverage_rows_follow_runtime_anchor_set() -> None:
     runtime_anchors = [
         {
@@ -175,8 +204,22 @@ def test_control_coverage_rows_follow_runtime_anchor_set() -> None:
             "template_id": "e17_001_to_002",
         },
     ]
-    e12_rows = [{"analysis_label": "within_subject_loso_session:sub-001"}]
-    e13_rows = [{"analysis_label": "frozen_cross_person_transfer:sub-001->sub-002"}]
+    e12_rows = [
+        {
+            "analysis_label": "within_subject_loso_session:sub-001",
+            "run_id": "e12_run_sub001",
+            "metrics_path": "/tmp/e12_sub001_metrics.json",
+            "report_dir": "/tmp/e12_report",
+        }
+    ]
+    e13_rows = [
+        {
+            "analysis_label": "frozen_cross_person_transfer:sub-001->sub-002",
+            "run_id": "e13_run_001_to_002",
+            "metrics_path": "/tmp/e13_001_to_002_metrics.json",
+            "report_dir": "/tmp/e13_report",
+        }
+    ]
 
     rows = build_confirmatory_control_coverage_rows(
         runtime_anchors=runtime_anchors,
@@ -190,5 +233,10 @@ def test_control_coverage_rows_follow_runtime_anchor_set() -> None:
     transfer_row = [row for row in rows if str(row["analysis_type"]) == "cross_person_transfer"][0]
     assert within_row["e12_covered"] is True
     assert within_row["e13_covered"] is False
+    assert within_row["e12_run_id"] == "e12_run_sub001"
+    assert within_row["e12_metrics_path"] == "/tmp/e12_sub001_metrics.json"
+    assert within_row["e13_run_id"] is None
     assert transfer_row["e12_covered"] is False
     assert transfer_row["e13_covered"] is True
+    assert transfer_row["e12_metrics_path"] is None
+    assert transfer_row["e13_run_id"] == "e13_run_001_to_002"

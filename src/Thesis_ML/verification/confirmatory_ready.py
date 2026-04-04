@@ -51,6 +51,17 @@ def _criterion(name: str, *, passed: bool, details: dict[str, Any] | None = None
     return payload
 
 
+def _runtime_anchor_labels(scope_runtime_summary: dict[str, Any]) -> list[str]:
+    labels: list[str] = []
+    for row in list(scope_runtime_summary.get("runtime_anchor_set") or []):
+        if not isinstance(row, dict):
+            continue
+        label = str(row.get("analysis_label", "")).strip()
+        if label:
+            labels.append(label)
+    return sorted(set(labels))
+
+
 def verify_confirmatory_ready(
     *,
     output_dir: Path | str,
@@ -401,6 +412,9 @@ def verify_confirmatory_ready(
 
     control_coverage_path = root / "special_aggregations" / "confirmatory"
     control_coverage_json = control_coverage_path / "confirmatory_anchor_control_coverage.json"
+    control_coverage_payload: dict[str, Any] | None = None
+    control_coverage_rows: list[dict[str, Any]] = []
+    runtime_anchor_labels = _runtime_anchor_labels(scope_runtime_summary)
     if require_control_coverage:
         control_coverage_present = (
             control_coverage_json.exists() and control_coverage_json.is_file()
@@ -420,6 +434,118 @@ def verify_confirmatory_ready(
                     "details": {"path": str(control_coverage_json.resolve())},
                 }
             )
+        else:
+            control_coverage_payload = _load_json(
+                control_coverage_json,
+                issues=issues,
+                code_prefix="confirmatory_control_coverage",
+            )
+            if isinstance(control_coverage_payload, dict):
+                rows_payload = control_coverage_payload.get("rows")
+                if isinstance(rows_payload, list):
+                    control_coverage_rows = [
+                        dict(row) for row in rows_payload if isinstance(row, dict)
+                    ]
+                else:
+                    issues.append(
+                        {
+                            "code": "confirmatory_control_coverage_invalid_shape",
+                            "message": (
+                                "confirmatory_anchor_control_coverage.json must contain list field 'rows'."
+                            ),
+                            "details": {"path": str(control_coverage_json.resolve())},
+                        }
+                    )
+
+    if require_control_coverage and isinstance(control_coverage_payload, dict):
+        coverage_by_label: dict[str, dict[str, Any]] = {}
+        duplicate_labels: set[str] = set()
+        for row in control_coverage_rows:
+            analysis_label = str(row.get("analysis_label", "")).strip()
+            if not analysis_label:
+                continue
+            if analysis_label in coverage_by_label:
+                duplicate_labels.add(analysis_label)
+                continue
+            coverage_by_label[analysis_label] = row
+
+        if duplicate_labels:
+            issues.append(
+                {
+                    "code": "confirmatory_control_coverage_duplicate_analysis_labels",
+                    "message": "Control coverage artifact has duplicate analysis_label rows.",
+                    "details": {
+                        "analysis_labels": sorted(duplicate_labels),
+                        "path": str(control_coverage_json.resolve()),
+                    },
+                }
+            )
+
+        missing_coverage_rows = sorted(
+            label for label in runtime_anchor_labels if label not in coverage_by_label
+        )
+        missing_e12_coverage = sorted(
+            label
+            for label in runtime_anchor_labels
+            if label in coverage_by_label
+            and not bool(coverage_by_label[label].get("e12_covered", False))
+        )
+        missing_e13_coverage = sorted(
+            label
+            for label in runtime_anchor_labels
+            if label in coverage_by_label
+            and not bool(coverage_by_label[label].get("e13_covered", False))
+        )
+
+        criteria.append(
+            _criterion(
+                "confirmatory_control_coverage_complete",
+                passed=not (
+                    missing_coverage_rows or missing_e12_coverage or missing_e13_coverage
+                ),
+                details={
+                    "path": str(control_coverage_json.resolve()),
+                    "runtime_anchor_labels": runtime_anchor_labels,
+                    "missing_coverage_rows": missing_coverage_rows,
+                    "missing_e12_coverage": missing_e12_coverage,
+                    "missing_e13_coverage": missing_e13_coverage,
+                },
+            )
+        )
+
+        if missing_coverage_rows:
+            issues.append(
+                {
+                    "code": "confirmatory_control_coverage_rows_missing_for_runtime_anchors",
+                    "message": (
+                        "Control coverage rows are missing for runtime confirmatory anchors: "
+                        + ", ".join(missing_coverage_rows)
+                    ),
+                    "details": {"analysis_labels": missing_coverage_rows},
+                }
+            )
+        if missing_e12_coverage:
+            issues.append(
+                {
+                    "code": "confirmatory_control_coverage_e12_missing",
+                    "message": (
+                        "E12 permutation coverage is missing for confirmatory anchors: "
+                        + ", ".join(missing_e12_coverage)
+                    ),
+                    "details": {"analysis_labels": missing_e12_coverage},
+                }
+            )
+        if missing_e13_coverage:
+            issues.append(
+                {
+                    "code": "confirmatory_control_coverage_e13_missing",
+                    "message": (
+                        "E13 dummy-baseline coverage is missing for confirmatory anchors: "
+                        + ", ".join(missing_e13_coverage)
+                    ),
+                    "details": {"analysis_labels": missing_e13_coverage},
+                }
+            )
 
     passed = bool(all(entry.get("passed", False) for entry in criteria))
     return {
@@ -429,6 +555,11 @@ def verify_confirmatory_ready(
         "issues": issues,
         "official_artifact_summary": official_summary,
         "scope_runtime_alignment": scope_runtime_summary,
+        "control_coverage_artifact_path": (
+            str(control_coverage_json.resolve())
+            if control_coverage_json.exists() and control_coverage_json.is_file()
+            else None
+        ),
         "reproducibility_summary_path": (
             str(Path(reproducibility_summary).resolve()) if reproducibility_summary else None
         ),

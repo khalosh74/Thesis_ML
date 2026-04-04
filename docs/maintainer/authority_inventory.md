@@ -14,7 +14,7 @@ This inventory classifies truth-bearing and related files by authority layer.
 
 ## Generation
 - `templates/thesis_experiment_program.xlsx` (governed template)
-- `templates/thesis_experiment_program_revised.xlsx` (study workbook instance)
+- `workbooks/thesis_program_instances/thesis_experiment_program_revised_v1.xlsx` (study workbook instance)
 - `src/Thesis_ML/workbook/template_constants.py`
 - `src/Thesis_ML/workbook/template_builder.py`
 - `scripts/freeze_workbook_registry.py`
@@ -25,7 +25,7 @@ This inventory classifies truth-bearing and related files by authority layer.
 
 ## Archive
 - `configs/archive/registries/` (backup registries root)
-- `configs/decision_support_registry_revised_execution.E02_backup.json` (legacy backup file)
+- `configs/archive/registries/decision_support_registry_revised_execution.E02_backup.json` (legacy backup file)
 
 ## Machine-Readable Layer Contract
 - `configs/authority_manifest.json` is the machine-readable declaration of the scientific/runtime/generation/derived/archive authority model.

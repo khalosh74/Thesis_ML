@@ -60,6 +60,7 @@ def test_generation_authority_distinguishes_template_and_study_instance() -> Non
     generation = payload["generation"]
     assert generation["workbook_template"] == "templates/thesis_experiment_program.xlsx"
     assert (
-        generation["study_workbook_instance"] == "templates/thesis_experiment_program_revised.xlsx"
+        generation["study_workbook_instance"]
+        == "workbooks/thesis_program_instances/thesis_experiment_program_revised_v1.xlsx"
     )
     assert generation["workbook_template"] != generation["study_workbook_instance"]

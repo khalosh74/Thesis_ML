@@ -251,7 +251,7 @@ python -m uv run thesisml-run-decision-support `
 ```
 
 Study workbook instance classification:
-- `templates/thesis_experiment_program_revised.xlsx` is a thesis study instance used to freeze runtime
+- `workbooks/thesis_program_instances/thesis_experiment_program_revised_v1.xlsx` is a thesis study instance used to freeze runtime
   registries; it is not a generic template authority.
 
 ## Compatibility install path (kept)

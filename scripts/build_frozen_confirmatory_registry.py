@@ -539,6 +539,28 @@ def _write_markdown_report(path: Path, *, payload: dict[str, Any]) -> None:
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def _extract_alignment_labels(
+    alignment_summary: dict[str, Any],
+) -> tuple[list[str], list[str]]:
+    missing_labels: set[str] = set()
+    out_of_scope_labels: set[str] = set()
+    for row in list(alignment_summary.get("issues") or []):
+        if not isinstance(row, dict):
+            continue
+        details = row.get("details")
+        if not isinstance(details, dict):
+            continue
+        for value in list(details.get("missing_analysis_labels") or []):
+            text = _safe_text(value)
+            if text:
+                missing_labels.add(text)
+        for value in list(details.get("analysis_labels") or []):
+            text = _safe_text(value)
+            if text:
+                out_of_scope_labels.add(text)
+    return sorted(missing_labels), sorted(out_of_scope_labels)
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
     campaign_root = args.campaign_root.resolve()
@@ -565,9 +587,17 @@ def main(argv: list[str] | None = None) -> int:
             for row in list(alignment_summary.get("issues") or [])
             if isinstance(row, dict)
         ]
+        missing_labels, out_of_scope_labels = _extract_alignment_labels(alignment_summary)
+        detail_parts: list[str] = []
+        if missing_labels:
+            detail_parts.append("missing analyses: " + ", ".join(missing_labels))
+        if out_of_scope_labels:
+            detail_parts.append("out-of-scope runtime anchors: " + ", ".join(out_of_scope_labels))
+        detail_suffix = f" ({'; '.join(detail_parts)})" if detail_parts else ""
         raise FrozenConfirmatoryBuildError(
             "Scientific scope and thesis runtime registry are not aligned; "
             f"cannot build frozen confirmatory registry. Issues: {', '.join(issue_codes)}"
+            + detail_suffix
         )
 
     selected = _required_selected(bundle_payload)

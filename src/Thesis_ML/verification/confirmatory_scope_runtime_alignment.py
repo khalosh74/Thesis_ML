@@ -23,6 +23,14 @@ def _load_json_object(path: Path, *, label: str) -> dict[str, Any]:
     return payload
 
 
+def _within_analysis_label(subject: str) -> str:
+    return f"{_WITHIN_CV}:{subject}"
+
+
+def _transfer_analysis_label(pair: tuple[str, str]) -> str:
+    return f"{_TRANSFER_CV}:{pair[0]}->{pair[1]}"
+
+
 def _resolve_scope(scope_payload: dict[str, Any]) -> dict[str, Any]:
     scope_id = _safe_text(scope_payload.get("scope_id"))
     within_subjects = [
@@ -232,15 +240,31 @@ def verify_confirmatory_scope_runtime_alignment(
     missing_transfer = sorted(scope_transfer - runtime_transfer - deferred_transfer)
     out_of_scope_within = sorted(runtime_within - scope_within)
     out_of_scope_transfer = sorted(runtime_transfer - scope_transfer)
+    invalid_deferred_within = sorted(deferred_within - scope_within)
+    invalid_deferred_transfer = sorted(deferred_transfer - scope_transfer)
+
+    missing_within_labels = [_within_analysis_label(subject) for subject in missing_within]
+    missing_transfer_labels = [_transfer_analysis_label(pair) for pair in missing_transfer]
+    missing_analysis_labels = sorted(missing_within_labels + missing_transfer_labels)
+
+    out_of_scope_within_labels = [_within_analysis_label(subject) for subject in out_of_scope_within]
+    out_of_scope_transfer_labels = [_transfer_analysis_label(pair) for pair in out_of_scope_transfer]
+    out_of_scope_analysis_labels = sorted(
+        out_of_scope_within_labels + out_of_scope_transfer_labels
+    )
 
     issues: list[dict[str, Any]] = []
     if missing_within:
         issues.append(
             {
                 "code": "scope_within_missing_in_runtime",
-                "message": "Scoped within-subject confirmatory analyses are missing from runtime.",
+                "message": (
+                    "Scoped within-subject confirmatory analyses are missing from runtime: "
+                    + ", ".join(missing_within_labels)
+                ),
                 "details": {
                     "missing_within_subjects": missing_within,
+                    "missing_analysis_labels": missing_within_labels,
                 },
             }
         )
@@ -248,12 +272,16 @@ def verify_confirmatory_scope_runtime_alignment(
         issues.append(
             {
                 "code": "scope_transfer_missing_in_runtime",
-                "message": "Scoped transfer confirmatory analyses are missing from runtime.",
+                "message": (
+                    "Scoped transfer confirmatory analyses are missing from runtime: "
+                    + ", ".join(missing_transfer_labels)
+                ),
                 "details": {
                     "missing_transfer_pairs": [
                         {"train_subject": pair[0], "test_subject": pair[1]}
                         for pair in missing_transfer
-                    ]
+                    ],
+                    "missing_analysis_labels": missing_transfer_labels,
                 },
             }
         )
@@ -261,9 +289,13 @@ def verify_confirmatory_scope_runtime_alignment(
         issues.append(
             {
                 "code": "runtime_within_out_of_scope",
-                "message": "Runtime includes within-subject confirmatory analyses outside scientific scope.",
+                "message": (
+                    "Runtime includes within-subject confirmatory analyses outside scientific scope: "
+                    + ", ".join(out_of_scope_within_labels)
+                ),
                 "details": {
                     "subjects": out_of_scope_within,
+                    "analysis_labels": out_of_scope_within_labels,
                 },
             }
         )
@@ -271,12 +303,47 @@ def verify_confirmatory_scope_runtime_alignment(
         issues.append(
             {
                 "code": "runtime_transfer_out_of_scope",
-                "message": "Runtime includes transfer confirmatory analyses outside scientific scope.",
+                "message": (
+                    "Runtime includes transfer confirmatory analyses outside scientific scope: "
+                    + ", ".join(out_of_scope_transfer_labels)
+                ),
                 "details": {
                     "pairs": [
                         {"train_subject": pair[0], "test_subject": pair[1]}
                         for pair in out_of_scope_transfer
-                    ]
+                    ],
+                    "analysis_labels": out_of_scope_transfer_labels,
+                },
+            }
+        )
+    if invalid_deferred_within:
+        issues.append(
+            {
+                "code": "scope_exceptions_within_outside_scope",
+                "message": (
+                    "Deferred within-subject exceptions are outside scientific scope: "
+                    + ", ".join(sorted(invalid_deferred_within))
+                ),
+                "details": {
+                    "invalid_deferred_within_subjects": sorted(invalid_deferred_within),
+                },
+            }
+        )
+    if invalid_deferred_transfer:
+        issues.append(
+            {
+                "code": "scope_exceptions_transfer_outside_scope",
+                "message": (
+                    "Deferred transfer exceptions are outside scientific scope: "
+                    + ", ".join(
+                        _transfer_analysis_label(pair) for pair in sorted(invalid_deferred_transfer)
+                    )
+                ),
+                "details": {
+                    "invalid_deferred_transfer_pairs": [
+                        {"train_subject": pair[0], "test_subject": pair[1]}
+                        for pair in sorted(invalid_deferred_transfer)
+                    ],
                 },
             }
         )
@@ -295,11 +362,26 @@ def verify_confirmatory_scope_runtime_alignment(
         "scope_transfer_pairs": [
             {"train_subject": pair[0], "test_subject": pair[1]} for pair in sorted(scope_transfer)
         ],
+        "scope_analysis_labels": sorted(
+            [_within_analysis_label(subject) for subject in scope_within]
+            + [_transfer_analysis_label(pair) for pair in scope_transfer]
+        ),
         "deferred_within_subjects": sorted(deferred_within),
         "deferred_transfer_pairs": [
             {"train_subject": pair[0], "test_subject": pair[1]}
             for pair in sorted(deferred_transfer)
         ],
+        "deferred_analysis_labels": sorted(
+            [_within_analysis_label(subject) for subject in deferred_within]
+            + [_transfer_analysis_label(pair) for pair in deferred_transfer]
+        ),
+        "runtime_analysis_labels": sorted(
+            _safe_text(row.get("analysis_label"))
+            for row in runtime_anchors
+            if _safe_text(row.get("analysis_label"))
+        ),
+        "missing_analysis_labels": missing_analysis_labels,
+        "out_of_scope_analysis_labels": out_of_scope_analysis_labels,
         "runtime_anchor_set": runtime_anchors,
         "issues": issues,
     }
@@ -313,20 +395,28 @@ def build_confirmatory_control_coverage_rows(
     e12_summary_json_path: str | None,
     e13_summary_json_path: str | None,
 ) -> list[dict[str, Any]]:
-    e12_labels = {
-        _safe_text(row.get("analysis_label"))
-        for row in e12_table_rows
-        if isinstance(row, dict) and _safe_text(row.get("analysis_label"))
-    }
-    e13_labels = {
-        _safe_text(row.get("analysis_label"))
-        for row in e13_table_rows
-        if isinstance(row, dict) and _safe_text(row.get("analysis_label"))
-    }
+    def _rows_by_label(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+        mapping: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            analysis_label = _safe_text(row.get("analysis_label"))
+            if not analysis_label:
+                continue
+            if analysis_label not in mapping:
+                mapping[analysis_label] = dict(row)
+        return mapping
+
+    e12_by_label = _rows_by_label(e12_table_rows)
+    e13_by_label = _rows_by_label(e13_table_rows)
+    e12_labels = set(e12_by_label.keys())
+    e13_labels = set(e13_by_label.keys())
 
     rows: list[dict[str, Any]] = []
     for anchor in runtime_anchors:
         analysis_label = _safe_text(anchor.get("analysis_label"))
+        e12_row = e12_by_label.get(analysis_label, {})
+        e13_row = e13_by_label.get(analysis_label, {})
         rows.append(
             {
                 "analysis_label": analysis_label,
@@ -339,6 +429,12 @@ def build_confirmatory_control_coverage_rows(
                 "runtime_anchor_template_id": _safe_text(anchor.get("template_id")),
                 "e12_covered": bool(analysis_label in e12_labels),
                 "e13_covered": bool(analysis_label in e13_labels),
+                "e12_run_id": _safe_text(e12_row.get("run_id")) or None,
+                "e13_run_id": _safe_text(e13_row.get("run_id")) or None,
+                "e12_metrics_path": _safe_text(e12_row.get("metrics_path")) or None,
+                "e13_metrics_path": _safe_text(e13_row.get("metrics_path")) or None,
+                "e12_report_dir": _safe_text(e12_row.get("report_dir")) or None,
+                "e13_report_dir": _safe_text(e13_row.get("report_dir")) or None,
                 "e12_summary_json_path": str(e12_summary_json_path)
                 if e12_summary_json_path
                 else None,

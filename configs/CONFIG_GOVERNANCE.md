@@ -34,7 +34,7 @@ Phase 1 is governance-only and does not change runtime behavior.
 - Thesis runtime authority for decision-support execution is `configs/decision_support_registry_revised_execution.json`.
 - `configs/decision_support_registry.json` is package/demo default registry, not thesis runtime authority.
 - Workbook template authority is `templates/thesis_experiment_program.xlsx`.
-- `templates/thesis_experiment_program_revised.xlsx` is a study workbook instance, not a generic template.
+- `workbooks/thesis_program_instances/thesis_experiment_program_revised_v1.xlsx` is a study workbook instance, not a generic template.
 - Packaged assets under `src/Thesis_ML/assets/` are derived mirrors and must not be hand-maintained as peer authorities.
 - Backup registries are archive-only and must not be discoverable as active runtime defaults.
 

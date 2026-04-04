@@ -79,6 +79,20 @@ def test_backup_registry_is_not_present_in_active_config_registry() -> None:
         assert "decision_support_registry_revised_execution.E02_backup.json" not in path_text
 
 
+def test_backup_registry_is_archived_and_not_in_active_configs_root() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    active_backup_path = repo_root / "configs" / "decision_support_registry_revised_execution.E02_backup.json"
+    archived_backup_path = (
+        repo_root
+        / "configs"
+        / "archive"
+        / "registries"
+        / "decision_support_registry_revised_execution.E02_backup.json"
+    )
+    assert not active_backup_path.exists()
+    assert archived_backup_path.exists()
+
+
 def test_runtime_selection_default_alias_uses_fallback_when_registry_missing(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

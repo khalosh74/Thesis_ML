@@ -11,7 +11,7 @@
   },
   "generation": {
     "workbook_template": "templates/thesis_experiment_program.xlsx",
-    "study_workbook_instance": "templates/thesis_experiment_program_revised.xlsx",
+    "study_workbook_instance": "workbooks/thesis_program_instances/thesis_experiment_program_revised_v1.xlsx",
     "template_constants": "src/Thesis_ML/workbook/template_constants.py"
   },
   "derived": {

@@ -2,10 +2,16 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 from typing import Any
 
 from Thesis_ML.orchestration.workbook_compiler import compile_workbook_file
+
+LEGACY_REVISED_WORKBOOK_PATH = Path("templates/thesis_experiment_program_revised.xlsx")
+CANONICAL_STUDY_WORKBOOK_PATH = Path(
+    "workbooks/thesis_program_instances/thesis_experiment_program_revised_v1.xlsx"
+)
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -16,7 +22,10 @@ def _build_parser() -> argparse.ArgumentParser:
         "--workbook",
         type=Path,
         required=True,
-        help="Workbook path to compile.",
+        help=(
+            "Workbook path to compile. Canonical thesis study instance path: "
+            "workbooks/thesis_program_instances/thesis_experiment_program_revised_v1.xlsx"
+        ),
     )
     parser.add_argument(
         "--output",
@@ -25,6 +34,28 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Output registry JSON path.",
     )
     return parser
+
+
+def _resolve_workbook_path(path: Path, *, cwd: Path) -> Path:
+    raw_path = Path(path)
+    candidate = (cwd / raw_path).resolve() if not raw_path.is_absolute() else raw_path.resolve()
+    if candidate.exists():
+        return candidate
+
+    normalized_raw = raw_path.as_posix()
+    legacy_tail = LEGACY_REVISED_WORKBOOK_PATH.as_posix()
+    if normalized_raw == legacy_tail or normalized_raw.endswith(f"/{legacy_tail}"):
+        canonical = (cwd / CANONICAL_STUDY_WORKBOOK_PATH).resolve()
+        if canonical.exists():
+            print(
+                (
+                    "[deprecation] templates/thesis_experiment_program_revised.xlsx has moved to "
+                    "workbooks/thesis_program_instances/thesis_experiment_program_revised_v1.xlsx."
+                ),
+                file=sys.stderr,
+            )
+            return canonical
+    return candidate
 
 
 def _manifest_to_registry_payload(manifest: Any, *, source_workbook: Path) -> dict[str, Any]:
@@ -54,7 +85,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
 
-    workbook_path = Path(args.workbook).resolve()
+    workbook_path = _resolve_workbook_path(Path(args.workbook), cwd=Path.cwd())
     output_path = Path(args.output).resolve()
     manifest = compile_workbook_file(workbook_path)
     payload = _manifest_to_registry_payload(manifest, source_workbook=workbook_path)

@@ -10,7 +10,7 @@ This framework supports a full round trip:
 ## Authoritative workbook files
 
 - Template: `templates/thesis_experiment_program.xlsx`
-- Study workbook instance (thesis program instance): `templates/thesis_experiment_program_revised.xlsx`
+- Study workbook instance (thesis program instance): `workbooks/thesis_program_instances/thesis_experiment_program_revised_v1.xlsx`
 - Versioned write-back outputs: `outputs/workbooks/`
 
 Authority contract:
@@ -25,7 +25,7 @@ Template policy:
   `Experiment_Definitions`
 
 Study-instance policy:
-- `templates/thesis_experiment_program_revised.xlsx` is a thesis study instance used to generate
+- `workbooks/thesis_program_instances/thesis_experiment_program_revised_v1.xlsx` is a thesis study instance used to generate
   frozen runtime registries (for example `configs/decision_support_registry_revised_execution.json`)
 - it is not treated as a generic baseline template for new studies
 
