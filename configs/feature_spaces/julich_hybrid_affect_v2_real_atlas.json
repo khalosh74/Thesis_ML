@@ -12,12 +12,12 @@
     {
       "roi_id": "julich_v1_bilateral_real_atlas",
       "type": "mask",
-      "mask_path": "configs/feature_spaces/assets/julich_v3_0_3/masks/julich_v303_v1_bilateral_beta2mm.nii.gz"
+      "mask_path": "masks_khaled_thesis/official_beta2mm/julich_v303_v1_bilateral_beta2mm.nii.gz"
     },
     {
       "roi_id": "julich_primary_auditory_te1_bilateral_real_atlas",
       "type": "mask",
-      "mask_path": "configs/feature_spaces/assets/julich_v3_0_3/masks/julich_v303_pac_te1_bilateral_beta2mm.nii.gz"
+      "mask_path": "masks_khaled_thesis/official_beta2mm/julich_v303_pac_te1_bilateral_beta2mm.nii.gz"
     }
   ]
 }
