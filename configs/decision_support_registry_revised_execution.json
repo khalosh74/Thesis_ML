@@ -3179,6 +3179,65 @@
       ]
     },
     {
+      "experiment_id": "E14",
+      "title": "Interpretability stability robustness support",
+      "stage": "Stage 6 - Robustness analysis",
+      "decision_id": null,
+      "manipulated_factor": "Explanation stability across held-out-session folds",
+      "primary_metric": "balanced_accuracy",
+      "executable_now": true,
+      "execution_status": "unknown",
+      "blocked_reasons": [],
+      "notes": "Derived robustness support from E16 anchors only; model-behavior evidence only.",
+      "section_plan": [
+        "dataset_selection",
+        "feature_cache_build",
+        "feature_matrix_load",
+        "spatial_validation",
+        "model_fit",
+        "evaluation",
+        "interpretability"
+      ],
+      "variant_templates": [
+        {
+          "experiment_id": "E14",
+          "template_id": "wb_row_012",
+          "supported": true,
+          "unsupported_reason": null,
+          "params": {
+            "target": "coarse_affect",
+            "cv": "within_subject_loso_session",
+            "model": "ridge",
+            "anchor_experiment_id": "E16"
+          },
+          "expand": {},
+          "sections": [
+            "dataset_selection",
+            "feature_cache_build",
+            "feature_matrix_load",
+            "spatial_validation",
+            "model_fit",
+            "interpretability",
+            "evaluation"
+          ],
+          "artifacts": [],
+          "start_section": "dataset_selection",
+          "end_section": "evaluation",
+          "base_artifact_id": null,
+          "reuse_policy": "auto",
+          "search_space_id": null,
+          "study_id": null,
+          "trial_id": null,
+          "cell_id": null,
+          "repeat_id": null,
+          "seed": null,
+          "factor_settings": {},
+          "fixed_controls": {},
+          "design_metadata": {}
+        }
+      ]
+    },
+    {
       "experiment_id": "E15",
       "title": "Subset sensitivity framing",
       "stage": "Stage 6 - Robustness analysis",

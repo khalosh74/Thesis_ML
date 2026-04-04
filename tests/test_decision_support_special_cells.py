@@ -256,6 +256,106 @@ def _registry_experiments_for_e13_single_anchor() -> list[dict[str, object]]:
     ]
 
 
+def _registry_experiments_for_e14_multi_anchor() -> list[dict[str, object]]:
+    return [
+        {
+            "experiment_id": "E16",
+            "title": "Final within-person confirmatory analysis",
+            "stage": "Stage 5 - Confirmatory analysis",
+            "executable_now": True,
+            "execution_status": "unknown",
+            "variant_templates": [
+                {
+                    "template_id": "e16_anchor",
+                    "supported": True,
+                    "params": {
+                        "target": "coarse_affect",
+                        "model": "ridge",
+                        "cv": "within_subject_loso_session",
+                        "subject": "sub-001",
+                        "feature_space": "whole_brain_masked",
+                    },
+                },
+                {
+                    "template_id": "e16_anchor_sub002",
+                    "supported": True,
+                    "params": {
+                        "target": "coarse_affect",
+                        "model": "ridge",
+                        "cv": "within_subject_loso_session",
+                        "subject": "sub-002",
+                        "feature_space": "whole_brain_masked",
+                    },
+                },
+            ],
+        },
+        {
+            "experiment_id": "E17",
+            "title": "Final cross-person confirmatory analysis",
+            "stage": "Stage 5 - Confirmatory analysis",
+            "executable_now": True,
+            "execution_status": "unknown",
+            "variant_templates": [
+                {
+                    "template_id": "e17_anchor",
+                    "supported": True,
+                    "params": {
+                        "target": "coarse_affect",
+                        "model": "ridge",
+                        "cv": "frozen_cross_person_transfer",
+                        "train_subject": "sub-001",
+                        "test_subject": "sub-002",
+                    },
+                }
+            ],
+        },
+    ]
+
+
+def _registry_experiments_for_e14_non_linear_anchor_only() -> list[dict[str, object]]:
+    return [
+        {
+            "experiment_id": "E16",
+            "title": "Final within-person confirmatory analysis",
+            "stage": "Stage 5 - Confirmatory analysis",
+            "executable_now": True,
+            "execution_status": "unknown",
+            "variant_templates": [
+                {
+                    "template_id": "e16_anchor_tree",
+                    "supported": True,
+                    "params": {
+                        "target": "coarse_affect",
+                        "model": "xgboost",
+                        "cv": "within_subject_loso_session",
+                        "subject": "sub-001",
+                    },
+                }
+            ],
+        },
+        {
+            "experiment_id": "E17",
+            "title": "Final cross-person confirmatory analysis",
+            "stage": "Stage 5 - Confirmatory analysis",
+            "executable_now": True,
+            "execution_status": "unknown",
+            "variant_templates": [
+                {
+                    "template_id": "e17_anchor",
+                    "supported": True,
+                    "params": {
+                        "target": "coarse_affect",
+                        "model": "ridge",
+                        "cv": "frozen_cross_person_transfer",
+                        "train_subject": "sub-001",
+                        "test_subject": "sub-002",
+                    },
+                }
+            ],
+        },
+    ]
+
+
 def test_e12_materialization_chunks_permutations_deterministically() -> None:
     experiment = {"experiment_id": "E12"}
     cells, warnings = materialize_experiment_cells(
@@ -386,6 +486,46 @@ def test_e13_materialization_adapts_when_confirmatory_anchor_set_changes() -> No
     assert str(cells[0]["params"].get("model")) == "dummy"
     assert str(cells[0]["params"].get("cv")) == "within_subject_loso_session"
     assert str(cells[0]["params"].get("subject")) == "sub-001"
+
+
+def test_e14_materialization_matches_e16_within_person_anchors_only() -> None:
+    experiment = {"experiment_id": "E14"}
+    cells, warnings = materialize_experiment_cells(
+        experiment=experiment,
+        variants=[_base_variant()],
+        dataset_scope={},
+        n_permutations=0,
+        registry_experiments=_registry_experiments_for_e14_multi_anchor(),
+    )
+    assert warnings == []
+    assert len(cells) == 2
+    assert all(bool(cell.get("supported")) is False for cell in cells)
+    assert {
+        str(cell.get("design_metadata", {}).get("special_cell_kind"))
+        for cell in cells
+        if isinstance(cell.get("design_metadata"), dict)
+    } == {"interpretability_stability"}
+    assert {str(cell["params"].get("cv")) for cell in cells} == {"within_subject_loso_session"}
+    assert {str(cell["params"].get("subject")) for cell in cells} == {"sub-001", "sub-002"}
+    assert {
+        str(cell.get("design_metadata", {}).get("anchor_experiment_id"))
+        for cell in cells
+        if isinstance(cell.get("design_metadata"), dict)
+    } == {"E16"}
+
+
+def test_e14_materialization_requires_within_subject_linear_anchor_conditions() -> None:
+    experiment = {"experiment_id": "E14"}
+    cells, warnings = materialize_experiment_cells(
+        experiment=experiment,
+        variants=[_base_variant()],
+        dataset_scope={},
+        n_permutations=0,
+        registry_experiments=_registry_experiments_for_e14_non_linear_anchor_only(),
+    )
+    assert cells == []
+    assert warnings
+    assert "no eligible E16 within-subject linear-interpretability anchors" in str(warnings[0])
 
 
 def test_e23_materialization_expands_omitted_sessions() -> None:

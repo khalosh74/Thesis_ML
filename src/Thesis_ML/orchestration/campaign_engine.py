@@ -71,6 +71,9 @@ from Thesis_ML.orchestration.experiment_selection import (
 from Thesis_ML.orchestration.experiment_selection import (
     select_experiments as _select_experiments,
 )
+from Thesis_ML.orchestration.interpretability_stability_aggregation import (
+    build_e14_reporting_records as _build_e14_reporting_records,
+)
 from Thesis_ML.orchestration.permutation_chunk_aggregation import (
     build_e12_table_ready_rows as _build_e12_table_ready_rows,
 )
@@ -930,7 +933,7 @@ _PHASE_BLUEPRINT_AUTO: list[dict[str, Any]] = [
     },
     {"phase_name": "Freeze final confirmatory pipeline", "groups": []},
     {"phase_name": "Confirmatory", "groups": [["E16", "E17"]]},
-    {"phase_name": "Blocking robustness", "groups": [["E12", "E13", "E20"]]},
+    {"phase_name": "Blocking robustness", "groups": [["E12", "E13", "E14", "E20"]]},
     {"phase_name": "Context robustness", "groups": [["E21", "E22", "E23", "E15"]]},
     {"phase_name": "Reproducibility audit", "groups": [["E24"]]},
 ]
@@ -2147,6 +2150,8 @@ def run_decision_support_campaign(
     e12_table_ready_summary_json_path: str | None = None
     e13_table_ready_summary_csv_path: str | None = None
     e13_table_ready_summary_json_path: str | None = None
+    e14_stability_summary_csv_path: str | None = None
+    e14_stability_summary_json_path: str | None = None
     confirmatory_anchor_control_coverage_csv_path: str | None = None
     confirmatory_anchor_control_coverage_json_path: str | None = None
     thesis_confirmatory_artifact_paths: dict[str, str | None] = {}
@@ -2205,6 +2210,27 @@ def run_decision_support_campaign(
         )
         e13_table_ready_summary_csv_path = str(e13_csv_path.resolve())
         e13_table_ready_summary_json_path = str(e13_json_path.resolve())
+
+    reporting_variant_records, e14_summary_rows, e14_summary_payload = _build_e14_reporting_records(
+        reporting_variant_records=reporting_variant_records
+    )
+    if e14_summary_rows:
+        special_aggregation_root = campaign_root / "special_aggregations" / "E14"
+        special_aggregation_root.mkdir(parents=True, exist_ok=True)
+        e14_csv_path = special_aggregation_root / "e14_explanation_stability_summary.csv"
+        e14_json_path = special_aggregation_root / "e14_explanation_stability_summary.json"
+        import pandas as pd
+
+        pd.DataFrame(e14_summary_rows).to_csv(e14_csv_path, index=False)
+        e14_json_payload = dict(e14_summary_payload)
+        e14_json_payload["generated_at_utc"] = _utc_timestamp()
+        e14_json_payload["n_rows"] = int(len(e14_summary_rows))
+        e14_json_path.write_text(
+            f"{json.dumps(e14_json_payload, indent=2)}\n",
+            encoding="utf-8",
+        )
+        e14_stability_summary_csv_path = str(e14_csv_path.resolve())
+        e14_stability_summary_json_path = str(e14_json_path.resolve())
 
     runtime_anchor_rows: list[dict[str, Any]] = []
     try:
@@ -2453,6 +2479,8 @@ def run_decision_support_campaign(
             "e12_permutation_analysis_summary_json": e12_table_ready_summary_json_path,
             "e13_dummy_baseline_analysis_summary_csv": e13_table_ready_summary_csv_path,
             "e13_dummy_baseline_analysis_summary_json": e13_table_ready_summary_json_path,
+            "e14_explanation_stability_summary_csv": e14_stability_summary_csv_path,
+            "e14_explanation_stability_summary_json": e14_stability_summary_json_path,
             "confirmatory_anchor_control_coverage_csv": confirmatory_anchor_control_coverage_csv_path,
             "confirmatory_anchor_control_coverage_json": confirmatory_anchor_control_coverage_json_path,
             "confirmatory_anchor_manifest_csv": thesis_confirmatory_artifact_paths.get(
