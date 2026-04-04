@@ -268,6 +268,7 @@ def stamp_metrics_artifact(
     compute_policy: ResolvedComputePolicy | None = None,
     compute_runtime_metadata: dict[str, Any] | None = None,
     stage_execution: StageExecutionMetadata | dict[str, Any] | None = None,
+    model_persistence: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     if not metrics_path.exists():
         return None
@@ -388,6 +389,8 @@ def stamp_metrics_artifact(
     stage_execution_data = _stage_execution_payload(stage_execution)
     if stage_execution_data is not None:
         persisted_metrics["stage_execution"] = stage_execution_data
+    if isinstance(model_persistence, dict):
+        persisted_metrics["model_persistence"] = dict(model_persistence)
     stamp_compute_policy_metadata(
         payload=persisted_metrics,
         compute_policy=compute_policy,
@@ -508,6 +511,7 @@ def build_run_config_payload(
     compute_policy: ResolvedComputePolicy | None = None,
     compute_runtime_metadata: dict[str, Any] | None = None,
     stage_execution: StageExecutionMetadata | dict[str, Any] | None = None,
+    model_persistence: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     payload = {
         "run_id": run_id,
@@ -701,6 +705,8 @@ def build_run_config_payload(
     stage_execution_data = _stage_execution_payload(stage_execution)
     if stage_execution_data is not None:
         payload["stage_execution"] = stage_execution_data
+    if isinstance(model_persistence, dict):
+        payload["model_persistence"] = dict(model_persistence)
     stamp_compute_policy_metadata(
         payload=payload,
         compute_policy=compute_policy,
@@ -782,6 +788,7 @@ def build_run_result_payload(
     compute_policy: ResolvedComputePolicy | None = None,
     compute_runtime_metadata: dict[str, Any] | None = None,
     stage_execution: StageExecutionMetadata | dict[str, Any] | None = None,
+    model_persistence: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     payload = {
         "run_id": run_id,
@@ -928,6 +935,8 @@ def build_run_result_payload(
     stage_execution_data = _stage_execution_payload(stage_execution)
     if stage_execution_data is not None:
         payload["stage_execution"] = stage_execution_data
+    if isinstance(model_persistence, dict):
+        payload["model_persistence"] = dict(model_persistence)
     stamp_compute_policy_metadata(
         payload=payload,
         compute_policy=compute_policy,

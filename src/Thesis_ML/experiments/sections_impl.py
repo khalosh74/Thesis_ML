@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import inspect
 import json
+import platform
 from pathlib import Path
 from time import perf_counter
 from typing import TYPE_CHECKING, Any
@@ -18,6 +19,11 @@ from Thesis_ML.experiments.cv_split_plan import build_cv_split_plan
 from Thesis_ML.experiments.evidence_statistics import build_calibration_outputs
 from Thesis_ML.experiments.metrics import classification_metric_score
 from Thesis_ML.experiments.model_factory import model_supports_linear_interpretability
+from Thesis_ML.experiments.model_persistence import (
+    build_model_metadata_payload,
+    save_trained_estimator,
+    write_model_summary,
+)
 from Thesis_ML.experiments.progress import emit_progress
 from Thesis_ML.experiments.stage_execution import StageAssignment
 from Thesis_ML.experiments.stage_registry import (
@@ -296,10 +302,19 @@ def execute_model_fit(section_input: ModelFitInput) -> dict[str, Any]:
     fold_rows: list[dict[str, Any]] = []
     split_rows: list[dict[str, Any]] = []
     prediction_rows: list[dict[str, Any]] = []
+    saved_model_rows: list[dict[str, Any]] = []
     tuning_rows: list[dict[str, Any]] = []
     y_true_all: list[str] = []
     y_pred_all: list[str] = []
     fold_compute_runtime_metadata: list[dict[str, Any]] = []
+    models_dir = section_input.report_dir / "models"
+    persistence_enabled = bool(section_input.persist_models)
+    final_refit_model_path: Path | None = None
+    final_refit_metadata_path: Path | None = None
+    runtime_info = {
+        "python_version": platform.python_version(),
+        "config_filename": str(section_input.config_filename),
+    }
     total_outer_folds = int(len(splits))
     emit_progress(
         section_input.progress_callback,
@@ -753,6 +768,90 @@ def execute_model_fit(section_input: ModelFitInput) -> dict[str, Any]:
         fold_backend_metadata = _extract_fold_compute_runtime_metadata(estimator)
         if fold_backend_metadata is not None:
             fold_compute_runtime_metadata.append(fold_backend_metadata)
+
+        if persistence_enabled and bool(section_input.persist_fold_models):
+            class_labels = sorted(pd.Series(y[train_idx]).astype(str).unique().tolist())
+            fold_model_path = models_dir / f"fold_{fold_index:03d}_model.joblib"
+            fold_metadata_path = models_dir / f"fold_{fold_index:03d}_model.metadata.json"
+            direction_label = (
+                f"{section_input.train_subject}->{section_input.test_subject}"
+                if section_input.cv_mode == "frozen_cross_person_transfer"
+                else None
+            )
+            split_identity = (
+                "|".join(test_sessions)
+                if section_input.cv_mode == "within_subject_loso_session"
+                else direction_label
+            )
+            metadata_payload = build_model_metadata_payload(
+                artifact_role="fold_model",
+                experiment_id=section_input.experiment_id,
+                run_id=section_input.run_id,
+                variant_id=section_input.variant_id,
+                model_logical_name=section_input.model,
+                backend_family=(
+                    section_input.compute_policy.effective_backend_family
+                    if section_input.compute_policy is not None
+                    else None
+                ),
+                backend_id=(
+                    str(fold_backend_metadata.get("backend_id"))
+                    if isinstance(fold_backend_metadata, dict)
+                    and fold_backend_metadata.get("backend_id") is not None
+                    else None
+                ),
+                seed=section_input.seed,
+                target=section_input.target_column,
+                cv_mode=section_input.cv_mode,
+                subject=section_input.subject,
+                train_subject=section_input.train_subject,
+                test_subject=section_input.test_subject,
+                fold_index=int(fold_index),
+                split_identity=split_identity,
+                feature_space=section_input.feature_space,
+                preprocessing_strategy=section_input.preprocessing_strategy,
+                dimensionality_strategy=section_input.dimensionality_strategy,
+                class_labels=class_labels,
+                n_train=int(len(train_idx)),
+                n_test=int(len(test_idx)),
+                n_features=int(section_input.x_matrix.shape[1]),
+                config_filename=section_input.config_filename,
+                runtime_info=runtime_info,
+            )
+            saved_row = save_trained_estimator(
+                estimator=estimator,
+                model_path=fold_model_path,
+                metadata_path=fold_metadata_path,
+                metadata_payload=metadata_payload,
+            )
+            saved_model_rows.append(
+                {
+                    "artifact_role": "fold_model",
+                    "fold": int(fold_index),
+                    "direction": direction_label,
+                    "held_out_identity": split_identity,
+                    "subject": (
+                        str(section_input.subject)
+                        if section_input.cv_mode == "within_subject_loso_session"
+                        else None
+                    ),
+                    "train_subject": (
+                        str(section_input.train_subject)
+                        if section_input.cv_mode == "frozen_cross_person_transfer"
+                        else None
+                    ),
+                    "test_subject": (
+                        str(section_input.test_subject)
+                        if section_input.cv_mode == "frozen_cross_person_transfer"
+                        else None
+                    ),
+                    "n_train": int(len(train_idx)),
+                    "n_test": int(len(test_idx)),
+                    "n_features": int(section_input.x_matrix.shape[1]),
+                    "class_labels": json.dumps(class_labels),
+                    **saved_row,
+                }
+            )
 
         if interpretability_enabled:
             if interpretability_dir is None:
@@ -1253,6 +1352,117 @@ def execute_model_fit(section_input: ModelFitInput) -> dict[str, Any]:
         },
     )
 
+    if persistence_enabled and bool(section_input.persist_final_refit_model):
+        final_refit_model_path = models_dir / "final_refit_model.joblib"
+        final_refit_metadata_path = models_dir / "final_refit_model.metadata.json"
+        final_estimator = clone(pipeline_template)
+        final_fit_payload = run_model_fit_executor(
+            executor_id=model_fit_executor_id,
+            estimator=final_estimator,
+            x_train=section_input.x_matrix,
+            y_train=y,
+        )
+        final_estimator = final_fit_payload["estimator"]
+        final_backend_metadata = _extract_fold_compute_runtime_metadata(final_estimator)
+        final_class_labels = sorted(pd.Series(y).astype(str).unique().tolist())
+        final_split_identity = (
+            f"{section_input.train_subject}->{section_input.test_subject}"
+            if section_input.cv_mode == "frozen_cross_person_transfer"
+            else str(section_input.subject)
+            if section_input.subject is not None
+            else None
+        )
+        final_metadata_payload = build_model_metadata_payload(
+            artifact_role="final_refit_after_confirmatory_evaluation",
+            experiment_id=section_input.experiment_id,
+            run_id=section_input.run_id,
+            variant_id=section_input.variant_id,
+            model_logical_name=section_input.model,
+            backend_family=(
+                section_input.compute_policy.effective_backend_family
+                if section_input.compute_policy is not None
+                else None
+            ),
+            backend_id=(
+                str(final_backend_metadata.get("backend_id"))
+                if isinstance(final_backend_metadata, dict)
+                and final_backend_metadata.get("backend_id") is not None
+                else None
+            ),
+            seed=section_input.seed,
+            target=section_input.target_column,
+            cv_mode=section_input.cv_mode,
+            subject=section_input.subject,
+            train_subject=section_input.train_subject,
+            test_subject=section_input.test_subject,
+            split_identity=final_split_identity,
+            feature_space=section_input.feature_space,
+            preprocessing_strategy=section_input.preprocessing_strategy,
+            dimensionality_strategy=section_input.dimensionality_strategy,
+            class_labels=final_class_labels,
+            n_train=int(section_input.x_matrix.shape[0]),
+            n_test=0,
+            n_features=int(section_input.x_matrix.shape[1]),
+            config_filename=section_input.config_filename,
+            runtime_info=runtime_info,
+        )
+        final_saved_row = save_trained_estimator(
+            estimator=final_estimator,
+            model_path=final_refit_model_path,
+            metadata_path=final_refit_metadata_path,
+            metadata_payload=final_metadata_payload,
+        )
+        saved_model_rows.append(
+            {
+                "artifact_role": "final_refit_after_confirmatory_evaluation",
+                "fold": None,
+                "direction": (
+                    f"{section_input.train_subject}->{section_input.test_subject}"
+                    if section_input.cv_mode == "frozen_cross_person_transfer"
+                    else None
+                ),
+                "held_out_identity": final_split_identity,
+                "subject": (
+                    str(section_input.subject)
+                    if section_input.cv_mode == "within_subject_loso_session"
+                    else None
+                ),
+                "train_subject": (
+                    str(section_input.train_subject)
+                    if section_input.cv_mode == "frozen_cross_person_transfer"
+                    else None
+                ),
+                "test_subject": (
+                    str(section_input.test_subject)
+                    if section_input.cv_mode == "frozen_cross_person_transfer"
+                    else None
+                ),
+                "n_train": int(section_input.x_matrix.shape[0]),
+                "n_test": 0,
+                "n_features": int(section_input.x_matrix.shape[1]),
+                "class_labels": json.dumps(final_class_labels),
+                **final_saved_row,
+            }
+        )
+
+    model_summary_path: Path | None = None
+    model_artifacts_csv_path: Path | None = None
+    if persistence_enabled:
+        model_summary_path, model_artifacts_csv_path = write_model_summary(
+            models_dir=models_dir,
+            saved_model_rows=saved_model_rows,
+            run_metadata={
+                "run_id": section_input.run_id,
+                "experiment_id": section_input.experiment_id,
+                "variant_id": section_input.variant_id,
+                "model": section_input.model,
+                "target": section_input.target_column,
+                "cv_mode": section_input.cv_mode,
+                "persist_fold_models": bool(section_input.persist_fold_models),
+                "persist_final_refit_model": bool(section_input.persist_final_refit_model),
+            },
+        )
+
     return {
         "y": y,
         "splits": splits,
@@ -1273,6 +1483,13 @@ def execute_model_fit(section_input: ModelFitInput) -> dict[str, Any]:
         "tuning_best_params_path": tuning_best_params_path,
         "fit_timing_summary": fit_timing_summary,
         "fit_timing_summary_path": fit_timing_summary_path,
+        "saved_model_rows": saved_model_rows,
+        "model_summary_path": model_summary_path,
+        "model_artifacts_csv_path": model_artifacts_csv_path,
+        "model_bundle_artifact_id": None,
+        "final_refit_model_path": final_refit_model_path,
+        "final_refit_metadata_path": final_refit_metadata_path,
+        "final_refit_artifact_id": None,
         "compute_runtime_metadata": _aggregate_compute_runtime_metadata(
             fold_compute_runtime_metadata
         ),

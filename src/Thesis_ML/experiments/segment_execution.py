@@ -15,6 +15,8 @@ from Thesis_ML.artifacts.registry import (
     ARTIFACT_TYPE_FEATURE_MATRIX_BUNDLE,
     ARTIFACT_TYPE_INTERPRETABILITY_BUNDLE,
     ARTIFACT_TYPE_METRICS_BUNDLE,
+    ARTIFACT_TYPE_MODEL_BUNDLE,
+    ARTIFACT_TYPE_MODEL_REFIT_BUNDLE,
     compute_config_hash,
     get_artifact,
 )
@@ -117,6 +119,11 @@ class SegmentExecutionRequest:
     evidence_policy_effective: dict[str, Any] | None = None
     class_weight_policy: str = "none"
     feature_recipe_id: str = BASELINE_STANDARD_SCALER_RECIPE_ID
+    persist_models: bool = False
+    persist_fold_models: bool = True
+    persist_final_refit_model: bool = False
+    experiment_id: str | None = None
+    variant_id: str | None = None
     emit_feature_qc_artifacts: bool = True
     feature_qc_summary_path: Path | None = None
     feature_qc_selected_samples_path: Path | None = None
@@ -183,6 +190,7 @@ class SegmentExecutionResult:
     metrics: dict[str, Any] | None
     spatial_compatibility: dict[str, Any] | None
     interpretability_summary: dict[str, Any] | None
+    model_persistence: dict[str, Any] | None = None
     compute_runtime_metadata: dict[str, Any] | None = None
     section_timings_seconds: dict[str, float] | None = None
     stage_timings_seconds: dict[str, float] | None = None
@@ -441,6 +449,7 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
     feature_matrix_artifact_id: str | None = None
     fit_output = None
     interpretability_summary: dict[str, Any] | None = None
+    model_persistence_summary: dict[str, Any] | None = None
     metrics: dict[str, Any] | None = None
     compute_runtime_metadata: dict[str, Any] | None = None
     section_timings_seconds: dict[str, float] = {}
@@ -870,6 +879,9 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
                     pca_n_components=request.pca_n_components,
                     pca_variance_ratio=request.pca_variance_ratio,
                     feature_recipe_id=request.feature_recipe_id,
+                    persist_models=bool(request.persist_models),
+                    persist_fold_models=bool(request.persist_fold_models),
+                    persist_final_refit_model=bool(request.persist_final_refit_model),
                     tuning_enabled=request.tuning_enabled,
                     tuning_search_space_id=request.tuning_search_space_id,
                     tuning_search_space_version=request.tuning_search_space_version,
@@ -890,6 +902,12 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
                     run_id=request.run_id,
                     config_filename=request.config_filename,
                     report_dir=request.report_dir,
+                    artifact_registry_path=request.artifact_registry_path,
+                    code_ref=request.code_ref,
+                    upstream_feature_matrix_artifact_id=feature_matrix_artifact_id,
+                    experiment_id=request.experiment_id,
+                    variant_id=request.variant_id,
+                    feature_space=request.feature_space,
                     build_pipeline_fn=build_pipeline_fn,
                     scores_for_predictions_fn=scores_for_predictions_fn,
                     extract_linear_coefficients_fn=extract_linear_coefficients_fn,
@@ -901,6 +919,48 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
                 if isinstance(fit_output.compute_runtime_metadata, dict)
                 else None
             )
+            if fit_output.model_bundle_artifact_id is not None:
+                artifact_ids[ARTIFACT_TYPE_MODEL_BUNDLE] = str(fit_output.model_bundle_artifact_id)
+            if fit_output.final_refit_artifact_id is not None:
+                artifact_ids[ARTIFACT_TYPE_MODEL_REFIT_BUNDLE] = str(
+                    fit_output.final_refit_artifact_id
+                )
+            model_persistence_summary = {
+                "enabled": bool(request.persist_models),
+                "fold_models_saved": bool(request.persist_models and request.persist_fold_models),
+                "n_fold_models": int(
+                    sum(
+                        1
+                        for row in fit_output.saved_model_rows
+                        if str(row.get("artifact_role")) == "fold_model"
+                    )
+                ),
+                "model_summary_path": (
+                    str(fit_output.model_summary_path.resolve())
+                    if fit_output.model_summary_path is not None
+                    else None
+                ),
+                "model_artifacts_csv_path": (
+                    str(fit_output.model_artifacts_csv_path.resolve())
+                    if fit_output.model_artifacts_csv_path is not None
+                    else None
+                ),
+                "final_refit_saved": fit_output.final_refit_model_path is not None,
+                "final_refit_model_path": (
+                    str(fit_output.final_refit_model_path.resolve())
+                    if fit_output.final_refit_model_path is not None
+                    else None
+                ),
+                "final_refit_metadata_path": (
+                    str(fit_output.final_refit_metadata_path.resolve())
+                    if fit_output.final_refit_metadata_path is not None
+                    else None
+                ),
+                "artifact_ids": {
+                    ARTIFACT_TYPE_MODEL_BUNDLE: fit_output.model_bundle_artifact_id,
+                    ARTIFACT_TYPE_MODEL_REFIT_BUNDLE: fit_output.final_refit_artifact_id,
+                },
+            }
             tuning_assignment = stage_assignment_map.get(StageKey.TUNING)
             tuning_fallback_reason: str | None = None
             if tuning_assignment is not None:
@@ -1509,6 +1569,7 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
         metrics=metrics,
         spatial_compatibility=spatial_compatibility,
         interpretability_summary=interpretability_summary,
+        model_persistence=model_persistence_summary,
         compute_runtime_metadata=compute_runtime_metadata,
         section_timings_seconds=section_timings_seconds,
         stage_timings_seconds=stage_timings_seconds,

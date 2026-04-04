@@ -148,6 +148,13 @@ class TrialSpec(_ContractModel):
             raise ValueError("repeat_id must be > 0 when provided.")
         if self.seed is not None and int(self.seed) < 0:
             raise ValueError("seed must be >= 0 when provided.")
+        for key in (
+            "persist_models",
+            "persist_fold_models",
+            "persist_final_refit_model",
+        ):
+            if key in self.params and not isinstance(self.params.get(key), bool):
+                raise ValueError(f"TrialSpec.params['{key}'] must be boolean when provided.")
         return self
 
 

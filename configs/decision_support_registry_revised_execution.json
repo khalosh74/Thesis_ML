@@ -198,7 +198,10 @@
             "preprocessing_strategy": "none",
             "dimensionality_strategy": "none",
             "methodology_policy_name": "fixed_baselines_only",
-            "class_weight_policy": "none"
+            "class_weight_policy": "none",
+            "persist_models": true,
+            "persist_fold_models": true,
+            "persist_final_refit_model": true
           },
           "expand": {},
           "sections": [
@@ -244,7 +247,10 @@
             "preprocessing_strategy": "none",
             "dimensionality_strategy": "none",
             "methodology_policy_name": "fixed_baselines_only",
-            "class_weight_policy": "none"
+            "class_weight_policy": "none",
+            "persist_models": true,
+            "persist_fold_models": true,
+            "persist_final_refit_model": true
           },
           "expand": {},
           "sections": [
@@ -3337,7 +3343,10 @@
             "preprocessing_strategy": "none",
             "dimensionality_strategy": "none",
             "methodology_policy_name": "fixed_baselines_only",
-            "class_weight_policy": "none"
+            "class_weight_policy": "none",
+            "persist_models": true,
+            "persist_fold_models": true,
+            "persist_final_refit_model": true
           },
           "expand": {},
           "sections": [
@@ -3383,7 +3392,10 @@
             "preprocessing_strategy": "none",
             "dimensionality_strategy": "none",
             "methodology_policy_name": "fixed_baselines_only",
-            "class_weight_policy": "none"
+            "class_weight_policy": "none",
+            "persist_models": true,
+            "persist_fold_models": true,
+            "persist_final_refit_model": true
           },
           "expand": {},
           "sections": [
@@ -3453,7 +3465,10 @@
             "preprocessing_strategy": "standardize_zscore",
             "dimensionality_strategy": "none",
             "methodology_policy_name": "fixed_baselines_only",
-            "class_weight_policy": "none"
+            "class_weight_policy": "none",
+            "persist_models": true,
+            "persist_fold_models": true,
+            "persist_final_refit_model": true
           },
           "expand": {},
           "sections": [
@@ -3500,7 +3515,10 @@
             "preprocessing_strategy": "standardize_zscore",
             "dimensionality_strategy": "none",
             "methodology_policy_name": "fixed_baselines_only",
-            "class_weight_policy": "none"
+            "class_weight_policy": "none",
+            "persist_models": true,
+            "persist_fold_models": true,
+            "persist_final_refit_model": true
           },
           "expand": {},
           "sections": [

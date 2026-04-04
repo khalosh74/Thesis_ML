@@ -162,6 +162,9 @@ def build_command(
     allow_backend_fallback: bool = False,
     max_parallel_runs: int | None = None,
     max_parallel_gpu_runs: int | None = None,
+    persist_models: bool = False,
+    persist_fold_models: bool = True,
+    persist_final_refit_model: bool = False,
 ) -> list[str]:
     command = [
         sys.executable,
@@ -230,6 +233,12 @@ def build_command(
         command.extend(["--max-parallel-runs", str(int(max_parallel_runs))])
     if max_parallel_gpu_runs is not None:
         command.extend(["--max-parallel-gpu-runs", str(int(max_parallel_gpu_runs))])
+    if persist_models:
+        command.append("--persist-models")
+    if not persist_fold_models:
+        command.append("--no-persist-fold-models")
+    if persist_final_refit_model:
+        command.append("--persist-final-refit-model")
     if start_section:
         command.extend(["--start-section", str(start_section)])
     if end_section:
@@ -528,6 +537,17 @@ def build_variant_run_kwargs(
         "tuning_search_space_version": methodology_params["tuning_search_space_version"],
         "tuning_inner_cv_scheme": methodology_params["tuning_inner_cv_scheme"],
         "tuning_inner_group_field": methodology_params["tuning_inner_group_field"],
+        "persist_models": bool(_optional_bool(params.get("persist_models")) or False),
+        "persist_fold_models": (
+            bool(_optional_bool(params.get("persist_fold_models")))
+            if _optional_bool(params.get("persist_fold_models")) is not None
+            else True
+        ),
+        "persist_final_refit_model": bool(
+            _optional_bool(params.get("persist_final_refit_model")) or False
+        ),
+        "experiment_id": str(experiment_id),
+        "variant_id": str(resolve_variant_id(variant)),
         "run_id": run_id,
         "reports_root": reports_root,
         "start_section": start_section,
@@ -822,6 +842,15 @@ def execute_variant(
                 allow_backend_fallback=bool(allow_backend_fallback),
                 max_parallel_runs=int(max_parallel_runs),
                 max_parallel_gpu_runs=int(max_parallel_gpu_runs),
+                persist_models=bool(_optional_bool(params.get("persist_models")) or False),
+                persist_fold_models=(
+                    bool(_optional_bool(params.get("persist_fold_models")))
+                    if _optional_bool(params.get("persist_fold_models")) is not None
+                    else True
+                ),
+                persist_final_refit_model=bool(
+                    _optional_bool(params.get("persist_final_refit_model")) or False
+                ),
             )
             command_text = command_to_text(command)
             if dry_run:
@@ -920,6 +949,17 @@ def execute_variant(
                         ],
                         tuning_inner_cv_scheme=methodology_params["tuning_inner_cv_scheme"],
                         tuning_inner_group_field=methodology_params["tuning_inner_group_field"],
+                        persist_models=bool(_optional_bool(params.get("persist_models")) or False),
+                        persist_fold_models=(
+                            bool(_optional_bool(params.get("persist_fold_models")))
+                            if _optional_bool(params.get("persist_fold_models")) is not None
+                            else True
+                        ),
+                        persist_final_refit_model=bool(
+                            _optional_bool(params.get("persist_final_refit_model")) or False
+                        ),
+                        experiment_id=str(experiment_id),
+                        variant_id=str(variant_id),
                         run_id=run_id,
                         reports_root=reports_root,
                         start_section=start_section,
@@ -1038,6 +1078,21 @@ def execute_variant(
             "spatial_compatibility_report_path": (
                 result.get("spatial_compatibility_report_path") if result else None
             ),
+            "model_summary_path": (
+                result.get("model_persistence", {}).get("model_summary_path")
+                if isinstance(result, dict)
+                else None
+            ),
+            "model_artifacts_csv_path": (
+                result.get("model_persistence", {}).get("model_artifacts_csv_path")
+                if isinstance(result, dict)
+                else None
+            ),
+            "final_refit_model_path": (
+                result.get("model_persistence", {}).get("final_refit_model_path")
+                if isinstance(result, dict)
+                else None
+            ),
         },
         "warnings": [blocked_reason] if blocked_reason else [],
         "error": error,
@@ -1121,6 +1176,17 @@ def execute_variant(
     result_eta_p80_seconds = (
         _safe_float(result.get("eta_p80_seconds")) if isinstance(result, dict) else None
     )
+    result_model_persistence_payload = (
+        result.get("model_persistence") if isinstance(result, dict) else None
+    )
+    result_model_persistence = (
+        {
+            str(key): value
+            for key, value in result_model_persistence_payload.items()
+        }
+        if isinstance(result_model_persistence_payload, dict)
+        else None
+    )
     effective_process_profile_summary = (
         result_process_profile_summary
         if result_process_profile_summary is not None
@@ -1198,6 +1264,21 @@ def execute_variant(
         "report_dir": result.get("report_dir") if result else None,
         "config_path": result.get("config_path") if result else None,
         "metrics_path": result.get("metrics_path") if result else None,
+        "model_summary_path": (
+            result_model_persistence.get("model_summary_path")
+            if isinstance(result_model_persistence, dict)
+            else None
+        ),
+        "model_artifacts_csv_path": (
+            result_model_persistence.get("model_artifacts_csv_path")
+            if isinstance(result_model_persistence, dict)
+            else None
+        ),
+        "final_refit_model_path": (
+            result_model_persistence.get("final_refit_model_path")
+            if isinstance(result_model_persistence, dict)
+            else None
+        ),
         "manifest_path": str(manifest_path.resolve()),
         "orchestrator_artifact_id": orchestrator_artifact_id,
         "blocked_reason": blocked_reason,

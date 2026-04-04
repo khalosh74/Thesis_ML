@@ -24,6 +24,8 @@ from Thesis_ML.artifacts.registry import (
     ARTIFACT_TYPE_EXPERIMENT_REPORT,
     ARTIFACT_TYPE_INTERPRETABILITY_BUNDLE,
     ARTIFACT_TYPE_METRICS_BUNDLE,
+    ARTIFACT_TYPE_MODEL_BUNDLE,
+    ARTIFACT_TYPE_MODEL_REFIT_BUNDLE,
     compute_config_hash,
     register_artifact,
 )
@@ -556,10 +558,15 @@ def run_experiment(
     subgroup_dimensions: list[str] | None = None,
     subgroup_min_samples_per_group: int = 1,
     interpretability_enabled_override: bool | None = None,
+    persist_models: bool = False,
+    persist_fold_models: bool = True,
+    persist_final_refit_model: bool = False,
     framework_mode: FrameworkMode | str = FrameworkMode.EXPLORATORY,
     protocol_context: dict[str, Any] | None = None,
     comparison_context: dict[str, Any] | None = None,
     run_id: str | None = None,
+    experiment_id: str | None = None,
+    variant_id: str | None = None,
     reports_root: Path | str = DEFAULT_EXPERIMENT_REPORTS_ROOT,
     start_section: str | None = None,
     end_section: str | None = None,
@@ -1478,6 +1485,9 @@ def run_experiment(
                             evidence_policy_model.calibration.require_probabilities_for_validity
                         ),
                         interpretability_enabled_override=interpretability_enabled_override,
+                        persist_models=bool(persist_models),
+                        persist_fold_models=bool(persist_fold_models),
+                        persist_final_refit_model=bool(persist_final_refit_model),
                         max_outer_folds=profiling_max_outer_folds,
                         profiling_only=bool(resolved_profiling_context is not None),
                         profile_inner_folds=profiling_inner_fold_cap,
@@ -1552,6 +1562,8 @@ def run_experiment(
                             stage_planning_result.stage_resource_contracts
                         ),
                         stage_lease_manager=stage_lease_manager,
+                        experiment_id=(str(experiment_id) if experiment_id is not None else None),
+                        variant_id=(str(variant_id) if variant_id is not None else None),
                     )
                 )
             finally:
@@ -1747,6 +1759,7 @@ def run_experiment(
             compute_policy=resolved_compute_policy,
             compute_runtime_metadata=compute_runtime_metadata,
             stage_execution=stage_execution,
+            model_persistence=segment_result.model_persistence,
         )
     except Exception as exc:
         if stage_observer is not None:
@@ -1933,6 +1946,7 @@ def run_experiment(
             compute_policy=resolved_compute_policy,
             compute_runtime_metadata=compute_runtime_metadata,
             stage_execution=stage_execution,
+            model_persistence=segment_result.model_persistence,
         )
         config_path.write_text(f"{json.dumps(config, indent=2)}\n", encoding="utf-8")
     except Exception as exc:
@@ -1977,6 +1991,8 @@ def run_experiment(
     report_upstream_candidates = [
         artifact_ids.get(ARTIFACT_TYPE_METRICS_BUNDLE),
         artifact_ids.get(ARTIFACT_TYPE_INTERPRETABILITY_BUNDLE),
+        artifact_ids.get(ARTIFACT_TYPE_MODEL_BUNDLE),
+        artifact_ids.get(ARTIFACT_TYPE_MODEL_REFIT_BUNDLE),
     ]
     report_upstream = [
         artifact_id for artifact_id in report_upstream_candidates if isinstance(artifact_id, str)
@@ -2252,6 +2268,7 @@ def run_experiment(
         compute_policy=resolved_compute_policy,
         compute_runtime_metadata=compute_runtime_metadata,
         stage_execution=stage_execution,
+        model_persistence=segment_result.model_persistence,
     )
 
 
@@ -2411,6 +2428,27 @@ def _build_parser() -> argparse.ArgumentParser:
         type=int,
         default=1,
         help="Minimum samples per subgroup row.",
+    )
+    parser.add_argument(
+        "--persist-models",
+        action="store_true",
+        help=(
+            "Persist trained model artifacts for this run (fold models and optional final refit)."
+        ),
+    )
+    parser.add_argument(
+        "--persist-fold-models",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="When model persistence is enabled, control fold-model persistence.",
+    )
+    parser.add_argument(
+        "--persist-final-refit-model",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help=(
+            "When model persistence is enabled, fit and persist one final refit model for the run."
+        ),
     )
     parser.add_argument(
         "--run-id",
@@ -2624,6 +2662,9 @@ def main(argv: list[str] | None = None) -> int:
             subgroup_reporting_enabled=True,
             subgroup_dimensions=subgroup_dimensions,
             subgroup_min_samples_per_group=args.subgroup_min_samples,
+            persist_models=bool(args.persist_models),
+            persist_fold_models=bool(args.persist_fold_models),
+            persist_final_refit_model=bool(args.persist_final_refit_model),
             run_id=model_run_id,
             reports_root=Path(args.reports_root),
             start_section=args.start_section,

@@ -136,6 +136,9 @@ class ModelFitInput(_SectionModel):
     tuning_summary_path: Path | None = None
     tuning_best_params_path: Path | None = None
     fit_timing_summary_path: Path | None = None
+    persist_models: bool = False
+    persist_fold_models: bool = True
+    persist_final_refit_model: bool = False
     interpretability_enabled: bool | None = None
     max_outer_folds: int | None = None
     profiling_only: bool = False
@@ -149,6 +152,12 @@ class ModelFitInput(_SectionModel):
     run_id: str = Field(min_length=1)
     config_filename: str = Field(min_length=1)
     report_dir: Path
+    artifact_registry_path: Path | None = None
+    code_ref: str | None = None
+    upstream_feature_matrix_artifact_id: str | None = None
+    experiment_id: str | None = None
+    variant_id: str | None = None
+    feature_space: str | None = None
     build_pipeline_fn: Callable[..., Any]
     scores_for_predictions_fn: Callable[..., dict[str, list[Any]]]
     extract_linear_coefficients_fn: Callable[..., tuple[np.ndarray, np.ndarray, list[str]]]
@@ -173,6 +182,13 @@ class ModelFitOutput(_SectionModel):
     tuning_best_params_path: Path
     fit_timing_summary: dict[str, Any]
     fit_timing_summary_path: Path
+    saved_model_rows: list[dict[str, Any]] = Field(default_factory=list)
+    model_summary_path: Path | None = None
+    model_artifacts_csv_path: Path | None = None
+    model_bundle_artifact_id: str | None = None
+    final_refit_model_path: Path | None = None
+    final_refit_metadata_path: Path | None = None
+    final_refit_artifact_id: str | None = None
     compute_runtime_metadata: dict[str, Any] | None = None
 
 

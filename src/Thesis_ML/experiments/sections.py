@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pandas as pd
 
 from Thesis_ML.artifacts.registry import (
@@ -7,6 +9,8 @@ from Thesis_ML.artifacts.registry import (
     ARTIFACT_TYPE_FEATURE_MATRIX_BUNDLE,
     ARTIFACT_TYPE_INTERPRETABILITY_BUNDLE,
     ARTIFACT_TYPE_METRICS_BUNDLE,
+    ARTIFACT_TYPE_MODEL_BUNDLE,
+    ARTIFACT_TYPE_MODEL_REFIT_BUNDLE,
     compute_config_hash,
     register_artifact,
 )
@@ -255,6 +259,55 @@ def model_fit(section_input: ModelFitInput) -> ModelFitOutput:
     from Thesis_ML.experiments.sections_impl import execute_model_fit
 
     output_payload = execute_model_fit(section_input)
+    if (
+        section_input.artifact_registry_path is not None
+        and section_input.upstream_feature_matrix_artifact_id is not None
+        and output_payload.get("model_summary_path") is not None
+    ):
+        model_summary_path = Path(output_payload["model_summary_path"])
+        model_bundle = register_artifact(
+            registry_path=section_input.artifact_registry_path,
+            artifact_type=ARTIFACT_TYPE_MODEL_BUNDLE,
+            run_id=section_input.run_id,
+            upstream_artifact_ids=[section_input.upstream_feature_matrix_artifact_id],
+            config_hash=compute_config_hash(
+                {
+                    "run_id": section_input.run_id,
+                    "model": section_input.model,
+                    "target": section_input.target_column,
+                    "cv": section_input.cv_mode,
+                    "persist_models": bool(section_input.persist_models),
+                    "persist_fold_models": bool(section_input.persist_fold_models),
+                    "persist_final_refit_model": bool(section_input.persist_final_refit_model),
+                }
+            ),
+            code_ref=section_input.code_ref,
+            path=model_summary_path,
+            status="created",
+        )
+        output_payload["model_bundle_artifact_id"] = model_bundle.artifact_id
+
+        final_refit_model_path = output_payload.get("final_refit_model_path")
+        if final_refit_model_path is not None:
+            final_refit_bundle = register_artifact(
+                registry_path=section_input.artifact_registry_path,
+                artifact_type=ARTIFACT_TYPE_MODEL_REFIT_BUNDLE,
+                run_id=section_input.run_id,
+                upstream_artifact_ids=[model_bundle.artifact_id],
+                config_hash=compute_config_hash(
+                    {
+                        "run_id": section_input.run_id,
+                        "model": section_input.model,
+                        "target": section_input.target_column,
+                        "cv": section_input.cv_mode,
+                        "artifact_role": "final_refit_after_confirmatory_evaluation",
+                    }
+                ),
+                code_ref=section_input.code_ref,
+                path=model_summary_path,
+                status="created",
+            )
+            output_payload["final_refit_artifact_id"] = final_refit_bundle.artifact_id
     return ModelFitOutput.model_validate(output_payload)
 
 
