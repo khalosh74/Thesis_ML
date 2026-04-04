@@ -453,8 +453,15 @@ def test_campaign_runtime_profile_uses_fallback_for_unprofileable_grouped_nested
 
     monkeypatch.setattr(runtime_profile, "run_experiment", _fake_run_experiment)
 
+    # Force an unprofileable grouped-nested setting by limiting to two sessions per subject.
+    # With within-subject LOSO, each outer-train fold then has only one session group.
+    source_index = pd.read_csv(_demo_index_csv())
+    limited_index = source_index[source_index["session"].isin(["ses-01", "ses-02"])].copy()
+    limited_index_path = tmp_path / "dataset_index_two_sessions.csv"
+    limited_index.to_csv(limited_index_path, index=False)
+
     summary = runtime_profile.verify_campaign_runtime_profile(
-        index_csv=_demo_index_csv(),
+        index_csv=limited_index_path,
         data_root=_repo_root() / "demo_data" / "synthetic_v1" / "data_root",
         cache_dir=_repo_root() / "demo_data" / "synthetic_v1" / "cache",
         confirmatory_protocol=_confirmatory_protocol(),

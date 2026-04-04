@@ -62,7 +62,19 @@ def _registry_experiments_multi_anchor() -> list[dict[str, object]]:
                         "framework_mode": "confirmatory",
                         "canonical_run": True,
                     },
-                }
+                },
+                {
+                    "template_id": "e16_anchor_sub002",
+                    "supported": True,
+                    "params": {
+                        "target": "coarse_affect",
+                        "cv": "within_subject_loso_session",
+                        "model": "ridge",
+                        "subject": "sub-002",
+                        "framework_mode": "confirmatory",
+                        "canonical_run": True,
+                    },
+                },
             ],
         },
         {
@@ -83,7 +95,20 @@ def _registry_experiments_multi_anchor() -> list[dict[str, object]]:
                         "framework_mode": "confirmatory",
                         "canonical_run": True,
                     },
-                }
+                },
+                {
+                    "template_id": "e17_anchor_reverse",
+                    "supported": True,
+                    "params": {
+                        "target": "coarse_affect",
+                        "cv": "frozen_cross_person_transfer",
+                        "model": "ridge",
+                        "train_subject": "sub-002",
+                        "test_subject": "sub-001",
+                        "framework_mode": "confirmatory",
+                        "canonical_run": True,
+                    },
+                },
             ],
         },
     ]
@@ -99,7 +124,7 @@ def test_e13_materialization_inherits_anchor_identity_and_normalizes_model() -> 
     )
 
     assert warnings == []
-    assert len(cells) == 2
+    assert len(cells) == 4
     assert {str(cell["params"].get("model")) for cell in cells} == {"dummy"}
     assert all(cell["params"].get("subject") != "None" for cell in cells)
 
@@ -109,11 +134,13 @@ def test_e13_materialization_inherits_anchor_identity_and_normalizes_model() -> 
     transfer = [
         cell for cell in cells if str(cell["params"].get("cv")) == "frozen_cross_person_transfer"
     ]
-    assert len(within) == 1
-    assert len(transfer) == 1
-    assert str(within[0]["params"].get("subject")) == "sub-001"
-    assert str(transfer[0]["params"].get("train_subject")) == "sub-001"
-    assert str(transfer[0]["params"].get("test_subject")) == "sub-002"
+    assert len(within) == 2
+    assert len(transfer) == 2
+    assert {str(cell["params"].get("subject")) for cell in within} == {"sub-001", "sub-002"}
+    assert {
+        (str(cell["params"].get("train_subject")), str(cell["params"].get("test_subject")))
+        for cell in transfer
+    } == {("sub-001", "sub-002"), ("sub-002", "sub-001")}
 
 
 def test_e13_table_ready_rows_keep_anchors_distinct(tmp_path: Path) -> None:

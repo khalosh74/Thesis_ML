@@ -72,6 +72,23 @@ def test_thesis_runtime_anchor_set_matches_confirmatory_scope() -> None:
         "frozen_cross_person_transfer:sub-001->sub-002",
         "frozen_cross_person_transfer:sub-002->sub-001",
     }
+    within = [row for row in anchors if str(row.get("cv")) == "within_subject_loso_session"]
+    transfer = [row for row in anchors if str(row.get("cv")) == "frozen_cross_person_transfer"]
+    assert {str(row.get("experiment_id")) for row in within} == {"E16"}
+    assert {str(row.get("experiment_id")) for row in transfer} == {"E17"}
+
+    locked_core_keys = (
+        "target",
+        "feature_space",
+        "filter_modality",
+        "preprocessing_strategy",
+        "dimensionality_strategy",
+        "methodology_policy_name",
+        "class_weight_policy",
+    )
+    for key in locked_core_keys:
+        values = {str(row.get(key) or "").strip() for row in anchors}
+        assert len(values) == 1
 
 
 def test_e12_and_e13_materialize_against_full_runtime_anchor_set() -> None:
@@ -107,4 +124,3 @@ def test_e12_and_e13_materialize_against_full_runtime_anchor_set() -> None:
     }
     assert _analysis_labels_from_cells(e12_cells) == expected_labels
     assert _analysis_labels_from_cells(e13_cells) == expected_labels
-

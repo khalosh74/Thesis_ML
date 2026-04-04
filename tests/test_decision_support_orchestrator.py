@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
 import pytest
@@ -321,19 +322,9 @@ def _write_e12_confirmatory_anchor_registry(path: Path) -> None:
                             "subject": "sub-001",
                             "feature_space": "whole_brain_masked",
                         },
-                    }
-                ],
-            },
-            {
-                "experiment_id": "E17",
-                "title": "Final within-person confirmatory analysis",
-                "stage": "Stage 5 - Confirmatory analysis",
-                "decision_id": "CFM_LOCK_V1",
-                "manipulated_factor": "none",
-                "primary_metric": "balanced_accuracy",
-                "variant_templates": [
+                    },
                     {
-                        "template_id": "e17_anchor",
+                        "template_id": "e16_anchor_sub002",
                         "supported": True,
                         "params": {
                             "target": "coarse_affect",
@@ -346,7 +337,7 @@ def _write_e12_confirmatory_anchor_registry(path: Path) -> None:
                 ],
             },
             {
-                "experiment_id": "E18",
+                "experiment_id": "E17",
                 "title": "Final cross-person confirmatory analysis",
                 "stage": "Stage 5 - Confirmatory analysis",
                 "decision_id": "CFM_LOCK_V1",
@@ -354,7 +345,7 @@ def _write_e12_confirmatory_anchor_registry(path: Path) -> None:
                 "primary_metric": "balanced_accuracy",
                 "variant_templates": [
                     {
-                        "template_id": "e18_anchor",
+                        "template_id": "e17_anchor",
                         "supported": True,
                         "params": {
                             "target": "coarse_affect",
@@ -364,19 +355,8 @@ def _write_e12_confirmatory_anchor_registry(path: Path) -> None:
                             "test_subject": "sub-002",
                             "feature_space": "whole_brain_masked",
                         },
-                    }
-                ],
-            },
-            {
-                "experiment_id": "E19",
-                "title": "Final cross-person confirmatory analysis",
-                "stage": "Stage 5 - Confirmatory analysis",
-                "decision_id": "CFM_LOCK_V1",
-                "manipulated_factor": "none",
-                "primary_metric": "balanced_accuracy",
-                "variant_templates": [
                     {
-                        "template_id": "e19_anchor",
+                        "template_id": "e17_anchor_reverse",
                         "supported": True,
                         "params": {
                             "target": "coarse_affect",
@@ -435,6 +415,16 @@ def _write_e13_confirmatory_anchor_registry(path: Path) -> None:
                             "cv": "within_subject_loso_session",
                             "subject": "sub-001",
                         },
+                    },
+                    {
+                        "template_id": "e16_anchor_sub002",
+                        "supported": True,
+                        "params": {
+                            "target": "coarse_affect",
+                            "model": "ridge",
+                            "cv": "within_subject_loso_session",
+                            "subject": "sub-002",
+                        },
                     }
                 ],
             },
@@ -456,6 +446,17 @@ def _write_e13_confirmatory_anchor_registry(path: Path) -> None:
                             "train_subject": "sub-001",
                             "test_subject": "sub-002",
                         },
+                    },
+                    {
+                        "template_id": "e17_anchor_reverse",
+                        "supported": True,
+                        "params": {
+                            "target": "coarse_affect",
+                            "model": "ridge",
+                            "cv": "frozen_cross_person_transfer",
+                            "train_subject": "sub-002",
+                            "test_subject": "sub-001",
+                        },
                     }
                 ],
             },
@@ -464,9 +465,9 @@ def _write_e13_confirmatory_anchor_registry(path: Path) -> None:
     path.write_text(f"{json.dumps(payload, indent=2)}\n", encoding="utf-8")
 
 
-def _stub_run_experiment(**kwargs: object) -> dict[str, object]:
+def _stub_run_experiment(**kwargs: Any) -> dict[str, object]:
     run_id = str(kwargs["run_id"])
-    reports_root = Path(kwargs["reports_root"])
+    reports_root = Path(str(kwargs["reports_root"]))
     report_dir = reports_root / run_id
     report_dir.mkdir(parents=True, exist_ok=True)
     return {
@@ -487,13 +488,13 @@ def _stub_run_experiment(**kwargs: object) -> dict[str, object]:
     }
 
 
-def _stub_run_experiment_with_permutation_metrics(**kwargs: object) -> dict[str, object]:
+def _stub_run_experiment_with_permutation_metrics(**kwargs: Any) -> dict[str, object]:
     run_id = str(kwargs["run_id"])
-    reports_root = Path(kwargs["reports_root"])
+    reports_root = Path(str(kwargs["reports_root"]))
     report_dir = reports_root / run_id
     report_dir.mkdir(parents=True, exist_ok=True)
     metrics_path = report_dir / "metrics.json"
-    n_permutations = int(kwargs.get("n_permutations", 0))
+    n_permutations = int(str(kwargs.get("n_permutations", 0)))
     observed = 0.58
     null_scores = [0.20 + (0.001 * idx) for idx in range(n_permutations)]
     ge_count = sum(float(value) >= float(observed) for value in null_scores)
@@ -927,6 +928,38 @@ def test_e12_uses_anchor_subject_and_merged_summary_outputs(
     assert set(coverage_df["e12_covered"].astype(bool).tolist()) == {True}
     assert set(coverage_df["e13_covered"].astype(bool).tolist()) == {False}
 
+    manifest_path = (
+        campaign_root / "special_aggregations" / "confirmatory" / "confirmatory_anchor_manifest.csv"
+    )
+    assert manifest_path.exists()
+    manifest_df = pd.read_csv(manifest_path)
+    assert len(manifest_df) == 4
+
+    within_table_path = (
+        campaign_root
+        / "special_aggregations"
+        / "confirmatory"
+        / "thesis_e16_within_person_summary.csv"
+    )
+    transfer_table_path = (
+        campaign_root
+        / "special_aggregations"
+        / "confirmatory"
+        / "thesis_e17_transfer_summary.csv"
+    )
+    permutation_table_path = (
+        campaign_root
+        / "special_aggregations"
+        / "confirmatory"
+        / "thesis_permutation_robustness_summary.csv"
+    )
+    assert within_table_path.exists()
+    assert transfer_table_path.exists()
+    assert permutation_table_path.exists()
+    assert len(pd.read_csv(within_table_path)) == 4
+    assert len(pd.read_csv(transfer_table_path)) == 4
+    assert len(pd.read_csv(permutation_table_path)) == 4
+
 
 def test_e13_materializes_anchor_matched_dummy_baselines_and_writes_table_ready_summary(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -970,23 +1003,23 @@ def test_e13_materializes_anchor_matched_dummy_baselines_and_writes_table_ready_
         dry_run=False,
     )
 
-    assert len(captured_identities) == 2
+    assert len(captured_identities) == 4
     assert {identity[4] for identity in captured_identities} == {"dummy"}
     assert {
         identity[1]
         for identity in captured_identities
         if identity[0] == "within_subject_loso_session"
-    } == {"sub-001"}
+    } == {"sub-001", "sub-002"}
     assert {
         (identity[2], identity[3])
         for identity in captured_identities
         if identity[0] == "frozen_cross_person_transfer"
-    } == {("sub-001", "sub-002")}
+    } == {("sub-001", "sub-002"), ("sub-002", "sub-001")}
 
     campaign_root = Path(result["campaign_root"])
     run_log_df = pd.read_csv(campaign_root / "run_log_export.csv")
     e13_rows = run_log_df[run_log_df["Experiment_ID"] == "E13"]
-    assert len(e13_rows) == 2
+    assert len(e13_rows) == 4
     assert set(e13_rows["Model"].astype(str).tolist()) == {"dummy"}
     assert "None" not in set(e13_rows["Data_Subset"].astype(str).tolist())
 
@@ -999,7 +1032,7 @@ def test_e13_materializes_anchor_matched_dummy_baselines_and_writes_table_ready_
     )
     assert table_ready_path.exists()
     table_ready_df = pd.read_csv(table_ready_path)
-    assert len(table_ready_df) == 2
+    assert len(table_ready_df) == 4
     assert set(table_ready_df["model"].astype(str).tolist()) == {"dummy"}
     assert set(table_ready_df["anchor_analysis_type"].astype(str).tolist()) == {
         "within_person_loso",
@@ -1014,6 +1047,16 @@ def test_e13_materializes_anchor_matched_dummy_baselines_and_writes_table_ready_
     )
     assert coverage_path.exists()
     coverage_df = pd.read_csv(coverage_path)
-    assert len(coverage_df) == 2
+    assert len(coverage_df) == 4
     assert set(coverage_df["e12_covered"].astype(bool).tolist()) == {False}
     assert set(coverage_df["e13_covered"].astype(bool).tolist()) == {True}
+
+    baseline_table_path = (
+        campaign_root
+        / "special_aggregations"
+        / "confirmatory"
+        / "thesis_e13_baseline_summary.csv"
+    )
+    assert baseline_table_path.exists()
+    baseline_df = pd.read_csv(baseline_table_path)
+    assert len(baseline_df) == 4

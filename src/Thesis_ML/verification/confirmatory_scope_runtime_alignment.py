@@ -6,6 +6,18 @@ from typing import Any
 
 _WITHIN_CV = "within_subject_loso_session"
 _TRANSFER_CV = "frozen_cross_person_transfer"
+_WITHIN_FAMILY_EXPERIMENT_ID = "E16"
+_TRANSFER_FAMILY_EXPERIMENT_ID = "E17"
+_LOCKED_CORE_KEYS: tuple[str, ...] = (
+    "target",
+    "feature_space",
+    "filter_task",
+    "filter_modality",
+    "preprocessing_strategy",
+    "dimensionality_strategy",
+    "methodology_policy_name",
+    "class_weight_policy",
+)
 
 
 def _safe_text(value: Any) -> str:
@@ -188,6 +200,16 @@ def collect_runtime_confirmatory_anchors(
                     "experiment_id": experiment_id,
                     "template_id": template_id,
                     "target": _safe_text(params.get("target")) or None,
+                    "feature_space": _safe_text(params.get("feature_space")) or None,
+                    "filter_task": _safe_text(params.get("filter_task")) or None,
+                    "filter_modality": _safe_text(params.get("filter_modality")) or None,
+                    "preprocessing_strategy": _safe_text(params.get("preprocessing_strategy"))
+                    or None,
+                    "dimensionality_strategy": _safe_text(params.get("dimensionality_strategy"))
+                    or None,
+                    "methodology_policy_name": _safe_text(params.get("methodology_policy_name"))
+                    or None,
+                    "class_weight_policy": _safe_text(params.get("class_weight_policy")) or None,
                 }
             )
 
@@ -240,18 +262,69 @@ def verify_confirmatory_scope_runtime_alignment(
     missing_transfer = sorted(scope_transfer - runtime_transfer - deferred_transfer)
     out_of_scope_within = sorted(runtime_within - scope_within)
     out_of_scope_transfer = sorted(runtime_transfer - scope_transfer)
-    invalid_deferred_within = sorted(deferred_within - scope_within)
-    invalid_deferred_transfer = sorted(deferred_transfer - scope_transfer)
+    invalid_deferred_within: list[str] = sorted(
+        subject for subject in deferred_within if subject not in scope_within
+    )
+    invalid_deferred_transfer: list[tuple[str, str]] = sorted(
+        pair for pair in deferred_transfer if pair not in scope_transfer
+    )
+
+    within_runtime_anchors = [
+        row for row in runtime_anchors if _safe_text(row.get("cv")) == _WITHIN_CV
+    ]
+    transfer_runtime_anchors = [
+        row for row in runtime_anchors if _safe_text(row.get("cv")) == _TRANSFER_CV
+    ]
+
+    non_family_within_labels = sorted(
+        _safe_text(row.get("analysis_label"))
+        for row in within_runtime_anchors
+        if _safe_text(row.get("experiment_id")) != _WITHIN_FAMILY_EXPERIMENT_ID
+        and _safe_text(row.get("analysis_label"))
+    )
+    non_family_transfer_labels = sorted(
+        _safe_text(row.get("analysis_label"))
+        for row in transfer_runtime_anchors
+        if _safe_text(row.get("experiment_id")) != _TRANSFER_FAMILY_EXPERIMENT_ID
+        and _safe_text(row.get("analysis_label"))
+    )
+
+    locked_core_mismatch_details: dict[str, dict[str, Any]] = {}
+    for key in _LOCKED_CORE_KEYS:
+        values = {_safe_text(row.get(key)) for row in runtime_anchors if _safe_text(row.get(key))}
+        if len(values) > 1:
+            locked_core_mismatch_details[key] = {
+                "values": sorted(values),
+            }
+
+    scope_target = _safe_text(scope_payload.get("main_target"))
+    scope_feature_space = _safe_text(scope_payload.get("feature_space"))
+    target_mismatch_labels = sorted(
+        _safe_text(row.get("analysis_label"))
+        for row in runtime_anchors
+        if scope_target
+        and _safe_text(row.get("target"))
+        and _safe_text(row.get("target")) != scope_target
+    )
+    feature_space_mismatch_labels = sorted(
+        _safe_text(row.get("analysis_label"))
+        for row in runtime_anchors
+        if scope_feature_space
+        and _safe_text(row.get("feature_space"))
+        and _safe_text(row.get("feature_space")) != scope_feature_space
+    )
 
     missing_within_labels = [_within_analysis_label(subject) for subject in missing_within]
     missing_transfer_labels = [_transfer_analysis_label(pair) for pair in missing_transfer]
     missing_analysis_labels = sorted(missing_within_labels + missing_transfer_labels)
 
-    out_of_scope_within_labels = [_within_analysis_label(subject) for subject in out_of_scope_within]
-    out_of_scope_transfer_labels = [_transfer_analysis_label(pair) for pair in out_of_scope_transfer]
-    out_of_scope_analysis_labels = sorted(
-        out_of_scope_within_labels + out_of_scope_transfer_labels
-    )
+    out_of_scope_within_labels = [
+        _within_analysis_label(subject) for subject in out_of_scope_within
+    ]
+    out_of_scope_transfer_labels = [
+        _transfer_analysis_label(pair) for pair in out_of_scope_transfer
+    ]
+    out_of_scope_analysis_labels = sorted(out_of_scope_within_labels + out_of_scope_transfer_labels)
 
     issues: list[dict[str, Any]] = []
     if missing_within:
@@ -347,6 +420,72 @@ def verify_confirmatory_scope_runtime_alignment(
                 },
             }
         )
+    if non_family_within_labels:
+        issues.append(
+            {
+                "code": "runtime_within_family_experiment_mismatch",
+                "message": (
+                    "Within-subject confirmatory anchors must belong to E16; mismatched anchors: "
+                    + ", ".join(non_family_within_labels)
+                ),
+                "details": {
+                    "required_experiment_id": _WITHIN_FAMILY_EXPERIMENT_ID,
+                    "analysis_labels": non_family_within_labels,
+                },
+            }
+        )
+    if non_family_transfer_labels:
+        issues.append(
+            {
+                "code": "runtime_transfer_family_experiment_mismatch",
+                "message": (
+                    "Cross-person transfer confirmatory anchors must belong to E17; mismatched anchors: "
+                    + ", ".join(non_family_transfer_labels)
+                ),
+                "details": {
+                    "required_experiment_id": _TRANSFER_FAMILY_EXPERIMENT_ID,
+                    "analysis_labels": non_family_transfer_labels,
+                },
+            }
+        )
+    if locked_core_mismatch_details:
+        issues.append(
+            {
+                "code": "runtime_confirmatory_locked_core_mismatch",
+                "message": (
+                    "Runtime confirmatory anchors do not share a single locked core design across E16/E17."
+                ),
+                "details": locked_core_mismatch_details,
+            }
+        )
+    if target_mismatch_labels:
+        issues.append(
+            {
+                "code": "runtime_confirmatory_target_mismatch",
+                "message": (
+                    "Runtime confirmatory anchors target does not match scientific scope target for: "
+                    + ", ".join(target_mismatch_labels)
+                ),
+                "details": {
+                    "scope_target": scope_target,
+                    "analysis_labels": target_mismatch_labels,
+                },
+            }
+        )
+    if feature_space_mismatch_labels:
+        issues.append(
+            {
+                "code": "runtime_confirmatory_feature_space_mismatch",
+                "message": (
+                    "Runtime confirmatory anchors feature_space does not match scientific scope feature_space for: "
+                    + ", ".join(feature_space_mismatch_labels)
+                ),
+                "details": {
+                    "scope_feature_space": scope_feature_space,
+                    "analysis_labels": feature_space_mismatch_labels,
+                },
+            }
+        )
 
     return {
         "passed": not issues,
@@ -382,6 +521,11 @@ def verify_confirmatory_scope_runtime_alignment(
         ),
         "missing_analysis_labels": missing_analysis_labels,
         "out_of_scope_analysis_labels": out_of_scope_analysis_labels,
+        "within_family_experiment_id": _WITHIN_FAMILY_EXPERIMENT_ID,
+        "transfer_family_experiment_id": _TRANSFER_FAMILY_EXPERIMENT_ID,
+        "non_family_within_analysis_labels": non_family_within_labels,
+        "non_family_transfer_analysis_labels": non_family_transfer_labels,
+        "locked_core_mismatch_details": locked_core_mismatch_details,
         "runtime_anchor_set": runtime_anchors,
         "issues": issues,
     }

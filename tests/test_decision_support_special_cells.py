@@ -80,18 +80,29 @@ def _registry_experiments_for_e12_multi_anchor() -> list[dict[str, object]]:
                         "subject": "sub-001",
                         "feature_space": "whole_brain_masked",
                     },
-                }
+                },
+                {
+                    "template_id": "e16_anchor_sub002",
+                    "supported": True,
+                    "params": {
+                        "target": "coarse_affect",
+                        "model": "ridge",
+                        "cv": "within_subject_loso_session",
+                        "subject": "sub-002",
+                        "feature_space": "whole_brain_masked",
+                    },
+                },
             ],
         },
         {
-            "experiment_id": "E18",
+            "experiment_id": "E17",
             "title": "Final cross-person confirmatory analysis",
             "stage": "Stage 5 - Confirmatory analysis",
             "executable_now": True,
             "execution_status": "unknown",
             "variant_templates": [
                 {
-                    "template_id": "e18_anchor",
+                    "template_id": "e17_anchor",
                     "supported": True,
                     "params": {
                         "target": "coarse_affect",
@@ -101,7 +112,19 @@ def _registry_experiments_for_e12_multi_anchor() -> list[dict[str, object]]:
                         "test_subject": "sub-002",
                         "feature_space": "whole_brain_masked",
                     },
-                }
+                },
+                {
+                    "template_id": "e17_anchor_reverse",
+                    "supported": True,
+                    "params": {
+                        "target": "coarse_affect",
+                        "model": "ridge",
+                        "cv": "frozen_cross_person_transfer",
+                        "train_subject": "sub-002",
+                        "test_subject": "sub-001",
+                        "feature_space": "whole_brain_masked",
+                    },
+                },
             ],
         },
     ]
@@ -143,18 +166,29 @@ def _registry_experiments_for_e13_multi_anchor() -> list[dict[str, object]]:
                         "subject": "sub-001",
                         "feature_space": "whole_brain_masked",
                     },
-                }
+                },
+                {
+                    "template_id": "e16_anchor_sub002",
+                    "supported": True,
+                    "params": {
+                        "target": "coarse_affect",
+                        "model": "ridge",
+                        "cv": "within_subject_loso_session",
+                        "subject": "sub-002",
+                        "feature_space": "whole_brain_masked",
+                    },
+                },
             ],
         },
         {
-            "experiment_id": "E18",
+            "experiment_id": "E17",
             "title": "Final cross-person confirmatory analysis",
             "stage": "Stage 5 - Confirmatory analysis",
             "executable_now": True,
             "execution_status": "unknown",
             "variant_templates": [
                 {
-                    "template_id": "e18_anchor",
+                    "template_id": "e17_anchor",
                     "supported": True,
                     "params": {
                         "target": "coarse_affect",
@@ -164,7 +198,19 @@ def _registry_experiments_for_e13_multi_anchor() -> list[dict[str, object]]:
                         "test_subject": "sub-002",
                         "feature_space": "whole_brain_masked",
                     },
-                }
+                },
+                {
+                    "template_id": "e17_anchor_reverse",
+                    "supported": True,
+                    "params": {
+                        "target": "coarse_affect",
+                        "model": "ridge",
+                        "cv": "frozen_cross_person_transfer",
+                        "train_subject": "sub-002",
+                        "test_subject": "sub-001",
+                        "feature_space": "whole_brain_masked",
+                    },
+                },
             ],
         },
     ]
@@ -256,26 +302,29 @@ def test_e12_materialization_creates_separate_groups_for_within_and_transfer_anc
         registry_experiments=_registry_experiments_for_e12_multi_anchor(),
     )
     assert warnings == []
-    assert len(cells) == 4
+    assert len(cells) == 8
     group_ids = {
         str(cell["design_metadata"]["permutation_group_id"])
         for cell in cells
         if isinstance(cell.get("design_metadata"), dict)
     }
-    assert len(group_ids) == 2
+    assert len(group_ids) == 4
     within_cells = [
         cell for cell in cells if str(cell["params"].get("cv")) == "within_subject_loso_session"
     ]
     transfer_cells = [
         cell for cell in cells if str(cell["params"].get("cv")) == "frozen_cross_person_transfer"
     ]
-    assert len(within_cells) == 2
-    assert len(transfer_cells) == 2
-    assert {str(cell["params"].get("subject")) for cell in within_cells} == {"sub-001"}
+    assert len(within_cells) == 4
+    assert len(transfer_cells) == 4
+    assert {str(cell["params"].get("subject")) for cell in within_cells} == {
+        "sub-001",
+        "sub-002",
+    }
     assert {
         (str(cell["params"].get("train_subject")), str(cell["params"].get("test_subject")))
         for cell in transfer_cells
-    } == {("sub-001", "sub-002")}
+    } == {("sub-001", "sub-002"), ("sub-002", "sub-001")}
 
 
 def test_e13_materialization_matches_confirmatory_anchors_and_enforces_dummy_model() -> None:
@@ -288,7 +337,7 @@ def test_e13_materialization_matches_confirmatory_anchors_and_enforces_dummy_mod
         registry_experiments=_registry_experiments_for_e13_multi_anchor(),
     )
     assert warnings == []
-    assert len(cells) == 2
+    assert len(cells) == 4
     assert {str(cell["params"].get("model")) for cell in cells} == {"dummy"}
     assert all(cell["params"].get("subject") != "None" for cell in cells)
 
@@ -298,13 +347,16 @@ def test_e13_materialization_matches_confirmatory_anchors_and_enforces_dummy_mod
     transfer_cells = [
         cell for cell in cells if str(cell["params"].get("cv")) == "frozen_cross_person_transfer"
     ]
-    assert len(within_cells) == 1
-    assert len(transfer_cells) == 1
-    assert {str(cell["params"].get("subject")) for cell in within_cells} == {"sub-001"}
+    assert len(within_cells) == 2
+    assert len(transfer_cells) == 2
+    assert {str(cell["params"].get("subject")) for cell in within_cells} == {
+        "sub-001",
+        "sub-002",
+    }
     assert {
         (str(cell["params"].get("train_subject")), str(cell["params"].get("test_subject")))
         for cell in transfer_cells
-    } == {("sub-001", "sub-002")}
+    } == {("sub-001", "sub-002"), ("sub-002", "sub-001")}
 
     metadata_kinds = {
         str(cell.get("design_metadata", {}).get("special_cell_kind"))
@@ -317,7 +369,7 @@ def test_e13_materialization_matches_confirmatory_anchors_and_enforces_dummy_mod
         for cell in cells
         if isinstance(cell.get("design_metadata"), dict)
     }
-    assert len(group_ids) == 2
+    assert len(group_ids) == 4
 
 
 def test_e13_materialization_adapts_when_confirmatory_anchor_set_changes() -> None:
