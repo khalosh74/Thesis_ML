@@ -129,6 +129,7 @@ def _resolve_scope_payload(scope_payload: dict[str, Any]) -> dict[str, Any]:
         "main_modality": _safe_text(scope_payload.get("main_modality")),
         "main_target": _safe_text(scope_payload.get("main_target")),
         "feature_space": feature_space,
+        "tuning_enabled": bool(scope_payload.get("tuning_enabled", False)),
         "within_subjects": within_subjects,
         "transfer_pairs": transfer_pairs,
         "notes": dict(scope_payload.get("notes", {}))
@@ -159,6 +160,55 @@ def _required_selected(bundle_payload: dict[str, Any]) -> dict[str, Any]:
             + ", ".join(sorted(missing))
         )
     return dict(selected_payload)
+
+
+def _enforce_final_confirmatory_locks(
+    *,
+    selected: dict[str, Any],
+    scope: dict[str, Any],
+) -> None:
+    expected_values = {
+        "target": str(scope["main_target"]),
+        "model": "ridge",
+        "class_weight_policy": "none",
+        "methodology_policy_name": "fixed_baselines_only",
+        "dimensionality_strategy": "none",
+        "preprocessing_strategy": "none",
+    }
+    mismatches = [
+        f"{key}={_safe_text(selected.get(key))!r} (expected {value!r})"
+        for key, value in expected_values.items()
+        if _safe_text(selected.get(key)) != value
+    ]
+    if mismatches:
+        raise FrozenConfirmatoryBuildError(
+            "Selection bundle violates frozen confirmatory lock(s): " + "; ".join(mismatches)
+        )
+
+    if _safe_text(selected.get("cv_within_subject")) != "within_subject_loso_session":
+        raise FrozenConfirmatoryBuildError(
+            "Selection bundle cv_within_subject must be within_subject_loso_session for final confirmatory family E16."
+        )
+    if _safe_text(selected.get("cv_transfer")) != "frozen_cross_person_transfer":
+        raise FrozenConfirmatoryBuildError(
+            "Selection bundle cv_transfer must be frozen_cross_person_transfer for final confirmatory family E17."
+        )
+
+    forbidden_tuning_keys = (
+        "tuning_search_space_id",
+        "tuning_search_space_version",
+        "tuning_inner_cv_scheme",
+        "tuning_inner_group_field",
+    )
+    if any(_safe_text(selected.get(key)) for key in forbidden_tuning_keys):
+        raise FrozenConfirmatoryBuildError(
+            "Selection bundle includes tuning metadata, but final confirmatory lock requires no tuning."
+        )
+
+    if scope.get("tuning_enabled") is not False:
+        raise FrozenConfirmatoryBuildError(
+            "Confirmatory scope tuning_enabled must be false for final frozen confirmatory families."
+        )
 
 
 def _extract_index_csv_from_run_config(config_path: Path) -> Path | None:
@@ -601,6 +651,7 @@ def main(argv: list[str] | None = None) -> int:
         )
 
     selected = _required_selected(bundle_payload)
+    _enforce_final_confirmatory_locks(selected=selected, scope=scope)
     advisory_payload = bundle_payload.get("advisory")
     advisory = dict(advisory_payload) if isinstance(advisory_payload, dict) else {}
     scope_feature_space = str(scope["feature_space"])

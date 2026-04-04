@@ -23,7 +23,13 @@ def _write_scope(path: Path) -> None:
         "main_tasks": ["emo", "recog"],
         "main_modality": "audiovisual",
         "main_target": "coarse_affect",
+        "model": "ridge",
         "feature_space": "whole_brain_masked",
+        "class_weight_policy": "none",
+        "methodology_policy_name": "fixed_baselines_only",
+        "dimensionality_strategy": "none",
+        "preprocessing_strategy": "none",
+        "tuning_enabled": False,
         "within_subjects": ["sub-001", "sub-002"],
         "transfer_pairs": [
             {"train_subject": "sub-001", "test_subject": "sub-002"},
@@ -59,7 +65,7 @@ def _write_bundle(path: Path, *, include_feature_space: bool = True) -> None:
             "class_weight_policy": "none",
             "methodology_policy_name": "fixed_baselines_only",
             "dimensionality_strategy": "none",
-            "preprocessing_strategy": "standardize_zscore",
+            "preprocessing_strategy": "none",
         },
         "advisory": {
             "task_pooling": "task_specific",
@@ -191,6 +197,13 @@ def _write_runtime_registry(path: Path, *, include_full_scope: bool) -> None:
                 "cv": "within_subject_loso_session",
                 "model": "ridge",
                 "subject": "sub-001",
+                "filter_modality": "audiovisual",
+                "scope_task_ids": ["emo", "recog"],
+                "feature_space": "whole_brain_masked",
+                "preprocessing_strategy": "none",
+                "dimensionality_strategy": "none",
+                "methodology_policy_name": "fixed_baselines_only",
+                "class_weight_policy": "none",
             },
         }
     ]
@@ -204,6 +217,13 @@ def _write_runtime_registry(path: Path, *, include_full_scope: bool) -> None:
                 "model": "ridge",
                 "train_subject": "sub-001",
                 "test_subject": "sub-002",
+                "filter_modality": "audiovisual",
+                "scope_task_ids": ["emo", "recog"],
+                "feature_space": "whole_brain_masked",
+                "preprocessing_strategy": "none",
+                "dimensionality_strategy": "none",
+                "methodology_policy_name": "fixed_baselines_only",
+                "class_weight_policy": "none",
             },
         }
     ]
@@ -217,6 +237,13 @@ def _write_runtime_registry(path: Path, *, include_full_scope: bool) -> None:
                     "cv": "within_subject_loso_session",
                     "model": "ridge",
                     "subject": "sub-002",
+                    "filter_modality": "audiovisual",
+                    "scope_task_ids": ["emo", "recog"],
+                    "feature_space": "whole_brain_masked",
+                    "preprocessing_strategy": "none",
+                    "dimensionality_strategy": "none",
+                    "methodology_policy_name": "fixed_baselines_only",
+                    "class_weight_policy": "none",
                 },
             }
         )
@@ -230,6 +257,13 @@ def _write_runtime_registry(path: Path, *, include_full_scope: bool) -> None:
                     "model": "ridge",
                     "train_subject": "sub-002",
                     "test_subject": "sub-001",
+                    "filter_modality": "audiovisual",
+                    "scope_task_ids": ["emo", "recog"],
+                    "feature_space": "whole_brain_masked",
+                    "preprocessing_strategy": "none",
+                    "dimensionality_strategy": "none",
+                    "methodology_policy_name": "fixed_baselines_only",
+                    "class_weight_policy": "none",
                 },
             }
         )
@@ -264,6 +298,7 @@ def test_build_frozen_confirmatory_registry_generates_expected_cells(tmp_path: P
     bundle_path = tmp_path / "bundle.json"
     scope_path = tmp_path / "scope.json"
     index_path = tmp_path / "index.csv"
+    runtime_registry_path = tmp_path / "runtime_registry.json"
     output_registry = (
         tmp_path / "configs" / "generated" / "frozen_confirmatory_registry_campaign_a.json"
     )
@@ -271,6 +306,7 @@ def test_build_frozen_confirmatory_registry_generates_expected_cells(tmp_path: P
     _write_bundle(bundle_path)
     _write_scope(scope_path)
     _write_index(index_path)
+    _write_runtime_registry(runtime_registry_path, include_full_scope=True)
 
     script = _load_script_module(Path("scripts") / "build_frozen_confirmatory_registry.py")
     exit_code = script.main(
@@ -281,6 +317,8 @@ def test_build_frozen_confirmatory_registry_generates_expected_cells(tmp_path: P
             str(bundle_path),
             "--scope-config",
             str(scope_path),
+            "--runtime-registry",
+            str(runtime_registry_path),
             "--output-registry",
             str(output_registry),
             "--index-csv",
@@ -335,7 +373,7 @@ def test_build_frozen_confirmatory_registry_generates_expected_cells(tmp_path: P
         assert params["methodology_policy_name"] == "fixed_baselines_only"
         assert params["feature_space"] == "whole_brain_masked"
         assert params["dimensionality_strategy"] == "none"
-        assert params["preprocessing_strategy"] == "standardize_zscore"
+        assert params["preprocessing_strategy"] == "none"
         assert params["framework_mode"] == "confirmatory"
         protocol_context = params["protocol_context"]
         assert protocol_context["framework_mode"] == "confirmatory"
@@ -359,6 +397,7 @@ def test_build_frozen_confirmatory_registry_uses_scope_feature_space_when_bundle
     bundle_path = tmp_path / "bundle.json"
     scope_path = tmp_path / "scope.json"
     index_path = tmp_path / "index.csv"
+    runtime_registry_path = tmp_path / "runtime_registry.json"
     output_registry = (
         tmp_path / "configs" / "generated" / "frozen_confirmatory_registry_campaign_a.json"
     )
@@ -366,6 +405,7 @@ def test_build_frozen_confirmatory_registry_uses_scope_feature_space_when_bundle
     _write_bundle(bundle_path, include_feature_space=False)
     _write_scope(scope_path)
     _write_index(index_path)
+    _write_runtime_registry(runtime_registry_path, include_full_scope=True)
 
     script = _load_script_module(Path("scripts") / "build_frozen_confirmatory_registry.py")
     exit_code = script.main(
@@ -376,6 +416,8 @@ def test_build_frozen_confirmatory_registry_uses_scope_feature_space_when_bundle
             str(bundle_path),
             "--scope-config",
             str(scope_path),
+            "--runtime-registry",
+            str(runtime_registry_path),
             "--output-registry",
             str(output_registry),
             "--index-csv",
@@ -442,6 +484,7 @@ def test_build_frozen_confirmatory_registry_rejects_feature_space_mismatch(
 
     bundle_path = tmp_path / "bundle.json"
     scope_path = tmp_path / "scope.json"
+    runtime_registry_path = tmp_path / "runtime_registry.json"
     index_path = tmp_path / "index.csv"
     output_registry = (
         tmp_path / "configs" / "generated" / "frozen_confirmatory_registry_campaign_a.json"
@@ -454,6 +497,7 @@ def test_build_frozen_confirmatory_registry_rejects_feature_space_mismatch(
 
     _write_scope(scope_path)
     _write_index(index_path)
+    _write_runtime_registry(runtime_registry_path, include_full_scope=True)
 
     script = _load_script_module(Path("scripts") / "build_frozen_confirmatory_registry.py")
     with pytest.raises(
@@ -467,6 +511,8 @@ def test_build_frozen_confirmatory_registry_rejects_feature_space_mismatch(
                 str(bundle_path),
                 "--scope-config",
                 str(scope_path),
+                "--runtime-registry",
+                str(runtime_registry_path),
                 "--output-registry",
                 str(output_registry),
                 "--index-csv",
@@ -493,6 +539,7 @@ def test_build_frozen_confirmatory_registry_fails_when_scope_coverage_missing(
 
     bundle_path = tmp_path / "bundle.json"
     scope_path = tmp_path / "scope.json"
+    runtime_registry_path = tmp_path / "runtime_registry.json"
     index_path = tmp_path / index_name
     output_registry = (
         tmp_path / "configs" / "generated" / "frozen_confirmatory_registry_campaign_a.json"
@@ -501,6 +548,7 @@ def test_build_frozen_confirmatory_registry_fails_when_scope_coverage_missing(
     _write_bundle(bundle_path)
     _write_scope(scope_path)
     writer(index_path)
+    _write_runtime_registry(runtime_registry_path, include_full_scope=True)
 
     script = _load_script_module(Path("scripts") / "build_frozen_confirmatory_registry.py")
     with pytest.raises(Exception, match="Coverage validation failed"):
@@ -512,6 +560,8 @@ def test_build_frozen_confirmatory_registry_fails_when_scope_coverage_missing(
                 str(bundle_path),
                 "--scope-config",
                 str(scope_path),
+                "--runtime-registry",
+                str(runtime_registry_path),
                 "--output-registry",
                 str(output_registry),
                 "--index-csv",

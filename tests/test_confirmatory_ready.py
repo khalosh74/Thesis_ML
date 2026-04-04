@@ -100,6 +100,10 @@ def test_confirmatory_ready_passes_with_clean_summary(
         "Thesis_ML.verification.confirmatory_ready.verify_official_artifacts",
         lambda **_: {"passed": True, "framework_mode": "confirmatory", "issues": []},
     )
+    monkeypatch.setattr(
+        "Thesis_ML.verification.confirmatory_ready.verify_confirmatory_scope_runtime_alignment",
+        lambda **_: {"passed": True, "issues": [], "runtime_anchor_set": []},
+    )
     summary = verify_confirmatory_ready(output_dir=output_dir)
     assert summary["passed"] is True
     assert all(bool(entry["passed"]) for entry in summary["criteria"])
@@ -243,11 +247,13 @@ def test_confirmatory_ready_requires_full_e12_e13_coverage_when_requested(
                 "analysis_label": "within_subject_loso_session:sub-001",
                 "e12_covered": True,
                 "e13_covered": True,
+                "e14_covered": True,
             },
             {
                 "analysis_label": "frozen_cross_person_transfer:sub-001->sub-002",
                 "e12_covered": False,
                 "e13_covered": False,
+                "e14_covered": False,
             },
         ],
     )
@@ -261,8 +267,14 @@ def test_confirmatory_ready_requires_full_e12_e13_coverage_when_requested(
             "passed": True,
             "issues": [],
             "runtime_anchor_set": [
-                {"analysis_label": "within_subject_loso_session:sub-001"},
-                {"analysis_label": "frozen_cross_person_transfer:sub-001->sub-002"},
+                {
+                    "analysis_label": "within_subject_loso_session:sub-001",
+                    "analysis_type": "within_subject",
+                },
+                {
+                    "analysis_label": "frozen_cross_person_transfer:sub-001->sub-002",
+                    "analysis_type": "cross_person_transfer",
+                },
             ],
         },
     )
@@ -285,11 +297,13 @@ def test_confirmatory_ready_passes_when_full_control_coverage_present(
                 "analysis_label": "within_subject_loso_session:sub-001",
                 "e12_covered": True,
                 "e13_covered": True,
+                "e14_covered": True,
             },
             {
                 "analysis_label": "frozen_cross_person_transfer:sub-001->sub-002",
                 "e12_covered": True,
                 "e13_covered": True,
+                "e14_covered": False,
             },
         ],
     )
@@ -303,10 +317,66 @@ def test_confirmatory_ready_passes_when_full_control_coverage_present(
             "passed": True,
             "issues": [],
             "runtime_anchor_set": [
-                {"analysis_label": "within_subject_loso_session:sub-001"},
-                {"analysis_label": "frozen_cross_person_transfer:sub-001->sub-002"},
+                {
+                    "analysis_label": "within_subject_loso_session:sub-001",
+                    "analysis_type": "within_subject",
+                },
+                {
+                    "analysis_label": "frozen_cross_person_transfer:sub-001->sub-002",
+                    "analysis_type": "cross_person_transfer",
+                },
             ],
         },
     )
     summary = verify_confirmatory_ready(output_dir=output_dir, require_control_coverage=True)
     assert summary["passed"] is True
+
+
+def test_confirmatory_ready_requires_e14_for_within_and_forbids_transfer_e14(
+    tmp_path: Path, monkeypatch
+) -> None:
+    output_dir = tmp_path / "protocol_runs" / "thesis-confirmatory__1.0.0"
+    _write_minimal_confirmatory_summary(output_dir)
+    _write_control_coverage(
+        output_dir,
+        rows=[
+            {
+                "analysis_label": "within_subject_loso_session:sub-001",
+                "e12_covered": True,
+                "e13_covered": True,
+                "e14_covered": False,
+            },
+            {
+                "analysis_label": "frozen_cross_person_transfer:sub-001->sub-002",
+                "e12_covered": True,
+                "e13_covered": True,
+                "e14_covered": True,
+            },
+        ],
+    )
+    monkeypatch.setattr(
+        "Thesis_ML.verification.confirmatory_ready.verify_official_artifacts",
+        lambda **_: {"passed": True, "framework_mode": "confirmatory", "issues": []},
+    )
+    monkeypatch.setattr(
+        "Thesis_ML.verification.confirmatory_ready.verify_confirmatory_scope_runtime_alignment",
+        lambda **_: {
+            "passed": True,
+            "issues": [],
+            "runtime_anchor_set": [
+                {
+                    "analysis_label": "within_subject_loso_session:sub-001",
+                    "analysis_type": "within_subject",
+                },
+                {
+                    "analysis_label": "frozen_cross_person_transfer:sub-001->sub-002",
+                    "analysis_type": "cross_person_transfer",
+                },
+            ],
+        },
+    )
+    summary = verify_confirmatory_ready(output_dir=output_dir, require_control_coverage=True)
+    assert summary["passed"] is False
+    issue_codes = {str(issue["code"]) for issue in summary["issues"]}
+    assert "confirmatory_control_coverage_e14_missing_for_within" in issue_codes
+    assert "confirmatory_control_coverage_e14_unexpected_for_transfer" in issue_codes

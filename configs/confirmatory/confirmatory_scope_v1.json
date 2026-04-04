@@ -6,7 +6,14 @@
   ],
   "main_modality": "audiovisual",
   "main_target": "coarse_affect",
+  "model": "ridge",
   "feature_space": "whole_brain_masked",
+  "class_weight_policy": "none",
+  "methodology_policy_name": "fixed_baselines_only",
+  "dimensionality_strategy": "none",
+  "preprocessing_strategy": "none",
+  "tuning_enabled": false,
+  "deterministic_execution": true,
   "within_subjects": [
     "sub-001",
     "sub-002"

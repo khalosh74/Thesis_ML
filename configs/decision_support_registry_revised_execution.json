@@ -195,7 +195,7 @@
               "recog"
             ],
             "feature_space": "whole_brain_masked",
-            "preprocessing_strategy": "standardize_zscore",
+            "preprocessing_strategy": "none",
             "dimensionality_strategy": "none",
             "methodology_policy_name": "fixed_baselines_only",
             "class_weight_policy": "none"
@@ -241,7 +241,7 @@
               "recog"
             ],
             "feature_space": "whole_brain_masked",
-            "preprocessing_strategy": "standardize_zscore",
+            "preprocessing_strategy": "none",
             "dimensionality_strategy": "none",
             "methodology_policy_name": "fixed_baselines_only",
             "class_weight_policy": "none"
@@ -3334,7 +3334,7 @@
               "recog"
             ],
             "feature_space": "whole_brain_masked",
-            "preprocessing_strategy": "standardize_zscore",
+            "preprocessing_strategy": "none",
             "dimensionality_strategy": "none",
             "methodology_policy_name": "fixed_baselines_only",
             "class_weight_policy": "none"
@@ -3380,7 +3380,7 @@
               "recog"
             ],
             "feature_space": "whole_brain_masked",
-            "preprocessing_strategy": "standardize_zscore",
+            "preprocessing_strategy": "none",
             "dimensionality_strategy": "none",
             "methodology_policy_name": "fixed_baselines_only",
             "class_weight_policy": "none"

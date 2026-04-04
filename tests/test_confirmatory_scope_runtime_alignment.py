@@ -15,7 +15,13 @@ def _write_scope(path: Path) -> None:
         "main_tasks": ["emo", "recog"],
         "main_modality": "audiovisual",
         "main_target": "coarse_affect",
+        "model": "ridge",
         "feature_space": "whole_brain_masked",
+        "class_weight_policy": "none",
+        "methodology_policy_name": "fixed_baselines_only",
+        "dimensionality_strategy": "none",
+        "preprocessing_strategy": "none",
+        "tuning_enabled": False,
         "within_subjects": ["sub-001", "sub-002"],
         "transfer_pairs": [
             {"train_subject": "sub-001", "test_subject": "sub-002"},
@@ -35,6 +41,13 @@ def _write_runtime_registry(path: Path, *, include_sub002: bool, include_reverse
                 "cv": "within_subject_loso_session",
                 "model": "ridge",
                 "subject": "sub-001",
+                "filter_modality": "audiovisual",
+                "scope_task_ids": ["emo", "recog"],
+                "feature_space": "whole_brain_masked",
+                "preprocessing_strategy": "none",
+                "dimensionality_strategy": "none",
+                "methodology_policy_name": "fixed_baselines_only",
+                "class_weight_policy": "none",
             },
         }
     ]
@@ -48,6 +61,13 @@ def _write_runtime_registry(path: Path, *, include_sub002: bool, include_reverse
                     "cv": "within_subject_loso_session",
                     "model": "ridge",
                     "subject": "sub-002",
+                    "filter_modality": "audiovisual",
+                    "scope_task_ids": ["emo", "recog"],
+                    "feature_space": "whole_brain_masked",
+                    "preprocessing_strategy": "none",
+                    "dimensionality_strategy": "none",
+                    "methodology_policy_name": "fixed_baselines_only",
+                    "class_weight_policy": "none",
                 },
             }
         )
@@ -62,6 +82,13 @@ def _write_runtime_registry(path: Path, *, include_sub002: bool, include_reverse
                 "model": "ridge",
                 "train_subject": "sub-001",
                 "test_subject": "sub-002",
+                "filter_modality": "audiovisual",
+                "scope_task_ids": ["emo", "recog"],
+                "feature_space": "whole_brain_masked",
+                "preprocessing_strategy": "none",
+                "dimensionality_strategy": "none",
+                "methodology_policy_name": "fixed_baselines_only",
+                "class_weight_policy": "none",
             },
         }
     ]
@@ -76,6 +103,13 @@ def _write_runtime_registry(path: Path, *, include_sub002: bool, include_reverse
                     "model": "ridge",
                     "train_subject": "sub-002",
                     "test_subject": "sub-001",
+                    "filter_modality": "audiovisual",
+                    "scope_task_ids": ["emo", "recog"],
+                    "feature_space": "whole_brain_masked",
+                    "preprocessing_strategy": "none",
+                    "dimensionality_strategy": "none",
+                    "methodology_policy_name": "fixed_baselines_only",
+                    "class_weight_policy": "none",
                 },
             }
         )
@@ -286,6 +320,12 @@ def test_scope_runtime_alignment_fails_when_locked_core_mismatch_detected(tmp_pa
                             "model": "ridge",
                             "subject": "sub-001",
                             "feature_space": "whole_brain_masked",
+                            "filter_modality": "audiovisual",
+                            "scope_task_ids": ["emo", "recog"],
+                            "preprocessing_strategy": "none",
+                            "dimensionality_strategy": "none",
+                            "methodology_policy_name": "fixed_baselines_only",
+                            "class_weight_policy": "none",
                         },
                     },
                     {
@@ -297,6 +337,12 @@ def test_scope_runtime_alignment_fails_when_locked_core_mismatch_detected(tmp_pa
                             "model": "ridge",
                             "subject": "sub-002",
                             "feature_space": "roi_masked_predefined",
+                            "filter_modality": "audiovisual",
+                            "scope_task_ids": ["emo", "recog"],
+                            "preprocessing_strategy": "none",
+                            "dimensionality_strategy": "none",
+                            "methodology_policy_name": "fixed_baselines_only",
+                            "class_weight_policy": "none",
                         },
                     },
                 ],
@@ -317,6 +363,12 @@ def test_scope_runtime_alignment_fails_when_locked_core_mismatch_detected(tmp_pa
                             "train_subject": "sub-001",
                             "test_subject": "sub-002",
                             "feature_space": "whole_brain_masked",
+                            "filter_modality": "audiovisual",
+                            "scope_task_ids": ["emo", "recog"],
+                            "preprocessing_strategy": "none",
+                            "dimensionality_strategy": "none",
+                            "methodology_policy_name": "fixed_baselines_only",
+                            "class_weight_policy": "none",
                         },
                     },
                     {
@@ -329,6 +381,12 @@ def test_scope_runtime_alignment_fails_when_locked_core_mismatch_detected(tmp_pa
                             "train_subject": "sub-002",
                             "test_subject": "sub-001",
                             "feature_space": "whole_brain_masked",
+                            "filter_modality": "audiovisual",
+                            "scope_task_ids": ["emo", "recog"],
+                            "preprocessing_strategy": "none",
+                            "dimensionality_strategy": "none",
+                            "methodology_policy_name": "fixed_baselines_only",
+                            "class_weight_policy": "none",
                         },
                     },
                 ],
@@ -346,6 +404,28 @@ def test_scope_runtime_alignment_fails_when_locked_core_mismatch_detected(tmp_pa
         str(row.get("code")) for row in summary.get("issues", []) if isinstance(row, dict)
     }
     assert "runtime_confirmatory_locked_core_mismatch" in issue_codes
+
+
+def test_scope_runtime_alignment_fails_when_task_scope_mismatch_detected(tmp_path: Path) -> None:
+    scope_path = tmp_path / "scope.json"
+    runtime_path = tmp_path / "runtime.json"
+    _write_scope(scope_path)
+    _write_runtime_registry(runtime_path, include_sub002=True, include_reverse=True)
+
+    payload = json.loads(runtime_path.read_text(encoding="utf-8"))
+    templates = payload["experiments"][0]["variant_templates"]
+    templates[0]["params"]["scope_task_ids"] = ["emo"]
+    runtime_path.write_text(f"{json.dumps(payload, indent=2)}\n", encoding="utf-8")
+
+    summary = verify_confirmatory_scope_runtime_alignment(
+        scope_config_path=scope_path,
+        runtime_registry_path=runtime_path,
+    )
+    assert summary["passed"] is False
+    issue_codes = {
+        str(row.get("code")) for row in summary.get("issues", []) if isinstance(row, dict)
+    }
+    assert "runtime_confirmatory_task_scope_mismatch" in issue_codes
 
 
 def test_control_coverage_rows_follow_runtime_anchor_set() -> None:
@@ -384,13 +464,23 @@ def test_control_coverage_rows_follow_runtime_anchor_set() -> None:
             "report_dir": "/tmp/e13_report",
         }
     ]
+    e14_rows = [
+        {
+            "analysis_label": "within_subject_loso_session:sub-001",
+            "run_id": "e14_run_sub001",
+            "metrics_path": "/tmp/e14_sub001_metrics.json",
+            "report_dir": "/tmp/e14_report",
+        }
+    ]
 
     rows = build_confirmatory_control_coverage_rows(
         runtime_anchors=runtime_anchors,
         e12_table_rows=e12_rows,
         e13_table_rows=e13_rows,
+        e14_table_rows=e14_rows,
         e12_summary_json_path="/tmp/e12.json",
         e13_summary_json_path="/tmp/e13.json",
+        e14_summary_json_path="/tmp/e14.json",
     )
     assert len(rows) == 2
     within_row = [row for row in rows if str(row["analysis_type"]) == "within_subject"][0]
@@ -400,7 +490,12 @@ def test_control_coverage_rows_follow_runtime_anchor_set() -> None:
     assert within_row["e12_run_id"] == "e12_run_sub001"
     assert within_row["e12_metrics_path"] == "/tmp/e12_sub001_metrics.json"
     assert within_row["e13_run_id"] is None
+    assert within_row["e14_expected"] is True
+    assert within_row["e14_covered"] is True
+    assert within_row["e14_run_id"] == "e14_run_sub001"
     assert transfer_row["e12_covered"] is False
     assert transfer_row["e13_covered"] is True
     assert transfer_row["e12_metrics_path"] is None
     assert transfer_row["e13_run_id"] == "e13_run_001_to_002"
+    assert transfer_row["e14_expected"] is False
+    assert transfer_row["e14_covered"] is False

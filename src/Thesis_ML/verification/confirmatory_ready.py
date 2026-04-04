@@ -484,6 +484,21 @@ def verify_confirmatory_ready(
         missing_coverage_rows = sorted(
             label for label in runtime_anchor_labels if label not in coverage_by_label
         )
+        runtime_anchor_set = list(scope_runtime_summary.get("runtime_anchor_set") or [])
+        within_anchor_labels = sorted(
+            str(row.get("analysis_label", "")).strip()
+            for row in runtime_anchor_set
+            if isinstance(row, dict)
+            and str(row.get("analysis_type", "")).strip() == "within_subject"
+            and str(row.get("analysis_label", "")).strip()
+        )
+        transfer_anchor_labels = sorted(
+            str(row.get("analysis_label", "")).strip()
+            for row in runtime_anchor_set
+            if isinstance(row, dict)
+            and str(row.get("analysis_type", "")).strip() == "cross_person_transfer"
+            and str(row.get("analysis_label", "")).strip()
+        )
         missing_e12_coverage = sorted(
             label
             for label in runtime_anchor_labels
@@ -496,19 +511,38 @@ def verify_confirmatory_ready(
             if label in coverage_by_label
             and not bool(coverage_by_label[label].get("e13_covered", False))
         )
+        missing_e14_coverage = sorted(
+            label
+            for label in within_anchor_labels
+            if label in coverage_by_label
+            and not bool(coverage_by_label[label].get("e14_covered", False))
+        )
+        unexpected_e14_transfer_coverage = sorted(
+            label
+            for label in transfer_anchor_labels
+            if label in coverage_by_label and bool(coverage_by_label[label].get("e14_covered", False))
+        )
 
         criteria.append(
             _criterion(
                 "confirmatory_control_coverage_complete",
                 passed=not (
-                    missing_coverage_rows or missing_e12_coverage or missing_e13_coverage
+                    missing_coverage_rows
+                    or missing_e12_coverage
+                    or missing_e13_coverage
+                    or missing_e14_coverage
+                    or unexpected_e14_transfer_coverage
                 ),
                 details={
                     "path": str(control_coverage_json.resolve()),
                     "runtime_anchor_labels": runtime_anchor_labels,
+                    "within_anchor_labels": within_anchor_labels,
+                    "transfer_anchor_labels": transfer_anchor_labels,
                     "missing_coverage_rows": missing_coverage_rows,
                     "missing_e12_coverage": missing_e12_coverage,
                     "missing_e13_coverage": missing_e13_coverage,
+                    "missing_e14_coverage": missing_e14_coverage,
+                    "unexpected_e14_transfer_coverage": unexpected_e14_transfer_coverage,
                 },
             )
         )
@@ -544,6 +578,28 @@ def verify_confirmatory_ready(
                         + ", ".join(missing_e13_coverage)
                     ),
                     "details": {"analysis_labels": missing_e13_coverage},
+                }
+            )
+        if missing_e14_coverage:
+            issues.append(
+                {
+                    "code": "confirmatory_control_coverage_e14_missing_for_within",
+                    "message": (
+                        "E14 interpretability-stability coverage is missing for within-subject confirmatory anchors: "
+                        + ", ".join(missing_e14_coverage)
+                    ),
+                    "details": {"analysis_labels": missing_e14_coverage},
+                }
+            )
+        if unexpected_e14_transfer_coverage:
+            issues.append(
+                {
+                    "code": "confirmatory_control_coverage_e14_unexpected_for_transfer",
+                    "message": (
+                        "E14 coverage must not be attached to transfer confirmatory anchors: "
+                        + ", ".join(unexpected_e14_transfer_coverage)
+                    ),
+                    "details": {"analysis_labels": unexpected_e14_transfer_coverage},
                 }
             )
 

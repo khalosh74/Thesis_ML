@@ -10,9 +10,11 @@ _WITHIN_FAMILY_EXPERIMENT_ID = "E16"
 _TRANSFER_FAMILY_EXPERIMENT_ID = "E17"
 _LOCKED_CORE_KEYS: tuple[str, ...] = (
     "target",
+    "model",
     "feature_space",
     "filter_task",
     "filter_modality",
+    "scope_task_signature",
     "preprocessing_strategy",
     "dimensionality_strategy",
     "methodology_policy_name",
@@ -24,6 +26,16 @@ def _safe_text(value: Any) -> str:
     if value is None:
         return ""
     return str(value).strip()
+
+
+def _normalize_task_ids(value: Any) -> list[str]:
+    if isinstance(value, list):
+        task_ids = [_safe_text(item) for item in value]
+    elif isinstance(value, str):
+        task_ids = [_safe_text(part) for part in value.split(",")]
+    else:
+        task_ids = []
+    return sorted({task_id for task_id in task_ids if task_id})
 
 
 def _load_json_object(path: Path, *, label: str) -> dict[str, Any]:
@@ -200,9 +212,15 @@ def collect_runtime_confirmatory_anchors(
                     "experiment_id": experiment_id,
                     "template_id": template_id,
                     "target": _safe_text(params.get("target")) or None,
+                    "model": _safe_text(params.get("model")) or None,
                     "feature_space": _safe_text(params.get("feature_space")) or None,
                     "filter_task": _safe_text(params.get("filter_task")) or None,
                     "filter_modality": _safe_text(params.get("filter_modality")) or None,
+                    "scope_task_ids": _normalize_task_ids(params.get("scope_task_ids")),
+                    "scope_task_signature": "|".join(
+                        _normalize_task_ids(params.get("scope_task_ids"))
+                    )
+                    or None,
                     "preprocessing_strategy": _safe_text(params.get("preprocessing_strategy"))
                     or None,
                     "dimensionality_strategy": _safe_text(params.get("dimensionality_strategy"))
@@ -210,6 +228,18 @@ def collect_runtime_confirmatory_anchors(
                     "methodology_policy_name": _safe_text(params.get("methodology_policy_name"))
                     or None,
                     "class_weight_policy": _safe_text(params.get("class_weight_policy")) or None,
+                    "tuning_search_space_id": _safe_text(params.get("tuning_search_space_id"))
+                    or None,
+                    "tuning_search_space_version": _safe_text(
+                        params.get("tuning_search_space_version")
+                    )
+                    or None,
+                    "tuning_inner_cv_scheme": _safe_text(params.get("tuning_inner_cv_scheme"))
+                    or None,
+                    "tuning_inner_group_field": _safe_text(
+                        params.get("tuning_inner_group_field")
+                    )
+                    or None,
                 }
             )
 
@@ -298,7 +328,16 @@ def verify_confirmatory_scope_runtime_alignment(
             }
 
     scope_target = _safe_text(scope_payload.get("main_target"))
+    scope_model = _safe_text(scope_payload.get("model"))
     scope_feature_space = _safe_text(scope_payload.get("feature_space"))
+    scope_main_modality = _safe_text(scope_payload.get("main_modality"))
+    scope_main_tasks = _normalize_task_ids(scope_payload.get("main_tasks"))
+    scope_methodology_policy = _safe_text(scope_payload.get("methodology_policy_name"))
+    scope_class_weight_policy = _safe_text(scope_payload.get("class_weight_policy"))
+    scope_dimensionality_strategy = _safe_text(scope_payload.get("dimensionality_strategy"))
+    scope_preprocessing_strategy = _safe_text(scope_payload.get("preprocessing_strategy"))
+    scope_tuning_enabled = scope_payload.get("tuning_enabled")
+
     target_mismatch_labels = sorted(
         _safe_text(row.get("analysis_label"))
         for row in runtime_anchors
@@ -306,13 +345,63 @@ def verify_confirmatory_scope_runtime_alignment(
         and _safe_text(row.get("target"))
         and _safe_text(row.get("target")) != scope_target
     )
+    model_mismatch_labels = sorted(
+        _safe_text(row.get("analysis_label"))
+        for row in runtime_anchors
+        if scope_model and _safe_text(row.get("model")) != scope_model
+    )
     feature_space_mismatch_labels = sorted(
         _safe_text(row.get("analysis_label"))
         for row in runtime_anchors
         if scope_feature_space
-        and _safe_text(row.get("feature_space"))
         and _safe_text(row.get("feature_space")) != scope_feature_space
     )
+    modality_mismatch_labels = sorted(
+        _safe_text(row.get("analysis_label"))
+        for row in runtime_anchors
+        if scope_main_modality and _safe_text(row.get("filter_modality")) != scope_main_modality
+    )
+    task_scope_mismatch_labels = sorted(
+        _safe_text(row.get("analysis_label"))
+        for row in runtime_anchors
+        if scope_main_tasks and list(row.get("scope_task_ids") or []) != scope_main_tasks
+    )
+    methodology_policy_mismatch_labels = sorted(
+        _safe_text(row.get("analysis_label"))
+        for row in runtime_anchors
+        if scope_methodology_policy
+        and _safe_text(row.get("methodology_policy_name")) != scope_methodology_policy
+    )
+    class_weight_policy_mismatch_labels = sorted(
+        _safe_text(row.get("analysis_label"))
+        for row in runtime_anchors
+        if scope_class_weight_policy
+        and _safe_text(row.get("class_weight_policy")) != scope_class_weight_policy
+    )
+    dimensionality_strategy_mismatch_labels = sorted(
+        _safe_text(row.get("analysis_label"))
+        for row in runtime_anchors
+        if scope_dimensionality_strategy
+        and _safe_text(row.get("dimensionality_strategy")) != scope_dimensionality_strategy
+    )
+    preprocessing_strategy_mismatch_labels = sorted(
+        _safe_text(row.get("analysis_label"))
+        for row in runtime_anchors
+        if scope_preprocessing_strategy
+        and _safe_text(row.get("preprocessing_strategy")) != scope_preprocessing_strategy
+    )
+
+    tuning_enabled_mismatch_labels: list[str] = []
+    if isinstance(scope_tuning_enabled, bool) and not scope_tuning_enabled:
+        tuning_enabled_mismatch_labels = sorted(
+            _safe_text(row.get("analysis_label"))
+            for row in runtime_anchors
+            if _safe_text(row.get("methodology_policy_name")) == "grouped_nested_tuning"
+            or _safe_text(row.get("tuning_search_space_id"))
+            or _safe_text(row.get("tuning_search_space_version"))
+            or _safe_text(row.get("tuning_inner_cv_scheme"))
+            or _safe_text(row.get("tuning_inner_group_field"))
+        )
 
     missing_within_labels = [_within_analysis_label(subject) for subject in missing_within]
     missing_transfer_labels = [_transfer_analysis_label(pair) for pair in missing_transfer]
@@ -472,6 +561,20 @@ def verify_confirmatory_scope_runtime_alignment(
                 },
             }
         )
+    if model_mismatch_labels:
+        issues.append(
+            {
+                "code": "runtime_confirmatory_model_mismatch",
+                "message": (
+                    "Runtime confirmatory anchors model does not match scientific scope model for: "
+                    + ", ".join(model_mismatch_labels)
+                ),
+                "details": {
+                    "scope_model": scope_model,
+                    "analysis_labels": model_mismatch_labels,
+                },
+            }
+        )
     if feature_space_mismatch_labels:
         issues.append(
             {
@@ -483,6 +586,104 @@ def verify_confirmatory_scope_runtime_alignment(
                 "details": {
                     "scope_feature_space": scope_feature_space,
                     "analysis_labels": feature_space_mismatch_labels,
+                },
+            }
+        )
+    if modality_mismatch_labels:
+        issues.append(
+            {
+                "code": "runtime_confirmatory_modality_mismatch",
+                "message": (
+                    "Runtime confirmatory anchors modality does not match scientific scope main_modality for: "
+                    + ", ".join(modality_mismatch_labels)
+                ),
+                "details": {
+                    "scope_main_modality": scope_main_modality,
+                    "analysis_labels": modality_mismatch_labels,
+                },
+            }
+        )
+    if task_scope_mismatch_labels:
+        issues.append(
+            {
+                "code": "runtime_confirmatory_task_scope_mismatch",
+                "message": (
+                    "Runtime confirmatory anchors task scope does not match scientific scope main_tasks for: "
+                    + ", ".join(task_scope_mismatch_labels)
+                ),
+                "details": {
+                    "scope_main_tasks": scope_main_tasks,
+                    "analysis_labels": task_scope_mismatch_labels,
+                },
+            }
+        )
+    if methodology_policy_mismatch_labels:
+        issues.append(
+            {
+                "code": "runtime_confirmatory_methodology_policy_mismatch",
+                "message": (
+                    "Runtime confirmatory anchors methodology_policy_name does not match scope lock for: "
+                    + ", ".join(methodology_policy_mismatch_labels)
+                ),
+                "details": {
+                    "scope_methodology_policy_name": scope_methodology_policy,
+                    "analysis_labels": methodology_policy_mismatch_labels,
+                },
+            }
+        )
+    if class_weight_policy_mismatch_labels:
+        issues.append(
+            {
+                "code": "runtime_confirmatory_class_weight_policy_mismatch",
+                "message": (
+                    "Runtime confirmatory anchors class_weight_policy does not match scope lock for: "
+                    + ", ".join(class_weight_policy_mismatch_labels)
+                ),
+                "details": {
+                    "scope_class_weight_policy": scope_class_weight_policy,
+                    "analysis_labels": class_weight_policy_mismatch_labels,
+                },
+            }
+        )
+    if dimensionality_strategy_mismatch_labels:
+        issues.append(
+            {
+                "code": "runtime_confirmatory_dimensionality_strategy_mismatch",
+                "message": (
+                    "Runtime confirmatory anchors dimensionality_strategy does not match scope lock for: "
+                    + ", ".join(dimensionality_strategy_mismatch_labels)
+                ),
+                "details": {
+                    "scope_dimensionality_strategy": scope_dimensionality_strategy,
+                    "analysis_labels": dimensionality_strategy_mismatch_labels,
+                },
+            }
+        )
+    if preprocessing_strategy_mismatch_labels:
+        issues.append(
+            {
+                "code": "runtime_confirmatory_preprocessing_strategy_mismatch",
+                "message": (
+                    "Runtime confirmatory anchors preprocessing_strategy does not match scope lock for: "
+                    + ", ".join(preprocessing_strategy_mismatch_labels)
+                ),
+                "details": {
+                    "scope_preprocessing_strategy": scope_preprocessing_strategy,
+                    "analysis_labels": preprocessing_strategy_mismatch_labels,
+                },
+            }
+        )
+    if tuning_enabled_mismatch_labels:
+        issues.append(
+            {
+                "code": "runtime_confirmatory_tuning_not_allowed",
+                "message": (
+                    "Runtime confirmatory anchors include tuning metadata despite tuning_enabled=false in scope: "
+                    + ", ".join(tuning_enabled_mismatch_labels)
+                ),
+                "details": {
+                    "scope_tuning_enabled": scope_tuning_enabled,
+                    "analysis_labels": tuning_enabled_mismatch_labels,
                 },
             }
         )
@@ -536,8 +737,10 @@ def build_confirmatory_control_coverage_rows(
     runtime_anchors: list[dict[str, Any]],
     e12_table_rows: list[dict[str, Any]],
     e13_table_rows: list[dict[str, Any]],
+    e14_table_rows: list[dict[str, Any]],
     e12_summary_json_path: str | None,
     e13_summary_json_path: str | None,
+    e14_summary_json_path: str | None,
 ) -> list[dict[str, Any]]:
     def _rows_by_label(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
         mapping: dict[str, dict[str, Any]] = {}
@@ -553,18 +756,23 @@ def build_confirmatory_control_coverage_rows(
 
     e12_by_label = _rows_by_label(e12_table_rows)
     e13_by_label = _rows_by_label(e13_table_rows)
+    e14_by_label = _rows_by_label(e14_table_rows)
     e12_labels = set(e12_by_label.keys())
     e13_labels = set(e13_by_label.keys())
+    e14_labels = set(e14_by_label.keys())
 
     rows: list[dict[str, Any]] = []
     for anchor in runtime_anchors:
         analysis_label = _safe_text(anchor.get("analysis_label"))
         e12_row = e12_by_label.get(analysis_label, {})
         e13_row = e13_by_label.get(analysis_label, {})
+        e14_row = e14_by_label.get(analysis_label, {})
+        analysis_type = _safe_text(anchor.get("analysis_type"))
+        e14_expected = analysis_type == "within_subject"
         rows.append(
             {
                 "analysis_label": analysis_label,
-                "analysis_type": _safe_text(anchor.get("analysis_type")),
+                "analysis_type": analysis_type,
                 "cv": _safe_text(anchor.get("cv")),
                 "subject": _safe_text(anchor.get("subject")) or None,
                 "train_subject": _safe_text(anchor.get("train_subject")) or None,
@@ -573,17 +781,25 @@ def build_confirmatory_control_coverage_rows(
                 "runtime_anchor_template_id": _safe_text(anchor.get("template_id")),
                 "e12_covered": bool(analysis_label in e12_labels),
                 "e13_covered": bool(analysis_label in e13_labels),
+                "e14_expected": bool(e14_expected),
+                "e14_covered": bool(e14_expected and analysis_label in e14_labels),
                 "e12_run_id": _safe_text(e12_row.get("run_id")) or None,
                 "e13_run_id": _safe_text(e13_row.get("run_id")) or None,
+                "e14_run_id": _safe_text(e14_row.get("run_id")) or None,
                 "e12_metrics_path": _safe_text(e12_row.get("metrics_path")) or None,
                 "e13_metrics_path": _safe_text(e13_row.get("metrics_path")) or None,
+                "e14_metrics_path": _safe_text(e14_row.get("metrics_path")) or None,
                 "e12_report_dir": _safe_text(e12_row.get("report_dir")) or None,
                 "e13_report_dir": _safe_text(e13_row.get("report_dir")) or None,
+                "e14_report_dir": _safe_text(e14_row.get("report_dir")) or None,
                 "e12_summary_json_path": str(e12_summary_json_path)
                 if e12_summary_json_path
                 else None,
                 "e13_summary_json_path": str(e13_summary_json_path)
                 if e13_summary_json_path
+                else None,
+                "e14_summary_json_path": str(e14_summary_json_path)
+                if e14_summary_json_path
                 else None,
             }
         )

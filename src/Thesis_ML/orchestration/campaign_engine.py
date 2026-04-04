@@ -2241,12 +2241,20 @@ def run_decision_support_campaign(
         runtime_anchor_rows = []
 
     if runtime_anchor_rows:
+        e14_table_rows = [
+            row
+            for row in reporting_variant_records
+            if str(row.get("experiment_id")) == "E14"
+            and str(row.get("analysis_label") or "").strip()
+        ]
         coverage_rows = build_confirmatory_control_coverage_rows(
             runtime_anchors=runtime_anchor_rows,
             e12_table_rows=e12_table_rows,
             e13_table_rows=e13_table_rows,
+            e14_table_rows=e14_table_rows,
             e12_summary_json_path=e12_table_ready_summary_json_path,
             e13_summary_json_path=e13_table_ready_summary_json_path,
+            e14_summary_json_path=e14_stability_summary_json_path,
         )
         coverage_root = campaign_root / "special_aggregations" / "confirmatory"
         coverage_root.mkdir(parents=True, exist_ok=True)
@@ -2266,6 +2274,12 @@ def run_decision_support_campaign(
                 ),
                 "n_e13_covered": int(
                     sum(1 for row in coverage_rows if bool(row.get("e13_covered")))
+                ),
+                "n_e14_expected": int(
+                    sum(1 for row in coverage_rows if bool(row.get("e14_expected")))
+                ),
+                "n_e14_covered": int(
+                    sum(1 for row in coverage_rows if bool(row.get("e14_covered")))
                 ),
             },
         }
