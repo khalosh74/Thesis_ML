@@ -33,3 +33,27 @@ def test_terminal_rules_emit_expected_anomalies(tmp_path: Path) -> None:
         assert "TUNING_EXPECTED_BUT_MISSING" in codes
         assert "PERMUTATION_EXPECTED_BUT_MISSING" in codes
         assert "ROI_FEATURE_SPACE_PROXY_WARNING" in codes
+
+
+def test_terminal_rules_accept_zero_duration_stage_timings(tmp_path: Path) -> None:
+    engine = AnomalyEngine(
+        campaign_root=tmp_path / "campaigns" / "c1_zero_duration",
+        campaign_id="c1_zero_duration",
+    )
+    rows = engine.inspect_terminal_run(
+        {
+            "phase_name": "Primary robustness",
+            "experiment_id": "E13",
+            "run_id": "run_terminal_zero_duration",
+            "tuning_enabled": True,
+            "n_permutations": 1000,
+            "stage_timings_seconds": {
+                "tuning": 0.0,
+                "permutation": 0.0,
+            },
+        }
+    )
+
+    codes = {row["code"] for row in rows}
+    assert "TUNING_EXPECTED_BUT_MISSING" not in codes
+    assert "PERMUTATION_EXPECTED_BUT_MISSING" not in codes

@@ -87,7 +87,8 @@ def _has_stage_timing_key(stage_timings: dict[str, Any] | None, needle: str) -> 
             numeric = _safe_float(value)
             if numeric is None:
                 continue
-            if numeric > 0.0:
+            # Analytic shortcut paths can legitimately stamp a zero-duration stage.
+            if numeric >= 0.0:
                 return True
     return False
 
