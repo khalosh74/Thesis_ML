@@ -591,6 +591,11 @@ def test_e15_materialization_emits_restricted_and_full_control_cells() -> None:
         "subject": "sub-001",
         "filter_task": "emo",
         "filter_modality": "audiovisual",
+        "feature_space": "whole_brain_masked",
+        "preprocessing_strategy": "none",
+        "dimensionality_strategy": "none",
+        "methodology_policy_name": "fixed_baselines_only",
+        "class_weight_policy": "none",
     }
 
     cells, warnings = materialize_experiment_cells(
@@ -643,3 +648,28 @@ def test_e15_materialization_blocks_missing_subject_for_within_subject_cv() -> N
     assert len(cells) == 1
     assert bool(cells[0]["supported"]) is False
     assert "requires subject" in str(cells[0].get("blocked_reason", ""))
+
+
+def test_e15_materialization_blocks_missing_locked_core_parameters() -> None:
+    experiment = {"experiment_id": "E15"}
+    variant = _base_variant()
+    variant["params"] = {
+        "target": "coarse_affect",
+        "model": "ridge",
+        "cv": "within_subject_loso_session",
+        "subject": "sub-001",
+        "filter_task": "emo",
+        "filter_modality": "audiovisual",
+    }
+
+    cells, warnings = materialize_experiment_cells(
+        experiment=experiment,
+        variants=[variant],
+        dataset_scope={},
+        n_permutations=0,
+    )
+
+    assert warnings == []
+    assert len(cells) == 1
+    assert bool(cells[0]["supported"]) is False
+    assert "requires explicit locked-core parameters" in str(cells[0].get("blocked_reason", ""))

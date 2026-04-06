@@ -3273,7 +3273,15 @@
             "target": "coarse_affect",
             "cv": "within_subject_loso_session",
             "model": "ridge",
-            "filter_modality": "audiovisual"
+            "filter_modality": "audiovisual",
+            "feature_space": "whole_brain_masked",
+            "preprocessing_strategy": "none",
+            "dimensionality_strategy": "none",
+            "methodology_policy_name": "fixed_baselines_only",
+            "class_weight_policy": "none",
+            "persist_models": true,
+            "persist_fold_models": true,
+            "persist_final_refit_model": true
           },
           "expand": {
             "subject": "subjects",
@@ -3464,7 +3472,7 @@
               "recog"
             ],
             "feature_space": "whole_brain_masked",
-            "preprocessing_strategy": "standardize_zscore",
+            "preprocessing_strategy": "none",
             "dimensionality_strategy": "none",
             "methodology_policy_name": "fixed_baselines_only",
             "class_weight_policy": "none",
@@ -3514,7 +3522,7 @@
               "recog"
             ],
             "feature_space": "whole_brain_masked",
-            "preprocessing_strategy": "standardize_zscore",
+            "preprocessing_strategy": "none",
             "dimensionality_strategy": "none",
             "methodology_policy_name": "fixed_baselines_only",
             "class_weight_policy": "none",

@@ -275,3 +275,102 @@ def test_e23_blocked_cells_remain_counted_in_dry_run(tmp_path: Path) -> None:
     live_payload = json.loads((campaign_root / "campaign_live_status.json").read_text(encoding="utf-8"))
     assert blocked_event_count > 0
     assert int(live_payload["counts"]["runs_blocked"]) == blocked_event_count
+
+
+def test_e14_selected_experiment_runs_reporting_even_when_cells_are_derived_only(
+    tmp_path: Path,
+) -> None:
+    registry_path = tmp_path / "registry.json"
+    index_csv = tmp_path / "index.csv"
+    _write_index(index_csv)
+    _write_registry(
+        registry_path,
+        experiments=[
+            {
+                "experiment_id": "E16",
+                "title": "Final within-person confirmatory analysis",
+                "stage": "Confirmatory",
+                "decision_id": "D16",
+                "manipulated_factor": "confirmatory_within_subject",
+                "primary_metric": "balanced_accuracy",
+                "variant_templates": [
+                    {
+                        "template_id": "e16_base",
+                        "supported": True,
+                        "params": {
+                            "target": "coarse_affect",
+                            "model": "ridge",
+                            "cv": "within_subject_loso_session",
+                            "subject": "sub-001",
+                            "feature_space": "whole_brain_masked",
+                            "filter_modality": "audiovisual",
+                            "preprocessing_strategy": "none",
+                            "dimensionality_strategy": "none",
+                            "methodology_policy_name": "fixed_baselines_only",
+                            "class_weight_policy": "none",
+                        },
+                        "expand": {},
+                    }
+                ],
+            },
+            {
+                "experiment_id": "E14",
+                "title": "Interpretability stability robustness support",
+                "stage": "Primary robustness",
+                "decision_id": "D14",
+                "manipulated_factor": "interpretability_stability",
+                "primary_metric": "balanced_accuracy",
+                "variant_templates": [
+                    {
+                        "template_id": "e14_base",
+                        "supported": True,
+                        "params": {
+                            "target": "coarse_affect",
+                            "model": "ridge",
+                            "cv": "within_subject_loso_session",
+                            "subject": "sub-001",
+                            "feature_space": "whole_brain_masked",
+                            "filter_modality": "audiovisual",
+                            "preprocessing_strategy": "none",
+                            "dimensionality_strategy": "none",
+                            "methodology_policy_name": "fixed_baselines_only",
+                            "class_weight_policy": "none",
+                        },
+                        "expand": {},
+                    }
+                ],
+            },
+        ],
+    )
+
+    result = campaign_engine.run_decision_support_campaign(
+        registry_path=registry_path,
+        index_csv=index_csv,
+        data_root=tmp_path / "Data",
+        cache_dir=tmp_path / "cache",
+        output_root=tmp_path / "outputs",
+        experiment_id="E14",
+        stage=None,
+        run_all=False,
+        seed=42,
+        n_permutations=0,
+        dry_run=True,
+        run_experiment_fn=_stub_run_experiment,
+    )
+
+    manifest_path = Path(result["campaign_manifest_path"])
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert list(manifest.get("selected_experiments") or []) == ["E14"]
+    status_counts = dict(manifest.get("status_counts") or {})
+    assert int(status_counts.get("blocked", 0)) >= 1
+
+    outputs = dict(manifest.get("outputs") or {})
+    e14_json_path = outputs.get("e14_explanation_stability_summary_json")
+    if isinstance(e14_json_path, str) and e14_json_path:
+        payload = json.loads(Path(e14_json_path).read_text(encoding="utf-8"))
+        rows = list(payload.get("rows") or [])
+        if rows:
+            assert str(rows[0].get("completion_status")) in {
+                "missing_anchor",
+                "ineligible_or_missing_artifacts",
+            }

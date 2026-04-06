@@ -8,6 +8,17 @@ import pandas as pd
 
 from Thesis_ML.experiments.model_factory import model_supports_linear_interpretability
 
+_E14_LOCKED_CORE_KEYS: tuple[str, ...] = (
+    "target",
+    "model",
+    "feature_space",
+    "filter_modality",
+    "preprocessing_strategy",
+    "dimensionality_strategy",
+    "methodology_policy_name",
+    "class_weight_policy",
+)
+
 
 def _safe_text(value: Any) -> str:
     if value is None:
@@ -79,6 +90,76 @@ def _candidate_anchor_records(
     reporting_variant_records: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     return [record for record in reporting_variant_records if _is_e16_completed_record(record)]
+
+
+def _runtime_within_anchor_by_label(
+    runtime_anchor_rows: list[dict[str, Any]] | None,
+) -> dict[str, dict[str, Any]]:
+    mapped: dict[str, dict[str, Any]] = {}
+    for row in list(runtime_anchor_rows or []):
+        if not isinstance(row, dict):
+            continue
+        if _safe_text(row.get("experiment_id")) != "E16":
+            continue
+        if _safe_text(row.get("cv")) != "within_subject_loso_session":
+            continue
+        label = _safe_text(row.get("analysis_label"))
+        if not label or label in mapped:
+            continue
+        mapped[label] = dict(row)
+    return mapped
+
+
+def _merge_anchor_candidates(
+    *,
+    reporting_variant_records: list[dict[str, Any]],
+    runtime_anchor_records: list[dict[str, Any]] | None,
+) -> list[dict[str, Any]]:
+    merged: list[dict[str, Any]] = []
+    seen_keys: set[tuple[str, str, str]] = set()
+    for row in _candidate_anchor_records(reporting_variant_records):
+        variant_id = _safe_text(row.get("variant_id"))
+        run_id = _safe_text(row.get("run_id"))
+        label = _analysis_label(row)
+        dedupe_key = (variant_id, run_id, label)
+        if dedupe_key in seen_keys:
+            continue
+        seen_keys.add(dedupe_key)
+        merged.append(row)
+    for row in list(runtime_anchor_records or []):
+        if not isinstance(row, dict) or not _is_e16_completed_record(row):
+            continue
+        variant_id = _safe_text(row.get("variant_id"))
+        run_id = _safe_text(row.get("run_id"))
+        label = _analysis_label(row)
+        dedupe_key = (variant_id, run_id, label)
+        if dedupe_key in seen_keys:
+            continue
+        seen_keys.add(dedupe_key)
+        merged.append(dict(row))
+    return merged
+
+
+def _normalized_lock_value(value: Any) -> str:
+    return _safe_text(value).lower()
+
+
+def _locked_core_mismatch_keys(
+    *,
+    anchor_record: dict[str, Any],
+    runtime_anchor_row: dict[str, Any] | None,
+) -> list[str]:
+    if not isinstance(runtime_anchor_row, dict):
+        return []
+    mismatches: list[str] = []
+    for key in _E14_LOCKED_CORE_KEYS:
+        expected_value = _normalized_lock_value(runtime_anchor_row.get(key))
+        if not expected_value:
+            continue
+        observed_value = _normalized_lock_value(anchor_record.get(key))
+        if observed_value != expected_value:
+            mismatches.append(str(key))
+    return mismatches
 
 
 def _resolve_anchor_record(
@@ -244,8 +325,14 @@ def _build_e14_summary_row(
 def build_e14_reporting_records(
     *,
     reporting_variant_records: list[dict[str, Any]],
+    runtime_anchor_rows: list[dict[str, Any]] | None = None,
+    runtime_anchor_records: list[dict[str, Any]] | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, Any]]:
-    anchor_candidates = _candidate_anchor_records(reporting_variant_records)
+    anchor_candidates = _merge_anchor_candidates(
+        reporting_variant_records=reporting_variant_records,
+        runtime_anchor_records=runtime_anchor_records,
+    )
+    runtime_anchor_by_label = _runtime_within_anchor_by_label(runtime_anchor_rows)
     e14_rows = [row for row in reporting_variant_records if _is_e14_special_cell(row)]
     if not e14_rows:
         return list(reporting_variant_records), [], {"rows": [], "errors": []}
@@ -263,8 +350,15 @@ def build_e14_reporting_records(
             anchor_variant_id=anchor_variant_id,
             anchor_analysis_label=anchor_analysis_label,
         )
+        runtime_anchor_row = runtime_anchor_by_label.get(anchor_analysis_label)
         if anchor_record is None:
-            reason = "No completed E16 anchor run was found for this E14 cell."
+            if runtime_anchor_row is not None:
+                reason = (
+                    "Runtime E16 anchor is declared for this E14 cell but no completed E16 "
+                    "anchor artifacts were resolved for the declared analysis label."
+                )
+            else:
+                reason = "No completed E16 anchor run was found for this E14 cell."
             summary_rows.append(
                 _build_e14_summary_row(
                     e14_record=row,
@@ -272,6 +366,33 @@ def build_e14_reporting_records(
                     interpretability_payload=None,
                     status="not_applicable",
                     completion_status="missing_anchor",
+                    status_reason=reason,
+                )
+            )
+            derived_row = dict(row)
+            derived_row["status"] = "blocked"
+            derived_row["blocked_reason"] = reason
+            converted_rows.append(derived_row)
+            errors.append(reason)
+            continue
+
+        lock_mismatches = _locked_core_mismatch_keys(
+            anchor_record=anchor_record,
+            runtime_anchor_row=runtime_anchor_row,
+        )
+        if lock_mismatches:
+            reason = (
+                "Resolved E16 anchor artifacts do not match runtime confirmatory anchor locked "
+                "core for keys: "
+                + ", ".join(sorted(lock_mismatches))
+            )
+            summary_rows.append(
+                _build_e14_summary_row(
+                    e14_record=row,
+                    anchor_record=anchor_record,
+                    interpretability_payload=None,
+                    status="not_applicable",
+                    completion_status="anchor_locked_core_mismatch",
                     status_reason=reason,
                 )
             )

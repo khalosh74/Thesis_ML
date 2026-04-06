@@ -113,6 +113,8 @@ def _e16_anchor_record(
     run_id: str,
     report_dir: str,
     metrics_path: str,
+    preprocessing_strategy: str = "none",
+    feature_space: str = "whole_brain_masked",
 ) -> dict[str, Any]:
     return {
         "experiment_id": "E16",
@@ -121,7 +123,13 @@ def _e16_anchor_record(
         "cv": "within_subject_loso_session",
         "model": "ridge",
         "subject": subject,
-        "feature_space": "whole_brain_masked",
+        "target": "coarse_affect",
+        "feature_space": feature_space,
+        "filter_modality": "audiovisual",
+        "preprocessing_strategy": preprocessing_strategy,
+        "dimensionality_strategy": "none",
+        "methodology_policy_name": "fixed_baselines_only",
+        "class_weight_policy": "none",
         "run_id": run_id,
         "report_dir": report_dir,
         "metrics_path": metrics_path,
@@ -232,4 +240,93 @@ def test_e14_reporting_marks_not_applicable_when_interpretability_missing(tmp_pa
     assert str(summary_rows[0].get("status")) == "not_applicable"
     assert str(summary_rows[0].get("completion_status")) == "ineligible_or_missing_artifacts"
     assert summary_rows[0].get("mean_pairwise_coef_correlation") is None
+    assert list(payload.get("errors") or [])
+
+
+def test_e14_reporting_uses_runtime_anchor_artifact_fallback_when_campaign_has_no_e16(
+    tmp_path: Path,
+) -> None:
+    report_a, metrics_a, _ = _write_anchor_artifacts(root=tmp_path, run_id="e16_sub001")
+    runtime_anchor_record = _e16_anchor_record(
+        variant_id="e16_anchor",
+        subject="sub-001",
+        run_id="e16_run_sub001",
+        report_dir=report_a,
+        metrics_path=metrics_a,
+    )
+    runtime_anchor_rows = [
+        {
+            "analysis_label": "within_subject_loso_session:sub-001",
+            "experiment_id": "E16",
+            "cv": "within_subject_loso_session",
+            "subject": "sub-001",
+            "target": "coarse_affect",
+            "model": "ridge",
+            "feature_space": "whole_brain_masked",
+            "filter_modality": "audiovisual",
+            "preprocessing_strategy": "none",
+            "dimensionality_strategy": "none",
+            "methodology_policy_name": "fixed_baselines_only",
+            "class_weight_policy": "none",
+        }
+    ]
+    records = [
+        _e14_record(variant_id="e14_sub001", subject="sub-001", anchor_variant_id="e16_anchor"),
+    ]
+
+    output_records, summary_rows, payload = build_e14_reporting_records(
+        reporting_variant_records=records,
+        runtime_anchor_rows=runtime_anchor_rows,
+        runtime_anchor_records=[runtime_anchor_record],
+    )
+
+    e14_output = [row for row in output_records if str(row.get("experiment_id")) == "E14"]
+    assert len(e14_output) == 1
+    assert str(e14_output[0].get("status")) == "completed"
+    assert str(summary_rows[0].get("completion_status")) == "completed"
+    assert list(payload.get("errors") or []) == []
+
+
+def test_e14_reporting_blocks_when_runtime_locked_core_mismatches_resolved_anchor(
+    tmp_path: Path,
+) -> None:
+    report_a, metrics_a, _ = _write_anchor_artifacts(root=tmp_path, run_id="e16_sub001")
+    runtime_anchor_record = _e16_anchor_record(
+        variant_id="e16_anchor",
+        subject="sub-001",
+        run_id="e16_run_sub001",
+        report_dir=report_a,
+        metrics_path=metrics_a,
+        preprocessing_strategy="standardize_zscore",
+    )
+    runtime_anchor_rows = [
+        {
+            "analysis_label": "within_subject_loso_session:sub-001",
+            "experiment_id": "E16",
+            "cv": "within_subject_loso_session",
+            "subject": "sub-001",
+            "target": "coarse_affect",
+            "model": "ridge",
+            "feature_space": "whole_brain_masked",
+            "filter_modality": "audiovisual",
+            "preprocessing_strategy": "none",
+            "dimensionality_strategy": "none",
+            "methodology_policy_name": "fixed_baselines_only",
+            "class_weight_policy": "none",
+        }
+    ]
+    records = [
+        _e14_record(variant_id="e14_sub001", subject="sub-001", anchor_variant_id="e16_anchor"),
+    ]
+
+    output_records, summary_rows, payload = build_e14_reporting_records(
+        reporting_variant_records=records,
+        runtime_anchor_rows=runtime_anchor_rows,
+        runtime_anchor_records=[runtime_anchor_record],
+    )
+
+    e14_output = [row for row in output_records if str(row.get("experiment_id")) == "E14"]
+    assert len(e14_output) == 1
+    assert str(e14_output[0].get("status")) == "blocked"
+    assert str(summary_rows[0].get("completion_status")) == "anchor_locked_core_mismatch"
     assert list(payload.get("errors") or [])

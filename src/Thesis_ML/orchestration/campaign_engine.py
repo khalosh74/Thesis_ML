@@ -164,6 +164,24 @@ def _safe_float(value: Any) -> float | None:
         return None
 
 
+def _safe_text(value: Any) -> str:
+    if value is None:
+        return ""
+    return str(value).strip()
+
+
+def _is_e14_derived_reporting_only_block(row: dict[str, Any]) -> bool:
+    if _safe_text(row.get("experiment_id")) != "E14":
+        return False
+    reason = _safe_text(row.get("blocked_reason")).lower()
+    return "derived from e16 artifacts" in reason and "not executed as a separate fit" in reason
+
+
+def _design_metadata(record: dict[str, Any]) -> dict[str, Any]:
+    value = record.get("design_metadata")
+    return dict(value) if isinstance(value, dict) else {}
+
+
 def _safe_load_json(path: Path) -> dict[str, Any] | None:
     if not path.exists():
         return None
@@ -175,15 +193,203 @@ def _safe_load_json(path: Path) -> dict[str, Any] | None:
 
 
 def _analysis_label_from_identity(row: dict[str, Any]) -> str:
-    cv_mode = str(row.get("cv") or "").strip()
-    subject = str(row.get("subject") or "").strip()
-    train_subject = str(row.get("train_subject") or "").strip()
-    test_subject = str(row.get("test_subject") or "").strip()
+    cv_mode = _safe_text(row.get("cv"))
+    subject = _safe_text(row.get("subject"))
+    train_subject = _safe_text(row.get("train_subject"))
+    test_subject = _safe_text(row.get("test_subject"))
     if cv_mode == "within_subject_loso_session" and subject:
         return f"{cv_mode}:{subject}"
     if cv_mode == "frozen_cross_person_transfer" and train_subject and test_subject:
         return f"{cv_mode}:{train_subject}->{test_subject}"
-    return str(row.get("analysis_label") or "").strip()
+    return _safe_text(row.get("analysis_label"))
+
+
+_THESIS_LOCKED_CORE_KEYS: tuple[str, ...] = (
+    "target",
+    "model",
+    "feature_space",
+    "preprocessing_strategy",
+    "dimensionality_strategy",
+    "methodology_policy_name",
+    "class_weight_policy",
+)
+
+
+def _normalized_lock_value(value: Any) -> str:
+    return _safe_text(value).lower()
+
+
+def _derive_within_family_locked_core(runtime_anchor_rows: list[dict[str, Any]]) -> dict[str, str]:
+    within_rows = [
+        row
+        for row in runtime_anchor_rows
+        if _safe_text(row.get("experiment_id")) == "E16"
+        and _safe_text(row.get("cv")) == "within_subject_loso_session"
+    ]
+    if not within_rows:
+        return {}
+    resolved: dict[str, str] = {}
+    for key in _THESIS_LOCKED_CORE_KEYS:
+        values = {
+            _normalized_lock_value(row.get(key))
+            for row in within_rows
+            if _normalized_lock_value(row.get(key))
+        }
+        if len(values) == 1:
+            resolved[key] = next(iter(values))
+    return resolved
+
+
+def _locked_core_mismatch_keys(
+    *,
+    row: dict[str, Any],
+    locked_core: dict[str, str],
+) -> list[str]:
+    mismatches: list[str] = []
+    for key, expected in locked_core.items():
+        if not expected:
+            continue
+        observed = _normalized_lock_value(row.get(key))
+        if observed != expected:
+            mismatches.append(str(key))
+    return mismatches
+
+
+def _extract_external_template_id(run_manifest: dict[str, Any]) -> str:
+    template_id = _safe_text(run_manifest.get("template_id"))
+    if template_id:
+        return template_id
+    variant_id = _safe_text(run_manifest.get("variant_id"))
+    if variant_id:
+        return variant_id.split("__")[0]
+    run_id = _safe_text(run_manifest.get("run_id"))
+    if not run_id:
+        return ""
+    # run_id format: ds_<experiment_id>_<template_id>__<index>_<campaign_id>
+    prefix = "ds_E16_"
+    if not run_id.startswith(prefix):
+        return ""
+    suffix = run_id[len(prefix) :]
+    marker = "__"
+    if marker not in suffix:
+        return ""
+    return suffix.split(marker, 1)[0]
+
+
+def _collect_external_e16_anchor_records(
+    *,
+    output_root: Path,
+    runtime_anchor_rows: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    e16_root = output_root / "E16"
+    if not e16_root.exists():
+        return []
+    expected_labels = {
+        _safe_text(row.get("analysis_label"))
+        for row in runtime_anchor_rows
+        if _safe_text(row.get("experiment_id")) == "E16"
+        and _safe_text(row.get("cv")) == "within_subject_loso_session"
+        and _safe_text(row.get("analysis_label"))
+    }
+    manifest_paths = sorted(e16_root.glob("*/run_manifests/*.json"))
+    candidates_by_label: dict[str, tuple[tuple[str, float], dict[str, Any]]] = {}
+
+    for manifest_path in manifest_paths:
+        manifest_payload = _safe_load_json(manifest_path)
+        if not isinstance(manifest_payload, dict):
+            continue
+        if _safe_text(manifest_payload.get("experiment_id")) != "E16":
+            continue
+        status = _safe_text(manifest_payload.get("status")).lower()
+        if status not in {"completed", "success"}:
+            continue
+
+        config_used = (
+            dict(manifest_payload.get("config_used"))
+            if isinstance(manifest_payload.get("config_used"), dict)
+            else {}
+        )
+        params_payload = (
+            dict(config_used.get("params_snapshot"))
+            if isinstance(config_used.get("params_snapshot"), dict)
+            else (
+                dict(config_used.get("params"))
+                if isinstance(config_used.get("params"), dict)
+                else {}
+            )
+        )
+        cv_mode = _safe_text(params_payload.get("cv"))
+        subject = _safe_text(params_payload.get("subject"))
+        if cv_mode != "within_subject_loso_session" or not subject:
+            continue
+        analysis_label = f"{cv_mode}:{subject}"
+        if expected_labels and analysis_label not in expected_labels:
+            continue
+
+        artifacts = (
+            dict(manifest_payload.get("artifacts"))
+            if isinstance(manifest_payload.get("artifacts"), dict)
+            else {}
+        )
+        report_dir = _safe_text(artifacts.get("report_dir"))
+        metrics_path = _safe_text(artifacts.get("metrics_path"))
+        config_path = _safe_text(artifacts.get("config_path"))
+        if not metrics_path:
+            continue
+        metrics_payload = _safe_load_json(Path(metrics_path)) or {}
+        primary_metric_name = (
+            _safe_text(metrics_payload.get("primary_metric_name")) or "balanced_accuracy"
+        )
+        primary_metric_value = _safe_float(metrics_payload.get(primary_metric_name))
+        if primary_metric_value is None:
+            primary_metric_value = _safe_float(metrics_payload.get("balanced_accuracy"))
+
+        template_id = _extract_external_template_id(manifest_payload)
+        if not template_id:
+            continue
+
+        candidate = {
+            "experiment_id": "E16",
+            "variant_id": template_id,
+            "status": "completed",
+            "cv": cv_mode,
+            "model": _safe_text(params_payload.get("model")) or "ridge",
+            "subject": subject,
+            "target": _safe_text(params_payload.get("target")) or None,
+            "filter_modality": _safe_text(params_payload.get("filter_modality")) or None,
+            "feature_space": _safe_text(params_payload.get("feature_space")) or None,
+            "preprocessing_strategy": _safe_text(params_payload.get("preprocessing_strategy"))
+            or None,
+            "dimensionality_strategy": _safe_text(params_payload.get("dimensionality_strategy"))
+            or None,
+            "methodology_policy_name": _safe_text(params_payload.get("methodology_policy_name"))
+            or None,
+            "class_weight_policy": _safe_text(params_payload.get("class_weight_policy")) or None,
+            "run_id": _safe_text(manifest_payload.get("run_id")) or None,
+            "report_dir": report_dir or None,
+            "metrics_path": metrics_path,
+            "config_path": config_path or None,
+            "primary_metric_name": primary_metric_name,
+            "primary_metric_value": primary_metric_value,
+            "balanced_accuracy": _safe_float(metrics_payload.get("balanced_accuracy")),
+            "macro_f1": _safe_float(metrics_payload.get("macro_f1")),
+            "accuracy": _safe_float(metrics_payload.get("accuracy")),
+            "anchor_source": "external_output_root_fallback",
+            "anchor_source_manifest_path": str(manifest_path.resolve()),
+            "analysis_label": analysis_label,
+        }
+        finished_at = _safe_text(manifest_payload.get("finished_at"))
+        sort_key = (
+            finished_at,
+            float(manifest_path.stat().st_mtime),
+        )
+        current = candidates_by_label.get(analysis_label)
+        if current is None or sort_key > current[0]:
+            candidates_by_label[analysis_label] = (sort_key, candidate)
+
+    rows = [payload for _, payload in sorted(candidates_by_label.values(), key=lambda item: item[0])]
+    rows.sort(key=lambda row: _safe_text(row.get("analysis_label")))
+    return rows
 
 
 def _build_confirmatory_model_rows(
@@ -194,6 +400,7 @@ def _build_confirmatory_model_rows(
     for record in reporting_variant_records:
         if str(record.get("experiment_id") or "") not in {"E16", "E17"}:
             continue
+        design_metadata = _design_metadata(record)
         params = {
             "cv": record.get("cv"),
             "subject": record.get("subject"),
@@ -228,12 +435,29 @@ def _build_confirmatory_model_rows(
             "train_subject": str(record.get("train_subject") or "").strip() or None,
             "test_subject": str(record.get("test_subject") or "").strip() or None,
             "model": str(record.get("model") or "").strip() or None,
+            "feature_space": str(record.get("feature_space") or "").strip() or None,
+            "filter_modality": str(record.get("filter_modality") or "").strip() or None,
+            "preprocessing_strategy": str(record.get("preprocessing_strategy") or "").strip()
+            or None,
+            "dimensionality_strategy": str(record.get("dimensionality_strategy") or "").strip()
+            or None,
+            "methodology_policy_name": str(record.get("methodology_policy_name") or "").strip()
+            or None,
+            "class_weight_policy": str(record.get("class_weight_policy") or "").strip() or None,
             "metric_name": metric_name or None,
             "observed_score": observed_score,
             "status": str(record.get("status") or "").strip() or None,
             "run_id": str(record.get("run_id") or "").strip() or None,
             "metrics_path": str(record.get("metrics_path") or "").strip() or None,
             "report_dir": str(record.get("report_dir") or "").strip() or None,
+            "legacy_diagnostic": bool(
+                bool(record.get("legacy_diagnostic"))
+                or bool(design_metadata.get("legacy_diagnostic"))
+                or _safe_text(record.get("thesis_selection_status")) == "legacy_diagnostic_excluded"
+            ),
+            "legacy_reason": _safe_text(record.get("legacy_reason"))
+            or _safe_text(design_metadata.get("legacy_reason"))
+            or None,
         }
         if analysis_label not in rows_by_label:
             rows_by_label[analysis_label] = row
@@ -272,6 +496,7 @@ def _write_confirmatory_thesis_artifacts(
     e12_by_label = _map_by_label(e12_table_rows)
     e13_by_label = _map_by_label(e13_table_rows)
     coverage_by_label = _map_by_label(coverage_rows)
+    locked_core = _derive_within_family_locked_core(runtime_anchor_rows)
 
     anchor_manifest_rows: list[dict[str, Any]] = []
     within_rows: list[dict[str, Any]] = []
@@ -294,6 +519,33 @@ def _write_confirmatory_thesis_artifacts(
         e12_row = e12_by_label.get(analysis_label, {})
         e13_row = e13_by_label.get(analysis_label, {})
         coverage_row = coverage_by_label.get(analysis_label, {})
+        anchor_lock_mismatches = _locked_core_mismatch_keys(row=anchor, locked_core=locked_core)
+        confirmatory_lock_mismatches = (
+            _locked_core_mismatch_keys(row=confirmatory_row, locked_core=locked_core)
+            if confirmatory_row
+            else []
+        )
+        explicit_legacy = bool(
+            bool(anchor.get("legacy_diagnostic")) or bool(confirmatory_row.get("legacy_diagnostic"))
+        )
+        legacy_reason = ""
+        if explicit_legacy:
+            legacy_reason = (
+                _safe_text(confirmatory_row.get("legacy_reason"))
+                or _safe_text(anchor.get("legacy_reason"))
+                or "explicit_legacy_diagnostic"
+            )
+        elif anchor_lock_mismatches:
+            legacy_reason = (
+                "runtime_anchor_locked_core_mismatch:"
+                + ",".join(sorted(anchor_lock_mismatches))
+            )
+        elif confirmatory_lock_mismatches:
+            legacy_reason = (
+                "resolved_confirmatory_locked_core_mismatch:"
+                + ",".join(sorted(confirmatory_lock_mismatches))
+            )
+        selected_for_thesis = bool(confirmatory_row) and not bool(legacy_reason)
 
         anchor_manifest_rows.append(
             {
@@ -312,6 +564,14 @@ def _write_confirmatory_thesis_artifacts(
                 "methodology_policy_name": str(anchor.get("methodology_policy_name") or "") or None,
                 "class_weight_policy": str(anchor.get("class_weight_policy") or "") or None,
                 "confirmatory_present": bool(confirmatory_row),
+                "locked_core_expected": dict(locked_core),
+                "locked_core_match": bool(not anchor_lock_mismatches and not confirmatory_lock_mismatches),
+                "legacy_diagnostic": bool(legacy_reason),
+                "legacy_reason": (legacy_reason or None),
+                "thesis_selection_status": (
+                    "selected" if selected_for_thesis else "legacy_diagnostic_excluded"
+                ),
+                "task_scope_semantics": "advisory_only_not_execution_filtered",
                 "e12_covered": bool(coverage_row.get("e12_covered", False)),
                 "e13_covered": bool(coverage_row.get("e13_covered", False)),
             }
@@ -345,53 +605,56 @@ def _write_confirmatory_thesis_artifacts(
             "run_id": str(confirmatory_row.get("run_id") or "") or None,
             "metrics_path": str(confirmatory_row.get("metrics_path") or "") or None,
         }
-        if family == "within_person_confirmatory":
-            within_rows.append(confirmatory_line)
-            within_rows.append(baseline_line)
-        else:
-            transfer_rows.append(confirmatory_line)
-            transfer_rows.append(baseline_line)
+        if selected_for_thesis:
+            if family == "within_person_confirmatory":
+                within_rows.append(confirmatory_line)
+                within_rows.append(baseline_line)
+            else:
+                transfer_rows.append(confirmatory_line)
+                transfer_rows.append(baseline_line)
 
-        permutation_rows.append(
-            {
-                "analysis_label": analysis_label,
-                "family": family,
-                "observed_score": _safe_float(e12_row.get("observed_balanced_accuracy")),
-                "null_mean": _safe_float(e12_row.get("null_mean")),
-                "null_min": _safe_float(e12_row.get("null_min")),
-                "null_max": _safe_float(e12_row.get("null_max")),
-                "null_q25": _safe_float(e12_row.get("null_q25")),
-                "null_q75": _safe_float(e12_row.get("null_q75")),
-                "p_value": _safe_float(e12_row.get("empirical_p")),
-                "n_permutations": _optional_int(e12_row.get("n_permutations")),
-                "coverage_status": bool(coverage_row.get("e12_covered", False)),
-                "completion_status": (
-                    "completed"
-                    if bool(coverage_row.get("e12_covered", False))
-                    and bool(e12_row.get("meets_minimum", False))
-                    else "missing_or_incomplete"
-                ),
-                "metrics_path": str(e12_row.get("metrics_path") or "") or None,
-                "run_id": str(e12_row.get("run_id") or "") or None,
-            }
-        )
+        if selected_for_thesis:
+            permutation_rows.append(
+                {
+                    "analysis_label": analysis_label,
+                    "family": family,
+                    "observed_score": _safe_float(e12_row.get("observed_balanced_accuracy")),
+                    "null_mean": _safe_float(e12_row.get("null_mean")),
+                    "null_min": _safe_float(e12_row.get("null_min")),
+                    "null_max": _safe_float(e12_row.get("null_max")),
+                    "null_q25": _safe_float(e12_row.get("null_q25")),
+                    "null_q75": _safe_float(e12_row.get("null_q75")),
+                    "p_value": _safe_float(e12_row.get("empirical_p")),
+                    "n_permutations": _optional_int(e12_row.get("n_permutations")),
+                    "coverage_status": bool(coverage_row.get("e12_covered", False)),
+                    "completion_status": (
+                        "completed"
+                        if bool(coverage_row.get("e12_covered", False))
+                        and bool(e12_row.get("meets_minimum", False))
+                        else "missing_or_incomplete"
+                    ),
+                    "metrics_path": str(e12_row.get("metrics_path") or "") or None,
+                    "run_id": str(e12_row.get("run_id") or "") or None,
+                }
+            )
 
-        e12_thesis_rows.append(
-            {
-                "analysis_label": analysis_label,
-                "family": family,
-                **dict(e12_row),
-                "covered": bool(coverage_row.get("e12_covered", False)),
-            }
-        )
-        e13_thesis_rows.append(
-            {
-                "analysis_label": analysis_label,
-                "family": family,
-                **dict(e13_row),
-                "covered": bool(coverage_row.get("e13_covered", False)),
-            }
-        )
+        if selected_for_thesis:
+            e12_thesis_rows.append(
+                {
+                    "analysis_label": analysis_label,
+                    "family": family,
+                    **dict(e12_row),
+                    "covered": bool(coverage_row.get("e12_covered", False)),
+                }
+            )
+            e13_thesis_rows.append(
+                {
+                    "analysis_label": analysis_label,
+                    "family": family,
+                    **dict(e13_row),
+                    "covered": bool(coverage_row.get("e13_covered", False)),
+                }
+            )
 
     files = {
         "confirmatory_anchor_manifest": "confirmatory_anchor_manifest",
@@ -2127,15 +2390,18 @@ def run_decision_support_campaign(
         if selected_records and all(
             str(row.get("status")) == "blocked" for row in selected_records
         ):
-            reasons = sorted(
-                {
-                    str(row.get("blocked_reason"))
-                    for row in selected_records
-                    if row.get("blocked_reason")
-                }
-            )
-            reason_text = "; ".join(reasons) if reasons else "unspecified"
-            raise RuntimeError(f"Experiment '{experiment_id}' is not executable now: {reason_text}")
+            if not all(_is_e14_derived_reporting_only_block(row) for row in selected_records):
+                reasons = sorted(
+                    {
+                        str(row.get("blocked_reason"))
+                        for row in selected_records
+                        if row.get("blocked_reason")
+                    }
+                )
+                reason_text = "; ".join(reasons) if reasons else "unspecified"
+                raise RuntimeError(
+                    f"Experiment '{experiment_id}' is not executable now: {reason_text}"
+                )
 
     stage_summary_paths = _write_stage_summaries(
         campaign_root=campaign_root,
@@ -2164,6 +2430,17 @@ def run_decision_support_campaign(
     coverage_rows: list[dict[str, Any]] = []
     confirmatory_model_rows = _build_confirmatory_model_rows(
         reporting_variant_records=reporting_variant_records
+    )
+    runtime_anchor_rows: list[dict[str, Any]] = []
+    try:
+        runtime_registry_payload = json.loads(registry_path.read_text(encoding="utf-8"))
+        if isinstance(runtime_registry_payload, dict):
+            runtime_anchor_rows = collect_runtime_confirmatory_anchors(runtime_registry_payload)
+    except Exception:
+        runtime_anchor_rows = []
+    external_e16_anchor_records = _collect_external_e16_anchor_records(
+        output_root=output_root,
+        runtime_anchor_rows=runtime_anchor_rows,
     )
     if isinstance(permutation_chunk_merge_summary, dict):
         merge_groups = permutation_chunk_merge_summary.get("groups")
@@ -2216,7 +2493,9 @@ def run_decision_support_campaign(
         e13_table_ready_summary_json_path = str(e13_json_path.resolve())
 
     reporting_variant_records, e14_summary_rows, e14_summary_payload = _build_e14_reporting_records(
-        reporting_variant_records=reporting_variant_records
+        reporting_variant_records=reporting_variant_records,
+        runtime_anchor_rows=runtime_anchor_rows,
+        runtime_anchor_records=external_e16_anchor_records,
     )
     if e14_summary_rows:
         special_aggregation_root = campaign_root / "special_aggregations" / "E14"
@@ -2235,14 +2514,6 @@ def run_decision_support_campaign(
         )
         e14_stability_summary_csv_path = str(e14_csv_path.resolve())
         e14_stability_summary_json_path = str(e14_json_path.resolve())
-
-    runtime_anchor_rows: list[dict[str, Any]] = []
-    try:
-        runtime_registry_payload = json.loads(registry_path.read_text(encoding="utf-8"))
-        if isinstance(runtime_registry_payload, dict):
-            runtime_anchor_rows = collect_runtime_confirmatory_anchors(runtime_registry_payload)
-    except Exception:
-        runtime_anchor_rows = []
 
     if runtime_anchor_rows:
         e14_table_rows = [

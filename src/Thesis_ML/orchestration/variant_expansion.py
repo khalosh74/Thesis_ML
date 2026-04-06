@@ -89,6 +89,13 @@ _E14_ANCHOR_PARAM_KEYS: tuple[str, ...] = (
     "filter_task",
     "filter_modality",
 )
+_E15_LOCKED_CORE_REQUIRED_KEYS: tuple[str, ...] = (
+    "feature_space",
+    "preprocessing_strategy",
+    "dimensionality_strategy",
+    "methodology_policy_name",
+    "class_weight_policy",
+)
 
 
 def _optional_int(value: Any) -> int | None:
@@ -113,6 +120,19 @@ def _is_executable_experiment(row: dict[str, Any]) -> bool:
     if execution_status == "blocked":
         return False
     return True
+
+
+def _missing_locked_core_keys(
+    params: dict[str, Any],
+    *,
+    required_keys: tuple[str, ...],
+) -> list[str]:
+    missing: list[str] = []
+    for key in required_keys:
+        if _safe_text(params.get(key)):
+            continue
+        missing.append(str(key))
+    return missing
 
 
 def _anchor_analysis_key(anchor_params: dict[str, Any]) -> str:
@@ -1424,6 +1444,19 @@ def _expand_e15_subset_sensitivity_cells(
             row["blocked_reason"] = "E15 subset sensitivity requires non-empty filter_task."
             cells.append(row)
             continue
+        missing_locked_core = _missing_locked_core_keys(
+            params,
+            required_keys=_E15_LOCKED_CORE_REQUIRED_KEYS,
+        )
+        if missing_locked_core:
+            row["supported"] = False
+            row["blocked_reason"] = (
+                "E15 subset sensitivity requires explicit locked-core parameters and must not "
+                "fall back to model defaults. Missing keys: "
+                + ", ".join(sorted(missing_locked_core))
+            )
+            cells.append(row)
+            continue
 
         group_id = (
             f"E15::{template_id}::{subject or 'unknown_subject'}::"
@@ -1466,6 +1499,19 @@ def _expand_e15_subset_sensitivity_cells(
         control_params = dict(control.get("params", {}))
         control_params["subject"] = subject
         control_params.pop("filter_task", None)
+        missing_control_locked_core = _missing_locked_core_keys(
+            control_params,
+            required_keys=_E15_LOCKED_CORE_REQUIRED_KEYS,
+        )
+        if missing_control_locked_core:
+            control["supported"] = False
+            control["blocked_reason"] = (
+                "E15 full-control cell is missing explicit locked-core parameters and cannot be "
+                "materialized safely. Missing keys: "
+                + ", ".join(sorted(missing_control_locked_core))
+            )
+            cells.append(control)
+            continue
         control["params"] = control_params
         control_group_id = (
             f"E15::{template_id}::{subject or 'unknown_subject'}::"

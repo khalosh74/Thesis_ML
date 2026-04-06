@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -813,6 +814,114 @@ def _build_confidence_interval_outputs(
     return interval_rows, payload
 
 
+def _freeze_identity_payload(
+    *,
+    run_results: list[ProtocolRunResult],
+) -> dict[str, Any]:
+    commits: set[str] = set()
+    python_versions: set[str] = set()
+    deterministic_values: set[bool] = set()
+    completed_run_ids: list[str] = []
+    for result in run_results:
+        if not is_run_success_status(result.status):
+            continue
+        completed_run_ids.append(str(result.run_id))
+        config_payload = _load_json(result.config_path)
+        metrics_payload = _load_json(result.metrics_path)
+        if isinstance(config_payload, dict):
+            commit = str(config_payload.get("git_commit") or "").strip()
+            if commit:
+                commits.add(commit)
+            python_version = str(config_payload.get("python_version") or "").strip()
+            if python_version:
+                python_versions.add(python_version)
+            if config_payload.get("deterministic_compute") is not None:
+                deterministic_values.add(bool(config_payload.get("deterministic_compute")))
+        if isinstance(metrics_payload, dict) and metrics_payload.get("deterministic_compute") is not None:
+            deterministic_values.add(bool(metrics_payload.get("deterministic_compute")))
+
+    deterministic_execution = bool(
+        deterministic_values and len(deterministic_values) == 1 and True in deterministic_values
+    )
+    return {
+        "n_completed_runs": int(len(completed_run_ids)),
+        "completed_run_ids": sorted(completed_run_ids),
+        "observed_commit_shas": sorted(commits),
+        "frozen_commit_sha": (sorted(commits)[0] if len(commits) == 1 else None),
+        "observed_python_versions": sorted(python_versions),
+        "python_version": (sorted(python_versions)[0] if len(python_versions) == 1 else None),
+        "deterministic_values_observed": sorted(bool(value) for value in deterministic_values),
+        "deterministic_execution": bool(deterministic_execution),
+    }
+
+
+def _thesis_item_map_payload(
+    *,
+    compiled_manifest: CompiledProtocolManifest,
+    report_index_path: Path,
+    claim_outcomes_path: Path,
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for suite_id in sorted(compiled_manifest.suite_ids):
+        rows.append(
+            {
+                "thesis_item_id": f"suite::{suite_id}::primary_metric_table",
+                "artifact_path": str(report_index_path.resolve()),
+                "artifact_path_relative": _relative_path(str(report_index_path.resolve())),
+                "selector": {"suite_id": str(suite_id)},
+                "note": "Extract rows by suite_id from report_index.csv.",
+            }
+        )
+    for claim_id in sorted(compiled_manifest.claim_to_run_map.keys()):
+        rows.append(
+            {
+                "thesis_item_id": f"claim::{claim_id}::verdict_summary",
+                "artifact_path": str(claim_outcomes_path.resolve()),
+                "artifact_path_relative": _relative_path(str(claim_outcomes_path.resolve())),
+                "selector": {"claim_id": str(claim_id)},
+                "note": "Extract claim verdict and strict_gate_summary from claim_outcomes.json.",
+            }
+        )
+    return rows
+
+
+def _frozen_thesis_evidence_manifest_payload(
+    *,
+    protocol: ThesisProtocol,
+    compiled_manifest: CompiledProtocolManifest,
+    run_results: list[ProtocolRunResult],
+    protocol_output_dir: Path,
+    source_protocol_payload: dict[str, Any],
+    report_index_path: Path,
+    claim_outcomes_path: Path,
+    dry_run: bool,
+) -> dict[str, Any]:
+    freeze_identity = _freeze_identity_payload(run_results=run_results)
+    thesis_item_map = _thesis_item_map_payload(
+        compiled_manifest=compiled_manifest,
+        report_index_path=report_index_path,
+        claim_outcomes_path=claim_outcomes_path,
+    )
+    freeze_ready = bool(
+        not dry_run
+        and freeze_identity.get("frozen_commit_sha")
+        and freeze_identity.get("python_version")
+        and bool(freeze_identity.get("deterministic_execution", False))
+    )
+    return {
+        "manifest_schema_version": "frozen-thesis-evidence-manifest-v1",
+        "generated_at_utc": datetime.now(UTC).replace(microsecond=0).isoformat(),
+        "protocol_id": str(protocol.protocol_id),
+        "protocol_version": str(protocol.protocol_version),
+        "protocol_output_root": str(protocol_output_dir.resolve()),
+        "source_protocol": dict(source_protocol_payload),
+        "freeze_identity": freeze_identity,
+        "freeze_ready": bool(freeze_ready),
+        "task_scope_semantics": "advisory_only_unless_execution_enforced",
+        "thesis_item_map": thesis_item_map,
+    }
+
+
 def write_protocol_artifacts(
     *,
     protocol: ThesisProtocol,
@@ -838,6 +947,7 @@ def write_protocol_artifacts(
     confidence_intervals_path = protocol_dir / "confidence_intervals.json"
     metric_intervals_path = protocol_dir / "metric_intervals.csv"
     report_index_path = protocol_dir / "report_index.csv"
+    frozen_thesis_evidence_manifest_path = protocol_dir / "frozen_thesis_evidence_manifest.json"
 
     metric_policy_effective = resolve_effective_metric_policy(
         primary_metric=compiled_manifest.metric_policy.primary_metric,
@@ -938,6 +1048,18 @@ def write_protocol_artifacts(
         for row in report_rows:
             writer.writerow(row)
 
+    frozen_manifest_payload = _frozen_thesis_evidence_manifest_payload(
+        protocol=protocol,
+        compiled_manifest=compiled_manifest,
+        run_results=run_results,
+        protocol_output_dir=protocol_dir,
+        source_protocol_payload=source_protocol_payload,
+        report_index_path=report_index_path,
+        claim_outcomes_path=claim_outcomes_path,
+        dry_run=bool(dry_run),
+    )
+    _write_json(frozen_thesis_evidence_manifest_path, frozen_manifest_payload)
+
     return {
         "protocol_json": str(protocol_json_path.resolve()),
         "compiled_protocol_manifest": str(compiled_manifest_path.resolve()),
@@ -951,4 +1073,5 @@ def write_protocol_artifacts(
         "metric_intervals": str(metric_intervals_path.resolve()),
         "report_index": str(report_index_path.resolve()),
         "claim_outcomes": str(claim_outcomes_path.resolve()),
+        "frozen_thesis_evidence_manifest": str(frozen_thesis_evidence_manifest_path.resolve()),
     }
