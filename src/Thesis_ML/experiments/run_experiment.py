@@ -2560,7 +2560,9 @@ def _build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+    from Thesis_ML.logging_config import configure_logging
+
+    configure_logging()
 
     models = list(DEFAULT_BATCH_MODEL_NAMES) if args.model == "all" else [args.model]
     subgroup_dimensions = list(args.subgroup_dimension) if list(args.subgroup_dimension) else None

@@ -766,7 +766,9 @@ def _build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+    from Thesis_ML.logging_config import configure_logging
+
+    configure_logging()
     parallel_backend: Literal["serial", "process"] = cast(
         Literal["serial", "process"],
         args.parallel_backend,
