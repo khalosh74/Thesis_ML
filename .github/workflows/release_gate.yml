@@ -9,6 +9,8 @@ on:
 jobs:
   validate_release_artifacts:
     runs-on: ubuntu-latest
+    env:
+      THESIS_ML_LOG_FORMAT: json
     steps:
       - name: Checkout
         uses: actions/checkout@v4

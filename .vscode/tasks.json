@@ -13,6 +13,11 @@
                 "--extra",
                 "dev"
             ],
+            "options": {
+                "env": {
+                    "THESIS_ML_LOG_FORMAT": "json"
+                }
+            },
             "problemMatcher": []
         },
         {
@@ -29,6 +34,11 @@
                 "-q"
             ],
             "group": "test",
+            "options": {
+                "env": {
+                    "THESIS_ML_LOG_FORMAT": "json"
+                }
+            },
             "problemMatcher": []
         },
         {
@@ -44,6 +54,11 @@
                 "--tmp-root",
                 "outputs/acceptance_tmp"
             ],
+            "options": {
+                "env": {
+                    "THESIS_ML_LOG_FORMAT": "json"
+                }
+            },
             "problemMatcher": []
         },
         {
@@ -66,7 +81,8 @@
                 "env": {
                     "THESIS_ML_INDEX_CSV": "${workspaceFolder}/demo_data/synthetic_v1/dataset_index.csv",
                     "THESIS_ML_DATA_ROOT": "${workspaceFolder}/demo_data/synthetic_v1/data_root",
-                    "THESIS_ML_CACHE_DIR": "${workspaceFolder}/demo_data/synthetic_v1/cache"
+                    "THESIS_ML_CACHE_DIR": "${workspaceFolder}/demo_data/synthetic_v1/cache",
+                    "THESIS_ML_LOG_FORMAT": "json"
                 }
             },
             "problemMatcher": []
@@ -91,7 +107,8 @@
                 "env": {
                     "THESIS_ML_INDEX_CSV": "${workspaceFolder}/demo_data/synthetic_v1/dataset_index.csv",
                     "THESIS_ML_DATA_ROOT": "${workspaceFolder}/demo_data/synthetic_v1/data_root",
-                    "THESIS_ML_CACHE_DIR": "${workspaceFolder}/demo_data/synthetic_v1/cache"
+                    "THESIS_ML_CACHE_DIR": "${workspaceFolder}/demo_data/synthetic_v1/cache",
+                    "THESIS_ML_LOG_FORMAT": "json"
                 }
             },
             "problemMatcher": []
@@ -110,6 +127,11 @@
                 "both",
                 "--use-demo-dataset"
             ],
+            "options": {
+                "env": {
+                    "THESIS_ML_LOG_FORMAT": "json"
+                }
+            },
             "problemMatcher": []
         }
     ]

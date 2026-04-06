@@ -51,6 +51,8 @@ jobs:
 
   build_verify:
     runs-on: ubuntu-latest
+    env:
+      THESIS_ML_LOG_FORMAT: json
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -165,6 +167,8 @@ jobs:
 
   uv_locked_smoke:
     runs-on: ubuntu-latest
+    env:
+      THESIS_ML_LOG_FORMAT: json
     steps:
       - name: Checkout
         uses: actions/checkout@v4
