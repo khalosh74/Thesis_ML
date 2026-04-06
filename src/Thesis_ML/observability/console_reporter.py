@@ -78,6 +78,19 @@ def _normalize_text(value: Any) -> str:
     return str(value).strip()
 
 
+def _json_safe(value: Any) -> Any:
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, dict):
+        return {str(key): _json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_json_safe(item) for item in value]
+    try:
+        return str(value)
+    except Exception:
+        return repr(value)
+
+
 def _progress_percent(completed_units: float | None, total_units: float | None) -> float | None:
     if completed_units is None or total_units is None:
         return None
