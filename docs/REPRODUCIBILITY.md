@@ -16,6 +16,20 @@ python -m pip install uv
 python -m uv sync --frozen --extra dev
 ```
 
+GPU-backed workflows require one additional explicit environment step after lockfile sync.
+The canonical `uv.lock` path does not pin CUDA-specific PyTorch wheels because the correct wheel
+channel is host-dependent.
+
+Example Windows provisioning for CUDA 13.0 hosts:
+
+```bash
+python -m uv run python -m pip install --upgrade torch --index-url https://download.pytorch.org/whl/cu130
+python -m uv run python -c "import torch; print('torch_version', torch.__version__); print('cuda_compiled', torch.version.cuda); print('cuda_available', torch.cuda.is_available()); print('device_count', torch.cuda.device_count())"
+```
+
+If your machine requires a different supported wheel channel, replace `cu130` with the appropriate
+PyTorch CUDA index such as `cu126` or `cu128`.
+
 ## Checked-in demo dataset
 
 The reproducibility dataset is checked in at:

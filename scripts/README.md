@@ -21,8 +21,8 @@ This directory keeps top-level entrypoint filenames stable while concentrating r
 - `run_analysis_server_execution_plan.py`
 
 ## Platform helpers
-- `bootstrap_env.ps1`
-- `bootstrap_env.sh`
+- `bootstrap_env.ps1` (`-InstallGpuTorch [-TorchIndexUrl ...]` for explicit CUDA-enabled torch provisioning)
+- `bootstrap_env.sh` (`--install-gpu-torch [--torch-index-url ...]` for explicit CUDA-enabled torch provisioning)
 - `prepare_frozen_campaign.ps1`
 - `run_frozen_campaign.ps1`
 

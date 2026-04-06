@@ -80,11 +80,30 @@ Optional extra for exploratory XGBoost model-family support:
 python -m uv sync --frozen --extra dev --extra xgboost
 ```
 
+### GPU torch provisioning
+
+`uv sync --frozen --extra dev` does not install `torch`.
+CUDA-specific PyTorch wheels are platform- and index-specific, so GPU provisioning is an explicit
+post-sync step rather than part of `uv.lock`.
+
+For `gpu_only` or GPU-enabled `max_both` runs, install a CUDA-enabled torch build into the project
+environment and verify CUDA visibility:
+
+```powershell
+python -m uv run python -m pip install --upgrade torch --index-url https://download.pytorch.org/whl/cu130
+python -m uv run python -c "import torch; print('torch_version', torch.__version__); print('cuda_compiled', torch.version.cuda); print('cuda_available', torch.cuda.is_available()); print('device_count', torch.cuda.device_count())"
+```
+
+If your host requires a different wheel family, replace the index URL with the appropriate PyTorch
+CUDA channel such as `cu126`, `cu128`, or `cu130`.
+
 ## Bootstrap commands (clean machine)
 
 You can run the scripts:
 - PowerShell: `./scripts/bootstrap_env.ps1`
+- PowerShell with GPU torch provisioning: `./scripts/bootstrap_env.ps1 -InstallGpuTorch`
 - Bash: `./scripts/bootstrap_env.sh`
+- Bash with GPU torch provisioning: `./scripts/bootstrap_env.sh --install-gpu-torch`
 
 Or run the commands directly:
 

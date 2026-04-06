@@ -345,6 +345,8 @@ Policy note:
   `--hardware-mode {cpu_only,gpu_only,max_both}`, `--gpu-device-id`,
   `--deterministic-compute`, `--allow-backend-fallback`,
   `--max-parallel-runs`, `--max-parallel-gpu-runs`.
+- GPU execution requires a CUDA-enabled `torch` build in the project environment;
+  `uv sync --frozen --extra dev` alone does not provision `torch`.
 - PR 5 exploratory behavior:
   `gpu_only` can execute `ridge` and `logreg` through the torch GPU backend when capability is valid.
   `max_both` now performs deterministic run-level CPU/GPU lane assignment (no in-fit hybrid execution).
