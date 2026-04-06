@@ -1035,8 +1035,10 @@ def build_progress_reporter(
     progress_detail: str = "experiment_stage",
 ) -> EventReporter:
     reporter_stream = stream if stream is not None else sys.stdout
-    # If JSON log format requested globally, emit structured JSON progress events.
-    if str(os.environ.get("THESIS_ML_LOG_FORMAT") or "").strip().lower() == "json":
+    # If JSON log format requested globally, or output is not a TTY (CI),
+    # emit structured JSON progress events.
+    env_val = str(os.environ.get("THESIS_ML_LOG_FORMAT") or "").strip().lower()
+    if env_val == "json" or not _stream_is_tty(reporter_stream):
         return JSONLineReporter(stream=reporter_stream, quiet=bool(quiet))
     normalized_ui = _normalize_progress_ui(progress_ui)
     normalized_detail = _normalize_progress_detail(progress_detail)
