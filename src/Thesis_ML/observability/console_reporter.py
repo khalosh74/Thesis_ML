@@ -1,5 +1,7 @@
 ﻿from __future__ import annotations
 
+import json
+import os
 import sys
 import time
 from datetime import UTC, datetime
@@ -97,9 +99,7 @@ def _shorten_message(message: str, *, max_chars: int = 72) -> str:
 def _normalize_progress_ui(value: str) -> str:
     normalized = str(value or "auto").strip().lower()
     if normalized not in PROGRESS_UI_CHOICES:
-        raise ValueError(
-            f"progress_ui must be one of {PROGRESS_UI_CHOICES}, got '{value}'."
-        )
+        raise ValueError(f"progress_ui must be one of {PROGRESS_UI_CHOICES}, got '{value}'.")
     return normalized
 
 
@@ -166,9 +166,9 @@ class LegacyLineReporter:
 
     def _elapsed_seconds(self, live_status: dict[str, Any]) -> float | None:
         started = _parse_iso_timestamp(live_status.get("started_at_utc"))
-        updated = _parse_iso_timestamp(live_status.get("last_updated_at_utc")) or _parse_iso_timestamp(
-            _utc_now_iso()
-        )
+        updated = _parse_iso_timestamp(
+            live_status.get("last_updated_at_utc")
+        ) or _parse_iso_timestamp(_utc_now_iso())
         if started is None or updated is None:
             return None
         return float(max(0.0, (updated - started).total_seconds()))
@@ -177,7 +177,9 @@ class LegacyLineReporter:
         raw = live_status.get("counts")
         if not isinstance(raw, dict):
             return {}
-        return {str(key): int(value) for key, value in raw.items() if isinstance(value, (int, float))}
+        return {
+            str(key): int(value) for key, value in raw.items() if isinstance(value, (int, float))
+        }
 
     def _maybe_emit_latest_error_anomaly(self, live_status: dict[str, Any]) -> None:
         latest = live_status.get("latest_anomaly")
@@ -265,7 +267,9 @@ class LegacyLineReporter:
         event_timestamp_utc: str | None,
     ) -> float | None:
         started_dt = _parse_iso_timestamp(started_at_utc)
-        current_dt = _parse_iso_timestamp(event_timestamp_utc) or _parse_iso_timestamp(_utc_now_iso())
+        current_dt = _parse_iso_timestamp(event_timestamp_utc) or _parse_iso_timestamp(
+            _utc_now_iso()
+        )
         if started_dt is None or current_dt is None:
             return None
         return float(max(0.0, (current_dt - started_dt).total_seconds()))
@@ -340,14 +344,14 @@ class LegacyLineReporter:
         message = _normalize_text(event.get("message"))
         metadata = event.get("metadata")
         event_metadata = dict(metadata) if isinstance(metadata, dict) else {}
-        status = _normalize_text(event.get("status")) or _normalize_text(event_metadata.get("status"))
+        status = _normalize_text(event.get("status")) or _normalize_text(
+            event_metadata.get("status")
+        )
         completed_units = _coerce_optional_float(event.get("completed_units"))
         total_units = _coerce_optional_float(event.get("total_units"))
         percent_complete = _progress_percent(completed_units, total_units)
         milestone_bucket = (
-            max(0, min(10, int(percent_complete // 10.0)))
-            if percent_complete is not None
-            else None
+            max(0, min(10, int(percent_complete // 10.0))) if percent_complete is not None else None
         )
 
         state = self._operation_state_by_run_id.setdefault(
@@ -389,10 +393,17 @@ class LegacyLineReporter:
             )
 
         finish_from_stage_event = (
-            _normalize_text(event_metadata.get("event_type")).lower() in _STAGE_COMPLETION_EVENT_TYPES
+            _normalize_text(event_metadata.get("event_type")).lower()
+            in _STAGE_COMPLETION_EVENT_TYPES
         )
         finish_from_percent = percent_complete is not None and percent_complete >= 100.0
-        finish_from_status = status.lower() in {"completed", "finished", "executed", "reused", "skipped"}
+        finish_from_status = status.lower() in {
+            "completed",
+            "finished",
+            "executed",
+            "reused",
+            "skipped",
+        }
         should_emit_finish = finish_from_stage_event or finish_from_percent or finish_from_status
 
         last_bucket = int(state.get("last_bucket", -1))
@@ -656,13 +667,15 @@ class RichLiveReporter:
         raw = live_status.get("counts")
         if not isinstance(raw, dict):
             return {}
-        return {str(key): int(value) for key, value in raw.items() if isinstance(value, (int, float))}
+        return {
+            str(key): int(value) for key, value in raw.items() if isinstance(value, (int, float))
+        }
 
     def _elapsed_seconds(self, live_status: dict[str, Any]) -> float | None:
         started = _parse_iso_timestamp(live_status.get("started_at_utc"))
-        updated = _parse_iso_timestamp(live_status.get("last_updated_at_utc")) or _parse_iso_timestamp(
-            _utc_now_iso()
-        )
+        updated = _parse_iso_timestamp(
+            live_status.get("last_updated_at_utc")
+        ) or _parse_iso_timestamp(_utc_now_iso())
         if started is None or updated is None:
             return None
         return float(max(0.0, (updated - started).total_seconds()))
@@ -684,9 +697,9 @@ class RichLiveReporter:
         live_status: dict[str, Any],
     ) -> float | None:
         started = _parse_iso_timestamp(operation.get("started_at_utc"))
-        updated = _parse_iso_timestamp(operation.get("last_updated_at_utc")) or _parse_iso_timestamp(
-            live_status.get("last_updated_at_utc")
-        )
+        updated = _parse_iso_timestamp(
+            operation.get("last_updated_at_utc")
+        ) or _parse_iso_timestamp(live_status.get("last_updated_at_utc"))
         if started is None or updated is None:
             return None
         return float(max(0.0, (updated - started).total_seconds()))
@@ -733,11 +746,7 @@ class RichLiveReporter:
             completed_units = _coerce_optional_float(operation.get("completed_units"))
             total_units = _coerce_optional_float(operation.get("total_units"))
             percent_complete = _coerce_optional_float(operation.get("percent_complete"))
-            if (
-                completed_units is not None
-                and total_units is not None
-                and total_units > 0.0
-            ):
+            if completed_units is not None and total_units is not None and total_units > 0.0:
                 resolved_total = float(max(total_units, 1.0))
                 resolved_completed = float(min(max(completed_units, 0.0), resolved_total))
             else:
@@ -988,6 +997,35 @@ class RichLiveReporter:
 ConsoleReporter = LegacyLineReporter
 
 
+class JSONLineReporter:
+    def __init__(self, stream: TextIO | None = None, quiet: bool = False) -> None:
+        self.stream = stream if stream is not None else sys.stdout
+        self.quiet = bool(quiet)
+
+    def handle_event(self, event: dict[str, Any], live_status: dict[str, Any]) -> None:
+        if self.quiet:
+            # preserve the legacy quiet behaviour for critical events
+            event_name = str(event.get("event_name") or "").strip()
+            if event_name not in {"campaign_finished", "run_failed"}:
+                return
+        payload = {
+            "timestamp_utc": str(
+                event.get("timestamp_utc") or datetime.now(UTC).replace(microsecond=0).isoformat()
+            ),
+            "event": _json_safe(event),
+            "live_status": _json_safe(live_status),
+        }
+        try:
+            self.stream.write(json.dumps(payload, ensure_ascii=False) + "\n")
+            self.stream.flush()
+        except Exception:
+            try:
+                self.stream.write('{"error": "json_serialize_failed"}\n')
+                self.stream.flush()
+            except Exception:
+                pass
+
+
 def build_progress_reporter(
     *,
     stream: TextIO | None = None,
@@ -997,6 +1035,9 @@ def build_progress_reporter(
     progress_detail: str = "experiment_stage",
 ) -> EventReporter:
     reporter_stream = stream if stream is not None else sys.stdout
+    # If JSON log format requested globally, emit structured JSON progress events.
+    if str(os.environ.get("THESIS_ML_LOG_FORMAT") or "").strip().lower() == "json":
+        return JSONLineReporter(stream=reporter_stream, quiet=bool(quiet))
     normalized_ui = _normalize_progress_ui(progress_ui)
     normalized_detail = _normalize_progress_detail(progress_detail)
 
