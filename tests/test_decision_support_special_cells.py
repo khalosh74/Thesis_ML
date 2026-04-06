@@ -430,6 +430,27 @@ def test_e12_materialization_creates_separate_groups_for_within_and_transfer_anc
     } == {("sub-001", "sub-002"), ("sub-002", "sub-001")}
 
 
+def test_e12_materialization_honors_design_metadata_chunk_size_override() -> None:
+    experiment = {"experiment_id": "E12"}
+    variant = _base_variant()
+    variant["design_metadata"] = {"permutation_chunk_size": 200}
+    cells, warnings = materialize_experiment_cells(
+        experiment=experiment,
+        variants=[variant],
+        dataset_scope={},
+        n_permutations=450,
+        registry_experiments=_registry_experiments_for_e12_anchor(),
+    )
+    assert warnings == []
+    assert len(cells) == 3
+    assert [int(cell["n_permutations_override"]) for cell in cells] == [200, 200, 50]
+    assert [int(cell["design_metadata"]["chunk_index"]) for cell in cells] == [1, 2, 3]
+    for cell in cells:
+        metadata = dict(cell["design_metadata"])
+        assert int(metadata["expected_chunk_count"]) == 3
+        assert int(metadata["total_permutations_requested"]) == 450
+
+
 def test_e13_materialization_matches_confirmatory_anchors_and_enforces_dummy_model() -> None:
     experiment = {"experiment_id": "E13"}
     cells, warnings = materialize_experiment_cells(

@@ -309,6 +309,154 @@ def build_ridge_gpu_permutation_core_state(
     }
 
 
+def build_ridge_cpu_permutation_core_state(
+    *,
+    x_train_scaled: np.ndarray,
+    x_test_scaled: np.ndarray,
+    y_train: np.ndarray,
+    y_test: np.ndarray,
+    alpha: float,
+    fit_intercept: bool,
+) -> tuple[dict[str, Any], dict[str, float]]:
+    x_train = np.asarray(x_train_scaled, dtype=np.float64)
+    x_test = np.asarray(x_test_scaled, dtype=np.float64)
+    y_train_text = np.asarray(y_train).astype(str, copy=False)
+    y_test_text = np.asarray(y_test).astype(str, copy=False)
+
+    classes, y_train_indices = np.unique(y_train_text, return_inverse=True)
+    if classes.shape[0] < 2:
+        raise ValueError("ridge_cpu_exact_alpha_batched requires at least two classes per fold.")
+
+    target_matrix, binary_mode = build_ridge_target_matrix(
+        y_train_indices.astype(np.int64, copy=False),
+        n_classes=int(classes.shape[0]),
+    )
+    target_mean = (
+        np.mean(target_matrix, axis=0, dtype=np.float64)
+        if bool(fit_intercept)
+        else np.zeros(target_matrix.shape[1], dtype=np.float64)
+    )
+
+    if bool(fit_intercept):
+        feature_mean = np.mean(x_train, axis=0, dtype=np.float64)
+        x_train_effective = np.asarray(x_train - feature_mean, dtype=np.float64)
+        x_test_effective = np.asarray(x_test - feature_mean, dtype=np.float64)
+    else:
+        x_train_effective = x_train
+        x_test_effective = x_test
+
+    build_start = perf_counter()
+    n_samples, n_features = x_train_effective.shape
+    if int(n_features) > int(n_samples):
+        solver_family = "dual"
+        system_matrix = x_train_effective @ x_train_effective.T
+        rhs_operator = None
+        predictor_matrix = x_test_effective @ x_train_effective.T
+    else:
+        solver_family = "primal"
+        system_matrix = x_train_effective.T @ x_train_effective
+        rhs_operator = np.asarray(x_train_effective.T, dtype=np.float64)
+        predictor_matrix = x_test_effective
+
+    factorization_start = perf_counter()
+    eigenvalues, eigenvectors = np.linalg.eigh(np.asarray(system_matrix, dtype=np.float64))
+    inverse_denominator = 1.0 / (np.asarray(eigenvalues, dtype=np.float64) + float(alpha))
+    factorization_seconds = float(perf_counter() - factorization_start)
+    fold_state_build_seconds = float(perf_counter() - build_start)
+
+    return {
+        "n_train": int(x_train_effective.shape[0]),
+        "n_test": int(x_test_effective.shape[0]),
+        "classes": np.asarray(classes).astype(str, copy=False),
+        "y_test": np.asarray(y_test_text).astype(str, copy=False),
+        "y_train_label_indices": np.asarray(y_train_indices, dtype=np.int64),
+        "binary_mode": bool(binary_mode),
+        "target_mean": np.asarray(target_mean, dtype=np.float64),
+        "solver_family": str(solver_family),
+        "predictor_matrix": np.ascontiguousarray(predictor_matrix, dtype=np.float64),
+        "rhs_operator": (
+            np.ascontiguousarray(rhs_operator, dtype=np.float64)
+            if rhs_operator is not None
+            else None
+        ),
+        "eigenvectors": np.ascontiguousarray(eigenvectors, dtype=np.float64),
+        "inverse_denominator": np.asarray(inverse_denominator, dtype=np.float64),
+    }, {
+        "fold_cpu_state_build_seconds": float(fold_state_build_seconds),
+        "fold_factorization_seconds": float(factorization_seconds),
+    }
+
+
+def solve_ridge_cpu_permutation_core_batch(
+    *,
+    state: dict[str, Any],
+    permuted_train_label_indices_batch: np.ndarray,
+    return_string_predictions: bool = True,
+) -> tuple[np.ndarray | None, np.ndarray, dict[str, float]]:
+    label_indices_batch = np.asarray(permuted_train_label_indices_batch, dtype=np.int64)
+    if label_indices_batch.ndim == 1:
+        label_indices_batch = label_indices_batch.reshape(-1, 1)
+    if label_indices_batch.ndim != 2:
+        raise ValueError(
+            "permuted_train_label_indices_batch must be 2D for batched ridge CPU permutation."
+        )
+    if int(label_indices_batch.shape[0]) != int(state["n_train"]):
+        raise ValueError(
+            "permuted_train_label_indices_batch row count does not match cached fold training size."
+        )
+
+    n_train, batch_size = label_indices_batch.shape
+    classes = np.asarray(state["classes"]).astype(str, copy=False)
+    target_columns = 1 if bool(state["binary_mode"]) else int(classes.shape[0])
+    target_mean = np.asarray(state["target_mean"], dtype=np.float64).reshape(1, target_columns, 1)
+
+    encode_start = perf_counter()
+    if bool(state["binary_mode"]):
+        target_tensor = np.where(label_indices_batch == 1, 1.0, -1.0).astype(np.float64, copy=False)
+        target_tensor = target_tensor.reshape(n_train, 1, batch_size)
+    else:
+        target_tensor = -np.ones((n_train, target_columns, batch_size), dtype=np.float64)
+        sample_indices = np.arange(n_train, dtype=np.int64)[:, None]
+        permutation_indices = np.arange(batch_size, dtype=np.int64)[None, :]
+        target_tensor[sample_indices, label_indices_batch, permutation_indices] = 1.0
+
+    target_tensor -= target_mean
+    rhs_matrix = target_tensor.reshape(n_train, target_columns * batch_size)
+    encode_seconds = float(perf_counter() - encode_start)
+
+    solve_start = perf_counter()
+    rhs_operator = state["rhs_operator"]
+    system_rhs = rhs_matrix if rhs_operator is None else rhs_operator @ rhs_matrix
+    eigenvectors = np.asarray(state["eigenvectors"], dtype=np.float64)
+    rotated_rhs = eigenvectors.T @ system_rhs
+    solution_matrix = eigenvectors @ (
+        rotated_rhs * np.asarray(state["inverse_denominator"], dtype=np.float64)[:, None]
+    )
+    batched_solve_seconds = float(perf_counter() - solve_start)
+
+    predict_start = perf_counter()
+    score_matrix = np.asarray(state["predictor_matrix"], dtype=np.float64) @ solution_matrix
+    score_tensor = score_matrix.reshape(int(state["n_test"]), target_columns, batch_size)
+    score_tensor += target_mean
+
+    if bool(state["binary_mode"]):
+        binary_scores = np.asarray(score_tensor[:, 0, :], dtype=np.float64)
+        predicted_label_indices = np.asarray(binary_scores >= 0.0, dtype=np.int64)
+    else:
+        predicted_label_indices = np.asarray(np.argmax(score_tensor, axis=1), dtype=np.int64)
+    batched_predict_seconds = float(perf_counter() - predict_start)
+
+    predictions: np.ndarray | None = None
+    if bool(return_string_predictions):
+        predictions = classes[predicted_label_indices].astype(str, copy=False)
+
+    return predictions, predicted_label_indices, {
+        "batched_target_encode_seconds": float(encode_seconds),
+        "batched_solve_seconds": float(batched_solve_seconds),
+        "batched_predict_seconds": float(batched_predict_seconds),
+    }
+
+
 def solve_ridge_gpu_permutation_core_batch(
     *,
     state: dict[str, Any],
@@ -496,6 +644,7 @@ __all__ = [
     "RidgeExactAlphaFactorizationState",
     "add_alpha_to_diagonal",
     "as_torch_float_tensor",
+    "build_ridge_cpu_permutation_core_state",
     "build_ridge_exact_alpha_factorization_state",
     "build_ridge_gpu_permutation_core_state",
     "build_ridge_target_matrix",
@@ -503,6 +652,7 @@ __all__ = [
     "predict_ridge_labels_for_alpha_batch",
     "prepare_weighted_centered_problem",
     "resolve_cholesky_factor",
+    "solve_ridge_cpu_permutation_core_batch",
     "solve_cholesky_system",
     "solve_ridge_exact_alpha_batch",
     "solve_ridge_gpu_permutation_core_batch",

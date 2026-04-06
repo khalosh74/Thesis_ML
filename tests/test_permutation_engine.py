@@ -60,6 +60,44 @@ def _toy_permutation_inputs_unequal_folds() -> tuple[
     return x_matrix, y, splits
 
 
+def _toy_multiclass_permutation_inputs() -> tuple[
+    np.ndarray, np.ndarray, list[tuple[np.ndarray, np.ndarray]]
+]:
+    x_matrix = np.asarray(
+        [
+            [2.0, 0.2, 0.0],
+            [1.8, 0.0, 0.1],
+            [-2.0, -0.2, 0.0],
+            [-1.8, 0.0, -0.1],
+            [0.0, 2.0, 0.1],
+            [0.1, 1.8, 0.0],
+            [2.1, 0.3, 0.1],
+            [-2.1, -0.3, -0.1],
+            [0.0, 2.1, 0.2],
+        ],
+        dtype=np.float64,
+    )
+    y = np.asarray(
+        [
+            "positive",
+            "positive",
+            "negative",
+            "negative",
+            "neutral",
+            "neutral",
+            "positive",
+            "negative",
+            "neutral",
+        ]
+    )
+    splits = [
+        (np.asarray([0, 1, 2, 3, 4, 5], dtype=np.int64), np.asarray([6, 7, 8], dtype=np.int64)),
+        (np.asarray([0, 1, 3, 4, 6, 8], dtype=np.int64), np.asarray([2, 5, 7], dtype=np.int64)),
+        (np.asarray([2, 4, 5, 6, 7, 8], dtype=np.int64), np.asarray([0, 1, 3], dtype=np.int64)),
+    ]
+    return x_matrix, y, splits
+
+
 def _reference_generic_loop(
     *,
     pipeline_template: Pipeline,
@@ -198,13 +236,18 @@ def test_dummy_stratified_does_not_use_shortcut() -> None:
     assert len(payload["null_scores"]) == 4
 
 
-def test_non_dummy_cpu_cached_path_matches_reference_generic_loop() -> None:
+def test_non_dummy_cpu_cached_path_matches_reference_generic_loop(monkeypatch) -> None:
     x_matrix, y, splits = _toy_permutation_inputs()
     pipeline_template = Pipeline(
         steps=[
             ("scaler", StandardScaler(with_mean=True, with_std=True)),
             ("model", RidgeClassifier(random_state=17)),
         ]
+    )
+    monkeypatch.setattr(
+        metrics_module,
+        "_supports_ridge_cpu_exact_alpha_batched",
+        lambda _estimator: (False, "forced_generic_path_for_reference_test"),
     )
 
     observed_metric = 0.5
@@ -236,6 +279,241 @@ def test_non_dummy_cpu_cached_path_matches_reference_generic_loop() -> None:
     assert payload["execution_mode"] == "cached_scaled_cpu"
     np.testing.assert_allclose(payload["null_scores"], reference["null_scores"], atol=0.0, rtol=0.0)
     assert payload["p_value"] == reference["p_value"]
+
+
+def test_ridge_cpu_exact_alpha_batched_routes_for_supported_cpu_ridge_case() -> None:
+    x_matrix, y, splits = _toy_permutation_inputs()
+    pipeline_template = Pipeline(
+        steps=[
+            ("scaler", StandardScaler(with_mean=True, with_std=True)),
+            ("model", RidgeClassifier(random_state=19)),
+        ]
+    )
+
+    execution_plan = metrics_module._resolve_permutation_execution_plan(
+        pipeline_template,
+        y=y,
+        splits=splits,
+    )
+
+    assert execution_plan.execution_mode == "ridge_cpu_exact_alpha_batched"
+
+
+def test_ridge_cpu_exact_alpha_batched_falls_back_for_balanced_class_weight() -> None:
+    x_matrix, y, splits = _toy_permutation_inputs()
+    pipeline_template = Pipeline(
+        steps=[
+            ("scaler", StandardScaler(with_mean=True, with_std=True)),
+            ("model", RidgeClassifier(random_state=23, class_weight="balanced")),
+        ]
+    )
+
+    execution_plan = metrics_module._resolve_permutation_execution_plan(
+        pipeline_template,
+        y=y,
+        splits=splits,
+    )
+
+    assert execution_plan.execution_mode == "cached_scaled_cpu"
+
+
+def test_ridge_cpu_exact_alpha_batched_matches_generic_cached_path_for_binary_case(
+    monkeypatch,
+) -> None:
+    x_matrix, y, splits = _toy_permutation_inputs()
+    pipeline_template = Pipeline(
+        steps=[
+            ("scaler", StandardScaler(with_mean=True, with_std=True)),
+            ("model", RidgeClassifier(random_state=29, alpha=1.3, fit_intercept=True)),
+        ]
+    )
+
+    specialized_payload = evaluate_permutations(
+        pipeline_template=pipeline_template,
+        x_matrix=x_matrix,
+        y=y,
+        splits=splits,
+        seed=29,
+        n_permutations=11,
+        metric_name="balanced_accuracy",
+        observed_metric=0.0,
+    )
+
+    monkeypatch.setattr(
+        metrics_module,
+        "_supports_ridge_cpu_exact_alpha_batched",
+        lambda _estimator: (False, "forced_generic_path_for_parity_test"),
+    )
+    generic_payload = evaluate_permutations(
+        pipeline_template=pipeline_template,
+        x_matrix=x_matrix,
+        y=y,
+        splits=splits,
+        seed=29,
+        n_permutations=11,
+        metric_name="balanced_accuracy",
+        observed_metric=0.0,
+    )
+
+    assert specialized_payload["execution_mode"] == "ridge_cpu_exact_alpha_batched"
+    assert generic_payload["execution_mode"] == "cached_scaled_cpu"
+    parity = compare_permutation_parity(
+        reference_payload=generic_payload,
+        candidate_payload=specialized_payload,
+        category="exact",
+    )
+    assert parity.passed is True
+    np.testing.assert_allclose(
+        specialized_payload["null_scores"],
+        generic_payload["null_scores"],
+        atol=1e-12,
+        rtol=1e-12,
+    )
+    assert specialized_payload["p_value"] == generic_payload["p_value"]
+
+
+def test_ridge_cpu_exact_alpha_batched_matches_generic_cached_path_for_multiclass_case(
+    monkeypatch,
+) -> None:
+    x_matrix, y, splits = _toy_multiclass_permutation_inputs()
+    pipeline_template = Pipeline(
+        steps=[
+            ("scaler", StandardScaler(with_mean=True, with_std=True)),
+            ("model", RidgeClassifier(random_state=31, alpha=0.7, fit_intercept=True)),
+        ]
+    )
+
+    specialized_payload = evaluate_permutations(
+        pipeline_template=pipeline_template,
+        x_matrix=x_matrix,
+        y=y,
+        splits=splits,
+        seed=31,
+        n_permutations=9,
+        metric_name="balanced_accuracy",
+        observed_metric=0.0,
+        primary_metric_aggregation="mean_fold_scores",
+    )
+
+    monkeypatch.setattr(
+        metrics_module,
+        "_supports_ridge_cpu_exact_alpha_batched",
+        lambda _estimator: (False, "forced_generic_path_for_multiclass_parity_test"),
+    )
+    generic_payload = evaluate_permutations(
+        pipeline_template=pipeline_template,
+        x_matrix=x_matrix,
+        y=y,
+        splits=splits,
+        seed=31,
+        n_permutations=9,
+        metric_name="balanced_accuracy",
+        observed_metric=0.0,
+        primary_metric_aggregation="mean_fold_scores",
+    )
+
+    assert specialized_payload["execution_mode"] == "ridge_cpu_exact_alpha_batched"
+    assert generic_payload["execution_mode"] == "cached_scaled_cpu"
+    parity = compare_permutation_parity(
+        reference_payload=generic_payload,
+        candidate_payload=specialized_payload,
+        category="exact",
+    )
+    assert parity.passed is True
+    np.testing.assert_allclose(
+        specialized_payload["null_scores"],
+        generic_payload["null_scores"],
+        atol=1e-12,
+        rtol=1e-12,
+    )
+    assert specialized_payload["p_value"] == generic_payload["p_value"]
+
+
+def test_ridge_cpu_exact_alpha_batched_preserves_per_permutation_progress_events() -> None:
+    x_matrix, y, splits = _toy_permutation_inputs()
+    events: list[Any] = []
+
+    evaluate_permutations(
+        pipeline_template=Pipeline(
+            steps=[
+                ("scaler", StandardScaler(with_mean=True, with_std=True)),
+                ("model", RidgeClassifier(random_state=35, alpha=0.9, fit_intercept=True)),
+            ]
+        ),
+        x_matrix=x_matrix,
+        y=y,
+        splits=splits,
+        seed=35,
+        n_permutations=5,
+        metric_name="balanced_accuracy",
+        observed_metric=0.0,
+        progress_callback=events.append,
+    )
+
+    permutation_messages = [
+        event.message
+        for event in events
+        if event.stage == "permutation"
+        and (
+            (event.message.startswith("running permutation ") and "/" in event.message)
+            or (event.message.startswith("finished permutation ") and "/" in event.message)
+        )
+    ]
+    assert len(permutation_messages) == 10
+    assert permutation_messages == [
+        "running permutation 1/5",
+        "finished permutation 1/5",
+        "running permutation 2/5",
+        "finished permutation 2/5",
+        "running permutation 3/5",
+        "finished permutation 3/5",
+        "running permutation 4/5",
+        "finished permutation 4/5",
+        "running permutation 5/5",
+        "finished permutation 5/5",
+    ]
+
+
+def test_ridge_cpu_exact_alpha_batched_payload_keeps_required_fields_and_additive_metadata() -> None:
+    x_matrix, y, splits = _toy_permutation_inputs()
+
+    payload = evaluate_permutations(
+        pipeline_template=Pipeline(
+            steps=[
+                ("scaler", StandardScaler(with_mean=True, with_std=True)),
+                ("model", RidgeClassifier(random_state=41, alpha=0.5, fit_intercept=True)),
+            ]
+        ),
+        x_matrix=x_matrix,
+        y=y,
+        splits=splits,
+        seed=41,
+        n_permutations=4,
+        metric_name="balanced_accuracy",
+        observed_metric=0.0,
+    )
+
+    required_existing_fields = {
+        "n_permutations",
+        "metric_name",
+        "observed_score",
+        "p_value",
+        "null_summary",
+        "null_scores",
+        "observed_metric",
+        "permutation_metric_mean",
+        "permutation_metric_std",
+        "permutation_p_value",
+    }
+    assert required_existing_fields <= set(payload)
+    assert payload["execution_mode"] == "ridge_cpu_exact_alpha_batched"
+    assert payload["specialized_ridge_cpu_path_used"] is True
+    assert int(payload["permutation_batch_size"]) > 0
+    assert isinstance(payload["fold_cpu_state_build_seconds"], float)
+    assert isinstance(payload["fold_factorization_seconds"], float)
+    assert isinstance(payload["batched_target_encode_seconds"], float)
+    assert isinstance(payload["batched_solve_seconds"], float)
+    assert isinstance(payload["batched_predict_seconds"], float)
 
 
 def test_permutation_null_scores_follow_selected_primary_metric_aggregation() -> None:

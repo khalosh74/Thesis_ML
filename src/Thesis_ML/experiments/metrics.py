@@ -10,9 +10,14 @@ import numpy as np
 import pandas as pd
 from sklearn.base import clone
 from sklearn.dummy import DummyClassifier
+from sklearn.linear_model import RidgeClassifier
 from sklearn.pipeline import Pipeline
 
 from Thesis_ML.config.metric_policy import classification_metric_score as policy_metric_score
+from Thesis_ML.experiments.backends.ridge_exact_kernels import (
+    build_ridge_cpu_permutation_core_state,
+    solve_ridge_cpu_permutation_core_batch,
+)
 from Thesis_ML.experiments.backends.torch_ridge import (
     build_ridge_gpu_permutation_fold_state,
     solve_ridge_gpu_permutation_batch,
@@ -24,6 +29,7 @@ PermutationExecutionMode = Literal[
     "analytic_shortcut",
     "cached_scaled_cpu",
     "cached_scaled_hybrid_gpu",
+    "ridge_cpu_exact_alpha_batched",
     "ridge_gpu_batched_dual",
 ]
 PRIMARY_METRIC_AGGREGATIONS = frozenset({"mean_fold_scores", "pooled_held_out_predictions"})
@@ -46,6 +52,13 @@ class PermutationExecutionPlan:
     shortcut_applied: bool
     shortcut_reason: str | None
     shortcut_strategy: str | None
+
+
+@dataclass(frozen=True)
+class BalancedAccuracyBatchCache:
+    present_class_indices: np.ndarray
+    present_class_counts: np.ndarray
+    class_row_indices: tuple[np.ndarray, ...]
 
 
 def classification_metric_score(
@@ -79,6 +92,66 @@ def scores_for_predictions(estimator: Pipeline, x_test: np.ndarray) -> dict[str,
         result["proba_vector"] = [json.dumps(row.tolist()) for row in proba_array]
 
     return result
+
+
+def _supports_balanced_accuracy_batch_fast_path(
+    *,
+    metric_name: str,
+    primary_metric_aggregation: str,
+) -> bool:
+    return (
+        str(metric_name).strip().lower() == "balanced_accuracy"
+        and str(primary_metric_aggregation).strip().lower() == "mean_fold_scores"
+    )
+
+
+def _build_balanced_accuracy_batch_cache(
+    *,
+    y_true: np.ndarray,
+    classes: np.ndarray,
+) -> BalancedAccuracyBatchCache:
+    class_lookup = {str(label): int(index) for index, label in enumerate(np.asarray(classes))}
+    y_true_text = np.asarray(y_true).astype(str, copy=False)
+    y_true_indices = np.asarray(
+        [class_lookup[str(label)] for label in y_true_text],
+        dtype=np.int64,
+    )
+    present_class_indices, present_class_counts = np.unique(y_true_indices, return_counts=True)
+    class_row_indices = tuple(
+        np.flatnonzero(y_true_indices == int(class_index)).astype(np.int64, copy=False)
+        for class_index in np.asarray(present_class_indices, dtype=np.int64)
+    )
+    return BalancedAccuracyBatchCache(
+        present_class_indices=np.asarray(present_class_indices, dtype=np.int64),
+        present_class_counts=np.asarray(present_class_counts, dtype=np.float64),
+        class_row_indices=class_row_indices,
+    )
+
+
+def _score_balanced_accuracy_batch(
+    *,
+    predicted_label_indices_batch: np.ndarray,
+    cache: BalancedAccuracyBatchCache,
+) -> np.ndarray:
+    prediction_batch = np.asarray(predicted_label_indices_batch, dtype=np.int64)
+    if prediction_batch.ndim == 1:
+        prediction_batch = prediction_batch.reshape(-1, 1)
+    recalls_sum = np.zeros(int(prediction_batch.shape[1]), dtype=np.float64)
+    for class_index, class_count, row_indices in zip(
+        np.asarray(cache.present_class_indices, dtype=np.int64),
+        np.asarray(cache.present_class_counts, dtype=np.float64),
+        cache.class_row_indices,
+        strict=True,
+    ):
+        if int(row_indices.size) == 0:
+            continue
+        recalls_sum += (
+            np.sum(prediction_batch[row_indices, :] == int(class_index), axis=0, dtype=np.int64)
+            / float(class_count)
+        )
+    if int(cache.present_class_indices.shape[0]) == 0:
+        return recalls_sum
+    return recalls_sum / float(cache.present_class_indices.shape[0])
 
 
 def _resolve_final_estimator(pipeline_template: Pipeline) -> Any:
@@ -136,6 +209,45 @@ def _binary_fold_targets_supported(
     return True
 
 
+def _non_constant_fold_targets_supported(
+    *,
+    y: np.ndarray,
+    splits: list[tuple[np.ndarray, np.ndarray]],
+) -> bool:
+    y_array = np.asarray(y).astype(str, copy=False)
+    for train_idx, _ in splits:
+        train_idx_array = np.asarray(train_idx, dtype=np.int64)
+        if train_idx_array.size == 0:
+            return False
+        if np.unique(y_array[train_idx_array]).shape[0] < 2:
+            return False
+    return True
+
+
+def _supports_ridge_cpu_exact_alpha_batched(estimator: Any) -> tuple[bool, str | None]:
+    if not isinstance(estimator, RidgeClassifier):
+        return False, "estimator_not_sklearn_ridge"
+
+    alpha_raw = getattr(estimator, "alpha", None)
+    if not isinstance(alpha_raw, (int, float)):
+        return False, "ridge_alpha_must_be_numeric"
+    alpha = float(alpha_raw)
+    if not np.isfinite(alpha) or alpha < 0.0:
+        return False, "ridge_alpha_must_be_finite_and_non_negative"
+
+    fit_intercept_raw = getattr(estimator, "fit_intercept", None)
+    if not isinstance(fit_intercept_raw, (bool, np.bool_)):
+        return False, "ridge_fit_intercept_must_be_boolean"
+
+    class_weight = getattr(estimator, "class_weight", None)
+    if class_weight is not None:
+        normalized_class_weight = str(class_weight).strip().lower()
+        if normalized_class_weight not in {"none", ""}:
+            return False, "ridge_cpu_exact_alpha_batched_requires_class_weight_none"
+
+    return True, None
+
+
 def _resolve_permutation_execution_plan(
     pipeline_template: Pipeline,
     *,
@@ -162,7 +274,14 @@ def _resolve_permutation_execution_plan(
         else:
             mode = "cached_scaled_hybrid_gpu"
     else:
-        mode = "cached_scaled_cpu"
+        ridge_cpu_specialized_supported, _ = _supports_ridge_cpu_exact_alpha_batched(
+            final_estimator
+        )
+        mode = (
+            "ridge_cpu_exact_alpha_batched"
+            if ridge_cpu_specialized_supported and _non_constant_fold_targets_supported(y=y, splits=splits)
+            else "cached_scaled_cpu"
+        )
     return PermutationExecutionPlan(
         execution_mode=mode,
         estimator_name=estimator_name,
@@ -201,6 +320,8 @@ def _build_permutation_fold_cache(
         else:
             x_train_scaled = x_train
             x_test_scaled = x_test
+        x_train_scaled = np.ascontiguousarray(x_train_scaled)
+        x_test_scaled = np.ascontiguousarray(x_test_scaled)
 
         fold_caches.append(
             PermutationFoldCache(
@@ -290,6 +411,187 @@ def _execute_cached_scaled_permutations(
             },
         )
     return permutation_scores
+
+
+def _execute_ridge_cpu_exact_alpha_batched_permutations(
+    *,
+    final_estimator_template: Any,
+    fold_caches: list[PermutationFoldCache],
+    rng: np.random.Generator,
+    n_permutations: int,
+    metric_name: str,
+    primary_metric_aggregation: str,
+    progress_callback: ProgressCallback | None,
+    progress_base: dict[str, Any],
+) -> tuple[list[float], dict[str, Any]]:
+    batch_size = max(1, int(getattr(final_estimator_template, "permutation_batch_size", 64)))
+
+    fold_states = []
+    fold_cpu_state_build_seconds = 0.0
+    fold_factorization_seconds = 0.0
+    for fold_cache in fold_caches:
+        fold_state, timing_metadata = build_ridge_cpu_permutation_core_state(
+            x_train_scaled=np.asarray(fold_cache.x_train_scaled, dtype=np.float64),
+            x_test_scaled=np.asarray(fold_cache.x_test_scaled, dtype=np.float64),
+            y_train=np.asarray(fold_cache.y_train),
+            y_test=np.asarray(fold_cache.y_test),
+            alpha=float(getattr(final_estimator_template, "alpha", 1.0)),
+            fit_intercept=bool(getattr(final_estimator_template, "fit_intercept", True)),
+        )
+        fold_states.append(fold_state)
+        fold_cpu_state_build_seconds += float(
+            timing_metadata.get("fold_cpu_state_build_seconds", 0.0)
+        )
+        fold_factorization_seconds += float(timing_metadata.get("fold_factorization_seconds", 0.0))
+
+    y_true_all_constant: list[str] = [
+        str(label) for fold_state in fold_states for label in np.asarray(fold_state["y_test"]).tolist()
+    ]
+    permutation_scores: list[float] = []
+    batched_target_encode_seconds = 0.0
+    batched_solve_seconds = 0.0
+    batched_predict_seconds = 0.0
+    batched_metric_seconds = 0.0
+    use_balanced_accuracy_batch_fast_path = _supports_balanced_accuracy_batch_fast_path(
+        metric_name=metric_name,
+        primary_metric_aggregation=primary_metric_aggregation,
+    )
+    if use_balanced_accuracy_batch_fast_path:
+        for fold_state in fold_states:
+            fold_state["balanced_accuracy_batch_cache"] = _build_balanced_accuracy_batch_cache(
+                y_true=np.asarray(fold_state["y_test"]).astype(str, copy=False),
+                classes=np.asarray(fold_state["classes"]).astype(str, copy=False),
+            )
+
+    permutation_index = 0
+    while permutation_index < int(n_permutations):
+        current_batch_size = min(batch_size, int(n_permutations) - permutation_index)
+        permutation_index_batches: list[np.ndarray] = []
+        for fold_state in fold_states:
+            n_train = int(fold_state["n_train"])
+            index_batch = np.broadcast_to(
+                np.arange(n_train, dtype=np.int64)[:, None],
+                (n_train, int(current_batch_size)),
+            ).copy()
+            permutation_index_batches.append(index_batch)
+
+        for local_perm_index in range(int(current_batch_size)):
+            for fold_index in range(len(fold_states)):
+                rng.shuffle(permutation_index_batches[fold_index][:, local_perm_index])
+
+        prediction_batches_by_fold: list[np.ndarray] = []
+        prediction_label_index_batches_by_fold: list[np.ndarray] = []
+        for fold_index, fold_state in enumerate(fold_states):
+            permuted_label_indices_batch = np.asarray(
+                fold_state["y_train_label_indices"],
+                dtype=np.int64,
+            )[permutation_index_batches[fold_index]]
+            prediction_batch, prediction_label_index_batch, timing_metadata = (
+                solve_ridge_cpu_permutation_core_batch(
+                    state=fold_state,
+                    permuted_train_label_indices_batch=permuted_label_indices_batch,
+                    return_string_predictions=not use_balanced_accuracy_batch_fast_path,
+                )
+            )
+            if prediction_batch is not None:
+                prediction_batches_by_fold.append(
+                    np.asarray(prediction_batch).astype(str, copy=False)
+                )
+            prediction_label_index_batches_by_fold.append(
+                np.asarray(prediction_label_index_batch, dtype=np.int64)
+            )
+            batched_target_encode_seconds += float(
+                timing_metadata.get("batched_target_encode_seconds", 0.0)
+            )
+            batched_solve_seconds += float(timing_metadata.get("batched_solve_seconds", 0.0))
+            batched_predict_seconds += float(timing_metadata.get("batched_predict_seconds", 0.0))
+
+        metric_start = perf_counter()
+        if use_balanced_accuracy_batch_fast_path:
+            batch_score_array = np.zeros(int(current_batch_size), dtype=np.float64)
+            for fold_index, fold_state in enumerate(fold_states):
+                batch_score_array += _score_balanced_accuracy_batch(
+                    predicted_label_indices_batch=prediction_label_index_batches_by_fold[
+                        fold_index
+                    ],
+                    cache=fold_state["balanced_accuracy_batch_cache"],
+                )
+            batch_scores = (batch_score_array / float(len(fold_states))).tolist()
+        else:
+            batch_scores = []
+            for local_perm_index in range(int(current_batch_size)):
+                y_pred_all: list[str] = []
+                per_fold_scores: list[float] = []
+                for fold_index, fold_state in enumerate(fold_states):
+                    predicted_labels = (
+                        np.asarray(prediction_batches_by_fold[fold_index][:, local_perm_index])
+                        .astype(str, copy=False)
+                        .tolist()
+                    )
+                    if primary_metric_aggregation == "mean_fold_scores":
+                        per_fold_scores.append(
+                            float(
+                                classification_metric_score(
+                                    y_true=fold_state["y_test"],
+                                    y_pred=predicted_labels,
+                                    metric_name=metric_name,
+                                )
+                            )
+                        )
+                    else:
+                        y_pred_all.extend(predicted_labels)
+                if primary_metric_aggregation == "mean_fold_scores":
+                    batch_scores.append(float(np.mean(per_fold_scores)))
+                else:
+                    batch_scores.append(
+                        classification_metric_score(
+                            y_true=y_true_all_constant,
+                            y_pred=y_pred_all,
+                            metric_name=metric_name,
+                        )
+                    )
+        batched_metric_seconds += float(perf_counter() - metric_start)
+
+        for local_perm_index, score in enumerate(batch_scores):
+            absolute_permutation_index = permutation_index + local_perm_index
+            emit_progress(
+                progress_callback,
+                stage="permutation",
+                message=f"running permutation {absolute_permutation_index + 1}/{n_permutations}",
+                completed_units=float(absolute_permutation_index),
+                total_units=float(n_permutations),
+                metadata={
+                    **progress_base,
+                    "permutation_index": int(absolute_permutation_index + 1),
+                    "n_permutations": int(n_permutations),
+                },
+            )
+            permutation_scores.append(float(score))
+            emit_progress(
+                progress_callback,
+                stage="permutation",
+                message=f"finished permutation {absolute_permutation_index + 1}/{n_permutations}",
+                completed_units=float(absolute_permutation_index + 1),
+                total_units=float(n_permutations),
+                metadata={
+                    **progress_base,
+                    "permutation_index": int(absolute_permutation_index + 1),
+                    "n_permutations": int(n_permutations),
+                },
+            )
+
+        permutation_index += int(current_batch_size)
+
+    return permutation_scores, {
+        "specialized_ridge_cpu_path_used": True,
+        "permutation_batch_size": int(batch_size),
+        "fold_cpu_state_build_seconds": float(fold_cpu_state_build_seconds),
+        "fold_factorization_seconds": float(fold_factorization_seconds),
+        "batched_target_encode_seconds": float(batched_target_encode_seconds),
+        "batched_solve_seconds": float(batched_solve_seconds),
+        "batched_predict_seconds": float(batched_predict_seconds),
+        "batched_metric_seconds": float(batched_metric_seconds),
+    }
 
 
 def _execute_ridge_gpu_batched_dual_permutations(
@@ -488,15 +790,22 @@ def _build_permutation_payload(
     payload["n_folds"] = int(n_folds)
     payload["fold_cache_build_seconds"] = float(fold_cache_build_seconds)
     payload["permutation_loop_seconds"] = float(permutation_loop_seconds)
+    payload["specialized_ridge_cpu_path_used"] = bool(
+        execution_plan.execution_mode == "ridge_cpu_exact_alpha_batched"
+    )
+    payload["specialized_ridge_cpu_fallback_reason"] = None
     payload["specialized_ridge_gpu_path_used"] = bool(
         execution_plan.execution_mode == "ridge_gpu_batched_dual"
     )
     payload["specialized_ridge_gpu_fallback_reason"] = None
     payload["permutation_batch_size"] = None
+    payload["fold_cpu_state_build_seconds"] = None
     payload["fold_gpu_state_build_seconds"] = None
     payload["fold_factorization_seconds"] = None
+    payload["batched_target_encode_seconds"] = None
     payload["batched_solve_seconds"] = None
     payload["batched_predict_seconds"] = None
+    payload["batched_metric_seconds"] = None
     if additional_metadata:
         payload.update(additional_metadata)
     return payload
@@ -572,7 +881,11 @@ def evaluate_permutations(
                     "n_permutations": int(n_permutations),
                 },
             )
-    elif execution_plan.execution_mode in {"cached_scaled_cpu", "cached_scaled_hybrid_gpu"}:
+    elif execution_plan.execution_mode in {
+        "cached_scaled_cpu",
+        "cached_scaled_hybrid_gpu",
+        "ridge_cpu_exact_alpha_batched",
+    }:
         fold_cache_start = perf_counter()
         fold_caches = _build_permutation_fold_cache(
             pipeline_template=pipeline_template,
@@ -582,16 +895,30 @@ def evaluate_permutations(
         )
         fold_cache_build_seconds = float(perf_counter() - fold_cache_start)
         permutation_loop_start = perf_counter()
-        permutation_scores = _execute_cached_scaled_permutations(
-            final_estimator_template=final_estimator,
-            fold_caches=fold_caches,
-            rng=rng,
-            n_permutations=int(n_permutations),
-            metric_name=metric_name,
-            primary_metric_aggregation=resolved_aggregation,
-            progress_callback=progress_callback,
-            progress_base=progress_base,
-        )
+        if execution_plan.execution_mode == "ridge_cpu_exact_alpha_batched":
+            permutation_scores, additional_metadata = (
+                _execute_ridge_cpu_exact_alpha_batched_permutations(
+                    final_estimator_template=final_estimator,
+                    fold_caches=fold_caches,
+                    rng=rng,
+                    n_permutations=int(n_permutations),
+                    metric_name=metric_name,
+                    primary_metric_aggregation=resolved_aggregation,
+                    progress_callback=progress_callback,
+                    progress_base=progress_base,
+                )
+            )
+        else:
+            permutation_scores = _execute_cached_scaled_permutations(
+                final_estimator_template=final_estimator,
+                fold_caches=fold_caches,
+                rng=rng,
+                n_permutations=int(n_permutations),
+                metric_name=metric_name,
+                primary_metric_aggregation=resolved_aggregation,
+                progress_callback=progress_callback,
+                progress_base=progress_base,
+            )
         permutation_loop_seconds = float(perf_counter() - permutation_loop_start)
     else:
         fold_cache_start = perf_counter()

@@ -1178,7 +1178,21 @@ def _expand_e12_permutation_cells(
     if not anchor_identities:
         return [], [str(anchor_warning or "E12 anchor resolution failed.")]
 
-    chunk_size = 50
+    configured_chunk_size = _optional_int(experiment.get("permutation_chunk_size"))
+    if configured_chunk_size is None or configured_chunk_size <= 0:
+        configured_chunk_size = 50
+    for candidate in variants:
+        candidate_design_metadata = (
+            dict(candidate.get("design_metadata", {}))
+            if isinstance(candidate.get("design_metadata"), dict)
+            else {}
+        )
+        candidate_chunk_size = _optional_int(candidate_design_metadata.get("permutation_chunk_size"))
+        if candidate_chunk_size is not None and candidate_chunk_size > 0:
+            configured_chunk_size = int(candidate_chunk_size)
+            break
+
+    chunk_size = int(configured_chunk_size)
     if int(n_permutations) < chunk_size:
         chunk_size = int(n_permutations)
     chunk_count = max(1, int(math.ceil(float(n_permutations) / float(chunk_size))))

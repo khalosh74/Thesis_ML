@@ -3122,7 +3122,9 @@
           "seed": null,
           "factor_settings": {},
           "fixed_controls": {},
-          "design_metadata": {}
+          "design_metadata": {
+            "permutation_chunk_size": 1000
+          }
         }
       ]
     },
