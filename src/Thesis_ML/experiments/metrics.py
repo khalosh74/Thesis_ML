@@ -299,8 +299,24 @@ def _build_permutation_fold_cache(
     y: np.ndarray,
     splits: list[tuple[np.ndarray, np.ndarray]],
 ) -> list[PermutationFoldCache]:
+    return list(
+        _iter_permutation_fold_cache(
+            pipeline_template=pipeline_template,
+            x_matrix=x_matrix,
+            y=y,
+            splits=splits,
+        )
+    )
+
+
+def _iter_permutation_fold_cache(
+    *,
+    pipeline_template: Pipeline,
+    x_matrix: np.ndarray,
+    y: np.ndarray,
+    splits: list[tuple[np.ndarray, np.ndarray]],
+) -> Any:
     scaler_template = pipeline_template.named_steps.get("scaler")
-    fold_caches: list[PermutationFoldCache] = []
     for fold_index, (train_idx, test_idx) in enumerate(splits):
         train_idx_array = np.asarray(train_idx, dtype=np.int64)
         test_idx_array = np.asarray(test_idx, dtype=np.int64)
@@ -322,17 +338,52 @@ def _build_permutation_fold_cache(
             x_test_scaled = x_test
         x_train_scaled = np.ascontiguousarray(x_train_scaled)
         x_test_scaled = np.ascontiguousarray(x_test_scaled)
-
-        fold_caches.append(
-            PermutationFoldCache(
-                fold_index=int(fold_index),
-                x_train_scaled=x_train_scaled,
-                x_test_scaled=x_test_scaled,
-                y_train=y_train,
-                y_test=y_test,
-            )
+        yield PermutationFoldCache(
+            fold_index=int(fold_index),
+            x_train_scaled=x_train_scaled,
+            x_test_scaled=x_test_scaled,
+            y_train=y_train,
+            y_test=y_test,
         )
-    return fold_caches
+
+
+def _build_ridge_cpu_permutation_fold_states(
+    *,
+    pipeline_template: Pipeline,
+    x_matrix: np.ndarray,
+    y: np.ndarray,
+    splits: list[tuple[np.ndarray, np.ndarray]],
+    alpha: float,
+    fit_intercept: bool,
+) -> tuple[list[dict[str, Any]], dict[str, float]]:
+    fold_states: list[dict[str, Any]] = []
+    fold_cpu_state_build_seconds = 0.0
+    fold_factorization_seconds = 0.0
+
+    for fold_cache in _iter_permutation_fold_cache(
+        pipeline_template=pipeline_template,
+        x_matrix=x_matrix,
+        y=y,
+        splits=splits,
+    ):
+        fold_state, timing_metadata = build_ridge_cpu_permutation_core_state(
+            x_train_scaled=np.asarray(fold_cache.x_train_scaled, dtype=np.float64),
+            x_test_scaled=np.asarray(fold_cache.x_test_scaled, dtype=np.float64),
+            y_train=np.asarray(fold_cache.y_train),
+            y_test=np.asarray(fold_cache.y_test),
+            alpha=float(alpha),
+            fit_intercept=bool(fit_intercept),
+        )
+        fold_states.append(fold_state)
+        fold_cpu_state_build_seconds += float(
+            timing_metadata.get("fold_cpu_state_build_seconds", 0.0)
+        )
+        fold_factorization_seconds += float(timing_metadata.get("fold_factorization_seconds", 0.0))
+
+    return fold_states, {
+        "fold_cpu_state_build_seconds": float(fold_cpu_state_build_seconds),
+        "fold_factorization_seconds": float(fold_factorization_seconds),
+    }
 
 
 def _execute_cached_scaled_permutations(
@@ -416,7 +467,9 @@ def _execute_cached_scaled_permutations(
 def _execute_ridge_cpu_exact_alpha_batched_permutations(
     *,
     final_estimator_template: Any,
-    fold_caches: list[PermutationFoldCache],
+    fold_states: list[dict[str, Any]],
+    fold_cpu_state_build_seconds: float,
+    fold_factorization_seconds: float,
     rng: np.random.Generator,
     n_permutations: int,
     metric_name: str,
@@ -425,24 +478,6 @@ def _execute_ridge_cpu_exact_alpha_batched_permutations(
     progress_base: dict[str, Any],
 ) -> tuple[list[float], dict[str, Any]]:
     batch_size = max(1, int(getattr(final_estimator_template, "permutation_batch_size", 64)))
-
-    fold_states = []
-    fold_cpu_state_build_seconds = 0.0
-    fold_factorization_seconds = 0.0
-    for fold_cache in fold_caches:
-        fold_state, timing_metadata = build_ridge_cpu_permutation_core_state(
-            x_train_scaled=np.asarray(fold_cache.x_train_scaled, dtype=np.float64),
-            x_test_scaled=np.asarray(fold_cache.x_test_scaled, dtype=np.float64),
-            y_train=np.asarray(fold_cache.y_train),
-            y_test=np.asarray(fold_cache.y_test),
-            alpha=float(getattr(final_estimator_template, "alpha", 1.0)),
-            fit_intercept=bool(getattr(final_estimator_template, "fit_intercept", True)),
-        )
-        fold_states.append(fold_state)
-        fold_cpu_state_build_seconds += float(
-            timing_metadata.get("fold_cpu_state_build_seconds", 0.0)
-        )
-        fold_factorization_seconds += float(timing_metadata.get("fold_factorization_seconds", 0.0))
 
     y_true_all_constant: list[str] = [
         str(label) for fold_state in fold_states for label in np.asarray(fold_state["y_test"]).tolist()
@@ -887,19 +922,27 @@ def evaluate_permutations(
         "ridge_cpu_exact_alpha_batched",
     }:
         fold_cache_start = perf_counter()
-        fold_caches = _build_permutation_fold_cache(
-            pipeline_template=pipeline_template,
-            x_matrix=x_matrix,
-            y=y,
-            splits=splits,
-        )
-        fold_cache_build_seconds = float(perf_counter() - fold_cache_start)
-        permutation_loop_start = perf_counter()
         if execution_plan.execution_mode == "ridge_cpu_exact_alpha_batched":
+            fold_states, ridge_state_build_metadata = _build_ridge_cpu_permutation_fold_states(
+                pipeline_template=pipeline_template,
+                x_matrix=x_matrix,
+                y=y,
+                splits=splits,
+                alpha=float(getattr(final_estimator, "alpha", 1.0)),
+                fit_intercept=bool(getattr(final_estimator, "fit_intercept", True)),
+            )
+            fold_cache_build_seconds = float(perf_counter() - fold_cache_start)
+            permutation_loop_start = perf_counter()
             permutation_scores, additional_metadata = (
                 _execute_ridge_cpu_exact_alpha_batched_permutations(
                     final_estimator_template=final_estimator,
-                    fold_caches=fold_caches,
+                    fold_states=fold_states,
+                    fold_cpu_state_build_seconds=float(
+                        ridge_state_build_metadata.get("fold_cpu_state_build_seconds", 0.0)
+                    ),
+                    fold_factorization_seconds=float(
+                        ridge_state_build_metadata.get("fold_factorization_seconds", 0.0)
+                    ),
                     rng=rng,
                     n_permutations=int(n_permutations),
                     metric_name=metric_name,
@@ -909,6 +952,14 @@ def evaluate_permutations(
                 )
             )
         else:
+            fold_caches = _build_permutation_fold_cache(
+                pipeline_template=pipeline_template,
+                x_matrix=x_matrix,
+                y=y,
+                splits=splits,
+            )
+            fold_cache_build_seconds = float(perf_counter() - fold_cache_start)
+            permutation_loop_start = perf_counter()
             permutation_scores = _execute_cached_scaled_permutations(
                 final_estimator_template=final_estimator,
                 fold_caches=fold_caches,

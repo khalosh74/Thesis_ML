@@ -78,6 +78,24 @@ def _optional_bool(value: Any) -> bool | None:
     return None
 
 
+def _resolve_locked_core_defaults(params: dict[str, Any]) -> dict[str, Any]:
+    """Apply thesis locked-core defaults when variant params leave them implicit."""
+    resolved = dict(params)
+
+    if _optional_str(resolved.get("feature_space")) is None:
+        resolved["feature_space"] = "whole_brain_masked"
+    if _optional_str(resolved.get("preprocessing_strategy")) is None:
+        resolved["preprocessing_strategy"] = "none"
+    if _optional_str(resolved.get("dimensionality_strategy")) is None:
+        resolved["dimensionality_strategy"] = "none"
+    if _optional_str(resolved.get("methodology_policy_name")) is None:
+        resolved["methodology_policy_name"] = MethodologyPolicyName.FIXED_BASELINES_ONLY.value
+    if _optional_str(resolved.get("class_weight_policy")) is None:
+        resolved["class_weight_policy"] = ClassWeightPolicy.NONE.value
+
+    return resolved
+
+
 def _resolve_methodology_params(params: dict[str, Any]) -> dict[str, Any]:
     raw_policy_name = _optional_str(params.get("methodology_policy_name"))
     raw_class_weight = _optional_str(params.get("class_weight_policy"))
@@ -166,6 +184,15 @@ def build_command(
     persist_fold_models: bool = True,
     persist_final_refit_model: bool = False,
 ) -> list[str]:
+    resolved_feature_space = (
+        str(params["feature_space"]) if params.get("feature_space") else "whole_brain_masked"
+    )
+    resolved_preprocessing_strategy = (
+        str(params["preprocessing_strategy"]) if params.get("preprocessing_strategy") else "none"
+    )
+    resolved_dimensionality_strategy = (
+        str(params["dimensionality_strategy"]) if params.get("dimensionality_strategy") else "none"
+    )
     command = [
         sys.executable,
         "-m",
@@ -201,14 +228,11 @@ def build_command(
         command.extend(["--filter-task", str(params["filter_task"])])
     if params.get("filter_modality"):
         command.extend(["--filter-modality", str(params["filter_modality"])])
-    if params.get("feature_space"):
-        command.extend(["--feature-space", str(params["feature_space"])])
+    command.extend(["--feature-space", str(resolved_feature_space)])
     if params.get("roi_spec_path"):
         command.extend(["--roi-spec-path", str(params["roi_spec_path"])])
-    if params.get("preprocessing_strategy"):
-        command.extend(["--preprocessing-strategy", str(params["preprocessing_strategy"])])
-    if params.get("dimensionality_strategy"):
-        command.extend(["--dimensionality-strategy", str(params["dimensionality_strategy"])])
+    command.extend(["--preprocessing-strategy", str(resolved_preprocessing_strategy)])
+    command.extend(["--dimensionality-strategy", str(resolved_dimensionality_strategy)])
     if params.get("pca_n_components") is not None:
         command.extend(["--pca-n-components", str(params["pca_n_components"])])
     if params.get("pca_variance_ratio") is not None:
@@ -298,7 +322,7 @@ def _build_feature_matrix_upstream_identity(
     if reuse_policy == "disallow":
         return None
 
-    params = dict(variant.get("params", {}))
+    params = _resolve_locked_core_defaults(dict(variant.get("params", {})))
     target = _optional_str(params.get("target"))
     cv_mode = _optional_str(params.get("cv"))
     if target is None or cv_mode is None:
@@ -457,7 +481,7 @@ def build_variant_run_kwargs(
     scheduled_compute_assignment: ComputeRunAssignment | None = None,
 ) -> tuple[dict[str, Any] | None, str | None, str]:
     experiment_id = str(experiment["experiment_id"])
-    params = dict(variant.get("params", {}))
+    params = _resolve_locked_core_defaults(dict(variant.get("params", {})))
     methodology_params, blocked_reason = _resolve_run_kwargs_methodology_params(
         params=params,
         variant=variant,
@@ -514,7 +538,9 @@ def build_variant_run_kwargs(
         else "whole_brain_masked",
         "roi_spec_path": str(params["roi_spec_path"]) if params.get("roi_spec_path") else None,
         "preprocessing_strategy": (
-            str(params["preprocessing_strategy"]) if params.get("preprocessing_strategy") else None
+            str(params["preprocessing_strategy"])
+            if params.get("preprocessing_strategy")
+            else "none"
         ),
         "dimensionality_strategy": (
             str(params["dimensionality_strategy"])
@@ -750,7 +776,7 @@ def execute_variant(
         else {}
     )
     variant_id = resolve_variant_id(variant)
-    params = dict(variant.get("params", {}))
+    params = _resolve_locked_core_defaults(dict(variant.get("params", {})))
     params_snapshot = dict(params)
     supported = bool(variant.get("supported", False))
     blocked_reason = variant.get("blocked_reason")
@@ -922,7 +948,7 @@ def execute_variant(
                         preprocessing_strategy=(
                             str(params["preprocessing_strategy"])
                             if params.get("preprocessing_strategy")
-                            else None
+                            else "none"
                         ),
                         dimensionality_strategy=(
                             str(params["dimensionality_strategy"])
