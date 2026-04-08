@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -120,6 +121,105 @@ def _resolve_official_requirements(
     return artifact_requirements, metadata_fields
 
 
+def _load_json_object(path: Path) -> dict[str, Any]:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise OfficialContractValidationError(
+            "compiled scope manifest must be a JSON object.",
+            details={"compiled_scope_manifest_path": str(path)},
+        )
+    return payload
+
+
+def _verify_compiled_scope_input_alignment(
+    *,
+    frame: pd.DataFrame,
+    index_csv: Path,
+    official_context: dict[str, Any],
+    compiled_scope_manifest_path: Path,
+    compiled_scope_selected_samples_path: Path,
+    target_column: str,
+) -> None:
+    if not compiled_scope_manifest_path.exists():
+        raise OfficialContractValidationError(
+            "release_scope_enforcement requires compiled_scope_manifest_path to exist.",
+            details={"compiled_scope_manifest_path": str(compiled_scope_manifest_path)},
+        )
+    if not compiled_scope_selected_samples_path.exists():
+        raise OfficialContractValidationError(
+            "release_scope_enforcement requires compiled_scope_selected_samples_path to exist.",
+            details={"compiled_scope_selected_samples_path": str(compiled_scope_selected_samples_path)},
+        )
+    if index_csv.resolve() != compiled_scope_selected_samples_path.resolve():
+        raise OfficialContractValidationError(
+            "release_scope_enforcement requires runtime index_csv to match compiled scope selected_samples.csv.",
+            details={
+                "index_csv": str(index_csv.resolve()),
+                "compiled_scope_selected_samples_path": str(
+                    compiled_scope_selected_samples_path.resolve()
+                ),
+            },
+        )
+
+    compiled_scope_manifest = _load_json_object(compiled_scope_manifest_path)
+    expected_science_hash = str(official_context.get("compiled_scope_science_hash", "")).strip()
+    if expected_science_hash and str(compiled_scope_manifest.get("science_hash")) != expected_science_hash:
+        raise OfficialContractValidationError(
+            "Compiled scope science_hash mismatch against runtime official context.",
+            details={
+                "manifest_science_hash": compiled_scope_manifest.get("science_hash"),
+                "expected_science_hash": expected_science_hash,
+            },
+        )
+
+    expected_target_mapping_hash = str(
+        official_context.get("compiled_scope_target_mapping_hash", "")
+    ).strip().lower()
+    if expected_target_mapping_hash and str(
+        compiled_scope_manifest.get("target_mapping_hash", "")
+    ).strip().lower() != expected_target_mapping_hash:
+        raise OfficialContractValidationError(
+            "Compiled scope target_mapping_hash mismatch against runtime official context.",
+            details={
+                "manifest_target_mapping_hash": compiled_scope_manifest.get("target_mapping_hash"),
+                "expected_target_mapping_hash": expected_target_mapping_hash,
+            },
+        )
+
+    if str(compiled_scope_manifest.get("target_column", "")).strip() != str(target_column).strip():
+        raise OfficialContractValidationError(
+            "Compiled scope target_column mismatch.",
+            details={
+                "manifest_target_column": compiled_scope_manifest.get("target_column"),
+                "runtime_target_column": target_column,
+            },
+        )
+
+    compiled_frame = pd.read_csv(compiled_scope_selected_samples_path)
+    if "sample_id" not in compiled_frame.columns:
+        raise OfficialContractValidationError(
+            "compiled scope selected_samples.csv is missing sample_id column.",
+            details={"compiled_scope_selected_samples_path": str(compiled_scope_selected_samples_path)},
+        )
+    if "sample_id" not in frame.columns:
+        raise OfficialContractValidationError(
+            "runtime dataset index is missing sample_id column under release_scope_enforcement.",
+            details={"index_csv": str(index_csv)},
+        )
+    runtime_ids = frame["sample_id"].astype(str).tolist()
+    compiled_ids = compiled_frame["sample_id"].astype(str).tolist()
+    if runtime_ids != compiled_ids:
+        runtime_set = set(runtime_ids)
+        compiled_set = set(compiled_ids)
+        raise OfficialContractValidationError(
+            "Runtime dataset index rows do not exactly match compiled scope rows under release_scope_enforcement.",
+            details={
+                "missing_sample_ids": sorted(compiled_set - runtime_set)[:50],
+                "extra_sample_ids": sorted(runtime_set - compiled_set)[:50],
+            },
+        )
+
+
 def validate_official_preflight(
     *,
     framework_mode: FrameworkMode,
@@ -154,6 +254,9 @@ def validate_official_preflight(
     subgroup_min_classes_per_group: int,
     subgroup_report_small_groups: bool,
     official_context: dict[str, Any],
+    release_scope_enforcement: bool = False,
+    compiled_scope_manifest_path: Path | None = None,
+    compiled_scope_selected_samples_path: Path | None = None,
 ) -> OfficialPreflightResult:
     if framework_mode not in {FrameworkMode.CONFIRMATORY, FrameworkMode.LOCKED_COMPARISON}:
         raise OfficialContractValidationError(
@@ -223,6 +326,33 @@ def validate_official_preflight(
             f"Official strict dataset-index validation failed: {exc}",
             details={"error": str(exc), "index_csv": str(index_csv)},
         ) from exc
+
+    if bool(release_scope_enforcement):
+        if compiled_scope_manifest_path is None or compiled_scope_selected_samples_path is None:
+            raise OfficialContractValidationError(
+                "release_scope_enforcement requires compiled_scope_manifest_path and "
+                "compiled_scope_selected_samples_path.",
+                details={
+                    "compiled_scope_manifest_path": (
+                        str(compiled_scope_manifest_path)
+                        if compiled_scope_manifest_path is not None
+                        else None
+                    ),
+                    "compiled_scope_selected_samples_path": (
+                        str(compiled_scope_selected_samples_path)
+                        if compiled_scope_selected_samples_path is not None
+                        else None
+                    ),
+                },
+            )
+        _verify_compiled_scope_input_alignment(
+            frame=frame,
+            index_csv=index_csv,
+            official_context=official_context,
+            compiled_scope_manifest_path=compiled_scope_manifest_path,
+            compiled_scope_selected_samples_path=compiled_scope_selected_samples_path,
+            target_column=target_column,
+        )
 
     derived_label_inconsistency_audit_df = build_derived_label_inconsistency_audit(
         frame,
@@ -307,14 +437,6 @@ def validate_official_preflight(
                 "sample_ids_head": summary["sample_ids_head"],
             },
         )
-
-    scope_frame = frame.copy()
-    if filter_task is not None:
-        scope_frame = scope_frame[scope_frame["task"].astype(str) == str(filter_task)].copy()
-    if filter_modality is not None:
-        scope_frame = scope_frame[
-            scope_frame["modality"].astype(str) == str(filter_modality)
-        ].copy()
 
     selection_result = apply_dataset_selection_filters(
         frame,
@@ -608,7 +730,7 @@ def validate_official_preflight(
                 )
 
             minimum_subjects = int(confirmatory_lock.get("minimum_subjects", 1))
-            subjects_in_scope = sorted(scope_frame["subject"].astype(str).unique().tolist())
+            subjects_in_scope = sorted(frame["subject"].astype(str).unique().tolist())
             if len(subjects_in_scope) < minimum_subjects:
                 raise OfficialContractValidationError(
                     "Confirmatory dataset scope does not meet minimum_subjects.",
@@ -622,7 +744,7 @@ def validate_official_preflight(
                 confirmatory_lock.get("minimum_sessions_per_subject", 1)
             )
             session_counts = (
-                scope_frame.groupby(scope_frame["subject"].astype(str))["session"]
+                frame.groupby(frame["subject"].astype(str))["session"]
                 .nunique(dropna=False)
                 .astype(int)
                 .to_dict()

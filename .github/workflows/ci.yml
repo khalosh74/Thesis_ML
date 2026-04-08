@@ -49,6 +49,9 @@ jobs:
       - name: Pytest
         run: python -m pytest -q
 
+      - name: Release Demo Smoke
+        run: python -m pytest tests/test_release_demo_smoke.py tests/test_release_scope_demo_smoke.py -q
+
   build_verify:
     runs-on: ubuntu-latest
     env:

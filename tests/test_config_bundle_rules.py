@@ -24,6 +24,7 @@ def test_registry_contains_expected_phase6_bundle_ids() -> None:
         "bundle.thesis_canonical_nested_v2_grouped_nested",
         "bundle.thesis_canonical_v1_fixed_linear",
         "bundle.thesis_confirmatory_v1_publishable",
+        "bundle.thesis_final_v1_release_authority",
     ]
 
 

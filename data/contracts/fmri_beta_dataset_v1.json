@@ -1,0 +1,24 @@
+{
+  "schema_version": "dataset-contract-v1",
+  "dataset_contract_id": "fmri_beta_dataset",
+  "dataset_contract_version": "fmri_beta_dataset_v1",
+  "sample_unit": "beta_event",
+  "required_columns": [
+    "sample_id",
+    "subject",
+    "session",
+    "task",
+    "modality",
+    "emotion",
+    "coarse_affect",
+    "beta_path",
+    "mask_path",
+    "subject_session",
+    "subject_session_bas"
+  ],
+  "minimum_subjects": 2,
+  "minimum_sessions_per_subject": 2,
+  "require_spatial_compatibility_checks": true,
+  "notes": "Cache is local/rebuildable and not part of scientific evidence."
+}
+

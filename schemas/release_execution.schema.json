@@ -1,0 +1,116 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Release Execution",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "run_classes_allowed",
+    "official_creation_policy",
+    "hardware_mode",
+    "max_parallel_runs",
+    "deterministic_compute",
+    "allow_backend_fallback",
+    "cache_policy",
+    "run_root",
+    "candidate_root",
+    "official_root",
+    "exploratory_root",
+    "scratch_root",
+    "default_behavior",
+    "allow_resume_for",
+    "allow_force_for"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "release-execution-v1"
+    },
+    "run_classes_allowed": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "scratch",
+          "exploratory",
+          "candidate"
+        ]
+      },
+      "uniqueItems": true
+    },
+    "official_creation_policy": {
+      "type": "string",
+      "const": "promotion_only"
+    },
+    "hardware_mode": {
+      "type": "string",
+      "const": "cpu_only"
+    },
+    "max_parallel_runs": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "deterministic_compute": {
+      "type": "boolean"
+    },
+    "allow_backend_fallback": {
+      "type": "boolean"
+    },
+    "cache_policy": {
+      "type": "string",
+      "minLength": 1
+    },
+    "run_root": {
+      "type": "string",
+      "minLength": 1
+    },
+    "candidate_root": {
+      "type": "string",
+      "minLength": 1
+    },
+    "official_root": {
+      "type": "string",
+      "minLength": 1
+    },
+    "exploratory_root": {
+      "type": "string",
+      "minLength": 1
+    },
+    "scratch_root": {
+      "type": "string",
+      "minLength": 1
+    },
+    "default_behavior": {
+      "type": "string",
+      "enum": [
+        "fresh",
+        "resume"
+      ]
+    },
+    "allow_resume_for": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "scratch",
+          "exploratory",
+          "candidate"
+        ]
+      },
+      "uniqueItems": true
+    },
+    "allow_force_for": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "scratch",
+          "exploratory",
+          "candidate"
+        ]
+      },
+      "uniqueItems": true
+    }
+  }
+}
+

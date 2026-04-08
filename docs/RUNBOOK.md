@@ -2,6 +2,15 @@
 
 This runbook covers normal operation on a clean machine and day-to-day rerun handling.
 
+Official thesis-final command path:
+
+1. `thesisml-run-release --release releases/thesis_final_v1/release.json --dataset-manifest <...> --run-class candidate`
+2. `thesisml-promote-run --candidate-run <candidate_run_dir>`
+
+Legacy compatibility commands (`thesisml-run-protocol`, `thesisml-run-comparison`, workbook execution) remain runnable but are non-official.
+
+Official release scope is compiled once into `artifacts/scope/selected_samples.csv` and enforced as an exact execution subset. Runtime filters are not authoritative.
+
 ## 1) Install
 
 Canonical:
@@ -636,37 +645,48 @@ Installed wheel path is also supported; default decision-support registry is pac
 
 ### 2) Canonical CLIs
 
-- `thesisml-run-protocol` (official thesis-facing command)
-- `thesisml-run-experiment`
-- `thesisml-run-comparison`
-- `thesisml-run-decision-support`
-- `thesisml-workbook`
+- `thesisml-run-release` (candidate creation for thesis-final path)
+- `thesisml-promote-run` (promotion to single official release run)
+- `thesisml-validate-release`
+- `thesisml-validate-dataset`
+- `thesisml-run-experiment` (exploratory)
+- `thesisml-run-comparison` (legacy compatibility)
+- `thesisml-run-protocol` (legacy compatibility)
+- `thesisml-run-decision-support` (legacy compatibility)
+- `thesisml-workbook` (legacy compatibility)
 - `thesisml-run-baseline`
 
 Compatibility wrappers are kept only for migration and are deprecated.
 
 ### 3) First-use checks
 
-Frozen confirmatory protocol dry-run:
+Release candidate run (official thesis-final pre-promotion step):
 
 ```bash
-thesisml-run-protocol \
-  --protocol configs/protocols/thesis_canonical_nested_v2.json \
-  --all-suites \
-  --reports-root outputs/reports/confirmatory \
-  --dry-run
+thesisml-run-release \
+  --release releases/thesis_final_v1/release.json \
+  --dataset-manifest demo_data/synthetic_v1/dataset_manifest.json \
+  --run-class candidate
 ```
 
-Frozen confirmatory protocol execution:
+Promotion to single official run:
+
+```bash
+thesisml-promote-run \
+  --candidate-run runs/candidate/thesis_final_v1/<candidate_run_id>
+```
+
+Legacy protocol compatibility dry-run:
 
 ```bash
 thesisml-run-protocol \
   --protocol configs/protocols/thesis_confirmatory_v1.json \
   --all-suites \
-  --reports-root outputs/reports/confirmatory
+  --reports-root outputs/reports/confirmatory \
+  --dry-run
 ```
 
-Locked comparison dry-run:
+Legacy locked comparison compatibility dry-run:
 
 ```bash
 thesisml-run-comparison \
@@ -676,29 +696,15 @@ thesisml-run-comparison \
   --dry-run
 ```
 
-Locked comparison execution:
-
-```bash
-thesisml-run-comparison \
-  --comparison configs/comparisons/model_family_grouped_nested_comparison_v2.json \
-  --all-variants \
-  --reports-root outputs/reports/comparisons
-```
-
-Grouped nested comparison execution:
-
-```bash
-thesisml-run-comparison \
-  --comparison configs/archive/comparisons/model_family_grouped_nested_comparison_v1.json \
-  --variant ridge \
-  --reports-root outputs/reports/comparisons
-```
-
 Official-policy note:
 - exploratory mode (`thesisml-run-experiment`) is ad hoc and non-confirmatory.
-- locked comparison mode (`thesisml-run-comparison`) is restricted to registered variants.
-- confirmatory mode (`thesisml-run-protocol`) is the final thesis evidence path.
-- default mode roots are `outputs/reports/exploratory`, `outputs/reports/comparisons`, and `outputs/reports/confirmatory`.
+- release mode is the only official thesis evidence path:
+  `thesisml-run-release` (candidate) -> `thesisml-promote-run` (official).
+- locked comparison (`thesisml-run-comparison`), confirmatory protocol (`thesisml-run-protocol`),
+  decision-support, and workbook workflows are non-official compatibility paths.
+- default mode roots are `outputs/reports/exploratory`, `outputs/reports/comparisons`,
+  and `outputs/reports/confirmatory` for legacy paths, plus `runs/candidate` and `runs/official`
+  for release-based official path.
 - comparison/protocol contracts must choose exactly one methodology policy:
   `fixed_baselines_only` or `grouped_nested_tuning`.
 - official checked-in comparison/protocol specs use `repeat_count=3` by default.

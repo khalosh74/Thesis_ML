@@ -1,0 +1,115 @@
+{
+  "schema_version": "release-science-v1",
+  "release_id": "thesis_final_v1",
+  "sample_unit": "beta_event",
+  "dataset_contract": {
+    "dataset_id": "fmri_beta_dataset",
+    "dataset_contract_version": "fmri_beta_dataset_v1",
+    "dataset_fingerprint_required": true,
+    "require_spatial_compatibility_checks": true,
+    "minimum_subjects": 2,
+    "minimum_sessions_per_subject": 2,
+    "required_columns": [
+      "sample_id",
+      "subject",
+      "session",
+      "task",
+      "modality",
+      "emotion",
+      "coarse_affect",
+      "beta_path",
+      "mask_path",
+      "subject_session",
+      "subject_session_bas"
+    ]
+  },
+  "target": {
+    "name": "coarse_affect",
+    "mapping_path": "configs/targets/affect_mapping_v2.json",
+    "mapping_hash": "3bbc30d6949e868f8d9d2ad64b7b10d1d14c93fff3d406d3321d76efee011ad3"
+  },
+  "scope": {
+    "strict_scope": true,
+    "target": "coarse_affect",
+    "tasks": [
+      "emo",
+      "recog"
+    ],
+    "modality": "audiovisual",
+    "subjects": [
+      "sub-001",
+      "sub-002"
+    ],
+    "main_tasks": [
+      "emo",
+      "recog"
+    ],
+    "main_modality": "audiovisual",
+    "within_subjects": [
+      "sub-001",
+      "sub-002"
+    ],
+    "transfer_pairs": [
+      {
+        "train_subject": "sub-001",
+        "test_subject": "sub-002"
+      },
+      {
+        "train_subject": "sub-002",
+        "test_subject": "sub-001"
+      }
+    ]
+  },
+  "feature_policy": {
+    "feature_space": "whole_brain_masked",
+    "preprocessing_strategy": "none",
+    "dimensionality_strategy": "none"
+  },
+  "model_policy": {
+    "model_family": "ridge",
+    "class_weight_policy": "none",
+    "methodology_policy_name": "fixed_baselines_only",
+    "tuning_enabled": false,
+    "deterministic_execution": true
+  },
+  "split_policy": {
+    "primary_analysis": {
+      "split": "within_subject_loso_session",
+      "metric": "balanced_accuracy",
+      "secondary_metrics": [
+        "macro_f1",
+        "accuracy",
+        "recall_macro"
+      ],
+      "seed": 42
+    },
+    "secondary_analysis": {
+      "split": "frozen_cross_person_transfer"
+    }
+  },
+  "controls": {
+    "dummy_baseline": true,
+    "permutation_test": true,
+    "n_permutations": 1000
+  },
+  "multiplicity": {
+    "primary_hypotheses": 1,
+    "primary_alpha": 0.05,
+    "secondary_policy": "descriptive_only",
+    "exploratory_claims_allowed": false
+  },
+  "interpretation_limits": {
+    "no_causal_claims": true,
+    "no_clinical_claims": true,
+    "no_localization_claims_from_coefficients": true,
+    "no_external_generalization_claim": true,
+    "secondary_results_not_primary_evidence": true
+  },
+  "reporting_requirements": {
+    "require_protocol_id": true,
+    "require_dataset_fingerprint": true,
+    "require_mapping_hash": true,
+    "require_interpretation_limits": true,
+    "require_deviation_log": true
+  }
+}

@@ -91,10 +91,10 @@ def test_repro_manifest_includes_spec_registry_identity_for_selected_specs(tmp_p
     protocol_identity = manifest["spec_identity"]["confirmatory_protocol"]["registry_identity"]
     assert comparison_identity["registered"] is True
     assert comparison_identity["config_id"] == "comparison.model_family_grouped_nested_comparison_v2"
-    assert comparison_identity["lifecycle"] == "active_default"
+    assert comparison_identity["lifecycle"] == "legacy_non_official"
     assert protocol_identity["registered"] is True
     assert protocol_identity["config_id"] == "protocol.thesis_confirmatory_v1"
-    assert protocol_identity["lifecycle"] == "frozen_confirmatory"
+    assert protocol_identity["lifecycle"] == "legacy_non_official"
 
 
 def test_repro_manifest_includes_valid_spec_bundle_validation_for_publishable_bundle(

@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Promotion Manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "release_id",
+    "release_version",
+    "official_run_id",
+    "candidate_run_id",
+    "candidate_run_path",
+    "official_run_path",
+    "timestamp_utc",
+    "release_hash",
+    "science_hash",
+    "execution_hash",
+    "environment_hash",
+    "evidence_hash",
+    "claims_hash",
+    "dataset_fingerprint"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "release-promotion-manifest-v1"
+    },
+    "release_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "release_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "official_run_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "candidate_run_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "candidate_run_path": {
+      "type": "string",
+      "minLength": 1
+    },
+    "official_run_path": {
+      "type": "string",
+      "minLength": 1
+    },
+    "timestamp_utc": {
+      "type": "string",
+      "minLength": 1
+    },
+    "release_hash": {
+      "type": "string",
+      "pattern": "^[a-fA-F0-9]{64}$"
+    },
+    "science_hash": {
+      "type": "string",
+      "pattern": "^[a-fA-F0-9]{64}$"
+    },
+    "execution_hash": {
+      "type": "string",
+      "pattern": "^[a-fA-F0-9]{64}$"
+    },
+    "environment_hash": {
+      "type": "string",
+      "pattern": "^[a-fA-F0-9]{64}$"
+    },
+    "evidence_hash": {
+      "type": "string",
+      "pattern": "^[a-fA-F0-9]{64}$"
+    },
+    "claims_hash": {
+      "type": "string",
+      "pattern": "^[a-fA-F0-9]{64}$"
+    },
+    "dataset_fingerprint": {
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}
+

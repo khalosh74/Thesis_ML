@@ -1,0 +1,163 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Run Manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "run_id",
+    "run_class",
+    "release_id",
+    "release_version",
+    "release_hash",
+    "science_hash",
+    "execution_hash",
+    "environment_hash",
+    "evidence_hash",
+    "claims_hash",
+    "dataset_manifest_path",
+    "dataset_fingerprint",
+    "git_commit",
+    "git_dirty",
+    "python_version",
+    "platform",
+    "timestamp_utc",
+    "parent_run_id",
+    "status",
+    "promotable",
+    "official",
+    "cache_policy",
+    "command_line",
+    "compiled_scope_manifest_path",
+    "selected_samples_path",
+    "selected_sample_ids_sha256",
+    "scope_alignment_passed"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "release-run-manifest-v1"
+    },
+    "run_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "run_class": {
+      "type": "string",
+      "enum": [
+        "scratch",
+        "exploratory",
+        "candidate",
+        "official"
+      ]
+    },
+    "release_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "release_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "release_hash": {
+      "type": "string",
+      "pattern": "^[a-fA-F0-9]{64}$"
+    },
+    "science_hash": {
+      "type": "string",
+      "pattern": "^[a-fA-F0-9]{64}$"
+    },
+    "execution_hash": {
+      "type": "string",
+      "pattern": "^[a-fA-F0-9]{64}$"
+    },
+    "environment_hash": {
+      "type": "string",
+      "pattern": "^[a-fA-F0-9]{64}$"
+    },
+    "evidence_hash": {
+      "type": "string",
+      "pattern": "^[a-fA-F0-9]{64}$"
+    },
+    "claims_hash": {
+      "type": "string",
+      "pattern": "^[a-fA-F0-9]{64}$"
+    },
+    "dataset_manifest_path": {
+      "type": "string",
+      "minLength": 1
+    },
+    "dataset_fingerprint": {
+      "type": "string",
+      "minLength": 1
+    },
+    "git_commit": {
+      "type": "string"
+    },
+    "git_dirty": {
+      "type": "boolean"
+    },
+    "python_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "platform": {
+      "type": "string",
+      "minLength": 1
+    },
+    "timestamp_utc": {
+      "type": "string",
+      "minLength": 1
+    },
+    "parent_run_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "status": {
+      "type": "string",
+      "minLength": 1
+    },
+    "promotable": {
+      "type": "boolean"
+    },
+    "official": {
+      "type": "boolean"
+    },
+    "cache_policy": {
+      "type": "string",
+      "minLength": 1
+    },
+    "command_line": {
+      "type": "string"
+    },
+    "evidence_verified": {
+      "type": "boolean"
+    },
+    "compiled_scope_manifest_path": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "minLength": 1
+    },
+    "selected_samples_path": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "minLength": 1
+    },
+    "selected_sample_ids_sha256": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[a-fA-F0-9]{64}$"
+    },
+    "scope_alignment_passed": {
+      "type": "boolean"
+    }
+  }
+}

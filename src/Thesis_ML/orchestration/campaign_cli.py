@@ -33,8 +33,8 @@ from Thesis_ML.orchestration.study_loading import (
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
-            "Automate thesis decision-support experiments (E01-E11) using the existing "
-            "thesisml-run-experiment execution path."
+            "Automate legacy/non-official decision-support experiments (E01-E11) "
+            "using thesisml-run-experiment execution."
         )
     )
     parser.add_argument(

@@ -1,0 +1,7 @@
+{
+  "schema_version": "release-registry-v1",
+  "aliases": {
+    "release.thesis_final_current": "releases/thesis_final_v1/release.json"
+  }
+}
+

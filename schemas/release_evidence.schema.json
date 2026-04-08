@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Release Evidence",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "required_run_artifacts",
+    "required_release_artifacts",
+    "required_control_artifacts",
+    "required_manifest_fields",
+    "verify_dataset_fingerprint",
+    "verify_science_hash",
+    "verify_execution_hash",
+    "verify_environment_hash",
+    "verify_claims_hash"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "release-evidence-v1"
+    },
+    "required_run_artifacts": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
+    "required_release_artifacts": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
+    "required_control_artifacts": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
+    "required_manifest_fields": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
+    "verify_dataset_fingerprint": {
+      "type": "boolean"
+    },
+    "verify_science_hash": {
+      "type": "boolean"
+    },
+    "verify_execution_hash": {
+      "type": "boolean"
+    },
+    "verify_environment_hash": {
+      "type": "boolean"
+    },
+    "verify_claims_hash": {
+      "type": "boolean"
+    }
+  }
+}
+

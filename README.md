@@ -22,6 +22,17 @@ Governance policy and release-facing boundaries are explicit and versioned:
 Confirmatory-ready means contract/governance checks passed for frozen scientific runs.
 It does **not** mean deployable clinical decision support.
 
+## Official thesis-final path (release-based)
+
+Official thesis evidence now uses a promotion-only release flow:
+
+1. `thesisml-run-release --release releases/thesis_final_v1/release.json --dataset-manifest <...> --run-class candidate`
+2. `thesisml-promote-run --candidate-run <candidate_run_dir>`
+
+`thesisml-run-protocol`, `thesisml-run-comparison`, and workbook-driven execution remain runnable for compatibility/exploration, but they are non-official after the release migration.
+
+Official release scope is compiled once into `artifacts/scope/selected_samples.csv` and enforced as an exact execution subset. Runtime filters are not authoritative.
+
 ## Expected data layout
 
 Use a BIDS-like hierarchy under a local data root (`Data/` or `data/`):
@@ -110,30 +121,37 @@ Or run the commands directly:
 ```powershell
 python -m uv sync --frozen --extra dev
 python -m uv run python -m pytest -q
-python -m uv run thesisml-run-comparison --help
-python -m uv run thesisml-run-protocol --help
+python -m uv run thesisml-run-release --help
+python -m uv run thesisml-promote-run --help
+python -m uv run thesisml-validate-release --help
+python -m uv run thesisml-validate-dataset --help
 python -m uv run thesisml-run-decision-support --help
 python -m uv run thesisml-workbook --output outputs/workbooks/bootstrap_thesis_experiment_program.xlsx
 ```
 
-Canonical thesis modeling-layer protocol run:
+Official thesis-final candidate run:
 
 ```powershell
-python -m uv run thesisml-run-protocol `
-  --protocol configs/protocols/thesis_canonical_nested_v2.json `
-  --all-suites `
-  --reports-root outputs/reports/confirmatory
+python -m uv run thesisml-run-release `
+  --release releases/thesis_final_v1/release.json `
+  --dataset-manifest demo_data/synthetic_v1/dataset_manifest.json `
+  --run-class candidate
 ```
 
-Canonical protocol note: `thesis_canonical_nested_v2.json` is the canonical modeling-layer protocol, while `thesis_confirmatory_v1.json` is retained for frozen confirmatory replay and hard-gate validation.
+Promotion to the single official run:
+
+```powershell
+python -m uv run thesisml-promote-run `
+  --candidate-run runs/candidate/thesis_final_v1/<candidate_run_id>
+```
+
+Legacy protocol note: `thesis_canonical_nested_v2.json` and `thesis_confirmatory_v1.json` are retained for compatibility replay, not as the official thesis-final authority.
 
 Framework mode lifecycle:
 - `thesisml-run-experiment` -> exploratory mode (`framework_mode=exploratory`, `canonical_run=false`), default reports root `outputs/reports/exploratory/`
-- `thesisml-run-comparison` -> locked comparison mode (`framework_mode=locked_comparison`, `canonical_run=false`), default reports root `outputs/reports/comparisons/`
-- `thesisml-run-protocol` -> confirmatory mode (`framework_mode=confirmatory`, `canonical_run=true`), default reports root `outputs/reports/confirmatory/`
-- official comparison/protocol contracts must pick exactly one methodology policy:
-  - `fixed_baselines_only`
-  - `grouped_nested_tuning`
+- `thesisml-run-comparison` -> locked comparison compatibility mode (`framework_mode=locked_comparison`, non-official)
+- `thesisml-run-protocol` -> confirmatory compatibility mode (`framework_mode=confirmatory`, non-official)
+- official thesis-final authority is the release bundle under `releases/thesis_final_v1/`.
 
 Strict metric consistency policy:
 - official runs must declare one primary metric (`balanced_accuracy`, `macro_f1`, or `accuracy`)
@@ -143,21 +161,21 @@ Strict metric consistency policy:
 - metric drift fallbacks are disallowed; decision-support/workbook/search-space inputs must declare explicit metric fields
 - official run artifacts persist effective metric policy in `config.json` / `metrics.json` under `metric_policy_effective`
 
-Evidence layer policy (official comparison + confirmatory paths):
+Legacy comparison/protocol evidence policy (compatibility paths):
 - contracts must declare explicit `evidence_policy`
 - repeated-run settings (`repeat_count`, `seed_stride`) are compiled into concrete run specs
 - grouped-bootstrap confidence intervals and paired sign-flip comparisons are emitted as machine-readable artifacts
 - calibration artifacts are always emitted (`performed` or explicit `not_applicable`)
 - required evidence package checks (dummy/permutation/untuned baseline when tuning) are reflected in mode-level summaries/decisions
-- official checked-in comparison/protocol specs use `repeat_count=3` by default
-- official checked-in locked comparison specs require significant paired wins (`require_significant_win=true`) for winner selection
+- legacy checked-in comparison/protocol specs use `repeat_count=3` by default
+- legacy checked-in locked comparison specs require significant paired wins (`require_significant_win=true`) for winner selection
 - calibration policy is explicit: calibration is performed when probability scores exist; otherwise runs emit `status=not_applicable` (no synthetic calibration)
 
-Official data-layer policy (official comparison + confirmatory paths):
+Legacy comparison/protocol data-layer policy (compatibility paths):
 - contracts now carry explicit `data_policy` (class balance, missingness, leakage, external-validation compatibility).
-- structural integrity failures are blocking on official paths (missing required columns/fields, invalid grouping requirements, empty filtered subsets, blocking leakage findings).
+- structural integrity failures are blocking on compatibility paths (missing required columns/fields, invalid grouping requirements, empty filtered subsets, blocking leakage findings).
 - threshold checks default to warnings unless explicitly configured as blocking in `data_policy`.
-- official run artifacts now include:
+- compatibility-path run artifacts include:
   - `dataset_card.json`, `dataset_card.md`
   - `dataset_summary.json`, `dataset_summary.csv`
   - `data_quality_report.json`
@@ -166,8 +184,8 @@ Official data-layer policy (official comparison + confirmatory paths):
   - `external_dataset_card.json`, `external_dataset_summary.json`, `external_validation_compatibility.json`
 - external validation in this phase is compatibility-only (schema/coverage compatibility checks); it is explicitly labeled as external/non-confirmatory evidence.
 
-RC-1 hardening policy (official runs):
-- confirmatory and locked-comparison runs enforce strict preflight contract validation before execution
+RC-1 hardening policy (legacy compatibility runs):
+- confirmatory and locked-comparison compatibility runs enforce strict preflight contract validation before execution
 - run artifacts now include deterministic provenance (`git_provenance` and `dataset_fingerprint`)
 - run-level `run_status.json` now exposes structured failure diagnostics (`error_code`, `error_type`, `failure_stage`) and warning/timing/resource summaries
 - run-level terminal status contract is explicit:
@@ -182,7 +200,7 @@ RC-1 hardening policy (official runs):
   - shutdown grace period: 30 seconds
   - absolute hard ceiling: 180 minutes
 - timed-out runs emit `timeout_diagnostics.json` under the run report directory
-- mode-level runners verify official artifact completeness/invariants before returning success
+- mode-level runners verify compatibility artifact completeness/invariants before returning success
 
 Modular architecture highlights:
 - `src/Thesis_ML/experiments/runtime_policies.py` owns framework-context, methodology, and official metric-policy resolution.

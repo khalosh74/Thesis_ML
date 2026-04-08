@@ -267,7 +267,7 @@ def test_comparison_runner_dry_run_emits_artifacts(
     source_comparison = result["source_comparison"]
     assert source_comparison["registered"] is True
     assert source_comparison["config_id"] == "comparison.model_family_comparison_v1"
-    assert source_comparison["lifecycle"] == "active_variant"
+    assert source_comparison["lifecycle"] == "legacy_non_official"
 
     status_payload = json.loads(
         Path(result["artifact_paths"]["execution_status"]).read_text(encoding="utf-8")
@@ -277,7 +277,7 @@ def test_comparison_runner_dry_run_emits_artifacts(
     assert isinstance(status_payload["source_comparison"], dict)
     assert status_payload["source_comparison"]["registered"] is True
     assert status_payload["source_comparison"]["config_id"] == "comparison.model_family_comparison_v1"
-    assert status_payload["source_comparison"]["lifecycle"] == "active_variant"
+    assert status_payload["source_comparison"]["lifecycle"] == "legacy_non_official"
     assert all(run["status"] == "planned" for run in status_payload["runs"])
 
     summary_payload = json.loads(

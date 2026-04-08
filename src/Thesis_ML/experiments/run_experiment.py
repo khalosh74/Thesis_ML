@@ -734,6 +734,23 @@ def run_experiment(
         official_context = dict(resolved_protocol_context)
     if resolved_framework_mode == FrameworkMode.LOCKED_COMPARISON:
         official_context = dict(resolved_comparison_context)
+    release_scope_enforcement = bool(official_context.get("release_scope_enforcement", False))
+    context_compiled_scope_selected_samples_path = official_context.get(
+        "compiled_scope_selected_samples_path"
+    )
+    compiled_scope_selected_samples_path = (
+        Path(str(context_compiled_scope_selected_samples_path)).resolve()
+        if context_compiled_scope_selected_samples_path is not None
+        and str(context_compiled_scope_selected_samples_path).strip()
+        else None
+    )
+    context_compiled_scope_manifest_path = official_context.get("compiled_scope_manifest_path")
+    compiled_scope_manifest_path = (
+        Path(str(context_compiled_scope_manifest_path)).resolve()
+        if context_compiled_scope_manifest_path is not None
+        and str(context_compiled_scope_manifest_path).strip()
+        else None
+    )
     context_feature_recipe_id = official_context.get("feature_recipe_id")
     if context_feature_recipe_id is not None:
         context_recipe_id = resolve_preprocessing_recipe(
@@ -1126,6 +1143,20 @@ def run_experiment(
         FrameworkMode.CONFIRMATORY,
         FrameworkMode.LOCKED_COMPARISON,
     }:
+        if bool(release_scope_enforcement):
+            if compiled_scope_selected_samples_path is None:
+                raise ValueError(
+                    "release_scope_enforcement=true requires compiled_scope_selected_samples_path."
+                )
+            if compiled_scope_manifest_path is None:
+                raise ValueError(
+                    "release_scope_enforcement=true requires compiled_scope_manifest_path."
+                )
+            if Path(index_csv).resolve() != compiled_scope_selected_samples_path:
+                raise ValueError(
+                    "Official release scope enforcement requires index_csv to match "
+                    "compiled_scope_selected_samples_path exactly."
+                )
         preflight_start = perf_counter()
         preflight = validate_official_preflight(
             framework_mode=resolved_framework_mode,
@@ -1160,6 +1191,9 @@ def run_experiment(
             subgroup_min_classes_per_group=int(confirmatory_subgroup_min_classes),
             subgroup_report_small_groups=bool(confirmatory_subgroup_report_small_groups),
             official_context=official_context,
+            release_scope_enforcement=bool(release_scope_enforcement),
+            compiled_scope_manifest_path=compiled_scope_manifest_path,
+            compiled_scope_selected_samples_path=compiled_scope_selected_samples_path,
         )
         dataset_fingerprint = collect_dataset_fingerprint(
             index_csv=index_csv,
@@ -1439,6 +1473,9 @@ def run_experiment(
                         test_subject=test_subject,
                         filter_task=filter_task,
                         filter_modality=filter_modality,
+                        release_scope_enforcement=bool(release_scope_enforcement),
+                        compiled_scope_selected_samples_path=compiled_scope_selected_samples_path,
+                        compiled_scope_manifest_path=compiled_scope_manifest_path,
                         feature_space=resolved_feature_space,
                         roi_spec_path=resolved_roi_spec_path,
                         preprocessing_strategy=resolved_preprocessing_config.strategy,

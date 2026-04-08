@@ -1,0 +1,17 @@
+{
+  "schema_version": "release-environment-v1",
+  "official_python": "3.13",
+  "requires_uv_lock": true,
+  "cpu_only_official": true,
+  "supported_os": [
+    "windows",
+    "linux"
+  ],
+  "required_project_scripts": [
+    "thesisml-run-release",
+    "thesisml-promote-run",
+    "thesisml-validate-release",
+    "thesisml-validate-dataset"
+  ]
+}
+

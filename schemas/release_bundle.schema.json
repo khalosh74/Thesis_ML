@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Release Bundle",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "release_id",
+    "release_version",
+    "status",
+    "title",
+    "aliases",
+    "science_path",
+    "execution_path",
+    "environment_path",
+    "evidence_path",
+    "claims_path"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "release-bundle-v1"
+    },
+    "release_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "release_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "frozen_candidate_only",
+        "official"
+      ]
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1
+    },
+    "aliases": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
+    "science_path": {
+      "type": "string",
+      "minLength": 1
+    },
+    "execution_path": {
+      "type": "string",
+      "minLength": 1
+    },
+    "environment_path": {
+      "type": "string",
+      "minLength": 1
+    },
+    "evidence_path": {
+      "type": "string",
+      "minLength": 1
+    },
+    "claims_path": {
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}
+

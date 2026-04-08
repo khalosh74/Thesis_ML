@@ -117,6 +117,9 @@ DEFAULT_PROTOCOL_REPORTS_ROOT = DEFAULT_CONFIRMATORY_REPORTS_ROOT
 DEFAULT_COMPARISON_SPEC_DIR = PROJECT_ROOT / "configs" / "comparisons"
 DEFAULT_PROTOCOLS_DIR = PROJECT_ROOT / "configs" / "protocols"
 DEFAULT_TARGET_CONFIGS_DIR = PROJECT_ROOT / "configs" / "targets"
+DEFAULT_RELEASES_DIR = PROJECT_ROOT / "releases"
+DEFAULT_RELEASE_REGISTRY_PATH = DEFAULT_RELEASES_DIR / "release_registry.json"
+DEFAULT_THESIS_FINAL_RELEASE_PATH = DEFAULT_RELEASES_DIR / "thesis_final_v1" / "release.json"
 
 # thesis_canonical_nested_v2.json is the canonical nested-tuning workflow
 # thesis_confirmatory_v1.json is the legacy frozen confirmatory path retained for hard-gate validation

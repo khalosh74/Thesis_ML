@@ -27,6 +27,10 @@ data/**
 Data/**
 outputs/**
 server/**
+!data/contracts/
+!data/contracts/**
+!Data/contracts/
+!Data/contracts/**
 
 # Local-only notebooks currently in repo root
 hello.ipynb

@@ -20,6 +20,8 @@ _EXPECTED_LIFECYCLE_STATUSES = [
     "frozen_confirmatory",
     "compatibility",
     "archived_deprecated",
+    "legacy_non_official",
+    "official_release_authority",
 ]
 
 _EXPECTED_ALIASES = {
@@ -32,19 +34,21 @@ _EXPECTED_ALIASES = {
     "registry.decision_support_package_default": "registry.decision_support_package_default",
     "registry.decision_support_default": "registry.decision_support_thesis_runtime",
     "registry.decision_support_registry": "registry.decision_support_package_default",
+    "release.thesis_final_current": "release.thesis_final_v1",
 }
 
 _EXPECTED_LIFECYCLE_BY_ID = {
     "target.affect_mapping_v2": "active_default",
-    "protocol.thesis_canonical_v1": "active_variant",
+    "protocol.thesis_canonical_v1": "legacy_non_official",
     "protocol.thesis_canonical_nested_v1": "compatibility",
-    "protocol.thesis_canonical_nested_v2": "active_default",
-    "protocol.thesis_confirmatory_v1": "frozen_confirmatory",
-    "comparison.model_family_comparison_v1": "active_variant",
+    "protocol.thesis_canonical_nested_v2": "legacy_non_official",
+    "protocol.thesis_confirmatory_v1": "legacy_non_official",
+    "comparison.model_family_comparison_v1": "legacy_non_official",
     "comparison.model_family_grouped_nested_comparison_v1": "compatibility",
-    "comparison.model_family_grouped_nested_comparison_v2": "active_default",
-    "registry.decision_support_thesis_runtime": "active_default",
-    "registry.decision_support_package_default": "active_variant",
+    "comparison.model_family_grouped_nested_comparison_v2": "legacy_non_official",
+    "registry.decision_support_thesis_runtime": "legacy_non_official",
+    "registry.decision_support_package_default": "legacy_non_official",
+    "release.thesis_final_v1": "official_release_authority",
 }
 
 
@@ -112,6 +116,7 @@ def test_registry_lists_every_current_config_json_file() -> None:
     )
     expected_paths.add("configs/decision_support_registry.json")
     expected_paths.add("configs/decision_support_registry_revised_execution.json")
+    expected_paths.add("releases/thesis_final_v1/release.json")
 
     assert registry_paths == expected_paths
 
@@ -203,6 +208,8 @@ def test_version_alignment_with_underlying_files() -> None:
             assert version == str(path_payload["schema_version"])
         elif kind == "target":
             assert version == path.stem
+        elif kind == "release_bundle":
+            assert version == str(path_payload["release_version"])
         else:
             raise AssertionError(f"Unsupported kind in registry: {kind}")
 

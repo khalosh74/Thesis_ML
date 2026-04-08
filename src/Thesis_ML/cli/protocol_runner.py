@@ -40,16 +40,16 @@ def _default_cache_dir() -> Path:
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
-            "Run official thesis suites from a canonical protocol. "
-            "Science-affecting parameters are loaded from protocol JSON only."
+            "Run legacy/compatibility confirmatory suites from protocol JSON. "
+            "After release migration this command is non-official (use thesisml-run-release + thesisml-promote-run)."
         )
     )
     parser.add_argument(
         "--protocol",
         default=None,
         help=(
-            "Path to confirmatory protocol JSON. Defaults to the frozen "
-            "confirmatory protocol for final science-freeze runs."
+            "Path to confirmatory protocol JSON (legacy compatibility path). "
+            "Defaults to the frozen confirmatory protocol replay asset."
         ),
     )
     parser.add_argument(

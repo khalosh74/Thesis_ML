@@ -1,5 +1,14 @@
 # Release Gate
 
+Official thesis-final execution path in this repository is now release-based:
+
+1. `thesisml-run-release --run-class candidate`
+2. `thesisml-promote-run --candidate-run <candidate_run_dir>`
+
+`thesisml-run-protocol`, `thesisml-run-comparison`, and workbook-driven paths are kept for compatibility but are non-official after the release migration.
+
+Official release scope is compiled once into `artifacts/scope/selected_samples.csv` and enforced as an exact execution subset. Runtime filters are not authoritative.
+
 This repository uses a tag-triggered release validation workflow:
 
 - Workflow: `.github/workflows/release_gate.yml`

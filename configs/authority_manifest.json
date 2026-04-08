@@ -1,5 +1,7 @@
 {
   "schema_version": "authority-manifest-v1",
+  "status": "legacy_non_official",
+  "note": "Legacy authority manifest retained for compatibility. Official top-level authority is releases/thesis_final_v1/release.json.",
   "scientific": {
     "confirmatory_scope": "configs/confirmatory/confirmatory_scope_v1.json",
     "claim_rules": "docs/Science/CLAIM_EVALUATION_RULES.md",

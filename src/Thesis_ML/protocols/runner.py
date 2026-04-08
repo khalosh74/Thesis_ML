@@ -542,6 +542,7 @@ def execute_compiled_protocol(
     gpu_device_id: int | None = None,
     deterministic_compute: bool = False,
     allow_backend_fallback: bool = False,
+    protocol_context_overrides_by_run_id: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     if force and resume:
         raise ValueError(
@@ -774,6 +775,15 @@ def execute_compiled_protocol(
                     else None
                 ),
             )
+            if isinstance(protocol_context_overrides_by_run_id, dict):
+                override_payload = protocol_context_overrides_by_run_id.get(str(spec.run_id))
+                if isinstance(override_payload, dict):
+                    protocol_context_payload.update(dict(override_payload))
+                    protocol_context_payload = validate_official_context_payload(
+                        framework_mode=FrameworkMode.CONFIRMATORY,
+                        context_name="protocol_context",
+                        context=protocol_context_payload,
+                    )
             protocol_context_payload["timeout_policy"] = dict(timeout_policy_effective)
             run_kwargs: dict[str, Any] = {
                 "index_csv": str(Path(index_csv)),
@@ -1127,6 +1137,7 @@ def compile_and_run_protocol(
     gpu_device_id: int | None = None,
     deterministic_compute: bool = False,
     allow_backend_fallback: bool = False,
+    protocol_context_overrides_by_run_id: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     if isinstance(protocol.confirmatory_lock, dict):
         analysis_status = str(protocol.confirmatory_lock.get("analysis_status", "")).strip().lower()
@@ -1165,4 +1176,5 @@ def compile_and_run_protocol(
         gpu_device_id=gpu_device_id,
         deterministic_compute=deterministic_compute,
         allow_backend_fallback=allow_backend_fallback,
+        protocol_context_overrides_by_run_id=protocol_context_overrides_by_run_id,
     )

@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Release Claims",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "primary_claim",
+    "secondary_claim",
+    "prohibited_claims",
+    "evidence_boundaries",
+    "result_usage_rules"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "release-claims-v1"
+    },
+    "primary_claim": {
+      "type": "string",
+      "minLength": 1
+    },
+    "secondary_claim": {
+      "type": "string",
+      "minLength": 1
+    },
+    "prohibited_claims": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
+    "evidence_boundaries": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
+    "result_usage_rules": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    }
+  }
+}
+

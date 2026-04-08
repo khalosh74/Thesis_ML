@@ -16,6 +16,8 @@ from Thesis_ML.script_support.io import file_sha256
 DEFAULT_OUTPUT = Path("demo_data") / "synthetic_v1"
 DATA_ROOT_DIRNAME = "data_root"
 INDEX_FILENAME = "dataset_index.csv"
+RELEASE_INDEX_FILENAME = "release_dataset_index.csv"
+RELEASE_DATASET_MANIFEST_FILENAME = "dataset_manifest.json"
 MANIFEST_FILENAME = "demo_dataset_manifest.json"
 README_FILENAME = "README.md"
 MANIFEST_SCHEMA_VERSION = "demo-dataset-manifest-v1"
@@ -114,7 +116,7 @@ def _manifest_payload(*, output_dir: Path, index_csv: Path) -> dict[str, Any]:
     for candidate in sorted(output_dir.rglob("*")):
         if not candidate.is_file():
             continue
-        if candidate.name == MANIFEST_FILENAME:
+        if candidate.name in {MANIFEST_FILENAME, RELEASE_DATASET_MANIFEST_FILENAME}:
             continue
         relative = candidate.relative_to(output_dir).as_posix()
         files.append(
@@ -173,6 +175,61 @@ def _manifest_payload(*, output_dir: Path, index_csv: Path) -> dict[str, Any]:
     }
 
 
+def _release_index_payload(index_df: pd.DataFrame) -> pd.DataFrame:
+    release_df = index_df.copy()
+    release_df["task"] = release_df["modality"].astype(str).map(
+        lambda value: "emo" if value == "audio" else "recog"
+    )
+    release_df["modality"] = "audiovisual"
+    return release_df.sort_values(
+        by=["subject", "session", "run", "beta_index"],
+        kind="mergesort",
+    ).reset_index(drop=True)
+
+
+def _release_dataset_manifest_payload(*, output_dir: Path, release_index_csv: Path) -> dict[str, Any]:
+    release_index = pd.read_csv(release_index_csv)
+    required_columns = [
+        "sample_id",
+        "subject",
+        "session",
+        "task",
+        "modality",
+        "emotion",
+        "coarse_affect",
+        "beta_path",
+        "mask_path",
+        "subject_session",
+        "subject_session_bas",
+    ]
+    missing_columns = sorted(set(required_columns) - set(release_index.columns))
+    if missing_columns:
+        raise ValueError(
+            "Release demo index is missing required columns: " + ", ".join(missing_columns)
+        )
+
+    sessions_by_subject = {
+        str(subject): int(group["session"].astype(str).nunique())
+        for subject, group in release_index.groupby("subject", sort=True)
+    }
+
+    return {
+        "schema_version": "dataset-instance-v1",
+        "dataset_id": "thesis_ml_synthetic_v1",
+        "dataset_contract_version": "fmri_beta_dataset_v1",
+        "dataset_fingerprint": file_sha256(release_index_csv),
+        "index_csv": RELEASE_INDEX_FILENAME,
+        "data_root": DATA_ROOT_DIRNAME,
+        "cache_dir": "cache",
+        "created_at": "2026-04-08T00:00:00Z",
+        "source_extraction_version": "synthetic_v1",
+        "sample_unit": "beta_event",
+        "required_columns": required_columns,
+        "subject_count": int(release_index["subject"].astype(str).nunique()),
+        "session_counts_by_subject": sessions_by_subject,
+    }
+
+
 def generate_demo_dataset(*, output_dir: Path, force: bool) -> dict[str, Any]:
     if output_dir.exists():
         if not force:
@@ -208,8 +265,17 @@ def generate_demo_dataset(*, output_dir: Path, force: bool) -> dict[str, Any]:
         kind="mergesort",
     ).reset_index(drop=True)
     index_df.to_csv(index_csv, index=False)
+    release_index_df = _release_index_payload(index_df)
+    release_index_csv = output_dir / RELEASE_INDEX_FILENAME
+    release_index_df.to_csv(release_index_csv, index=False)
 
     _write_readme(output_dir / README_FILENAME)
+    release_manifest = _release_dataset_manifest_payload(
+        output_dir=output_dir,
+        release_index_csv=release_index_csv,
+    )
+    release_manifest_path = output_dir / RELEASE_DATASET_MANIFEST_FILENAME
+    release_manifest_path.write_text(f"{json.dumps(release_manifest, indent=2)}\n", encoding="utf-8")
     manifest = _manifest_payload(output_dir=output_dir, index_csv=index_csv)
     manifest_path = output_dir / MANIFEST_FILENAME
     manifest_path.write_text(f"{json.dumps(manifest, indent=2)}\n", encoding="utf-8")
@@ -217,6 +283,8 @@ def generate_demo_dataset(*, output_dir: Path, force: bool) -> dict[str, Any]:
         "output_dir": str(output_dir.resolve()),
         "data_root": str(data_root.resolve()),
         "index_csv": str(index_csv.resolve()),
+        "release_index_csv": str(release_index_csv.resolve()),
+        "release_dataset_manifest_path": str(release_manifest_path.resolve()),
         "manifest_path": str(manifest_path.resolve()),
         "n_rows": int(manifest["n_rows"]),
     }

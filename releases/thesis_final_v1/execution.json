@@ -1,0 +1,31 @@
+{
+  "schema_version": "release-execution-v1",
+  "run_classes_allowed": [
+    "scratch",
+    "exploratory",
+    "candidate"
+  ],
+  "official_creation_policy": "promotion_only",
+  "hardware_mode": "cpu_only",
+  "max_parallel_runs": 1,
+  "deterministic_compute": true,
+  "allow_backend_fallback": false,
+  "cache_policy": "local_rebuildable",
+  "run_root": "runs",
+  "candidate_root": "runs/candidate",
+  "official_root": "runs/official",
+  "exploratory_root": "runs/exploratory",
+  "scratch_root": "runs/scratch",
+  "default_behavior": "fresh",
+  "allow_resume_for": [
+    "scratch",
+    "exploratory",
+    "candidate"
+  ],
+  "allow_force_for": [
+    "scratch",
+    "exploratory",
+    "candidate"
+  ]
+}
+

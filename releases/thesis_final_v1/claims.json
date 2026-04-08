@@ -1,0 +1,22 @@
+{
+  "schema_version": "release-claims-v1",
+  "primary_claim": "Within-subject held-out-session coarse_affect decoding is the only primary thesis claim for this release.",
+  "secondary_claim": "Cross-person transfer is secondary and descriptive-only for this release.",
+  "prohibited_claims": [
+    "No causal claims.",
+    "No clinical claims.",
+    "No localization claims from coefficients.",
+    "No external generalization claims."
+  ],
+  "evidence_boundaries": [
+    "Primary evidence comes only from within-subject LOSO session results.",
+    "Secondary analyses cannot replace the primary claim.",
+    "Control evidence supports validity but does not become a standalone claim."
+  ],
+  "result_usage_rules": [
+    "Use only release-promoted official outputs as thesis-final evidence.",
+    "Candidate/exploratory/scratch runs are non-official.",
+    "Treat secondary metrics as supporting context, not decision authority."
+  ]
+}
+

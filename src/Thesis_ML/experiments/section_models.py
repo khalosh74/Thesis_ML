@@ -31,6 +31,9 @@ class DatasetSelectionInput(_SectionModel):
     test_subject: str | None = None
     filter_task: str | None = None
     filter_modality: str | None = None
+    release_scope_enforcement: bool = False
+    compiled_scope_selected_samples_path: Path | None = None
+    compiled_scope_manifest_path: Path | None = None
 
     @model_validator(mode="after")
     def _validate_mode_requirements(self) -> DatasetSelectionInput:
@@ -46,6 +49,10 @@ class DatasetSelectionInput(_SectionModel):
                 raise ValueError(
                     "cv='frozen_cross_person_transfer' requires a non-empty test_subject."
                 )
+        if bool(self.release_scope_enforcement) and self.compiled_scope_selected_samples_path is None:
+            raise ValueError(
+                "release_scope_enforcement=true requires compiled_scope_selected_samples_path."
+            )
         return self
 
 

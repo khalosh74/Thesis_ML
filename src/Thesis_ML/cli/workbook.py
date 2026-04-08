@@ -10,7 +10,10 @@ from Thesis_ML.workbook.validation import validate_workbook
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Generate and validate the thesis experiment workbook template."
+        description=(
+            "Generate and validate the workbook template for legacy/non-official "
+            "decision-support workflows."
+        )
     )
     parser.add_argument(
         "--output",

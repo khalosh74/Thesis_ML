@@ -76,6 +76,9 @@ class SegmentExecutionRequest:
     test_subject: str | None
     filter_task: str | None
     filter_modality: str | None
+    release_scope_enforcement: bool = False
+    compiled_scope_selected_samples_path: Path | None = None
+    compiled_scope_manifest_path: Path | None = None
     feature_space: str = "whole_brain_masked"
     roi_spec_path: Path | None = None
     preprocessing_strategy: str | None = None
@@ -539,6 +542,9 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
                 test_subject=request.test_subject,
                 filter_task=request.filter_task,
                 filter_modality=request.filter_modality,
+                release_scope_enforcement=bool(request.release_scope_enforcement),
+                compiled_scope_selected_samples_path=request.compiled_scope_selected_samples_path,
+                compiled_scope_manifest_path=request.compiled_scope_manifest_path,
             )
         ).selected_index_df
 
@@ -671,6 +677,9 @@ def execute_section_segment(request: SegmentExecutionRequest) -> SegmentExecutio
                     test_subject=request.test_subject,
                     filter_task=request.filter_task,
                     filter_modality=request.filter_modality,
+                    release_scope_enforcement=bool(request.release_scope_enforcement),
+                    compiled_scope_selected_samples_path=request.compiled_scope_selected_samples_path,
+                    compiled_scope_manifest_path=request.compiled_scope_manifest_path,
                 )
             )
             selected_index_df = selection_output.selected_index_df

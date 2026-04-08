@@ -1,0 +1,404 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Release Science",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "release_id",
+    "sample_unit",
+    "dataset_contract",
+    "target",
+    "scope",
+    "feature_policy",
+    "model_policy",
+    "split_policy",
+    "controls",
+    "multiplicity",
+    "interpretation_limits",
+    "reporting_requirements"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "release-science-v1"
+    },
+    "release_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "sample_unit": {
+      "type": "string",
+      "minLength": 1
+    },
+    "dataset_contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "dataset_id",
+        "dataset_contract_version",
+        "dataset_fingerprint_required",
+        "require_spatial_compatibility_checks",
+        "minimum_subjects",
+        "minimum_sessions_per_subject",
+        "required_columns"
+      ],
+      "properties": {
+        "dataset_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "dataset_contract_version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "dataset_fingerprint_required": {
+          "type": "boolean"
+        },
+        "require_spatial_compatibility_checks": {
+          "type": "boolean"
+        },
+        "minimum_subjects": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "minimum_sessions_per_subject": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "required_columns": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        }
+      }
+    },
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "mapping_path",
+        "mapping_hash"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "mapping_path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "mapping_hash": {
+          "type": "string",
+          "pattern": "^[a-fA-F0-9]{64}$"
+        }
+      }
+    },
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "main_tasks",
+        "main_modality",
+        "within_subjects",
+        "transfer_pairs"
+      ],
+      "properties": {
+        "main_tasks": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
+        "tasks": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
+        "main_modality": {
+          "type": "string",
+          "minLength": 1
+        },
+        "modality": {
+          "type": "string",
+          "minLength": 1
+        },
+        "within_subjects": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
+        "subjects": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
+        "target": {
+          "type": "string",
+          "minLength": 1
+        },
+        "strict_scope": {
+          "type": "boolean"
+        },
+        "transfer_pairs": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "train_subject",
+              "test_subject"
+            ],
+            "properties": {
+              "train_subject": {
+                "type": "string",
+                "minLength": 1
+              },
+              "test_subject": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          },
+          "uniqueItems": true
+        }
+      }
+    },
+    "feature_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "feature_space",
+        "preprocessing_strategy",
+        "dimensionality_strategy"
+      ],
+      "properties": {
+        "feature_space": {
+          "type": "string",
+          "minLength": 1
+        },
+        "preprocessing_strategy": {
+          "type": "string",
+          "minLength": 1
+        },
+        "dimensionality_strategy": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "model_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "model_family",
+        "class_weight_policy",
+        "methodology_policy_name",
+        "tuning_enabled",
+        "deterministic_execution"
+      ],
+      "properties": {
+        "model_family": {
+          "type": "string",
+          "minLength": 1
+        },
+        "class_weight_policy": {
+          "type": "string",
+          "minLength": 1
+        },
+        "methodology_policy_name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "tuning_enabled": {
+          "type": "boolean"
+        },
+        "deterministic_execution": {
+          "type": "boolean"
+        }
+      }
+    },
+    "split_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "primary_analysis",
+        "secondary_analysis"
+      ],
+      "properties": {
+        "primary_analysis": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "split",
+            "metric",
+            "secondary_metrics",
+            "seed"
+          ],
+          "properties": {
+            "split": {
+              "type": "string",
+              "minLength": 1
+            },
+            "metric": {
+              "type": "string",
+              "minLength": 1
+            },
+            "secondary_metrics": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "uniqueItems": true
+            },
+            "seed": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        },
+        "secondary_analysis": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "split"
+          ],
+          "properties": {
+            "split": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      }
+    },
+    "controls": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "dummy_baseline",
+        "permutation_test",
+        "n_permutations"
+      ],
+      "properties": {
+        "dummy_baseline": {
+          "type": "boolean"
+        },
+        "permutation_test": {
+          "type": "boolean"
+        },
+        "n_permutations": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "multiplicity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "primary_hypotheses",
+        "primary_alpha",
+        "secondary_policy",
+        "exploratory_claims_allowed"
+      ],
+      "properties": {
+        "primary_hypotheses": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "primary_alpha": {
+          "type": "number",
+          "exclusiveMinimum": 0.0,
+          "maximum": 1.0
+        },
+        "secondary_policy": {
+          "type": "string",
+          "minLength": 1
+        },
+        "exploratory_claims_allowed": {
+          "type": "boolean"
+        }
+      }
+    },
+    "interpretation_limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "no_causal_claims",
+        "no_clinical_claims",
+        "no_localization_claims_from_coefficients",
+        "no_external_generalization_claim",
+        "secondary_results_not_primary_evidence"
+      ],
+      "properties": {
+        "no_causal_claims": {
+          "type": "boolean"
+        },
+        "no_clinical_claims": {
+          "type": "boolean"
+        },
+        "no_localization_claims_from_coefficients": {
+          "type": "boolean"
+        },
+        "no_external_generalization_claim": {
+          "type": "boolean"
+        },
+        "secondary_results_not_primary_evidence": {
+          "type": "boolean"
+        }
+      }
+    },
+    "reporting_requirements": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "require_protocol_id",
+        "require_dataset_fingerprint",
+        "require_mapping_hash",
+        "require_interpretation_limits",
+        "require_deviation_log"
+      ],
+      "properties": {
+        "require_protocol_id": {
+          "type": "boolean"
+        },
+        "require_dataset_fingerprint": {
+          "type": "boolean"
+        },
+        "require_mapping_hash": {
+          "type": "boolean"
+        },
+        "require_interpretation_limits": {
+          "type": "boolean"
+        },
+        "require_deviation_log": {
+          "type": "boolean"
+        }
+      }
+    }
+  }
+}

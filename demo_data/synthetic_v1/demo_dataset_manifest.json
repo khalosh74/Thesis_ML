@@ -42,7 +42,7 @@
     "regressor_label",
     "bas"
   ],
-  "index_csv_sha256": "c37a9f27ad275ef88ee28c0d24a25c9b4df3364d059e27406b3769976c23450f",
+  "index_csv_sha256": "31c878eae3f3b866f45e14fb099587166b42aad6149518578d952c4f5c4e5386",
   "files": [
     {
       "path": "cache/.gitkeep",
@@ -56,8 +56,8 @@
     },
     {
       "path": "data_root/processed/extractions/sub-001/ses-01/BAS2/session_summary.json",
-      "sha256": "02fd3dff0f6b2e66221748f34c8dd54fc0a51dfcdac1139c88d4762bc6493150",
-      "size_bytes": 501
+      "sha256": "d6206734a46ad8f1c4294615c652a774be9f7cea9879a2d6d99f0a32780a30a8",
+      "size_bytes": 500
     },
     {
       "path": "data_root/processed/extractions/sub-001/ses-02/BAS2/regressor_beta_mapping.csv",
@@ -66,8 +66,8 @@
     },
     {
       "path": "data_root/processed/extractions/sub-001/ses-02/BAS2/session_summary.json",
-      "sha256": "adfb3807d195da6c5cde87315d7e48e2fa2da8942beccdf6e66e7b699c1b41c1",
-      "size_bytes": 501
+      "sha256": "423b9ead6028ecd5f7bc56b2b2ac7601dcdbbf8d75dc8e7589b9b27f5065fc6e",
+      "size_bytes": 500
     },
     {
       "path": "data_root/processed/extractions/sub-001/ses-03/BAS2/regressor_beta_mapping.csv",
@@ -76,8 +76,8 @@
     },
     {
       "path": "data_root/processed/extractions/sub-001/ses-03/BAS2/session_summary.json",
-      "sha256": "5e20a5aca46098942ddac9c29e25c8add92c6d0a2a6ead09acf3e5bccde83c3d",
-      "size_bytes": 501
+      "sha256": "bedbd6f88f2ebd11362c7fe98e0ba3f792f190e421f982894b817213dd0b20d4",
+      "size_bytes": 500
     },
     {
       "path": "data_root/processed/extractions/sub-002/ses-01/BAS2/regressor_beta_mapping.csv",
@@ -86,8 +86,8 @@
     },
     {
       "path": "data_root/processed/extractions/sub-002/ses-01/BAS2/session_summary.json",
-      "sha256": "f84eb7946a5701e170d4e05375f547a4edee2baefac35ee8bac2c42380d5c71f",
-      "size_bytes": 501
+      "sha256": "e972aadbd96b7ad5cc30b36284604d53d8e53694fd7d7d170037e6e4413f1dec",
+      "size_bytes": 500
     },
     {
       "path": "data_root/processed/extractions/sub-002/ses-02/BAS2/regressor_beta_mapping.csv",
@@ -96,8 +96,8 @@
     },
     {
       "path": "data_root/processed/extractions/sub-002/ses-02/BAS2/session_summary.json",
-      "sha256": "d6d5695f82f6a6abd5c45819bef728c228692c4f3593052fc6bd411f2423a635",
-      "size_bytes": 501
+      "sha256": "a98c2c9ac3551f9627e8ea9a30c25cce6c9e4c45391ea1b3e1f12bab63af9bd3",
+      "size_bytes": 500
     },
     {
       "path": "data_root/processed/extractions/sub-002/ses-03/BAS2/regressor_beta_mapping.csv",
@@ -106,8 +106,8 @@
     },
     {
       "path": "data_root/processed/extractions/sub-002/ses-03/BAS2/session_summary.json",
-      "sha256": "01b9acc19c4437da3e57dbed6ce42d0e134bc8b6f140a2d998f54188456c2d32",
-      "size_bytes": 501
+      "sha256": "24caa64221d4193b35b0d303b3f650692b452a17fdb59182a081ba369b5c4a88",
+      "size_bytes": 500
     },
     {
       "path": "data_root/sub-001/ses-01/BAS2/beta_0001.nii",
@@ -291,13 +291,18 @@
     },
     {
       "path": "dataset_index.csv",
-      "sha256": "c37a9f27ad275ef88ee28c0d24a25c9b4df3364d059e27406b3769976c23450f",
-      "size_bytes": 19057
+      "sha256": "31c878eae3f3b866f45e14fb099587166b42aad6149518578d952c4f5c4e5386",
+      "size_bytes": 19009
     },
     {
       "path": "README.md",
       "sha256": "a999976b8d826bde556637c44070ca898d5676636ca6b323d5403bfac31e1cdf",
       "size_bytes": 721
+    },
+    {
+      "path": "release_dataset_index.csv",
+      "sha256": "239ec3803e8f9e34baa13f8b17c395f671dd371060184055c7860848d60a9b6e",
+      "size_bytes": 19081
     }
   ]
 }

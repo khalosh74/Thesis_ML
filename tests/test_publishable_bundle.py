@@ -155,11 +155,11 @@ def test_build_publishable_bundle_supports_alias_spec_flags(tmp_path: Path) -> N
     assert manifest["spec_bundle_validation"]["matched_bundle_id"] == "bundle.thesis_confirmatory_v1_publishable"
     protocol_identity = manifest["spec_registry_identity"]["confirmatory_protocol"]
     assert protocol_identity["config_id"] == "protocol.thesis_confirmatory_v1"
-    assert protocol_identity["lifecycle"] == "frozen_confirmatory"
+    assert protocol_identity["lifecycle"] == "legacy_non_official"
 
     comparison_identity = manifest["spec_registry_identity"]["comparison_spec"]
     assert comparison_identity["config_id"] == "comparison.model_family_grouped_nested_comparison_v2"
-    assert comparison_identity["lifecycle"] == "active_default"
+    assert comparison_identity["lifecycle"] == "legacy_non_official"
 
 
 def test_build_publishable_bundle_default_specs_include_valid_bundle_validation(

@@ -1,5 +1,8 @@
 # Workbook-Driven Workflow
 
+Workbook-driven execution is now a non-official compatibility/exploratory path.
+Official thesis-final evidence uses release bundle execution and promotion.
+
 This framework supports a full round trip:
 
 1. workbook template generation

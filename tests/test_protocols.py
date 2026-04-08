@@ -398,7 +398,7 @@ def test_confirmatory_freeze_subgroup_rows_mark_insufficient_data(
     source_protocol = result["source_protocol"]
     assert source_protocol["registered"] is True
     assert source_protocol["config_id"] == "protocol.thesis_confirmatory_v1"
-    assert source_protocol["lifecycle"] == "frozen_confirmatory"
+    assert source_protocol["lifecycle"] == "legacy_non_official"
     successful = [row for row in result["run_results"] if row["status"] == "success"]
     assert successful
     config = json.loads(Path(str(successful[0]["config_path"])).read_text(encoding="utf-8"))
@@ -530,7 +530,7 @@ def test_protocol_runner_dry_run_emits_protocol_artifacts(
     source_protocol = result["source_protocol"]
     assert source_protocol["registered"] is True
     assert source_protocol["config_id"] == "protocol.thesis_canonical_nested_v2"
-    assert source_protocol["lifecycle"] == "active_default"
+    assert source_protocol["lifecycle"] == "legacy_non_official"
 
     execution_status = json.loads(
         Path(result["artifact_paths"]["execution_status"]).read_text(encoding="utf-8")
@@ -546,7 +546,7 @@ def test_protocol_runner_dry_run_emits_protocol_artifacts(
     assert isinstance(execution_status["source_protocol"], dict)
     assert execution_status["source_protocol"]["registered"] is True
     assert execution_status["source_protocol"]["config_id"] == "protocol.thesis_canonical_nested_v2"
-    assert execution_status["source_protocol"]["lifecycle"] == "active_default"
+    assert execution_status["source_protocol"]["lifecycle"] == "legacy_non_official"
     assert all(row["status"] == "planned" for row in execution_status["runs"])
     assert suite_summary["metric_policy_effective"]["primary_metric"] == "balanced_accuracy"
     assert suite_summary["metric_policy_effective"]["decision_metric"] == "balanced_accuracy"

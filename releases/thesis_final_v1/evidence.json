@@ -1,0 +1,62 @@
+{
+  "schema_version": "release-evidence-v1",
+  "required_run_artifacts": [
+    "metrics.json",
+    "fold_metrics.csv",
+    "fold_splits.csv",
+    "predictions.csv",
+    "subgroup_report.csv",
+    "spatial_report.json",
+    "run_status.json"
+  ],
+  "required_release_artifacts": [
+    "release_manifest.json",
+    "release_summary.json",
+    "evidence_verification.json",
+    "dataset_snapshot.json",
+    "warnings.json",
+    "deviations.json",
+    "artifacts/scope/selected_samples.csv",
+    "artifacts/scope/scope_manifest.json",
+    "verification/scope_alignment_verification.json"
+  ],
+  "required_control_artifacts": [
+    "suite_summary.json",
+    "deviation_log.json",
+    "claim_outcomes.json"
+  ],
+  "required_manifest_fields": [
+    "run_id",
+    "run_class",
+    "release_id",
+    "release_version",
+    "release_hash",
+    "science_hash",
+    "execution_hash",
+    "environment_hash",
+    "evidence_hash",
+    "claims_hash",
+    "dataset_manifest_path",
+    "dataset_fingerprint",
+    "git_commit",
+    "git_dirty",
+    "python_version",
+    "platform",
+    "timestamp_utc",
+    "parent_run_id",
+    "status",
+    "promotable",
+    "official",
+    "cache_policy",
+    "command_line",
+    "compiled_scope_manifest_path",
+    "selected_samples_path",
+    "selected_sample_ids_sha256",
+    "scope_alignment_passed"
+  ],
+  "verify_dataset_fingerprint": true,
+  "verify_science_hash": true,
+  "verify_execution_hash": true,
+  "verify_environment_hash": true,
+  "verify_claims_hash": true
+}

@@ -1,5 +1,9 @@
 # Confirmatory-Ready Criteria
 
+This document now describes compatibility validation for legacy confirmatory outputs.
+Official thesis-final evidence is governed by the release flow:
+`thesisml-run-release` (candidate) -> `thesisml-promote-run` (official).
+
 This document defines the release-facing criteria for labeling an official output as
 **confirmatory-ready**.
 

@@ -53,6 +53,10 @@ thesisml-run-protocol = "Thesis_ML.cli.protocol_runner:main"
 thesisml-run-decision-support = "Thesis_ML.cli.decision_support:main"
 thesisml-run-baseline = "Thesis_ML.cli.baseline:main"
 thesisml-workbook = "Thesis_ML.cli.workbook:main"
+thesisml-run-release = "Thesis_ML.cli.release_runner:main"
+thesisml-promote-run = "Thesis_ML.cli.promote_run:main"
+thesisml-validate-release = "Thesis_ML.cli.validate_release:main"
+thesisml-validate-dataset = "Thesis_ML.cli.validate_dataset:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}

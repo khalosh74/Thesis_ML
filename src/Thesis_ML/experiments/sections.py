@@ -45,6 +45,72 @@ from Thesis_ML.experiments.selection_manifest import apply_dataset_selection_fil
 from Thesis_ML.features.nifti_features import build_feature_cache
 
 
+def _load_compiled_scope_samples(path: Path) -> pd.DataFrame:
+    if not path.exists() or not path.is_file():
+        raise ValueError(f"compiled_scope_selected_samples_path does not exist: {path}")
+    frame = pd.read_csv(path)
+    if "sample_id" not in frame.columns:
+        raise ValueError(
+            "compiled_scope_selected_samples_path is missing required column 'sample_id'."
+        )
+    frame = frame.copy()
+    frame["sample_id"] = frame["sample_id"].astype(str)
+    if bool(frame["sample_id"].duplicated().any()):
+        duplicates = (
+            frame.loc[frame["sample_id"].duplicated(keep=False), "sample_id"]
+            .astype(str)
+            .head(20)
+            .tolist()
+        )
+        raise ValueError(
+            "compiled_scope_selected_samples_path contains duplicate sample_id values. "
+            f"duplicate_sample_ids_head={duplicates}"
+        )
+    return frame
+
+
+def _enforce_compiled_scope_subset(
+    *,
+    index_df: pd.DataFrame,
+    compiled_scope_df: pd.DataFrame,
+) -> pd.DataFrame:
+    if "sample_id" not in index_df.columns:
+        raise ValueError("Dataset index is missing required column 'sample_id'.")
+
+    working = index_df.copy()
+    working["sample_id"] = working["sample_id"].astype(str)
+    if bool(working["sample_id"].duplicated().any()):
+        duplicates = (
+            working.loc[working["sample_id"].duplicated(keep=False), "sample_id"]
+            .astype(str)
+            .head(20)
+            .tolist()
+        )
+        raise ValueError(
+            "Dataset index contains duplicate sample_id values and cannot be matched "
+            "to a strict compiled scope subset. "
+            f"duplicate_sample_ids_head={duplicates}"
+        )
+
+    expected_ids = compiled_scope_df["sample_id"].astype(str).tolist()
+    expected_set = set(expected_ids)
+    actual_set = set(working["sample_id"].astype(str).tolist())
+    missing_ids = sorted(expected_set - actual_set)
+    extra_ids = sorted(actual_set - expected_set)
+    if missing_ids or extra_ids:
+        raise ValueError(
+            "Dataset selection strict compiled scope mismatch. "
+            f"missing_sample_ids={missing_ids[:50]}, extra_sample_ids={extra_ids[:50]}"
+        )
+
+    aligned = (
+        working.set_index("sample_id", drop=False)
+        .loc[expected_ids]
+        .reset_index(drop=True)
+    )
+    return aligned
+
+
 def dataset_selection(section_input: DatasetSelectionInput) -> DatasetSelectionOutput:
     index_df = pd.read_csv(section_input.index_csv)
     if index_df.empty:
@@ -98,6 +164,19 @@ def dataset_selection(section_input: DatasetSelectionInput) -> DatasetSelectionO
             f"n_rows={summary['n_rows']}, "
             f"by_category={summary['by_category']}, "
             f"sample_ids_head={summary['sample_ids_head']}"
+        )
+
+    if bool(section_input.release_scope_enforcement):
+        if section_input.compiled_scope_selected_samples_path is None:
+            raise ValueError(
+                "release_scope_enforcement=true requires compiled_scope_selected_samples_path."
+            )
+        compiled_scope_df = _load_compiled_scope_samples(
+            Path(section_input.compiled_scope_selected_samples_path).resolve()
+        )
+        index_df = _enforce_compiled_scope_subset(
+            index_df=index_df,
+            compiled_scope_df=compiled_scope_df,
         )
 
     selection_result = apply_dataset_selection_filters(

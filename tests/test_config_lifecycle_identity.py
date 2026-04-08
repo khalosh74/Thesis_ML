@@ -15,21 +15,21 @@ def test_describe_canonical_default_protocol_identity() -> None:
     identity = describe_config_path(DEFAULT_THESIS_PROTOCOL_PATH)
     assert identity["registered"] is True
     assert identity["config_id"] == "protocol.thesis_canonical_nested_v2"
-    assert identity["lifecycle"] == "active_default"
+    assert identity["lifecycle"] == "legacy_non_official"
 
 
 def test_describe_frozen_confirmatory_protocol_identity() -> None:
     identity = describe_config_path(DEFAULT_THESIS_CONFIRMATORY_PROTOCOL_PATH)
     assert identity["registered"] is True
     assert identity["config_id"] == "protocol.thesis_confirmatory_v1"
-    assert identity["lifecycle"] == "frozen_confirmatory"
+    assert identity["lifecycle"] == "legacy_non_official"
 
 
 def test_describe_default_comparison_identity() -> None:
     identity = describe_config_path(DEFAULT_COMPARISON_SPEC_PATH)
     assert identity["registered"] is True
     assert identity["config_id"] == "comparison.model_family_grouped_nested_comparison_v2"
-    assert identity["lifecycle"] == "active_default"
+    assert identity["lifecycle"] == "legacy_non_official"
 
 
 def test_describe_default_coarse_affect_target_identity() -> None:

@@ -1,0 +1,30 @@
+{
+  "schema_version": "dataset-instance-v1",
+  "dataset_id": "thesis_ml_synthetic_v1",
+  "dataset_contract_version": "fmri_beta_dataset_v1",
+  "dataset_fingerprint": "239ec3803e8f9e34baa13f8b17c395f671dd371060184055c7860848d60a9b6e",
+  "index_csv": "release_dataset_index.csv",
+  "data_root": "data_root",
+  "cache_dir": "cache",
+  "created_at": "2026-04-08T00:00:00Z",
+  "source_extraction_version": "synthetic_v1",
+  "sample_unit": "beta_event",
+  "required_columns": [
+    "sample_id",
+    "subject",
+    "session",
+    "task",
+    "modality",
+    "emotion",
+    "coarse_affect",
+    "beta_path",
+    "mask_path",
+    "subject_session",
+    "subject_session_bas"
+  ],
+  "subject_count": 2,
+  "session_counts_by_subject": {
+    "sub-001": 3,
+    "sub-002": 3
+  }
+}

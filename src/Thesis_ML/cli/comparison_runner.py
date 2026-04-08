@@ -40,8 +40,8 @@ def _default_cache_dir() -> Path:
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
-            "Run locked comparison experiments from registered comparison specs. "
-            "Science-affecting parameters are loaded from comparison JSON only."
+            "Run legacy locked-comparison compatibility experiments from registered specs. "
+            "After release migration this command is non-official."
         )
     )
     parser.add_argument(

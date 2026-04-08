@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Dataset Instance Manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "dataset_id",
+    "dataset_contract_version",
+    "dataset_fingerprint",
+    "index_csv",
+    "data_root",
+    "created_at",
+    "source_extraction_version",
+    "sample_unit",
+    "required_columns",
+    "subject_count",
+    "session_counts_by_subject"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "dataset-instance-v1"
+    },
+    "dataset_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "dataset_contract_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "dataset_fingerprint": {
+      "type": "string",
+      "minLength": 1
+    },
+    "index_csv": {
+      "type": "string",
+      "minLength": 1
+    },
+    "data_root": {
+      "type": "string",
+      "minLength": 1
+    },
+    "cache_dir": {
+      "type": "string",
+      "minLength": 1
+    },
+    "created_at": {
+      "type": "string",
+      "minLength": 1
+    },
+    "source_extraction_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "sample_unit": {
+      "type": "string",
+      "minLength": 1
+    },
+    "required_columns": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
+    "subject_count": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "session_counts_by_subject": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {
+        "type": "integer",
+        "minimum": 1
+      }
+    }
+  }
+}
+

@@ -1,5 +1,5 @@
 {
-  "glm_dir": "C:\\Users\\khal6952\\Projects\\Thesis_ML\\demo_data\\synthetic_v1\\data_root\\sub-002\\ses-01\\BAS2",
+  "glm_dir": "D:\\Khaled\\Projects\\VScode\\Thesis_ML\\demo_data\\synthetic_v1\\data_root\\sub-002\\ses-01\\BAS2",
   "bas_name": "BAS2",
   "mask_path": "mask.nii",
   "mask_shape": [

@@ -1,0 +1,16 @@
+{
+  "schema_version": "release-bundle-v1",
+  "release_id": "thesis_final_v1",
+  "release_version": "1.0.0",
+  "status": "frozen_candidate_only",
+  "title": "Thesis Final Release v1",
+  "aliases": [
+    "release.thesis_final_current"
+  ],
+  "science_path": "science.json",
+  "execution_path": "execution.json",
+  "environment_path": "environment.json",
+  "evidence_path": "evidence.json",
+  "claims_path": "claims.json"
+}
+
