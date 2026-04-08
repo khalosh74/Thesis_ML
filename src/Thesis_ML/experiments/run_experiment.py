@@ -2318,7 +2318,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
             "Run leakage-safe grouped-CV fMRI experiments (exploratory mode). "
-            "For locked comparisons use thesisml-run-comparison; for confirmatory runs use thesisml-run-protocol."
+            "Official thesis execution is available via thesisml-run-release."
         )
     )
     parser.add_argument("--index-csv", required=True, help="Dataset index CSV.")

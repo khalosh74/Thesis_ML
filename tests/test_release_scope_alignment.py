@@ -13,7 +13,7 @@ from tests._release_test_utils import (
     make_temp_release_bundle,
     repo_root,
 )
-from Thesis_ML.protocols.compiler import compile_protocol as _compile_protocol
+from Thesis_ML.release.runtime_protocol.compiler import compile_protocol as _compile_protocol
 from Thesis_ML.release.models import RunClass
 from Thesis_ML.release.runner import run_release
 

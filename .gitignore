@@ -26,6 +26,7 @@ dist/
 data/**
 Data/**
 outputs/**
+runs/**
 server/**
 !data/contracts/
 !data/contracts/**

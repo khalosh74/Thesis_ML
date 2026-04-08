@@ -304,12 +304,12 @@ def resolve_framework_context(
         if protocol_context is not None:
             raise ValueError(
                 "framework_mode='exploratory' cannot accept protocol_context. "
-                "Use framework_mode='confirmatory' via thesisml-run-protocol."
+                "Confirmatory mode is reserved for the release runner."
             )
         if comparison_context is not None:
             raise ValueError(
                 "framework_mode='exploratory' cannot accept comparison_context. "
-                "Use framework_mode='locked_comparison' via thesisml-run-comparison."
+                "Locked comparison mode is not a public runtime path."
             )
         return resolved_mode, False, {}, {}
 

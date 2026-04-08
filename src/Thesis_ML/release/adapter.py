@@ -7,15 +7,17 @@ from typing import Any
 
 import pandas as pd
 
-from Thesis_ML.config.paths import (
-    DEFAULT_THESIS_CONFIRMATORY_PROTOCOL_PATH,
-    PROJECT_ROOT,
-)
-from Thesis_ML.protocols.compiler import compile_protocol
-from Thesis_ML.protocols.loader import load_protocol
-from Thesis_ML.protocols.models import CompiledProtocolManifest, ThesisProtocol
+from Thesis_ML.config.paths import PROJECT_ROOT
 from Thesis_ML.release.hashing import canonical_target_mapping_hash
 from Thesis_ML.release.loader import LoadedDatasetManifest, LoadedReleaseBundle
+from Thesis_ML.release.runtime_protocol.compiler import compile_protocol
+from Thesis_ML.release.runtime_protocol.confirmatory_freeze import (
+    adapt_confirmatory_freeze_to_thesis_protocol,
+)
+from Thesis_ML.release.runtime_protocol.models import (
+    CompiledProtocolManifest,
+    ThesisProtocol,
+)
 from Thesis_ML.release.scope_models import CompiledScopeManifest, CompiledScopeResult
 
 
@@ -37,6 +39,95 @@ def _load_compiled_scope_manifest(path: Path) -> CompiledScopeManifest:
     if not isinstance(payload, dict):
         raise ValueError(f"Compiled scope manifest must be a JSON object: '{path}'.")
     return CompiledScopeManifest.model_validate(payload)
+
+
+def _build_protocol_from_release_science(release: LoadedReleaseBundle) -> ThesisProtocol:
+    science = release.science
+    mapping_version = Path(science.target.mapping_path).stem
+    freeze_like_payload: dict[str, Any] = {
+        "protocol_id": "thesis_confirmatory_v1",
+        "protocol_version": release.release.release_version,
+        "analysis_status": "locked",
+        "sample_unit": science.sample_unit,
+        "target": {
+            "name": science.target.name,
+            "source_column": "emotion",
+            "mapping_version": mapping_version,
+            "mapping_hash": science.target.mapping_hash,
+        },
+        "primary_analysis": {
+            "split": science.split_policy.primary_analysis.split,
+            "metric": science.split_policy.primary_analysis.metric,
+            "secondary_metrics": list(science.split_policy.primary_analysis.secondary_metrics),
+            "model_family": science.model_policy.model_family,
+            "hyperparameter_policy": "fixed",
+            "class_weight_policy": science.model_policy.class_weight_policy,
+            "feature_recipe_id": "baseline_standard_scaler_v1",
+            "seed": int(science.split_policy.primary_analysis.seed),
+            "primary_metric_aggregation": "pooled_held_out_predictions",
+        },
+        "dataset_contract": {
+            "dataset_fingerprint_required": bool(
+                science.dataset_contract.dataset_fingerprint_required
+            ),
+            "allowed_index_columns": list(science.dataset_contract.required_columns),
+            "minimum_subjects": int(science.dataset_contract.minimum_subjects),
+            "minimum_sessions_per_subject": int(science.dataset_contract.minimum_sessions_per_subject),
+        },
+        "controls": {
+            "dummy_baseline": bool(science.controls.dummy_baseline),
+            "permutation_test": bool(science.controls.permutation_test),
+            "n_permutations": int(science.controls.n_permutations),
+        },
+        "subgroups": {
+            "enabled": True,
+            "allowed": ["label", "task", "modality", "session", "subject"],
+            "min_samples_per_group": 1,
+        },
+        "secondary_analyses": [
+            {"name": "frozen_cross_person_transfer", "status": "official_secondary"}
+        ],
+        "model_cost_policy": {
+            "allowed_tiers": ["official_fast", "official_allowed"],
+            "max_projected_runtime_seconds_per_run": 90 * 60,
+        },
+        "multiplicity": science.multiplicity.model_dump(mode="json"),
+        "interpretation_limits": science.interpretation_limits.model_dump(mode="json"),
+        "reporting": science.reporting_requirements.model_dump(mode="json"),
+    }
+    protocol = adapt_confirmatory_freeze_to_thesis_protocol(
+        freeze_like_payload,
+        source_path=release.release_path,
+    )
+
+    suite_payloads: list[dict[str, Any]] = []
+    for suite in protocol.official_run_suites:
+        payload = suite.model_dump(mode="json")
+        payload["filter_task"] = None
+        payload["filter_modality"] = None
+        if payload.get("split_mode") == "within_subject_loso_session":
+            payload["subject_source"] = "explicit"
+            payload["subjects"] = sorted(science.scope.effective_subjects())
+        if payload.get("split_mode") == "frozen_cross_person_transfer":
+            payload["transfer_pair_source"] = "explicit"
+            payload["transfer_pairs"] = [
+                {
+                    "train_subject": pair.train_subject,
+                    "test_subject": pair.test_subject,
+                }
+                for pair in science.scope.transfer_pairs
+            ]
+        suite_payloads.append(payload)
+
+    protocol_payload = protocol.model_dump(mode="json")
+    protocol_payload["description"] = (
+        f"Release-native runtime protocol for '{release.release.release_id}'."
+    )
+    protocol_payload["notes"] = (
+        "Auto-compiled from release science; runtime task/modality filters are disabled."
+    )
+    protocol_payload["official_run_suites"] = suite_payloads
+    return ThesisProtocol.model_validate(protocol_payload)
 
 
 def _adapt_protocol_for_release(
@@ -251,8 +342,8 @@ def build_release_adapter_plan(
     _ = dataset  # dataset is intentionally kept in the signature for compatibility and traceability.
     compiled_scope_manifest = _load_compiled_scope_manifest(compiled_scope.scope_manifest_path)
 
-    protocol_path = Path(DEFAULT_THESIS_CONFIRMATORY_PROTOCOL_PATH).resolve()
-    protocol = load_protocol(protocol_path)
+    protocol_path = release.release_path.resolve()
+    protocol = _build_protocol_from_release_science(release)
     protocol, protocol_override_summary = _adapt_protocol_for_release(
         release=release,
         protocol=protocol,

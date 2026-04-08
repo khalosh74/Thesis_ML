@@ -60,7 +60,7 @@ from Thesis_ML.experiments.stage_lease_manager import (
 from Thesis_ML.experiments.stage_observability import StageBoundaryRecorder
 from Thesis_ML.experiments.stage_planner import StageResourceContract
 from Thesis_ML.features.preprocessing import BASELINE_STANDARD_SCALER_RECIPE_ID
-from Thesis_ML.orchestration.contracts import ReusePolicy, SectionName
+from Thesis_ML.experiments.contracts import ReusePolicy, SectionName
 
 
 @dataclass(frozen=True, kw_only=True)

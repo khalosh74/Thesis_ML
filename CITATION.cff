@@ -8,11 +8,11 @@ license: MIT
 authors:
   - name: Thesis_ML Contributors
 abstract: >
-  Leakage-aware ML experimentation framework for exploratory, locked-comparison,
-  and confirmatory protocol execution with strict artifact and policy contracts.
+  Leakage-aware release-governed ML framework for thesis-final fMRI decoding,
+  with strict scope compilation, artifact contracts, and promotion-gated official runs.
 keywords:
   - machine-learning
   - fmri
   - reproducibility
-  - confirmatory-analysis
+  - release-governance
   - scientific-workflows

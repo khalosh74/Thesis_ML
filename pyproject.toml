@@ -47,12 +47,6 @@ dev = [
 thesisml-extract-glm = "Thesis_ML.spm.extract_glm:main"
 thesisml-build-index = "Thesis_ML.data.index_dataset:main"
 thesisml-cache-features = "Thesis_ML.features.nifti_features:main"
-thesisml-run-experiment = "Thesis_ML.experiments.run_experiment:main"
-thesisml-run-comparison = "Thesis_ML.cli.comparison_runner:main"
-thesisml-run-protocol = "Thesis_ML.cli.protocol_runner:main"
-thesisml-run-decision-support = "Thesis_ML.cli.decision_support:main"
-thesisml-run-baseline = "Thesis_ML.cli.baseline:main"
-thesisml-workbook = "Thesis_ML.cli.workbook:main"
 thesisml-run-release = "Thesis_ML.cli.release_runner:main"
 thesisml-promote-run = "Thesis_ML.cli.promote_run:main"
 thesisml-validate-release = "Thesis_ML.cli.validate_release:main"
@@ -63,12 +57,6 @@ package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
-
-[tool.setuptools.package-data]
-Thesis_ML = [
-    "assets/configs/*.json",
-    "assets/templates/*.xlsx",
-]
 
 [tool.ruff]
 target-version = "py311"
@@ -100,13 +88,12 @@ check_untyped_defs = true
 no_implicit_optional = true
 ignore_missing_imports = true
 files = [
-    "src/Thesis_ML/artifacts",
-    "src/Thesis_ML/comparisons",
-    "src/Thesis_ML/protocols",
-    "src/Thesis_ML/orchestration",
-    "src/Thesis_ML/workbook",
-    "src/Thesis_ML/cli/comparison_runner.py",
-    "src/Thesis_ML/cli/protocol_runner.py",
+    "src/Thesis_ML/release",
+    "src/Thesis_ML/release/runtime_protocol",
+    "src/Thesis_ML/cli/release_runner.py",
+    "src/Thesis_ML/cli/promote_run.py",
+    "src/Thesis_ML/cli/validate_release.py",
+    "src/Thesis_ML/cli/validate_dataset.py",
     "src/Thesis_ML/spm/extract_glm.py",
     "src/Thesis_ML/features/nifti_features.py",
     "src/Thesis_ML/experiments/run_experiment.py",

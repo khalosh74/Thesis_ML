@@ -14,7 +14,7 @@ from Thesis_ML.artifacts.registry import (
     list_artifacts_for_run,
     register_artifact,
 )
-from Thesis_ML.orchestration.contracts import ReusePolicy, SectionName
+from Thesis_ML.experiments.contracts import ReusePolicy, SectionName
 
 EXECUTION_SECTION_ORDER: tuple[SectionName, ...] = (
     SectionName.DATASET_SELECTION,

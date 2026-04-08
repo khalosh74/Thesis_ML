@@ -8,7 +8,6 @@ from typing import Any
 
 import pandas as pd
 
-from Thesis_ML.protocols.runner import compile_and_run_protocol
 from Thesis_ML.release.adapter import build_release_adapter_plan
 from Thesis_ML.release.evidence import verify_release_evidence
 from Thesis_ML.release.manifests import (
@@ -18,6 +17,7 @@ from Thesis_ML.release.manifests import (
 )
 from Thesis_ML.release.models import RunClass, RunStatus
 from Thesis_ML.release.paths import ensure_run_directories, resolve_run_paths
+from Thesis_ML.release.runtime_protocol.runner import compile_and_run_protocol
 from Thesis_ML.release.scope import (
     compile_release_scope,
     verify_scope_execution_alignment,
