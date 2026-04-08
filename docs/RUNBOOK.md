@@ -401,6 +401,34 @@ Metric policy note (official runs):
   - `docs/CONFIRMATORY_READY.md`
   - `docs/REPRODUCIBILITY.md`
 
+## Windows SSH access to Olympus
+
+Use the built-in OpenSSH client on Windows. The reusable config file is `%USERPROFILE%\.ssh\config`.
+
+```sshconfig
+Host olympus
+  HostName olympus.dsv.su.se
+  User khal6952
+  Port 22
+  ServerAliveInterval 30
+  ServerAliveCountMax 3
+  IdentitiesOnly yes
+  # If you use a key, uncomment and point this at your private key.
+  # IdentityFile ~/.ssh/id_ed25519
+```
+
+Connect with:
+
+```powershell
+ssh olympus
+```
+
+If you already have a working password login, you can leave `IdentityFile` out. If you use a key, the private key stays on your Windows machine and the matching public key must be registered with the university account or server-side SSH setup.
+
+VS Code Remote-SSH can reuse the same `olympus` alias.
+
+This only covers the login layer. When we later touch Slurm job scripts, I will wire in your required `--account=user` flag there rather than here.
+
 Implementation ownership notes (for maintainers):
 - framework/methodology/metric runtime resolution: `src/Thesis_ML/experiments/runtime_policies.py`
 - run artifact payload stamping/building: `src/Thesis_ML/experiments/run_artifacts.py`

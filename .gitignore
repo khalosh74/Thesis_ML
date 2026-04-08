@@ -26,15 +26,7 @@ dist/
 data/**
 Data/**
 outputs/**
-
-# Keep scaffold placeholders only
-!outputs/
-!outputs/models/
-!outputs/models/README.md
-!outputs/models/.gitkeep
-!outputs/reports/
-!outputs/reports/README.md
-!outputs/reports/.gitkeep
+server/**
 
 # Local-only notebooks currently in repo root
 hello.ipynb
