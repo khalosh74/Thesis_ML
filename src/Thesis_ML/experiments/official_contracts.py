@@ -328,6 +328,14 @@ def validate_official_preflight(
         ) from exc
 
     if bool(release_scope_enforcement):
+        if filter_task is not None or filter_modality is not None:
+            raise OfficialContractValidationError(
+                "release_scope_enforcement requires filter_task=None and filter_modality=None.",
+                details={
+                    "filter_task": filter_task,
+                    "filter_modality": filter_modality,
+                },
+            )
         if compiled_scope_manifest_path is None or compiled_scope_selected_samples_path is None:
             raise OfficialContractValidationError(
                 "release_scope_enforcement requires compiled_scope_manifest_path and "

@@ -333,7 +333,7 @@ def _write_e12_confirmatory_anchor_registry(path: Path) -> None:
                             "subject": "sub-002",
                             "feature_space": "whole_brain_masked",
                         },
-                    }
+                    },
                 ],
             },
             {
@@ -355,6 +355,7 @@ def _write_e12_confirmatory_anchor_registry(path: Path) -> None:
                             "test_subject": "sub-002",
                             "feature_space": "whole_brain_masked",
                         },
+                    },
                     {
                         "template_id": "e17_anchor_reverse",
                         "supported": True,
@@ -366,7 +367,7 @@ def _write_e12_confirmatory_anchor_registry(path: Path) -> None:
                             "test_subject": "sub-001",
                             "feature_space": "whole_brain_masked",
                         },
-                    }
+                    },
                 ],
             },
         ],
@@ -425,7 +426,7 @@ def _write_e13_confirmatory_anchor_registry(path: Path) -> None:
                             "cv": "within_subject_loso_session",
                             "subject": "sub-002",
                         },
-                    }
+                    },
                 ],
             },
             {
@@ -457,7 +458,7 @@ def _write_e13_confirmatory_anchor_registry(path: Path) -> None:
                             "train_subject": "sub-002",
                             "test_subject": "sub-001",
                         },
-                    }
+                    },
                 ],
             },
         ],
@@ -942,10 +943,7 @@ def test_e12_uses_anchor_subject_and_merged_summary_outputs(
         / "thesis_e16_within_person_summary.csv"
     )
     transfer_table_path = (
-        campaign_root
-        / "special_aggregations"
-        / "confirmatory"
-        / "thesis_e17_transfer_summary.csv"
+        campaign_root / "special_aggregations" / "confirmatory" / "thesis_e17_transfer_summary.csv"
     )
     permutation_table_path = (
         campaign_root
@@ -1052,10 +1050,7 @@ def test_e13_materializes_anchor_matched_dummy_baselines_and_writes_table_ready_
     assert set(coverage_df["e13_covered"].astype(bool).tolist()) == {True}
 
     baseline_table_path = (
-        campaign_root
-        / "special_aggregations"
-        / "confirmatory"
-        / "thesis_e13_baseline_summary.csv"
+        campaign_root / "special_aggregations" / "confirmatory" / "thesis_e13_baseline_summary.csv"
     )
     assert baseline_table_path.exists()
     baseline_df = pd.read_csv(baseline_table_path)

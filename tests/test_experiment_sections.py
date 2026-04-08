@@ -27,18 +27,6 @@ from Thesis_ML.experiments.run_experiment import (
     _scores_for_predictions,
     run_experiment,
 )
-from Thesis_ML.experiments.stage_registry import PERMUTATION_REFERENCE_EXECUTOR_ID
-from Thesis_ML.experiments.stage_registry import (
-    SPECIALIZED_RIDGE_TUNING_EXECUTOR_ID,
-    TUNING_GENERIC_EXECUTOR_ID,
-)
-from Thesis_ML.experiments.stage_execution import StageAssignment, StageBackendFamily, StageKey
-from Thesis_ML.experiments.tuning_search_spaces import (
-    LINEAR_GROUPED_NESTED_SEARCH_SPACE_ID,
-    LINEAR_GROUPED_NESTED_SEARCH_SPACE_VERSION,
-)
-from Thesis_ML.verification.backend_parity import compare_tuned_null_parity
-from Thesis_ML.features.feature_qc import FEATURE_QC_SAMPLE_FIELDS
 from Thesis_ML.experiments.sections import (
     DatasetSelectionInput,
     EvaluationInput,
@@ -49,6 +37,18 @@ from Thesis_ML.experiments.sections import (
     interpretability,
     model_fit,
 )
+from Thesis_ML.experiments.stage_execution import StageAssignment, StageBackendFamily, StageKey
+from Thesis_ML.experiments.stage_registry import (
+    PERMUTATION_REFERENCE_EXECUTOR_ID,
+    SPECIALIZED_RIDGE_TUNING_EXECUTOR_ID,
+    TUNING_GENERIC_EXECUTOR_ID,
+)
+from Thesis_ML.experiments.tuning_search_spaces import (
+    LINEAR_GROUPED_NESTED_SEARCH_SPACE_ID,
+    LINEAR_GROUPED_NESTED_SEARCH_SPACE_VERSION,
+)
+from Thesis_ML.features.feature_qc import FEATURE_QC_SAMPLE_FIELDS
+from Thesis_ML.verification.backend_parity import compare_tuned_null_parity
 
 
 def _write_nifti(path: Path, data: np.ndarray, affine: np.ndarray | None = None) -> None:
@@ -1095,6 +1095,46 @@ def test_dataset_selection_records_task_filter_exclusions(tmp_path: Path) -> Non
     assert exclusion_manifest.iloc[0]["sample_id"] == "s2"
     assert exclusion_manifest.iloc[0]["exclusion_stage"] == "filter_task"
     assert exclusion_manifest.iloc[0]["exclusion_reason"] == "task_mismatch"
+
+
+def test_dataset_selection_release_scope_enforcement_rejects_runtime_task_modality_filters(
+    tmp_path: Path,
+) -> None:
+    index_csv = tmp_path / "dataset_index.csv"
+    index_df = pd.DataFrame(
+        [
+            {
+                "sample_id": "s1",
+                "subject": "sub-001",
+                "session": "ses-01",
+                "task": "emo",
+                "modality": "audiovisual",
+                "emotion": "anger",
+            },
+            {
+                "sample_id": "s2",
+                "subject": "sub-001",
+                "session": "ses-02",
+                "task": "recog",
+                "modality": "audiovisual",
+                "emotion": "happiness",
+            },
+        ]
+    )
+    index_df.to_csv(index_csv, index=False)
+
+    with pytest.raises(ValueError, match="requires filter_task=None and filter_modality=None"):
+        dataset_selection(
+            DatasetSelectionInput(
+                index_csv=index_csv,
+                target_column="coarse_affect",
+                cv_mode="within_subject_loso_session",
+                subject="sub-001",
+                filter_task="emo",
+                release_scope_enforcement=True,
+                compiled_scope_selected_samples_path=index_csv,
+            )
+        )
 
 
 def test_grouped_nested_tuned_permutation_reapplies_tuning_under_null(

@@ -1144,6 +1144,11 @@ def run_experiment(
         FrameworkMode.LOCKED_COMPARISON,
     }:
         if bool(release_scope_enforcement):
+            if filter_task is not None or filter_modality is not None:
+                raise ValueError(
+                    "release_scope_enforcement=true requires filter_task=None and "
+                    "filter_modality=None. Scope authority must come from compiled scope only."
+                )
             if compiled_scope_selected_samples_path is None:
                 raise ValueError(
                     "release_scope_enforcement=true requires compiled_scope_selected_samples_path."

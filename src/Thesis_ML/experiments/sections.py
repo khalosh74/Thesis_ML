@@ -167,6 +167,11 @@ def dataset_selection(section_input: DatasetSelectionInput) -> DatasetSelectionO
         )
 
     if bool(section_input.release_scope_enforcement):
+        if section_input.filter_task is not None or section_input.filter_modality is not None:
+            raise ValueError(
+                "release_scope_enforcement=true requires filter_task=None and "
+                "filter_modality=None."
+            )
         if section_input.compiled_scope_selected_samples_path is None:
             raise ValueError(
                 "release_scope_enforcement=true requires compiled_scope_selected_samples_path."
@@ -179,6 +184,13 @@ def dataset_selection(section_input: DatasetSelectionInput) -> DatasetSelectionO
             compiled_scope_df=compiled_scope_df,
         )
 
+    effective_filter_task = (
+        None if bool(section_input.release_scope_enforcement) else section_input.filter_task
+    )
+    effective_filter_modality = (
+        None if bool(section_input.release_scope_enforcement) else section_input.filter_modality
+    )
+
     selection_result = apply_dataset_selection_filters(
         index_df,
         target_column=section_input.target_column,
@@ -186,8 +198,8 @@ def dataset_selection(section_input: DatasetSelectionInput) -> DatasetSelectionO
         subject=section_input.subject,
         train_subject=section_input.train_subject,
         test_subject=section_input.test_subject,
-        filter_task=section_input.filter_task,
-        filter_modality=section_input.filter_modality,
+        filter_task=effective_filter_task,
+        filter_modality=effective_filter_modality,
     )
 
     index_df = selection_result.selected_index_df

@@ -168,16 +168,30 @@ def _validate_compiled_alignment(
             f"expected={expected_transfer_pairs}, actual={transfer_pairs_compiled}"
         )
 
-    allowed_tasks = set(science.scope.effective_tasks())
-    allowed_modality = science.scope.effective_modality()
+    configured_filter_tasks = sorted(
+        {
+            str(spec.filter_task)
+            for spec in compiled_manifest.runs
+            if spec.filter_task is not None and str(spec.filter_task).strip()
+        }
+    )
+    configured_filter_modalities = sorted(
+        {
+            str(spec.filter_modality)
+            for spec in compiled_manifest.runs
+            if spec.filter_modality is not None and str(spec.filter_modality).strip()
+        }
+    )
     for spec in compiled_manifest.runs:
-        if spec.filter_task is not None and str(spec.filter_task) not in allowed_tasks:
+        if spec.filter_task is not None:
             issues.append(
-                f"compiled run '{spec.run_id}' uses task filter outside release scope: {spec.filter_task}"
+                f"compiled run '{spec.run_id}' sets filter_task='{spec.filter_task}', "
+                "but release scope enforcement requires filter_task=None."
             )
-        if spec.filter_modality is not None and str(spec.filter_modality) != str(allowed_modality):
+        if spec.filter_modality is not None:
             issues.append(
-                f"compiled run '{spec.run_id}' uses modality filter outside release scope: {spec.filter_modality}"
+                f"compiled run '{spec.run_id}' sets filter_modality='{spec.filter_modality}', "
+                "but release scope enforcement requires filter_modality=None."
             )
 
     scope_tasks = sorted(compiled_scope_df["task"].astype(str).unique().tolist())
@@ -222,6 +236,8 @@ def _validate_compiled_alignment(
         "compiled_scope_modalities": scope_modalities,
         "compiled_scope_selected_row_count": int(compiled_scope_manifest.selected_row_count),
         "compiled_scope_selected_sample_ids_sha256": compiled_scope_manifest.selected_sample_ids_sha256,
+        "compiled_filter_task_values": configured_filter_tasks,
+        "compiled_filter_modality_values": configured_filter_modalities,
         "tuning_run_ids": tuned_run_ids,
     }
 
@@ -282,4 +298,3 @@ def build_release_adapter_plan(
 
 
 __all__ = ["ReleaseAdapterPlan", "build_release_adapter_plan"]
-

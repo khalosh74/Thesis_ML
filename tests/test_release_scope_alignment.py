@@ -2,6 +2,7 @@
 
 import json
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
 import pytest
@@ -12,6 +13,7 @@ from tests._release_test_utils import (
     make_temp_release_bundle,
     repo_root,
 )
+from Thesis_ML.protocols.compiler import compile_protocol as _compile_protocol
 from Thesis_ML.release.models import RunClass
 from Thesis_ML.release.runner import run_release
 
@@ -125,3 +127,30 @@ def test_release_runtime_alignment_catches_feature_model_and_tuning_mismatch(
     verification = json.loads(verification_path.read_text(encoding="utf-8"))
     assert verification["passed"] is False
     assert any(str(issue.get("code")) == expected_issue for issue in verification["issues"])
+
+
+def test_release_scope_enforcement_rejects_compiled_runtime_task_filter(
+    tmp_path: Path,
+) -> None:
+    release_path = make_temp_release_bundle(tmp_path)
+
+    def _compile_protocol_with_runtime_filter(*args: Any, **kwargs: Any) -> Any:
+        compiled = _compile_protocol(*args, **kwargs)
+        first = compiled.runs[0].model_copy(update={"filter_task": "emo"})
+        return compiled.model_copy(update={"runs": [first, *compiled.runs[1:]]})
+
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.setattr(
+            "Thesis_ML.release.adapter.compile_protocol",
+            _compile_protocol_with_runtime_filter,
+        )
+        with pytest.raises(
+            ValueError,
+            match="release scope enforcement requires filter_task=None",
+        ):
+            run_release(
+                release_ref=release_path,
+                dataset_manifest_path=dataset_manifest_path(),
+                run_class=RunClass.CANDIDATE,
+                run_id="reject_runtime_filter_authority",
+            )
