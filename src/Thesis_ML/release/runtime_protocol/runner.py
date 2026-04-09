@@ -1,6 +1,7 @@
 ﻿from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from time import perf_counter
@@ -52,6 +53,26 @@ from Thesis_ML.release.runtime_protocol.models import (
 from Thesis_ML.verification.official_artifacts import verify_official_artifacts
 
 _OFFICIAL_CONFIRMATORY_MAX_PARALLEL_GPU_RUNS = 1
+
+
+def _emit_runtime_event(
+    *,
+    runtime_event_callback: Callable[[dict[str, Any]], None] | None,
+    event_name: str,
+    **payload: Any,
+) -> None:
+    if runtime_event_callback is None:
+        return
+    event_payload = {
+        "event": str(event_name),
+        "timestamp_utc": datetime.now(UTC).isoformat(),
+        **dict(payload),
+    }
+    try:
+        runtime_event_callback(event_payload)
+    except Exception:
+        # Monitoring callbacks must never alter official execution behavior.
+        return
 
 
 def _fallback_source_protocol_identity(path_text: str | None) -> dict[str, Any]:
@@ -543,6 +564,7 @@ def execute_compiled_protocol(
     deterministic_compute: bool = False,
     allow_backend_fallback: bool = False,
     protocol_context_overrides_by_run_id: dict[str, dict[str, Any]] | None = None,
+    runtime_event_callback: Callable[[dict[str, Any]], None] | None = None,
 ) -> dict[str, Any]:
     if force and resume:
         raise ValueError(
@@ -574,6 +596,16 @@ def execute_compiled_protocol(
     reports_root_path.mkdir(parents=True, exist_ok=True)
     execute_start = perf_counter()
     execution_mode = "dry_run" if dry_run else "force" if force else "resume" if resume else "fresh"
+    _emit_runtime_event(
+        runtime_event_callback=runtime_event_callback,
+        event_name="runtime_protocol.execute_start",
+        protocol_id=str(protocol.protocol_id),
+        protocol_version=str(protocol.protocol_version),
+        execution_mode=str(execution_mode),
+        n_runs=int(len(compiled_manifest.runs)),
+        max_parallel_runs=int(resolved_max_parallel_runs),
+        max_parallel_gpu_runs=int(resolved_max_parallel_gpu_runs_effective),
+    )
     reconciliation_counts = _new_reconciliation_counts(
         execution_mode=execution_mode,
         n_planned=len(compiled_manifest.runs),
@@ -638,10 +670,26 @@ def execute_compiled_protocol(
             }
         )
 
+    _emit_runtime_event(
+        runtime_event_callback=runtime_event_callback,
+        event_name="runtime_protocol.plan_ready",
+        n_total_runs=int(len(run_plan)),
+        n_conflicts=int(len(fresh_conflicts)),
+        n_missing=int(reconciliation_counts.get("n_missing", 0)),
+        n_reused=int(reconciliation_counts.get("n_reused", 0)),
+        n_rerun=int(reconciliation_counts.get("n_rerun", 0)),
+    )
+
     if fresh_conflicts:
         preview = "; ".join(
             f"{item['run_id']}[{item['status']}]@{item['output_dir']}"
             for item in fresh_conflicts[:5]
+        )
+        _emit_runtime_event(
+            runtime_event_callback=runtime_event_callback,
+            event_name="runtime_protocol.execute_blocked_by_conflicts",
+            n_conflicts=int(len(fresh_conflicts)),
+            conflicts=list(fresh_conflicts[:5]),
         )
         raise RuntimeError(
             "Fresh protocol execution refused because existing run outputs were found: "
@@ -671,6 +719,14 @@ def execute_compiled_protocol(
                     status=RUN_STATUS_PLANNED,
                 )
             )
+            _emit_runtime_event(
+                runtime_event_callback=runtime_event_callback,
+                event_name="runtime_protocol.run_completed",
+                run_id=str(spec.run_id),
+                suite_id=str(spec.suite_id),
+                status=RUN_STATUS_PLANNED,
+                action=str(action),
+            )
             run_index_rows.append(
                 _run_index_row(
                     spec=spec,
@@ -699,6 +755,14 @@ def execute_compiled_protocol(
                 run_dir=run_dir,
             )
             run_results.append(reused_result)
+            _emit_runtime_event(
+                runtime_event_callback=runtime_event_callback,
+                event_name="runtime_protocol.run_completed",
+                run_id=str(spec.run_id),
+                suite_id=str(spec.suite_id),
+                status=str(reused_result.status),
+                action=str(action),
+            )
             run_index_rows.append(
                 _run_index_row(
                     spec=spec,
@@ -739,6 +803,13 @@ def execute_compiled_protocol(
                 "run_resume": bool(run_resume),
             }
         )
+
+    _emit_runtime_event(
+        runtime_event_callback=runtime_event_callback,
+        event_name="runtime_protocol.pending_runs_ready",
+        n_pending_runs=int(len(pending_run_executions)),
+        n_already_materialized=int(len(run_results)),
+    )
 
     dispatch_jobs: list[OfficialRunJob] = []
     job_metadata_by_order: dict[int, dict[str, Any]] = {}
@@ -876,6 +947,15 @@ def execute_compiled_protocol(
                 error_details=dict(failure_payload["error_details"]),
             )
             run_results.append(run_result)
+            _emit_runtime_event(
+                runtime_event_callback=runtime_event_callback,
+                event_name="runtime_protocol.run_completed",
+                run_id=str(spec.run_id),
+                suite_id=str(spec.suite_id),
+                status=RUN_STATUS_FAILED,
+                action=str(action),
+                error=str(exc),
+            )
             run_index_rows.append(
                 _run_index_row(
                     spec=spec,
@@ -893,11 +973,20 @@ def execute_compiled_protocol(
                 )
             )
 
+    _emit_runtime_event(
+        runtime_event_callback=runtime_event_callback,
+        event_name="runtime_protocol.dispatch_ready",
+        n_dispatch_jobs=int(len(dispatch_jobs)),
+        max_parallel_runs=int(resolved_max_parallel_runs),
+        max_parallel_gpu_runs=int(resolved_max_parallel_gpu_runs_effective),
+    )
+
     dispatch_results = execute_official_run_jobs(
         jobs=dispatch_jobs,
         max_parallel_runs=resolved_max_parallel_runs,
         max_parallel_gpu_runs=resolved_max_parallel_gpu_runs_effective,
         watchdog_executor=execute_run_with_timeout_watchdog,
+        progress_callback=runtime_event_callback,
     )
     for dispatched in dispatch_results:
         order_index = int(dispatched["order_index"])
@@ -1015,6 +1104,14 @@ def execute_compiled_protocol(
                 )
 
         run_results.append(run_result)
+        _emit_runtime_event(
+            runtime_event_callback=runtime_event_callback,
+            event_name="runtime_protocol.run_completed",
+            run_id=str(spec.run_id),
+            suite_id=str(spec.suite_id),
+            status=str(run_result.status),
+            action=str(action),
+        )
         run_index_rows.append(
             _run_index_row(
                 spec=spec,
@@ -1098,6 +1195,15 @@ def execute_compiled_protocol(
         result.status == RUN_STATUS_SKIPPED_DUE_TO_POLICY for result in run_results
     )
     n_planned = sum(result.status == RUN_STATUS_PLANNED for result in run_results)
+    _emit_runtime_event(
+        runtime_event_callback=runtime_event_callback,
+        event_name="runtime_protocol.execute_complete",
+        n_success=int(n_success),
+        n_failed=int(n_failed),
+        n_timed_out=int(n_timed_out),
+        n_skipped_due_to_policy=int(n_skipped_due_to_policy),
+        n_planned=int(n_planned),
+    )
     return {
         "protocol_id": protocol.protocol_id,
         "protocol_version": protocol.protocol_version,
@@ -1138,6 +1244,7 @@ def compile_and_run_protocol(
     deterministic_compute: bool = False,
     allow_backend_fallback: bool = False,
     protocol_context_overrides_by_run_id: dict[str, dict[str, Any]] | None = None,
+    runtime_event_callback: Callable[[dict[str, Any]], None] | None = None,
 ) -> dict[str, Any]:
     if isinstance(protocol.confirmatory_lock, dict):
         analysis_status = str(protocol.confirmatory_lock.get("analysis_status", "")).strip().lower()
@@ -1151,6 +1258,12 @@ def compile_and_run_protocol(
             "Confirmatory protocol execution rejects status='draft'. "
             "Set protocol status to 'locked' or 'released' before running."
         )
+    _emit_runtime_event(
+        runtime_event_callback=runtime_event_callback,
+        event_name="runtime_protocol.compile_start",
+        protocol_id=str(protocol.protocol_id),
+        protocol_version=str(protocol.protocol_version),
+    )
     compile_start = perf_counter()
     compiled_manifest = compile_protocol(
         protocol,
@@ -1159,6 +1272,12 @@ def compile_and_run_protocol(
     )
     _validate_confirmatory_lock_controls(protocol, compiled_manifest)
     compile_duration_seconds = perf_counter() - compile_start
+    _emit_runtime_event(
+        runtime_event_callback=runtime_event_callback,
+        event_name="runtime_protocol.compile_complete",
+        n_compiled_runs=int(len(compiled_manifest.runs)),
+        compile_duration_seconds=float(compile_duration_seconds),
+    )
     return execute_compiled_protocol(
         protocol=protocol,
         compiled_manifest=compiled_manifest,
@@ -1177,5 +1296,6 @@ def compile_and_run_protocol(
         deterministic_compute=deterministic_compute,
         allow_backend_fallback=allow_backend_fallback,
         protocol_context_overrides_by_run_id=protocol_context_overrides_by_run_id,
+        runtime_event_callback=runtime_event_callback,
     )
 

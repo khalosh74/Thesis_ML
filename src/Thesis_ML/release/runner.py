@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import shutil
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -29,6 +30,26 @@ from Thesis_ML.release.validator import validate_release
 def _timestamp_run_id(prefix: str = "run") -> str:
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     return f"{prefix}_{stamp}"
+
+
+def _emit_release_event(
+    *,
+    event_callback: Callable[[dict[str, Any]], None] | None,
+    event_name: str,
+    **payload: Any,
+) -> None:
+    if event_callback is None:
+        return
+    event_payload = {
+        "event": str(event_name),
+        "timestamp_utc": datetime.now(UTC).isoformat(),
+        **dict(payload),
+    }
+    try:
+        event_callback(event_payload)
+    except Exception:
+        # Terminal observability must not alter scientific execution behavior.
+        return
 
 
 def _write_dataset_snapshot(
@@ -196,7 +217,18 @@ def run_release(
     dry_run: bool = False,
     command_line: list[str] | None = None,
     run_id: str | None = None,
+    event_callback: Callable[[dict[str, Any]], None] | None = None,
 ) -> dict[str, Any]:
+    _emit_release_event(
+        event_callback=event_callback,
+        event_name="release_runner.start",
+        release_ref=str(release_ref),
+        dataset_manifest_path=str(dataset_manifest_path),
+        run_class=str(run_class.value),
+        dry_run=bool(dry_run),
+        force=bool(force),
+        resume=bool(resume),
+    )
     if not is_runner_allowed_run_class(run_class):
         raise ValueError(
             "Release runner only supports scratch/exploratory/candidate. "
@@ -216,6 +248,12 @@ def run_release(
 
     release = validated.release
     dataset = validated.dataset
+    _emit_release_event(
+        event_callback=event_callback,
+        event_name="release_runner.validation_passed",
+        release_id=str(release.release.release_id),
+        release_version=str(release.release.release_version),
+    )
 
     if resume and run_class not in set(release.execution.allow_resume_for):
         raise ValueError(f"--resume is not allowed for run_class='{run_class.value}'.")
@@ -237,6 +275,11 @@ def run_release(
                 f"Run directory already exists: {run_paths.root}. Use --force to replace."
             )
     ensure_run_directories(run_paths)
+    _emit_release_event(
+        event_callback=event_callback,
+        event_name="release_runner.run_directory_ready",
+        run_dir=str(run_paths.root.resolve()),
+    )
 
     compiled_scope_result = compile_release_scope(
         release_bundle=release,
@@ -251,6 +294,15 @@ def run_release(
             "Compiled scope manifest must be a JSON object: "
             f"{compiled_scope_result.scope_manifest_path}"
         )
+    _emit_release_event(
+        event_callback=event_callback,
+        event_name="release_runner.scope_compiled",
+        selected_row_count=int(compiled_scope_manifest_payload.get("selected_row_count", 0)),
+        selected_sample_ids_sha256=str(
+            compiled_scope_manifest_payload.get("selected_sample_ids_sha256", "")
+        ),
+        scope_manifest_path=str(compiled_scope_result.scope_manifest_path.resolve()),
+    )
 
     release_manifest = build_release_manifest(
         release_bundle=release.release,
@@ -320,6 +372,12 @@ def run_release(
             dataset=dataset,
             compiled_scope=compiled_scope_result,
         )
+        _emit_release_event(
+            event_callback=event_callback,
+            event_name="release_runner.protocol_execution_start",
+            n_compiled_runs=int(len(adapter_plan.compiled_manifest.runs)),
+            max_parallel_runs=int(release.execution.max_parallel_runs),
+        )
         protocol_result = compile_and_run_protocol(
             protocol=adapter_plan.protocol,
             index_csv=adapter_plan.scoped_index_csv,
@@ -336,6 +394,15 @@ def run_release(
             deterministic_compute=bool(release.execution.deterministic_compute),
             allow_backend_fallback=bool(release.execution.allow_backend_fallback),
             protocol_context_overrides_by_run_id=adapter_plan.protocol_context_overrides_by_run_id,
+            runtime_event_callback=event_callback,
+        )
+        _emit_release_event(
+            event_callback=event_callback,
+            event_name="release_runner.protocol_execution_complete",
+            n_success=int(protocol_result.get("n_success", 0)),
+            n_failed=int(protocol_result.get("n_failed", 0)),
+            n_timed_out=int(protocol_result.get("n_timed_out", 0)),
+            n_planned=int(protocol_result.get("n_planned", 0)),
         )
         protocol_output_dir = Path(str(protocol_result["protocol_output_dir"])).resolve()
         _materialize_required_run_alias_artifacts(protocol_output_dir=protocol_output_dir)
@@ -355,6 +422,13 @@ def run_release(
                     if isinstance(issue, dict)
                 )
             )
+        _emit_release_event(
+            event_callback=event_callback,
+            event_name="release_runner.scope_alignment_passed",
+            selected_sample_ids_sha256=str(
+                scope_alignment_verification.get("selected_sample_ids_sha256", "")
+            ),
+        )
         run_manifest = run_manifest.model_copy(update={"scope_alignment_passed": True})
         _write_release_summary(
             run_dir=run_paths.root,
@@ -382,6 +456,10 @@ def run_release(
                 "Release evidence verification failed: "
                 + "; ".join(str(issue["message"]) for issue in verification.get("issues", [])[:8])
             )
+        _emit_release_event(
+            event_callback=event_callback,
+            event_name="release_runner.evidence_verification_passed",
+        )
 
         run_manifest = run_manifest.model_copy(
             update={
@@ -393,6 +471,13 @@ def run_release(
             }
         )
         write_json(run_paths.root / "run_manifest.json", run_manifest.model_dump(mode="json"))
+        _emit_release_event(
+            event_callback=event_callback,
+            event_name="release_runner.succeeded",
+            run_id=str(run_manifest.run_id),
+            run_dir=str(run_paths.root.resolve()),
+            promotable=bool(run_manifest.promotable),
+        )
         return {
             "passed": True,
             "run_id": run_manifest.run_id,
@@ -429,6 +514,13 @@ def run_release(
             }
         )
         write_json(run_paths.root / "run_manifest.json", run_manifest.model_dump(mode="json"))
+        _emit_release_event(
+            event_callback=event_callback,
+            event_name="release_runner.failed",
+            run_id=str(run_manifest.run_id),
+            run_dir=str(run_paths.root.resolve()),
+            error=str(exc),
+        )
         raise
 
 

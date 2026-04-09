@@ -1,6 +1,7 @@
 ﻿from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -105,3 +106,67 @@ def test_release_runner_cli_returns_nonzero_on_evidence_failure(
         ]
     )
     assert exit_code == 1
+
+
+def test_release_runner_cli_verbose_and_live_progress_emit_stderr(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    release_path = make_temp_release_bundle(tmp_path)
+
+    def _fake_run_release(**kwargs: object) -> dict[str, object]:
+        callback = kwargs.get("event_callback")
+        assert callable(callback)
+        typed_callback = callback
+        assert isinstance(typed_callback, Callable)
+        typed_callback(
+            {
+                "event": "runtime_protocol.execute_start",
+                "n_runs": 2,
+            }
+        )
+        typed_callback(
+            {
+                "event": "parallel_execution.run_completed",
+                "run_id": "run_a",
+                "status": "success",
+            }
+        )
+        typed_callback(
+            {
+                "event": "parallel_execution.run_completed",
+                "run_id": "run_b",
+                "status": "failed",
+            }
+        )
+        return {
+            "passed": True,
+            "run_id": "candidate_test",
+            "run_class": "candidate",
+            "run_dir": str(tmp_path / "runs" / "candidate" / "candidate_test"),
+            "promotable": False,
+            "official": False,
+            "release_id": "thesis_final_v1",
+            "release_version": "1.0.0",
+        }
+
+    monkeypatch.setattr("Thesis_ML.cli.release_runner.run_release", _fake_run_release)
+
+    exit_code = release_runner_main(
+        [
+            "--release",
+            str(release_path),
+            "--dataset-manifest",
+            str(dataset_manifest_path()),
+            "--run-class",
+            "candidate",
+            "--verbose",
+            "--live-progress",
+        ]
+    )
+    assert exit_code == 0
+    captured = capsys.readouterr()
+    assert '"passed": true' in captured.out.lower()
+    assert "[thesisml]" in captured.err
+    assert "[thesisml-live] completed=2/2" in captured.err

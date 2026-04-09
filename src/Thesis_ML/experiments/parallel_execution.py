@@ -131,6 +131,36 @@ def _run_watchdog_job_local(
         }
 
 
+def _emit_parallel_event(
+    *,
+    progress_callback: Callable[[dict[str, Any]], None] | None,
+    event_name: str,
+    **payload: Any,
+) -> None:
+    if progress_callback is None:
+        return
+    event_payload = {
+        "event": str(event_name),
+        "timestamp_utc": _utc_now_iso(),
+        **dict(payload),
+    }
+    try:
+        progress_callback(event_payload)
+    except Exception:
+        # Monitoring callbacks must never alter official execution behavior.
+        return
+
+
+def _resolve_watchdog_status(payload: dict[str, Any]) -> str:
+    execution_error = payload.get("execution_error")
+    if isinstance(execution_error, dict):
+        return "failed"
+    watchdog_result_raw = payload.get("watchdog_result")
+    watchdog_result = dict(watchdog_result_raw) if isinstance(watchdog_result_raw, dict) else {}
+    status = str(watchdog_result.get("status", "")).strip().lower()
+    return status or "unknown"
+
+
 def resolve_official_job_resource_lane_hint(
     *,
     hardware_mode: str | None,
@@ -254,6 +284,7 @@ def execute_official_run_jobs(
     max_parallel_runs: int,
     max_parallel_gpu_runs: int = 1,
     watchdog_executor: Callable[..., dict[str, Any]] | None = None,
+    progress_callback: Callable[[dict[str, Any]], None] | None = None,
 ) -> list[dict[str, Any]]:
     if int(max_parallel_runs) <= 0:
         raise ValueError("max_parallel_runs must be >= 1.")
@@ -278,10 +309,24 @@ def execute_official_run_jobs(
         _job_with_stage_lease_context(job=job, stage_lease_context=stage_lease_context)
         for job in resolved_jobs
     ]
+    _emit_parallel_event(
+        progress_callback=progress_callback,
+        event_name="parallel_execution.dispatch_start",
+        total_jobs=int(len(resolved_jobs)),
+        max_parallel_runs=int(resolved_parallelism),
+        max_parallel_gpu_runs=int(resolved_max_parallel_gpu_runs),
+    )
 
     if resolved_parallelism <= 1:
         serial_payloads = []
         for job in resolved_jobs:
+            _emit_parallel_event(
+                progress_callback=progress_callback,
+                event_name="parallel_execution.run_admitted",
+                run_id=str(job.run_id),
+                order_index=int(job.order_index),
+                resource_lane_hint=str(_resolved_lane_from_job(job)),
+            )
             if watchdog_executor is not None:
                 payload = _run_watchdog_job_local(
                     job=job,
@@ -300,6 +345,22 @@ def execute_official_run_jobs(
                     max_parallel_gpu_runs_effective=resolved_max_parallel_gpu_runs,
                 )
             )
+            _emit_parallel_event(
+                progress_callback=progress_callback,
+                event_name="parallel_execution.run_completed",
+                run_id=str(job.run_id),
+                order_index=int(job.order_index),
+                status=_resolve_watchdog_status(payload),
+                resource_lane_hint=str(_resolved_lane_from_job(job)),
+                started_at_utc=str(payload.get("started_at_utc") or admitted_at),
+                ended_at_utc=str(payload.get("ended_at_utc") or completed_at),
+            )
+        _emit_parallel_event(
+            progress_callback=progress_callback,
+            event_name="parallel_execution.dispatch_complete",
+            total_jobs=int(len(resolved_jobs)),
+            completed_jobs=int(len(serial_payloads)),
+        )
         return serial_payloads
 
     max_workers = min(int(resolved_parallelism), int(len(resolved_jobs)))
@@ -334,6 +395,14 @@ def execute_official_run_jobs(
                         running_gpu_jobs += 1
                     pending_jobs.pop(scan_index)
                     admitted_any = True
+                    _emit_parallel_event(
+                        progress_callback=progress_callback,
+                        event_name="parallel_execution.run_admitted",
+                        run_id=str(job.run_id),
+                        order_index=int(job.order_index),
+                        resource_lane_hint=str(lane_hint),
+                        admitted_at_utc=str(admitted_at),
+                    )
 
             if running_futures:
                 done, _ = wait(tuple(running_futures.keys()), return_when=FIRST_COMPLETED)
@@ -368,6 +437,16 @@ def execute_official_run_jobs(
                             max_parallel_gpu_runs_effective=resolved_max_parallel_gpu_runs,
                         )
                     )
+                    _emit_parallel_event(
+                        progress_callback=progress_callback,
+                        event_name="parallel_execution.run_completed",
+                        run_id=str(job.run_id),
+                        order_index=int(job.order_index),
+                        status=_resolve_watchdog_status(payload),
+                        resource_lane_hint=str(lane_hint),
+                        admitted_at_utc=str(admitted_at),
+                        completed_at_utc=str(completed_at),
+                    )
                 continue
 
             if pending_jobs and not admitted_any:
@@ -377,10 +456,17 @@ def execute_official_run_jobs(
                     f"Pending run_ids: {', '.join(blocked_job_ids)}."
                 )
 
-    return sorted(
+    sorted_payloads = sorted(
         completed_payloads,
         key=lambda item: (int(item["order_index"]), str(item["run_id"])),
     )
+    _emit_parallel_event(
+        progress_callback=progress_callback,
+        event_name="parallel_execution.dispatch_complete",
+        total_jobs=int(len(resolved_jobs)),
+        completed_jobs=int(len(sorted_payloads)),
+    )
+    return sorted_payloads
 
 
 __all__ = [
