@@ -28,7 +28,7 @@ dependencies = [
 
 [project.optional-dependencies]
 spm = [
-    "scipy>=1.13",
+    "scipy>=1.17.1",
 ]
 optuna = [
     "optuna>=4.0",
