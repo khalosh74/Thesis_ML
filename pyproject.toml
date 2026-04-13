@@ -34,7 +34,7 @@ optuna = [
     "optuna>=4.0",
 ]
 xgboost = [
-    "xgboost>=2.0",
+    "xgboost>=3.2.0",
 ]
 dev = [
     "pre-commit>=3.7.0",
