@@ -1,8 +1,34 @@
-﻿# Thesis_ML
+# Thesis_ML — reproducible fMRI decoding experiments
 
+**Master's thesis research | Python · scikit-learn · reproducibility · testing**
+
+This repository contains an experimental pipeline for studying **emotion decoding from fMRI data**, including how machine-learning results hold up across scanning sessions. The research question is about model stability and generalization, not just obtaining a high score on one dataset.
+
+For a technical reviewer, the interesting parts are the explicit dataset contracts, run validation, automated checks, and traceable artifacts. The project separates exploratory work from a controlled thesis-final execution path.
+
+## Start here
+
+- **Research problem:** Within-person stability and cross-session generalization in fMRI emotion decoding.
+- **Code:** [src/Thesis_ML](src/Thesis_ML) for the Python package; [tests](tests) for validation and regression coverage.
+- **Synthetic example:** [demo_data/synthetic_v1](demo_data/synthetic_v1) allows inspection of the release workflow without access to the research MRI data.
+- **Implementation notes:** [Architecture](docs/ARCHITECTURE.md) · [Runbook](docs/RUNBOOK.md) · [Release specification](docs/RELEASE.md).
+- **CI:** [GitHub Actions](../../actions) runs Python tests, package-build checks, and a Docker build.
+
+## Running the demonstration
+
+Install [uv](https://docs.astral.sh/uv/) and use the repository root:
+
+```bash
+uv sync --extra dev
+uv run pytest
+```
+
+The example below uses the synthetic dataset manifest. Its outputs demonstrate the workflow; **they are not thesis performance results or claims of clinical validity**.
+
+## Controlled thesis-final workflow
 Thesis_ML is a release-governed fMRI decoding system.
 
-The only thesis-final runtime path is:
+The thesis-final runtime path consists of four steps:
 
 1. `thesisml-validate-dataset`
 2. `thesisml-validate-release`
