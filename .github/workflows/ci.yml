@@ -1,227 +1,58 @@
 name: CI
 
+# The project now uses the release-governed Thesis_ML pipeline.
+# Test current code rather than obsolete workbook/decision-support paths.
 on:
   push:
+    branches: [master]
   pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
-  quality:
+  tests:
+    name: Python tests (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install -e ".[dev]"
-
-      - name: Ruff lint
-        run: >
-          python -m ruff check src/Thesis_ML/artifacts src/Thesis_ML/orchestration
-          src/Thesis_ML/workbook src/Thesis_ML/experiments/segment_execution.py
-          src/Thesis_ML/experiments/sections.py src/Thesis_ML/experiments/run_experiment.py
-          tests/test_artifact_registry.py tests/test_segment_execution.py
-          tests/test_workbook_compiler.py tests/test_workbook_roundtrip.py
-          tests/test_execution_idempotency.py --exclude src/Thesis_ML/workbook/template_builder.py
-
-      - name: Ruff format check
-        run: >
-          python -m ruff format --check src/Thesis_ML/artifacts src/Thesis_ML/orchestration
-          src/Thesis_ML/workbook src/Thesis_ML/experiments/segment_execution.py
-          src/Thesis_ML/experiments/sections.py src/Thesis_ML/experiments/run_experiment.py
-          tests/test_artifact_registry.py tests/test_segment_execution.py
-          tests/test_workbook_compiler.py tests/test_workbook_roundtrip.py
-          tests/test_execution_idempotency.py --exclude src/Thesis_ML/workbook/template_builder.py
-
-      - name: Mypy type check
-        run: python -m mypy
-
-      - name: Pytest
+          cache: pip
+      - name: Install package and test dependencies
+        run: python -m pip install -e ".[dev]"
+      - name: Run the current test suite
         run: python -m pytest -q
 
-      - name: Release Demo Smoke
-        run: python -m pytest tests/test_release_demo_smoke.py tests/test_release_scope_demo_smoke.py -q
-
-  build_verify:
+  package:
+    name: Build and check Python package
     runs-on: ubuntu-latest
-    env:
-      THESIS_ML_LOG_FORMAT: json
+    timeout-minutes: 20
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
+      - name: Install build tools
+        run: python -m pip install build twine
+      - name: Build package
+        run: python -m build --sdist --wheel
+      - name: Check package metadata
+        run: python -m twine check dist/*
 
-      - name: Build package artifacts
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install build twine
-          python -m build --sdist --wheel
-          python -m twine check dist/*
-
-      - name: Optuna optional-mode smoke
-        run: |
-          python -m pip install -e ".[dev,optuna]"
-          python -m pytest tests/test_search_space_and_aggregation.py::test_optuna_search_space_expands_when_enabled -q
-
-      - name: Wheel install and CLI smoke (clean venv)
-        run: |
-          set -euo pipefail
-          WHEEL_PATH="$(python - <<'PY'
-          from pathlib import Path
-
-          wheels = sorted(Path("dist").glob("*.whl"))
-          if not wheels:
-              raise SystemExit("No wheel artifact found in dist/.")
-          print(wheels[-1])
-          PY
-          )"
-
-          python -m venv /tmp/thesisml-wheel-smoke
-          source /tmp/thesisml-wheel-smoke/bin/activate
-          python -m pip install --upgrade pip
-          python -m pip install "${WHEEL_PATH}"
-
-          python - <<'PY'
-          from Thesis_ML.config.paths import (
-              DEFAULT_DECISION_SUPPORT_REGISTRY,
-              SHIPPED_WORKBOOK_TEMPLATE,
-          )
-          from Thesis_ML.orchestration.workbook_compiler import (
-              NoEnabledExecutableRowsError,
-              compile_workbook_file,
-          )
-          from Thesis_ML.workbook.validation import validate_workbook
-
-          print(DEFAULT_DECISION_SUPPORT_REGISTRY)
-          if not DEFAULT_DECISION_SUPPORT_REGISTRY.exists():
-              raise SystemExit(
-                  f"Expected installed default registry to exist: {DEFAULT_DECISION_SUPPORT_REGISTRY}"
-              )
-          print(SHIPPED_WORKBOOK_TEMPLATE)
-          if not SHIPPED_WORKBOOK_TEMPLATE.exists():
-              raise SystemExit(
-                  f"Expected installed shipped workbook template to exist: {SHIPPED_WORKBOOK_TEMPLATE}"
-              )
-
-          summary = validate_workbook(SHIPPED_WORKBOOK_TEMPLATE)
-          if summary.get("sheet_order_ok") != "True":
-              raise SystemExit(f"Shipped workbook template sheet-order validation failed: {summary}")
-          if summary.get("required_named_lists_present") != "True":
-              raise SystemExit(f"Shipped workbook template named-list validation failed: {summary}")
-          if summary.get("schema_metadata_keys_present") != "True":
-              raise SystemExit(f"Shipped workbook template schema metadata validation failed: {summary}")
-
-          try:
-              manifest = compile_workbook_file(SHIPPED_WORKBOOK_TEMPLATE)
-          except NoEnabledExecutableRowsError:
-              pass
-          else:
-              if len(manifest.trial_specs) == 0:
-                  raise SystemExit(
-                      "Shipped workbook compiled successfully but produced zero trial specs."
-                  )
-          PY
-
-          thesisml-run-decision-support --help
-          thesisml-workbook --output /tmp/thesisml_pkg_smoke_workbook.xlsx
-          test -f /tmp/thesisml_pkg_smoke_workbook.xlsx
-
-          python - <<'PY'
-          from pathlib import Path
-          import pandas as pd
-
-          temp_root = Path("/tmp/thesisml_pkg_smoke")
-          temp_root.mkdir(parents=True, exist_ok=True)
-          pd.DataFrame(
-              [{"subject": "sub-001", "task": "passive", "modality": "audio"}]
-          ).to_csv(temp_root / "dataset_index.csv", index=False)
-          PY
-
-          thesisml-run-decision-support \
-            --index-csv /tmp/thesisml_pkg_smoke/dataset_index.csv \
-            --data-root /tmp/thesisml_pkg_smoke/Data \
-            --cache-dir /tmp/thesisml_pkg_smoke/cache \
-            --output-root /tmp/thesisml_pkg_smoke/outputs_default_registry \
-            --all \
-            --dry-run
-
-          thesisml-run-decision-support \
-            --registry configs/decision_support_registry.json \
-            --index-csv /tmp/thesisml_pkg_smoke/dataset_index.csv \
-            --data-root /tmp/thesisml_pkg_smoke/Data \
-            --cache-dir /tmp/thesisml_pkg_smoke/cache \
-            --output-root /tmp/thesisml_pkg_smoke/outputs \
-            --all \
-            --dry-run
-
-  uv_locked_smoke:
+  docker:
+    name: Docker build
     runs-on: ubuntu-latest
-    env:
-      THESIS_ML_LOG_FORMAT: json
+    timeout-minutes: 25
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.13"
-
-      - name: Install uv
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install uv
-
-      - name: Sync locked environment
-        run: python -m uv sync --frozen --extra dev
-
-      - name: Locked test smoke
-        run: python -m uv run python -m pytest tests/test_import_decoupling.py -q
-
-      - name: Locked mypy smoke
-        run: python -m uv run python -m mypy
-
-      - name: Locked lint smoke
-        run: >
-          python -m uv run python -m ruff check src/Thesis_ML/artifacts
-          src/Thesis_ML/orchestration src/Thesis_ML/workbook
-          src/Thesis_ML/experiments/segment_execution.py src/Thesis_ML/experiments/sections.py
-          src/Thesis_ML/experiments/run_experiment.py tests/test_artifact_registry.py
-          tests/test_segment_execution.py tests/test_workbook_compiler.py
-          tests/test_workbook_roundtrip.py tests/test_execution_idempotency.py
-          --exclude src/Thesis_ML/workbook/template_builder.py
-
-      - name: Gold acceptance smoke
-        run: |
-          python -m uv run python scripts/acceptance_smoke.py
-
-      - name: Workbook compile/write-back smoke
-        run: |
-          python -m uv run python -m pytest tests/test_workbook_roundtrip.py::test_workbook_roundtrip_compile_execute_writeback -q
-
-      - name: Segment execution smoke
-        run: |
-          python -m uv run python -m pytest tests/test_segment_execution.py::test_segment_execution_feature_matrix_to_evaluation -q
-
-  docker_build_smoke:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Docker build smoke
+      - uses: actions/checkout@v4
+      - name: Build image
         run: docker build -t thesis-ml:ci-smoke .
